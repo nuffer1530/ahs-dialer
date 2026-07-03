@@ -15,13 +15,13 @@ export default function WinCelebration() {
   useEffect(() => {
     // Listen for new Booked outcomes in real time
     channelRef.current = sb.channel('win-celebrations')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'call_logs' }, async payload => {
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'call_logs' }, payload => {
         if (payload.new.outcome !== 'Booked') return
-        // Get contact name
-        const { data: contact } = await sb.from('contacts').select('name').eq('id', payload.new.contact_id).single()
-        const contactName = contact?.name || 'a contact'
         const rep = payload.new.rep || 'Someone'
-        triggerCelebration(rep, contactName)
+        sb.from('contacts').select('name').eq('id', payload.new.contact_id).single()
+          .then(({ data }) => {
+            triggerCelebration(rep, data?.name || 'a contact')
+          })
       })
       .subscribe()
     return () => { if (channelRef.current) sb.removeChannel(channelRef.current) }
