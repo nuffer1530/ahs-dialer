@@ -8,28 +8,34 @@ import DashboardPage from './DashboardPage'
 import LivePage from './LivePage'
 import NotesPage from './NotesPage'
 import AdminPage from './AdminPage'
+import WarRoomPage from './WarRoomPage'
+import LeaderboardPage from './LeaderboardPage'
+import WinCelebration from '../components/WinCelebration'
 
 export default function DialerLayout() {
   const { profile, isAdmin } = useAuth()
   const { contacts, syncStatus, reload } = useData()
   const navigate = useNavigate()
 
-  const signOut = async () => {
-    await sb.auth.signOut()
-    navigate('/login')
-  }
+  const signOut = async () => { await sb.auth.signOut(); navigate('/login') }
 
-  const syncColors = {
-    ok: { bg:'var(--success-bg)', color:'var(--success)' },
-    loading: { bg:'var(--warning-bg)', color:'var(--warning)' },
-    error: { bg:'var(--danger-bg)', color:'var(--danger)' },
-  }
-  const sc = syncColors[syncStatus] || syncColors.loading
+  const sc = { ok: { bg:'var(--success-bg)', color:'var(--success)' }, loading: { bg:'var(--warning-bg)', color:'var(--warning)' }, error: { bg:'var(--danger-bg)', color:'var(--danger)' } }[syncStatus] || { bg:'var(--warning-bg)', color:'var(--warning)' }
   const syncLabel = syncStatus === 'ok' ? `✓ ${contacts.length.toLocaleString()} contacts` : syncStatus === 'loading' ? 'Loading…' : '✗ Error'
+
+  const navItems = [
+    { to:'/', label:'📞 Dialer', end:true },
+    { to:'/campaigns', label:'📋 Campaigns' },
+    { to:'/dashboard', label:'📊 Dashboard' },
+    { to:'/leaderboard', label:'🏆 Leaderboard' },
+    { to:'/live', label:'🟢 Live' },
+    { to:'/warroom', label:'📺 War Room' },
+    { to:'/notes', label:'🔍 Notes' },
+    ...(isAdmin ? [{ to:'/admin', label:'⚙️ Admin' }] : []),
+  ]
 
   return (
     <div style={{ display:'flex', flexDirection:'column', height:'100vh', overflow:'hidden' }}>
-      {/* HEADER */}
+      <WinCelebration />
       <header style={{ background:'var(--surface)', borderBottom:'1px solid var(--border)', padding:'0 20px', display:'flex', alignItems:'center', justifyContent:'space-between', height:52, flexShrink:0, zIndex:100 }}>
         <div style={{ display:'flex', alignItems:'center', gap:10 }}>
           <span style={{ background:'var(--accent)', color:'#fff', fontSize:11, fontWeight:700, padding:'2px 8px', borderRadius:4, letterSpacing:.5 }}>AHS</span>
@@ -49,18 +55,11 @@ export default function DialerLayout() {
         </div>
       </header>
 
-      {/* NAV TABS */}
       <nav style={{ background:'var(--surface)', borderBottom:'1px solid var(--border)', padding:'0 20px', display:'flex', gap:2, flexShrink:0, overflowX:'auto' }}>
-        {[
-          { to:'/', label:'📞 Dialer', end:true },
-          { to:'/campaigns', label:'📋 Campaigns' },
-          { to:'/dashboard', label:'📊 Dashboard' },
-          { to:'/live', label:'🟢 Live' },
-          { to:'/notes', label:'🔍 Notes' },
-          ...(isAdmin ? [{ to:'/admin', label:'⚙️ Admin' }] : []),
-        ].map(({ to, label, end }) => (
+        {navItems.map(({ to, label, end }) => (
           <NavLink key={to} to={to} end={end} style={({ isActive }) => ({
-            padding:'10px 16px', fontSize:13, fontWeight:500, color: isActive ? 'var(--accent)' : 'var(--text-muted)',
+            padding:'10px 14px', fontSize:12, fontWeight:500,
+            color: isActive ? 'var(--accent)' : 'var(--text-muted)',
             borderBottom: isActive ? '2px solid var(--accent)' : '2px solid transparent',
             textDecoration:'none', whiteSpace:'nowrap', transition:'all .1s',
           })}>
@@ -69,13 +68,14 @@ export default function DialerLayout() {
         ))}
       </nav>
 
-      {/* PAGE CONTENT */}
       <div style={{ flex:1, overflow:'hidden', display:'flex', flexDirection:'column' }}>
         <Routes>
           <Route path="/" element={<DialerPage />} />
           <Route path="/campaigns" element={<CampaignsPage />} />
           <Route path="/dashboard" element={<DashboardPage />} />
+          <Route path="/leaderboard" element={<LeaderboardPage />} />
           <Route path="/live" element={<LivePage />} />
+          <Route path="/warroom" element={<WarRoomPage />} />
           <Route path="/notes" element={<NotesPage />} />
           {isAdmin && <Route path="/admin" element={<AdminPage />} />}
         </Routes>
