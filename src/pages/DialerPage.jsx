@@ -460,6 +460,36 @@ export default function DialerPage() {
                 </div>
               </div>
 
+              {/* Campaign script — auto-shows when campaign has script/tips */}
+              {(() => {
+                const camp = campaigns.find(x => x.id === c.campaign_id)
+                if (!camp?.script && !camp?.tips) return null
+                return (
+                  <div className="card" style={{ border:'2px solid var(--accent)' }}>
+                    <div className="card-header" style={{ background:'var(--accent-bg)' }}>
+                      <div className="card-title" style={{ color:'var(--accent)' }}>📜 {camp.name} — Call Guide</div>
+                    </div>
+                    <div className="card-body" style={{ display:'flex', flexDirection:'column', gap:14 }}>
+                      {camp.script && (
+                        <div>
+                          <div style={{ fontSize:11, fontWeight:600, textTransform:'uppercase', letterSpacing:.5, color:'var(--text-secondary)', marginBottom:6 }}>Script</div>
+                          <div style={{ background:'var(--surface-2)', borderRadius:'var(--radius)', padding:'12px 14px', fontSize:13, lineHeight:1.8, whiteSpace:'pre-wrap', color:'var(--text-primary)', borderLeft:'3px solid var(--accent)' }}>
+                            {camp.script}
+                          </div>
+                        </div>
+                      )}
+                      {camp.tips && (
+                        <div>
+                          <div style={{ fontSize:11, fontWeight:600, textTransform:'uppercase', letterSpacing:.5, color:'var(--text-secondary)', marginBottom:6 }}>💡 Tips & Talking Points</div>
+                          <div style={{ background:'var(--warning-bg)', border:'1px solid #E8C84A', borderRadius:'var(--radius)', padding:'12px 14px', fontSize:13, lineHeight:1.8, whiteSpace:'pre-wrap', color:'var(--text-primary)' }}>
+                            {camp.tips}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )
+              })()}
               {/* Log outcome */}
               {!done && (
                 <div className="card">
