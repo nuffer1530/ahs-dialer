@@ -1,18 +1,32 @@
-useEffect(() => {
-  channelRef.current = sb.channel('win-celebrations')
-    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'call_logs' }, payload => {
-      if (payload.new.outcome !== 'Booked') return
-      const rep = payload.new.rep || 'Someone'
-      const contactId = payload.new.contact_id
-      // Use setTimeout to avoid blocking the channel callback
-      setTimeout(() => {
-        sb.from('contacts').select('name').eq('id', contactId).single()
-          .then(({ data }) => triggerCelebration(rep, data?.name || 'a contact'))
-      }, 0)
-    })
-    .subscribe()
-  return () => { if (channelRef.current) sb.removeChannel(channelRef.current) }
-}, [])
+import { useEffect, useState, useRef } from 'react'
+import { sb } from '../lib/supabase'
+
+// Confetti particle
+function Particle({ style }) {
+  return <div style={{ position: 'fixed', borderRadius: 3, ...style, animation: 'fall 3s ease-in forwards', pointerEvents: 'none' }} />
+}
+
+export default function WinCelebration() {
+  const [celebration, setCelebration] = useState(null) // { rep, contactName }
+  const [particles, setParticles] = useState([])
+  const channelRef = useRef(null)
+  const timeoutRef = useRef(null)
+
+  useEffect(() => {
+    // Listen for new Booked outcomes in real time
+    channelRef.current = sb.channel('win-celebrations')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'call_logs' }, payload => {
+        if (payload.new.outcome !== 'Booked') return
+        const rep = payload.new.rep || 'Someone'
+        // Fetch contact name separately without blocking the channel
+        sb.from('contacts').select('name').eq('id', payload.new.contact_id).single()
+          .then(({ data }) => {
+            triggerCelebration(rep, data?.name || 'a contact')
+          })
+      })
+      .subscribe()
+    return () => { if (channelRef.current) sb.removeChannel(channelRef.current) }
+  }, [])
 
   const triggerCelebration = (rep, contactName) => {
     // Generate confetti particles
