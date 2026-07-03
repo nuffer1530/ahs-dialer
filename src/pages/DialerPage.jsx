@@ -542,7 +542,7 @@ export default function DialerPage() {
                 )
               })()}
 
-              {/* Call history */}}
+              {/* Call history */}
               <div className="card">
                 <div className="card-header">
                   <div className="card-title">Call history ({contactLogs.length})</div>
