@@ -31,6 +31,19 @@ export default function DialerPage() {
   const [correctOutcome, setCorrectOutcome] = useState('')
   const [correctNote, setCorrectNote] = useState('')
   const [mobileView, setMobileView] = useState('queue') // 'queue' | 'contact'
+  const [powerDialActive, setPowerDialActive] = useState(false)
+  const [showScript, setShowScript] = useState(false)
+
+  // Check for power dial campaign from sessionStorage
+  useEffect(() => {
+    const campId = sessionStorage.getItem('powerDialCampaign')
+    if (campId) {
+      sessionStorage.removeItem('powerDialCampaign')
+      setCampFilter(campId)
+      setPowerDialActive(true)
+      setTimeout(() => navNextPending(), 300)
+    }
+  }, [])
 
   const dupSet = useMemo(() => getDupSet(contacts), [contacts])
 
@@ -346,7 +359,17 @@ export default function DialerPage() {
 
         {/* Contact area */}
         <div style={{ flex:1, overflowY:'auto', padding:'20px 20px 40px' }}>
-          {!c ? (
+          {/* Power dial banner */}
+        {powerDialActive && (
+          <div style={{ background:'var(--accent)', color:'#fff', padding:'8px 20px', display:'flex', alignItems:'center', justifyContent:'space-between', flexShrink:0 }}>
+            <div style={{ display:'flex', alignItems:'center', gap:8, fontSize:13, fontWeight:500 }}>
+              <span>⚡</span> <strong>Power Dial Mode Active</strong> — auto-advancing through contacts
+            </div>
+            <button onClick={() => setPowerDialActive(false)} style={{ background:'rgba(255,255,255,0.2)', border:'none', color:'#fff', padding:'4px 12px', borderRadius:'var(--radius)', cursor:'pointer', fontSize:12 }}>Stop</button>
+          </div>
+        )}
+
+        {!c ? (
             <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
               {/* Home stats */}
               <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(160px,1fr))', gap:12 }}>
@@ -491,7 +514,35 @@ export default function DialerPage() {
                 </div>
               )}
 
-              {/* Call history */}
+              {/* Script panel */}
+              {showScript && c?.campaign_id && (() => {
+                const camp = campaigns.find(x=>x.id===c.campaign_id)
+                if (!camp?.script && !camp?.tips) return null
+                return (
+                  <div className="card" style={{ border:'2px solid var(--accent)' }}>
+                    <div className="card-header">
+                      <div className="card-title">📜 {camp.name} — Script</div>
+                      <button className="btn sm ghost" onClick={()=>setShowScript(false)}>✕</button>
+                    </div>
+                    <div className="card-body" style={{ display:'flex', flexDirection:'column', gap:14 }}>
+                      {camp.script && (
+                        <div>
+                          <div style={{ fontSize:11, fontWeight:600, textTransform:'uppercase', letterSpacing:.5, color:'var(--text-secondary)', marginBottom:6 }}>Call Script</div>
+                          <div style={{ background:'var(--surface-2)', borderRadius:'var(--radius)', padding:'12px 14px', fontSize:13, lineHeight:1.7, whiteSpace:'pre-wrap' }}>{camp.script}</div>
+                        </div>
+                      )}
+                      {camp.tips && (
+                        <div>
+                          <div style={{ fontSize:11, fontWeight:600, textTransform:'uppercase', letterSpacing:.5, color:'var(--text-secondary)', marginBottom:6 }}>💡 Tips</div>
+                          <div style={{ background:'var(--warning-bg)', border:'1px solid #E8C84A', borderRadius:'var(--radius)', padding:'12px 14px', fontSize:13, lineHeight:1.7, whiteSpace:'pre-wrap' }}>{camp.tips}</div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )
+              })()}
+
+              {/* Call history */}}
               <div className="card">
                 <div className="card-header">
                   <div className="card-title">Call history ({contactLogs.length})</div>
