@@ -1,6 +1,7 @@
 import { useState, useRef } from 'react'
 import { useData } from '../lib/DataContext'
 import { useAuth } from '../lib/AuthContext'
+import { useNavigate } from 'react-router-dom'
 import { sb } from '../lib/supabase'
 import Badge from '../components/Badge'
 import Modal from '../components/Modal'
@@ -9,31 +10,41 @@ import { isDone, normPhone, findCol, parseLine, cleanPhone } from '../lib/utils'
 export default function CampaignsPage() {
   const { contacts, setContacts, campaigns, setCampaigns, dncSet } = useData()
   const { isAdmin } = useAuth()
+  const navigate = useNavigate()
   const [showModal, setShowModal] = useState(false)
   const [editCamp, setEditCamp] = useState(null)
-  const [name, setName] = useState('')
-  const [desc, setDesc] = useState('')
-  const [status, setStatus] = useState('Active')
+  const [campForm, setCampForm] = useState({ name:'', description:'', status:'Active', script:'', tips:'' })
   const [saving, setSaving] = useState(false)
-  const [importing, setImporting] = useState(null) // campId being imported
+  const [importing, setImporting] = useState(null)
   const [importProgress, setImportProgress] = useState('')
-  const [showContacts, setShowContacts] = useState(null) // campId to show contacts
+  const [showContacts, setShowContacts] = useState(null)
   const [editContact, setEditContact] = useState(null)
+  const [showClearConfirm, setShowClearConfirm] = useState(null)
+  const [showScriptModal, setShowScriptModal] = useState(null)
+  const [clearConfirmText, setClearConfirmText] = useState('')
   const fileRef = useRef()
   const pendingCampRef = useRef(null)
 
-  const openNew = () => { setEditCamp(null); setName(''); setDesc(''); setStatus('Active'); setShowModal(true) }
-  const openEdit = (c) => { setEditCamp(c); setName(c.name||''); setDesc(c.description||''); setStatus(c.status||'Active'); setShowModal(true) }
+  const openNew = () => {
+    setEditCamp(null)
+    setCampForm({ name:'', description:'', status:'Active', script:'', tips:'' })
+    setShowModal(true)
+  }
+  const openEdit = (c) => {
+    setEditCamp(c)
+    setCampForm({ name:c.name||'', description:c.description||'', status:c.status||'Active', script:c.script||'', tips:c.tips||'' })
+    setShowModal(true)
+  }
 
   const save = async () => {
-    if (!name.trim()) return
+    if (!campForm.name.trim()) return
     setSaving(true)
     try {
       if (editCamp) {
-        const { data } = await sb.from('campaigns').update({ name, description: desc, status }).eq('id', editCamp.id).select().single()
+        const { data } = await sb.from('campaigns').update(campForm).eq('id', editCamp.id).select().single()
         if (data) setCampaigns(prev => prev.map(c => c.id === data.id ? data : c))
       } else {
-        const { data } = await sb.from('campaigns').insert({ name, description: desc, status }).select().single()
+        const { data } = await sb.from('campaigns').insert(campForm).select().single()
         if (data) setCampaigns(prev => [...prev, data])
       }
       setShowModal(false)
@@ -41,11 +52,27 @@ export default function CampaignsPage() {
   }
 
   const deleteCampaign = async (id) => {
-    if (!confirm('Delete this campaign? Contacts will remain but will be unassigned.')) return
+    if (!confirm('Delete this campaign? Contacts will remain but unassigned.')) return
     await sb.from('contacts').update({ campaign_id: null }).eq('campaign_id', id)
     await sb.from('campaigns').delete().eq('id', id)
     setCampaigns(prev => prev.filter(c => c.id !== id))
     setContacts(prev => prev.map(c => c.campaign_id === id ? { ...c, campaign_id: null } : c))
+  }
+
+  const clearCampaignContacts = async (campId) => {
+    const campName = campaigns.find(c => c.id === campId)?.name || ''
+    if (clearConfirmText !== campName) return
+    setSaving(true)
+    try {
+      const ids = contacts.filter(c => c.campaign_id === campId).map(c => c.id)
+      if (ids.length) {
+        await sb.from('call_logs').delete().in('contact_id', ids)
+        await sb.from('contacts').delete().eq('campaign_id', campId)
+        setContacts(prev => prev.filter(c => c.campaign_id !== campId))
+      }
+      setShowClearConfirm(null)
+      setClearConfirmText('')
+    } finally { setSaving(false) }
   }
 
   const startUpload = (campId) => { pendingCampRef.current = campId; fileRef.current.click() }
@@ -64,13 +91,11 @@ export default function CampaignsPage() {
     const cols = {}
     ;['name','phone','email','address','city','state','zip','source','notes','extid'].forEach(k => { cols[k] = findCol(headers, k) })
     const get = (row, key) => cols[key] >= 0 ? (row[cols[key]] || '').replace(/^"|"$/g, '').trim() : ''
-
     const rows = []; let dncSkipped = 0
     for (let i = 1; i < lines.length; i++) {
       const row = parseLine(lines[i])
       const nm = get(row, 'name'); if (!nm) continue
-      const rawPhone = get(row, 'phone')
-      const phone = cleanPhone(rawPhone)
+      const phone = cleanPhone(get(row, 'phone'))
       if (phone && dncSet.has(normPhone(phone))) { dncSkipped++; continue }
       const rec = { name: nm, status: 'Pending', attempts: 0 }
       if (phone) rec.phone = phone
@@ -85,11 +110,9 @@ export default function CampaignsPage() {
       if (campId) rec.campaign_id = campId
       rows.push(rec)
     }
-
     if (!rows.length) { alert('No valid rows.'); return }
     const campName = campaigns.find(c => c.id === campId)?.name || campId
     if (!confirm(`Import ${rows.length} contacts to "${campName}"?${dncSkipped ? `\n\n⛔ ${dncSkipped} DNC matches skipped.` : ''}`)) return
-
     setImporting(campId); setImportProgress(`Importing 0/${rows.length}…`)
     try {
       let created = 0
@@ -108,23 +131,22 @@ export default function CampaignsPage() {
   }
 
   const exportCampaign = (campId) => {
-    const campContacts = contacts.filter(c => c.campaign_id === campId)
+    const cc = contacts.filter(c => c.campaign_id === campId)
     const campName = campaigns.find(c => c.id === campId)?.name || 'Campaign'
-    const headers = ['Name','Phone','Email','Address','City','State','Zip','Status','Attempts','Source','ExternalID']
-    const esc = v => { if (v==null) return ''; const s=String(v); return s.includes(',')||s.includes('"')||s.includes('\n')?`"${s.replace(/"/g,'""')}"`:`${s}` }
-    const rows = campContacts.map(c => [c.name,c.phone,c.email,c.address,c.city,c.state,c.zip,c.status,c.attempts,c.source,c.external_id].map(esc).join(','))
-    const csv = [headers.join(','), ...rows].join('\n')
+    const esc = v => { if(v==null)return''; const s=String(v); return s.includes(',')||s.includes('"')||s.includes('\n')?`"${s.replace(/"/g,'""')}"`:`${s}` }
+    const h = ['Name','Phone','Email','Address','City','State','Zip','Status','Attempts','Source']
+    const csv = [h.join(','), ...cc.map(c => [c.name,c.phone,c.email,c.address,c.city,c.state,c.zip,c.status,c.attempts,c.source].map(esc).join(','))].join('\n')
     const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv],{type:'text/csv'})); a.download = `${campName.replace(/[^a-z0-9]/gi,'_')}.csv`; a.click()
   }
 
-  // Contact edit
+  const dialCampaign = (campId) => {
+    sessionStorage.setItem('powerDialCampaign', campId)
+    navigate('/')
+  }
+
   const saveContactEdit = async () => {
     if (!editContact) return
-    const { data } = await sb.from('contacts').update({
-      name: editContact.name, phone: editContact.phone, email: editContact.email,
-      address: editContact.address, city: editContact.city, state: editContact.state, zip: editContact.zip,
-      source: editContact.source, status: editContact.status,
-    }).eq('id', editContact.id).select().single()
+    const { data } = await sb.from('contacts').update({ name:editContact.name, phone:editContact.phone, email:editContact.email, address:editContact.address, city:editContact.city, state:editContact.state, zip:editContact.zip, source:editContact.source, status:editContact.status }).eq('id', editContact.id).select().single()
     if (data) setContacts(prev => prev.map(c => c.id === data.id ? data : c))
     setEditContact(null)
   }
@@ -151,11 +173,12 @@ export default function CampaignsPage() {
 
       <input type="file" accept=".csv" ref={fileRef} style={{display:'none'}} onChange={handleFile} />
 
-      <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(300px,1fr))', gap:14 }}>
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(320px,1fr))', gap:14 }}>
         {campaigns.map(camp => {
           const cc = contacts.filter(c => c.campaign_id === camp.id)
           const total = cc.length, done = cc.filter(isDone).length, booked = cc.filter(c => c.status === 'Booked').length
           const pct = total ? Math.round((done/total)*100) : 0
+          const hasScript = !!(camp.script || camp.tips)
           return (
             <div key={camp.id} className="card" style={{ display:'flex', flexDirection:'column', gap:10, padding:'16px 18px' }}>
               <div style={{ display:'flex', alignItems:'flex-start', justifyContent:'space-between', gap:8 }}>
@@ -163,39 +186,44 @@ export default function CampaignsPage() {
                   <div style={{ fontSize:15, fontWeight:600 }}>{camp.name}</div>
                   {camp.description && <div style={{ fontSize:12, color:'var(--text-secondary)', marginTop:2 }}>{camp.description}</div>}
                 </div>
-                <Badge status={camp.status} style={{ flexShrink:0 }} />
+                <div style={{ display:'flex', alignItems:'center', gap:6, flexShrink:0 }}>
+                  {hasScript && <span style={{ fontSize:10, background:'var(--accent-bg)', color:'var(--accent)', padding:'1px 6px', borderRadius:99, fontWeight:600 }}>📜 Script</span>}
+                  <Badge status={camp.status} />
+                </div>
               </div>
+
               <div style={{ height:6, background:'var(--surface-2)', borderRadius:99, overflow:'hidden' }}>
                 <div style={{ height:'100%', width:`${pct}%`, background:'var(--success)', borderRadius:99 }}></div>
               </div>
+
               <div style={{ display:'flex', gap:14 }}>
-                {[['Total',total],['Remaining',total-done,'warning'],['Booked',booked,'success'],['Done',pct+'%']].map(([l,v,c])=>(
+                {[['Total',total],['Remaining',total-done,'warning'],['Booked',booked,'success'],['Done%',pct+'%']].map(([l,v,c])=>(
                   <div key={l} style={{ textAlign:'center' }}>
                     <div style={{ fontSize:18, fontWeight:600, color: c ? `var(--${c})` : 'var(--text-primary)' }}>{v}</div>
                     <div style={{ fontSize:10, color:'var(--text-muted)', textTransform:'uppercase', letterSpacing:.4 }}>{l}</div>
                   </div>
                 ))}
               </div>
+
               <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
+                <button className="btn sm primary" onClick={() => dialCampaign(camp.id)}>⚡ Power Dial</button>
+                <button className="btn sm" onClick={() => setShowScriptModal(camp)}>📜 {hasScript ? 'View Script' : 'Add Script'}</button>
                 {isAdmin && (
                   <>
-                    <button className="btn sm" onClick={() => startUpload(camp.id)} disabled={importing === camp.id}>
-                      {importing === camp.id ? '⏳ Importing…' : '+ Upload'}
-                    </button>
+                    <button className="btn sm" onClick={() => startUpload(camp.id)} disabled={importing === camp.id}>{importing === camp.id ? '⏳' : '+ Upload'}</button>
                     <button className="btn sm" onClick={() => openEdit(camp)}>Edit</button>
-                    <button className="btn sm danger" onClick={() => deleteCampaign(camp.id)}>Delete</button>
+                    <button className="btn sm danger" onClick={() => { setShowClearConfirm(camp.id); setClearConfirmText('') }}>🗑 Clear</button>
                   </>
                 )}
-                <button className="btn sm" onClick={() => exportCampaign(camp.id)}>⬇ Export</button>
+                <button className="btn sm" onClick={() => exportCampaign(camp.id)}>⬇</button>
                 <button className="btn sm" onClick={() => setShowContacts(showContacts === camp.id ? null : camp.id)}>
-                  {showContacts === camp.id ? 'Hide contacts' : 'View contacts'}
+                  {showContacts === camp.id ? 'Hide' : 'Contacts'}
                 </button>
               </div>
 
-              {/* Inline contact list */}
               {showContacts === camp.id && (
-                <div style={{ marginTop:8, borderTop:'1px solid var(--border)', paddingTop:10 }}>
-                  <div style={{ maxHeight:300, overflowY:'auto' }}>
+                <div style={{ marginTop:4, borderTop:'1px solid var(--border)', paddingTop:10 }}>
+                  <div style={{ maxHeight:260, overflowY:'auto' }}>
                     <table className="data-table" style={{ fontSize:11 }}>
                       <thead><tr><th>Name</th><th>Phone</th><th>Status</th>{isAdmin&&<th>Actions</th>}</tr></thead>
                       <tbody>
@@ -212,7 +240,7 @@ export default function CampaignsPage() {
                             </td>}
                           </tr>
                         ))}
-                        {cc.length > 100 && <tr><td colSpan={4} style={{padding:'8px 10px',color:'var(--text-muted)',textAlign:'center'}}>+{cc.length-100} more — export CSV to see all</td></tr>}
+                        {cc.length > 100 && <tr><td colSpan={4} style={{padding:'8px 10px',color:'var(--text-muted)',textAlign:'center'}}>+{cc.length-100} more</td></tr>}
                       </tbody>
                     </table>
                   </div>
@@ -231,17 +259,76 @@ export default function CampaignsPage() {
 
       {/* Campaign modal */}
       {showModal && (
-        <Modal title={editCamp ? 'Edit campaign' : 'New campaign'} onClose={() => setShowModal(false)}>
-          <div className="form-field"><label className="form-label">Name</label><input className="form-input" value={name} onChange={e=>setName(e.target.value)} placeholder="e.g. Rocky MTN Acquisition" autoFocus /></div>
-          <div className="form-field"><label className="form-label">Description</label><textarea className="form-input" value={desc} onChange={e=>setDesc(e.target.value)} placeholder="Optional description" /></div>
+        <Modal title={editCamp ? 'Edit campaign' : 'New campaign'} onClose={() => setShowModal(false)} width={560}>
+          <div className="form-field"><label className="form-label">Name</label><input className="form-input" value={campForm.name} onChange={e=>setCampForm(p=>({...p,name:e.target.value}))} placeholder="e.g. Rocky MTN Acquisition" autoFocus /></div>
+          <div className="form-field"><label className="form-label">Description</label><textarea className="form-input" value={campForm.description} onChange={e=>setCampForm(p=>({...p,description:e.target.value}))} placeholder="Brief description of this campaign" /></div>
           <div className="form-field"><label className="form-label">Status</label>
-            <select className="form-input" value={status} onChange={e=>setStatus(e.target.value)}>
+            <select className="form-input" value={campForm.status} onChange={e=>setCampForm(p=>({...p,status:e.target.value}))}>
               {['Active','Paused','Complete'].map(s => <option key={s}>{s}</option>)}
             </select>
+          </div>
+          <div className="form-field">
+            <label className="form-label">Call script</label>
+            <textarea className="form-input" value={campForm.script} onChange={e=>setCampForm(p=>({...p,script:e.target.value}))}
+              placeholder={'Hi, this is [Name] with Awesome Home Services...\n\nI\'m calling because we recently acquired Rocky Mountain Climate and wanted to reach out to their customers personally...'} style={{ minHeight:120 }} />
+          </div>
+          <div className="form-field">
+            <label className="form-label">Tips & talking points</label>
+            <textarea className="form-input" value={campForm.tips} onChange={e=>setCampForm(p=>({...p,tips:e.target.value}))}
+              placeholder={'• Emphasize continuity of service\n• Mention the AHS guarantee\n• If they ask about pricing, offer a free quote\n• Best objection: "I already have someone" → "We want to earn your trust..."'} style={{ minHeight:100 }} />
           </div>
           <div className="modal-actions">
             <button className="btn" onClick={() => setShowModal(false)}>Cancel</button>
             <button className="btn primary" onClick={save} disabled={saving}>{saving ? '…' : editCamp ? 'Save' : 'Create'}</button>
+          </div>
+        </Modal>
+      )}
+
+      {/* Script/Tips viewer */}
+      {showScriptModal && (
+        <Modal title={`📜 ${showScriptModal.name} — Script & Tips`} onClose={() => setShowScriptModal(null)} width={640}>
+          {showScriptModal.script ? (
+            <div style={{ marginBottom:20 }}>
+              <div style={{ fontSize:12, fontWeight:600, textTransform:'uppercase', letterSpacing:.5, color:'var(--text-secondary)', marginBottom:8 }}>Call Script</div>
+              <div style={{ background:'var(--surface-2)', borderRadius:'var(--radius)', padding:'14px 16px', fontSize:13, lineHeight:1.7, whiteSpace:'pre-wrap', color:'var(--text-primary)' }}>
+                {showScriptModal.script}
+              </div>
+            </div>
+          ) : <div style={{ color:'var(--text-muted)', fontSize:13, marginBottom:16 }}>No script added yet.</div>}
+
+          {showScriptModal.tips ? (
+            <div>
+              <div style={{ fontSize:12, fontWeight:600, textTransform:'uppercase', letterSpacing:.5, color:'var(--text-secondary)', marginBottom:8 }}>💡 Tips & Talking Points</div>
+              <div style={{ background:'var(--warning-bg)', border:'1px solid #E8C84A', borderRadius:'var(--radius)', padding:'14px 16px', fontSize:13, lineHeight:1.7, whiteSpace:'pre-wrap', color:'var(--text-primary)' }}>
+                {showScriptModal.tips}
+              </div>
+            </div>
+          ) : <div style={{ color:'var(--text-muted)', fontSize:13 }}>No tips added yet.</div>}
+
+          <div className="modal-actions">
+            {isAdmin && <button className="btn" onClick={() => { openEdit(showScriptModal); setShowScriptModal(null) }}>Edit script</button>}
+            <button className="btn primary" onClick={() => setShowScriptModal(null)}>Close</button>
+          </div>
+        </Modal>
+      )}
+
+      {/* Clear contacts confirmation */}
+      {showClearConfirm && (
+        <Modal title="⚠️ Clear all contacts?" onClose={() => setShowClearConfirm(null)}>
+          <div style={{ background:'var(--danger-bg)', border:'1px solid #E8C0B8', borderRadius:'var(--radius)', padding:'12px 14px', fontSize:13, color:'var(--danger)', marginBottom:16 }}>
+            This will permanently delete ALL contacts and call logs for this campaign. This cannot be undone.
+          </div>
+          <div className="form-field">
+            <label className="form-label">Type the campaign name to confirm</label>
+            <input className="form-input" value={clearConfirmText} onChange={e=>setClearConfirmText(e.target.value)}
+              placeholder={campaigns.find(c=>c.id===showClearConfirm)?.name || ''} />
+          </div>
+          <div className="modal-actions">
+            <button className="btn" onClick={() => setShowClearConfirm(null)}>Cancel</button>
+            <button className="btn danger" disabled={clearConfirmText !== campaigns.find(c=>c.id===showClearConfirm)?.name || saving}
+              onClick={() => clearCampaignContacts(showClearConfirm)}>
+              {saving ? 'Clearing…' : 'Yes, delete all contacts'}
+            </button>
           </div>
         </Modal>
       )}
