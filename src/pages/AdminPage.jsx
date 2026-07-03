@@ -21,18 +21,22 @@ export default function AdminPage() {
   const saveProfile = async () => {
     if (!editProfile) return
     setSaving(true)
-    try {
-      const { data, error } = await sb.from('profiles')
+   try {
+      const { error } = await sb.from('profiles')
         .update({ name: editProfile.name, role: editProfile.role })
         .eq('id', editProfile.id)
-        .select().single()
       if (error) throw error
+      const { data } = await sb.from('profiles').select('*').eq('id', editProfile.id).maybeSingle()
       if (data) {
         setProfiles(prev => prev.map(p => p.id === data.id ? data : p))
         setMsg(`✓ ${data.name}'s role updated to ${data.role}`)
-        setTimeout(() => setMsg(''), 3000)
+      } else {
+        const { data: all } = await sb.from('profiles').select('*').order('name')
+        if (all) setProfiles(all)
+        setMsg('✓ Role updated successfully')
       }
-      // Refresh own profile if editing self
+      setTimeout(() => setMsg(''), 3000)
+      await refreshProfile()
       await refreshProfile()
     } catch(e) {
       setMsg('Error: ' + e.message)
