@@ -33,6 +33,7 @@ export default function DialerPage() {
   const [mobileView, setMobileView] = useState('queue') // 'queue' | 'contact'
   const [powerDialActive, setPowerDialActive] = useState(false)
   const [showScript, setShowScript] = useState(false)
+  const [celebration, setCelebration] = useState(null)
 
   // Check for power dial campaign from sessionStorage
   useEffect(() => {
@@ -139,6 +140,12 @@ export default function DialerPage() {
           await sb.from('contacts').update({ status: 'DNC' }).in('id', dupes.map(d => d.id))
           setContacts(prev => prev.map(x => dupes.some(d => d.id === x.id) ? { ...x, status: 'DNC', claimed_by: null } : x))
         }
+      }
+
+      // Trigger win celebration for Booked
+      if (selectedOutcome === 'Booked') {
+        setCelebration({ rep: currentRep, contactName: c.name || 'a contact' })
+        setTimeout(() => setCelebration(null), 5000)
       }
 
       setSelectedOutcome(null)
@@ -490,6 +497,7 @@ export default function DialerPage() {
                   </div>
                 )
               })()}
+
               {/* Log outcome */}
               {!done && (
                 <div className="card">
@@ -599,6 +607,27 @@ export default function DialerPage() {
           )}
         </div>
       </div>
+
+      {/* WIN CELEBRATION */}
+      {celebration && (
+        <>
+          <style>{`
+            @keyframes fall { 0%{transform:translateY(0) rotate(0deg);opacity:1;} 100%{transform:translateY(100vh) rotate(720deg);opacity:0;} }
+            @keyframes popIn { 0%{transform:translate(-50%,-50%) scale(0.5);opacity:0;} 70%{transform:translate(-50%,-50%) scale(1.05);opacity:1;} 100%{transform:translate(-50%,-50%) scale(1);opacity:1;} }
+          `}</style>
+          {Array.from({length:60},(_,i)=>(
+            <div key={i} style={{position:'fixed',borderRadius:3,left:`${Math.random()*100}%`,top:`-${Math.random()*20+10}px`,width:`${Math.random()*10+6}px`,height:`${Math.random()*10+6}px`,background:['#1A5C8A','#2E7D52','#FFC107','#E91E63','#9C27B0','#FF5722','#00BCD4'][Math.floor(Math.random()*7)],animation:`fall ${Math.random()*1.5+2}s ease-in ${Math.random()*1.5}s forwards`,pointerEvents:'none',zIndex:9999}}/>
+          ))}
+          <div style={{position:'fixed',top:'50%',left:'50%',zIndex:10000,animation:'popIn 0.5s cubic-bezier(0.175,0.885,0.32,1.275) forwards',background:'white',borderRadius:20,padding:'40px 48px',boxShadow:'0 20px 60px rgba(0,0,0,0.3)',textAlign:'center',border:'3px solid #2E7D52',minWidth:340}}>
+            <div style={{fontSize:64,marginBottom:8,lineHeight:1}}>🎉</div>
+            <div style={{fontSize:28,fontWeight:800,color:'#2E7D52',marginBottom:6}}>BOOKED!</div>
+            <div style={{fontSize:18,fontWeight:600,color:'#1C1B19',marginBottom:4}}>{celebration.contactName}</div>
+            <div style={{fontSize:14,color:'#6B6760'}}>{celebration.rep} just closed one! 🔥</div>
+            <button onClick={()=>setCelebration(null)} style={{marginTop:20,padding:'8px 24px',background:'#2E7D52',color:'white',border:'none',borderRadius:8,cursor:'pointer',fontSize:13,fontWeight:600}}>Let's go! 💪</button>
+          </div>
+          <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.4)',zIndex:9998}} onClick={()=>setCelebration(null)}/>
+        </>
+      )}
 
       {/* CALLBACK MODAL */}
       {showCallbackModal && (
