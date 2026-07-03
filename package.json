@@ -6,7 +6,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "start": "vite preview --port $PORT --host"
+ "start": "npm run build && vite preview --port ${PORT:-4173} --host 0.0.0.0"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.39.3",
