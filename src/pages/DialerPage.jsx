@@ -143,9 +143,27 @@ export default function DialerPage() {
       }
 
       // Trigger win celebration for Booked
-      if (selectedOutcome === 'Booked') {
+    if (selectedOutcome === 'Booked') {
         setCelebration({ rep: currentRep, contactName: c.name || 'a contact' })
         setTimeout(() => setCelebration(null), 5000)
+        // Fire Zapier webhook
+        fetch('https://hooks.zapier.com/hooks/catch/25348607/4u2k7s2/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: c.name || '',
+            phone: c.phone || '',
+            email: c.email || '',
+            address: c.address || '',
+            city: c.city || '',
+            state: c.state || '',
+            zip: c.zip || '',
+            campaign: campName(c) || '',
+            rep: currentRep,
+            booked_at: new Date().toISOString(),
+            source: c.source || 'AHS Dialer',
+          })
+        }).catch(err => console.warn('Zapier webhook failed:', err))
       }
 
       setSelectedOutcome(null)
