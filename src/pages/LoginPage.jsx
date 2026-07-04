@@ -63,7 +63,7 @@ export default function LoginPage() {
           <form onSubmit={handleSubmit}>
             <div className="form-field">
               <label className="form-label">Email</label>
-              <input className="form-input" type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="you@awesomehomeservices.com" required />
+              <input className="form-input" type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="you@awesomeservice.com" required />
             </div>
             {mode !== 'reset' && (
               <div className="form-field">
