@@ -17,6 +17,9 @@ export default function LoginPage() {
         const { error } = await sb.auth.signInWithPassword({ email, password })
         if (error) throw error
       } else if (mode === 'signup') {
+        if (!email.toLowerCase().endsWith('@awesomeservice.com')) {
+          throw new Error('You must use an @awesomeservice.com email to sign up.')
+        }
         const { data, error } = await sb.auth.signUp({ email, password })
         if (error) throw error
         // Create profile
