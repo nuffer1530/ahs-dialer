@@ -149,7 +149,7 @@ export default function DialerPage() {
         // Fire Zapier webhook
         fetch('https://hooks.zapier.com/hooks/catch/25348607/4u2k7s2/', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+         headers: { 'Content-Type': 'text/plain' },
           body: JSON.stringify({
             name: c.name || '',
             phone: c.phone || '',
