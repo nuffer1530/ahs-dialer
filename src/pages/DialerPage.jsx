@@ -442,7 +442,7 @@ export default function DialerPage() {
                     </div>
                   </div>
                   <div style={{ textAlign:'right', flexShrink:0 }}>
-                    <div style={{ fontSize:22, fontWeight:500, color:'var(--accent)', letterSpacing:-.3 }}>{c.phone || 'No phone'}</div>
+                  <a href={`tel:${c.phone}`} style={{ fontSize:22, fontWeight:500, color:'var(--accent)', letterSpacing:-.3, textDecoration:'none' }}>{c.phone || 'No phone'}</a>
                     {c.phone && (
                       <button className="btn sm" style={{ marginTop:4 }} onClick={() => navigator.clipboard.writeText(c.phone)}>📋 Copy</button>
                     )}
