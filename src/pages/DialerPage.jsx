@@ -149,19 +149,20 @@ export default function DialerPage() {
         // Fire Zapier webhook
         fetch('https://hooks.zapier.com/hooks/catch/25348607/4u2k7s2/', {
           method: 'POST',
-          body: JSON.stringify({
-            name: c.name || '',
-            phone: c.phone || '',
-            email: c.email || '',
-            address: c.address || '',
-            city: c.city || '',
-            state: c.state || '',
-            zip: c.zip || '',
-            campaign: campName(c) || '',
-            rep: currentRep,
-            booked_at: new Date().toISOString(),
-            source: c.source || 'AHS Dialer',
-          })
+         body: JSON.stringify({
+  name: c.name || '',
+  phone: c.phone || '',
+  email: c.email || 'noemail@ahsdialer.com',
+  address: c.address || '',
+  city: c.city || '',
+  state: c.state || '',
+  zip: c.zip || '80901',
+  campaign: campName(c) || '',
+  rep: currentRep,
+  booked_at: new Date().toISOString(),
+  source: c.source || 'AHS Dialer',
+  notes: notes || '',  // 👈 add this line
+})
         }).catch(err => console.warn('Zapier webhook failed:', err))
       }
 
