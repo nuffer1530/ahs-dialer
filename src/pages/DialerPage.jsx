@@ -102,9 +102,13 @@ export default function DialerPage() {
 
   // CLAIM
   const claimContact = async (id) => {
-    const { data: fresh } = await sb.from('contacts').select('claimed_by').eq('id', id).single()
-    if (fresh?.claimed_by && fresh.claimed_by !== currentRep) {
-      alert(`${fresh.claimed_by} just claimed this.`); return
+  const alreadyClaimed = contacts.find(c => c.claimed_by === currentRep && c.id !== id)
+  if (alreadyClaimed) {
+    alert(`You already have ${alreadyClaimed.name} claimed. Log an outcome before claiming another contact.`); return
+  }
+  const { data: fresh } = await sb.from('contacts').select('claimed_by').eq('id', id).single()
+  if (fresh?.claimed_by && fresh.claimed_by !== currentRep) {
+    alert(`${fresh.claimed_by} just claimed this.`); return
     }
     const { data } = await sb.from('contacts').update({ claimed_by: currentRep, claimed_at: new Date().toISOString() }).eq('id', id).select().single()
     if (data) setContacts(prev => prev.map(c => c.id === id ? data : c))
