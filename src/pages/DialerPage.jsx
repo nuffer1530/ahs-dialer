@@ -163,7 +163,7 @@ export default function DialerPage() {
   address: c.address || '',
   city: c.city || '',
   state: c.state || '',
-  zip: c.zip || '80901',
+  zip: c.zip || '',
   campaign: campName(c) || '',
   rep: currentRep,
   booked_at: new Date().toISOString(),
