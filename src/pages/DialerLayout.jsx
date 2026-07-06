@@ -75,6 +75,7 @@ export default function DialerLayout() {
     { to:'/dashboard', label:'📊 Analytics' },
     { to:'/notes', label:'🔍 Notes' },
     { to:'/warroom', label:'📺 War Room' },
+    { to:'/campaigns', label:'📋 Campaigns' },
     ...(isAdmin ? [{ to:'/admin', label:'⚙️ Admin' }] : []),
   ]
 
