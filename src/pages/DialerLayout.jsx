@@ -88,7 +88,6 @@ export default function DialerLayout() {
           <span style={{ fontSize:15, fontWeight:600 }}>Dialer</span>
         </div>
         <div style={{ display:'flex', alignItems:'center', gap:12 }}>
-          <span style={{ fontSize:11, padding:'3px 8px', borderRadius:99, fontWeight:500, background:sc.bg, color:sc.color }}>{syncLabel}</span>
           <button className="btn sm" onClick={reload}>↻</button>
 
           {/* Status picker */}
