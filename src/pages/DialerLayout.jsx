@@ -35,6 +35,22 @@ export default function DialerLayout() {
     if (profile?.status) setAgentStatus(profile.status)
   }, [profile])
 
+  // Real-time listener for admin status overrides
+  useEffect(() => {
+    if (!profile?.id) return
+    const channel = sb.channel('nav-status')
+      .on('postgres_changes', {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'profiles',
+        filter: `id=eq.${profile.id}`
+      }, payload => {
+        if (payload.new?.status) setAgentStatus(payload.new.status)
+      })
+      .subscribe()
+    return () => sb.removeChannel(channel)
+  }, [profile?.id])
+
   // Close menu on outside click
   useEffect(() => {
     const handler = (e) => {
