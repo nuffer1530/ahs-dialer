@@ -71,9 +71,9 @@ export default function DialerLayout() {
   const navItems = [
     { to:'/', label:'📞 Dialer', end:true },
     { to:'/campaigns', label:'📋 Campaigns' },
-    { to:'/dashboard', label:'📊 Dashboard' },
+    { to:'/dashboard', label:'📊 Analytics' },
     { to:'/leaderboard', label:'🏆 Leaderboard' },
-    { to:'/live', label:'🟢 Live' },
+    { to:'/live', label:'🟢 Live Dashboard' },
     { to:'/warroom', label:'📺 War Room' },
     { to:'/notes', label:'🔍 Notes' },
     ...(isAdmin ? [{ to:'/admin', label:'⚙️ Admin' }] : []),
