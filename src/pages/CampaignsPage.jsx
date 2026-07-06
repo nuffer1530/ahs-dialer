@@ -20,6 +20,7 @@ export default function CampaignsPage() {
   const [showContacts, setShowContacts] = useState(null)
   const [editContact, setEditContact] = useState(null)
   const [showClearConfirm, setShowClearConfirm] = useState(null)
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(null)
   const [showScriptModal, setShowScriptModal] = useState(null)
   const [clearConfirmText, setClearConfirmText] = useState('')
   const fileRef = useRef()
@@ -52,11 +53,17 @@ export default function CampaignsPage() {
   }
 
   const deleteCampaign = async (id) => {
-    if (!confirm('Delete this campaign? Contacts will remain but unassigned.')) return
-    await sb.from('contacts').update({ campaign_id: null }).eq('campaign_id', id)
-    await sb.from('campaigns').delete().eq('id', id)
-    setCampaigns(prev => prev.filter(c => c.id !== id))
-    setContacts(prev => prev.map(c => c.campaign_id === id ? { ...c, campaign_id: null } : c))
+    setSaving(true)
+    try {
+      const campContacts = contacts.filter(c => c.campaign_id === id).map(c => c.id)
+      if (campContacts.length) {
+        await sb.from('contacts').delete().eq('campaign_id', id)
+      }
+      await sb.from('campaigns').delete().eq('id', id)
+      setCampaigns(prev => prev.filter(c => c.id !== id))
+      setContacts(prev => prev.filter(c => c.campaign_id !== id))
+      setShowDeleteConfirm(null)
+    } finally { setSaving(false) }
   }
 
   const clearCampaignContacts = async (campId) => {
@@ -180,7 +187,14 @@ export default function CampaignsPage() {
           const pct = total ? Math.round((done/total)*100) : 0
           const hasScript = !!(camp.script || camp.tips)
           return (
-            <div key={camp.id} className="card" style={{ display:'flex', flexDirection:'column', gap:10, padding:'16px 18px' }}>
+            <div key={camp.id} className="card" style={{ display:'flex', flexDirection:'column', gap:10, padding:'16px 18px', position:'relative' }}>
+              {isAdmin && (
+                <button
+                  onClick={() => setShowDeleteConfirm(camp.id)}
+                  style={{ position:'absolute', top:10, right:10, width:22, height:22, borderRadius:'50%', border:'none', background:'var(--danger-bg)', color:'var(--danger)', cursor:'pointer', fontSize:16, fontWeight:700, display:'flex', alignItems:'center', justifyContent:'center', lineHeight:1, zIndex:1 }}
+                  title="Delete campaign"
+                >×</button>
+              )}
               <div style={{ display:'flex', alignItems:'flex-start', justifyContent:'space-between', gap:8 }}>
                 <div>
                   <div style={{ fontSize:15, fontWeight:600 }}>{camp.name}</div>
@@ -328,6 +342,25 @@ export default function CampaignsPage() {
             <button className="btn danger" disabled={clearConfirmText !== campaigns.find(c=>c.id===showClearConfirm)?.name || saving}
               onClick={() => clearCampaignContacts(showClearConfirm)}>
               {saving ? 'Clearing…' : 'Yes, delete all contacts'}
+            </button>
+          </div>
+        </Modal>
+      )}
+
+      {/* Delete campaign confirmation */}
+      {showDeleteConfirm && (
+        <Modal title="⚠️ Delete Campaign?" onClose={() => setShowDeleteConfirm(null)}>
+          <div style={{ background:'var(--danger-bg)', border:'1px solid #E8C0B8', borderRadius:'var(--radius)', padding:'12px 14px', fontSize:13, color:'var(--danger)', marginBottom:16 }}>
+            <strong>You are about to permanently delete "{campaigns.find(c => c.id === showDeleteConfirm)?.name}".</strong>
+            <br /><br />
+            This will delete the campaign and ALL contacts attached to it. Call logs and rep stats will be preserved for Analytics. <strong>This cannot be undone.</strong>
+            <br /><br />
+            If you just want to clear the contact list and re-upload, use the 🗑 Clear button instead.
+          </div>
+          <div className="modal-actions">
+            <button className="btn" onClick={() => setShowDeleteConfirm(null)}>Cancel — keep campaign</button>
+            <button className="btn danger" onClick={() => deleteCampaign(showDeleteConfirm)} disabled={saving}>
+              {saving ? 'Deleting…' : 'Yes, delete campaign'}
             </button>
           </div>
         </Modal>
