@@ -1,3 +1,4 @@
+import { useState, useEffect, useRef } from 'react'
 import { Routes, Route, NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '../lib/AuthContext'
 import { useData } from '../lib/DataContext'
@@ -12,15 +13,60 @@ import WarRoomPage from './WarRoomPage'
 import LeaderboardPage from './LeaderboardPage'
 import WinCelebration from '../components/WinCelebration'
 
+const STATUS_OPTIONS = [
+  { value: 'Available', color: '#22c55e' },
+  { value: 'On Call',   color: '#3b82f6' },
+  { value: 'Wrap Up',   color: '#f59e0b' },
+  { value: 'Break',     color: '#a855f7' },
+  { value: 'Lunch',     color: '#f97316' },
+  { value: 'Offline',   color: '#6b7280' },
+]
+
 export default function DialerLayout() {
   const { profile, isAdmin } = useAuth()
   const { contacts, syncStatus, reload } = useData()
   const navigate = useNavigate()
+  const [agentStatus, setAgentStatus] = useState('Offline')
+  const [showStatusMenu, setShowStatusMenu] = useState(false)
+  const menuRef = useRef(null)
 
-  const signOut = async () => { await sb.auth.signOut(); navigate('/login') }
+  // Load status from profile on mount
+  useEffect(() => {
+    if (profile?.status) setAgentStatus(profile.status)
+  }, [profile])
 
-  const sc = { ok: { bg:'var(--success-bg)', color:'var(--success)' }, loading: { bg:'var(--warning-bg)', color:'var(--warning)' }, error: { bg:'var(--danger-bg)', color:'var(--danger)' } }[syncStatus] || { bg:'var(--warning-bg)', color:'var(--warning)' }
-  const syncLabel = syncStatus === 'ok' ? `✓ ${contacts.length.toLocaleString()} contacts` : syncStatus === 'loading' ? 'Loading…' : '✗ Error'
+  // Close menu on outside click
+  useEffect(() => {
+    const handler = (e) => {
+      if (menuRef.current && !menuRef.current.contains(e.target)) setShowStatusMenu(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
+
+  const updateStatus = async (val) => {
+    setAgentStatus(val)
+    setShowStatusMenu(false)
+    await sb.from('profiles').update({ status: val, status_since: new Date().toISOString() }).eq('id', profile.id)
+  }
+
+  const signOut = async () => {
+    await updateStatus('Offline')
+    await sb.auth.signOut()
+    navigate('/login')
+  }
+
+  const currentStatusObj = STATUS_OPTIONS.find(s => s.value === agentStatus) || STATUS_OPTIONS[5]
+
+  const sc = {
+    ok:      { bg:'var(--success-bg)', color:'var(--success)' },
+    loading: { bg:'var(--warning-bg)', color:'var(--warning)' },
+    error:   { bg:'var(--danger-bg)',  color:'var(--danger)'  },
+  }[syncStatus] || { bg:'var(--warning-bg)', color:'var(--warning)' }
+
+  const syncLabel = syncStatus === 'ok'
+    ? `✓ ${contacts.length.toLocaleString()} contacts`
+    : syncStatus === 'loading' ? 'Loading…' : '✗ Error'
 
   const navItems = [
     { to:'/', label:'📞 Dialer', end:true },
@@ -44,6 +90,35 @@ export default function DialerLayout() {
         <div style={{ display:'flex', alignItems:'center', gap:12 }}>
           <span style={{ fontSize:11, padding:'3px 8px', borderRadius:99, fontWeight:500, background:sc.bg, color:sc.color }}>{syncLabel}</span>
           <button className="btn sm" onClick={reload}>↻</button>
+
+          {/* Status picker */}
+          <div ref={menuRef} style={{ position:'relative' }}>
+            <button
+              onClick={() => setShowStatusMenu(v => !v)}
+              style={{ display:'flex', alignItems:'center', gap:7, background:'var(--surface-2)', border:'1px solid var(--border)', borderRadius:99, padding:'4px 10px 4px 8px', cursor:'pointer', fontSize:12, fontWeight:500, color:'var(--text-primary)' }}
+            >
+              <div style={{ width:8, height:8, borderRadius:'50%', background:currentStatusObj.color, flexShrink:0 }}></div>
+              {currentStatusObj.value}
+              <span style={{ fontSize:10, color:'var(--text-muted)' }}>▾</span>
+            </button>
+            {showStatusMenu && (
+              <div style={{ position:'absolute', right:0, top:'calc(100% + 6px)', background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius)', boxShadow:'0 4px 16px rgba(0,0,0,.15)', zIndex:200, minWidth:145, overflow:'hidden' }}>
+                {STATUS_OPTIONS.map(s => (
+                  <button
+                    key={s.value}
+                    onClick={() => updateStatus(s.value)}
+                    style={{ display:'flex', alignItems:'center', gap:8, width:'100%', padding:'9px 14px', background: agentStatus === s.value ? 'var(--surface-2)' : 'transparent', border:'none', cursor:'pointer', fontSize:12, fontWeight: agentStatus === s.value ? 600 : 400, color:'var(--text-primary)', textAlign:'left' }}
+                  >
+                    <div style={{ width:8, height:8, borderRadius:'50%', background:s.color, flexShrink:0 }}></div>
+                    {s.value}
+                    {agentStatus === s.value && <span style={{ marginLeft:'auto', fontSize:10 }}>✓</span>}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Agent name */}
           <div style={{ fontSize:12, color:'var(--text-secondary)', display:'flex', alignItems:'center', gap:6 }}>
             <div style={{ width:28, height:28, borderRadius:'50%', background:'var(--accent-bg)', color:'var(--accent-text)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:11, fontWeight:600 }}>
               {(profile?.name || profile?.email || '?')[0].toUpperCase()}
