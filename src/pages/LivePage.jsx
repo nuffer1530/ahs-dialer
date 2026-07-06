@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useData } from '../lib/DataContext'
+import { useAuth } from '../lib/AuthContext'
 import { sb } from '../lib/supabase'
 import Badge from '../components/Badge'
 import { isDone, fmtShort } from '../lib/utils'
@@ -23,10 +24,26 @@ function timeSince(isoString) {
 
 export default function LivePage() {
   const { contacts, campaigns } = useData()
+  const { isAdmin } = useAuth()
   const [logs, setLogs] = useState([])
   const [profiles, setProfiles] = useState([])
   const [loading, setLoading] = useState(true)
   const [tick, setTick] = useState(0)
+  const [overrideMenu, setOverrideMenu] = useState(null) // profileId being overridden
+  const menuRef = useRef(null)
+
+  // Close override menu on outside click
+  useEffect(() => {
+    const handler = (e) => { if (menuRef.current && !menuRef.current.contains(e.target)) setOverrideMenu(null) }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
+
+  const adminSetStatus = async (profileId, val) => {
+    setOverrideMenu(null)
+    await sb.from('profiles').update({ status: val, status_since: new Date().toISOString() }).eq('id', profileId)
+    setProfiles(prev => prev.map(p => p.id === profileId ? { ...p, status: val, status_since: new Date().toISOString() } : p))
+  }
 
   // Tick every 30s to update "time in status"
   useEffect(() => {
@@ -142,15 +159,35 @@ export default function LivePage() {
                         </div>
                         <div>
                           <div style={{ fontSize:13 }}>{p.name || p.email}</div>
-                          {p.role === 'admin' && <div style={{ fontSize:10, color:'var(--accent)', fontWeight:600 }}>ADMIN</div>}
+                          
                         </div>
                       </div>
                     </td>
-                    <td style={{ padding:'10px 12px' }}>
-                      <span style={{ display:'inline-flex', alignItems:'center', gap:6, padding:'3px 10px', borderRadius:99, fontSize:11, fontWeight:600, background: statusObj.color + '20', color: statusObj.color }}>
+                    <td style={{ padding:'10px 12px', position:'relative' }} ref={overrideMenu === p.id ? menuRef : null}>
+                      <span
+                        onClick={() => isAdmin && setOverrideMenu(overrideMenu === p.id ? null : p.id)}
+                        style={{ display:'inline-flex', alignItems:'center', gap:6, padding:'3px 10px', borderRadius:99, fontSize:11, fontWeight:600, background: statusObj.color + '20', color: statusObj.color, cursor: isAdmin ? 'pointer' : 'default' }}
+                        title={isAdmin ? 'Click to change status' : ''}
+                      >
                         <div style={{ width:6, height:6, borderRadius:'50%', background:statusObj.color }}></div>
                         {status}
+                        {isAdmin && <span style={{ fontSize:9, opacity:.6 }}>▾</span>}
                       </span>
+                      {isAdmin && overrideMenu === p.id && (
+                        <div style={{ position:'absolute', left:12, top:'calc(100% + 4px)', background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius)', boxShadow:'0 4px 16px rgba(0,0,0,.15)', zIndex:200, minWidth:130, overflow:'hidden' }}>
+                          {STATUS_OPTIONS.map(s => (
+                            <button
+                              key={s.value}
+                              onClick={() => adminSetStatus(p.id, s.value)}
+                              style={{ display:'flex', alignItems:'center', gap:8, width:'100%', padding:'8px 12px', background: status === s.value ? 'var(--surface-2)' : 'transparent', border:'none', cursor:'pointer', fontSize:12, fontWeight: status === s.value ? 600 : 400, color:'var(--text-primary)', textAlign:'left' }}
+                            >
+                              <div style={{ width:7, height:7, borderRadius:'50%', background:s.color }}></div>
+                              {s.value}
+                              {status === s.value && <span style={{ marginLeft:'auto', fontSize:10 }}>✓</span>}
+                            </button>
+                          ))}
+                        </div>
+                      )}
                     </td>
                     <td style={{ padding:'10px 12px', fontSize:12, color:'var(--text-muted)' }}>
                       {p.status_since ? timeSince(p.status_since) : '—'}
@@ -195,7 +232,7 @@ export default function LivePage() {
                 <tr><th>Time</th><th>Rep</th><th>Contact</th><th>Phone</th><th>Outcome</th><th>Notes</th></tr>
               </thead>
               <tbody>
-                {logs.slice(0, 50).map(l => {
+                {logs.slice(0, 5).map(l => {
                   const c = contacts.find(x => x.id === l.contact_id)
                   return (
                     <tr key={l.id}>
