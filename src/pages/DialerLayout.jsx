@@ -70,12 +70,11 @@ export default function DialerLayout() {
 
   const navItems = [
     { to:'/', label:'📞 Dialer', end:true },
-    { to:'/campaigns', label:'📋 Campaigns' },
-    { to:'/dashboard', label:'📊 Analytics' },
-    { to:'/leaderboard', label:'🏆 Leaderboard' },
     { to:'/live', label:'🟢 Live Dashboard' },
-    { to:'/warroom', label:'📺 War Room' },
+    { to:'/leaderboard', label:'🏆 Leaderboard' },
+    { to:'/dashboard', label:'📊 Analytics' },
     { to:'/notes', label:'🔍 Notes' },
+    { to:'/warroom', label:'📺 War Room' },
     ...(isAdmin ? [{ to:'/admin', label:'⚙️ Admin' }] : []),
   ]
 
