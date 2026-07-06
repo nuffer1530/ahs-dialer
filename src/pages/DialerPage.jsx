@@ -124,6 +124,9 @@ export default function DialerPage() {
     if (!selectedOutcome || !selectedContact) return
     const c = selectedContact
     const notes = document.getElementById('call-notes')?.value?.trim() || ''
+    if (selectedOutcome === 'Booked' && !notes) {
+  alert('Please add notes before booking.'); return
+}
     const newAttempts = (c.attempts || 0) + 1
     const isFinal = DONE_OUTCOMES.includes(selectedOutcome) || newAttempts >= MAX_ATTEMPTS
     const newStatus = isFinal ? (DONE_OUTCOMES.includes(selectedOutcome) ? selectedOutcome : 'Max Attempts') : selectedOutcome
@@ -551,7 +554,7 @@ export default function DialerPage() {
                         )
                       })}
                     </div>
-                    <textarea id="call-notes" disabled={!isMe} placeholder="Notes (optional)…"
+                    <textarea id="call-notes" disabled={!isMe} placeholder="Notes (required)…"
                       style={{ width:'100%', border:'1px solid var(--border-strong)', borderRadius:'var(--radius)', padding:'8px 10px', fontSize:12, fontFamily:'inherit', resize:'vertical', minHeight:44, background:'var(--surface)', color:'var(--text-primary)', marginBottom:10, opacity:isMe?1:.45 }} />
                     <div style={{ display:'flex', gap:6, justifyContent:'flex-end', flexWrap:'wrap' }}>
                       <button className="btn warning" disabled={!isMe} onClick={openCallbackModal}>📅 Schedule callback</button>
