@@ -187,7 +187,7 @@ export default function CampaignsPage() {
           const pct = total ? Math.round((done/total)*100) : 0
           const hasScript = !!(camp.script || camp.tips)
           return (
-            <div key={camp.id} className="card" style={{ display:'flex', flexDirection:'column', gap:10, padding:'16px 18px', position:'relative' }}>
+            <div key={camp.id} className="card" style={{ display:'flex', flexDirection:'column', gap:10, padding:'16px 18px' }}>
               {isAdmin && (
                 <button
                   onClick={() => setShowDeleteConfirm(camp.id)}
@@ -203,6 +203,13 @@ export default function CampaignsPage() {
                 <div style={{ display:'flex', alignItems:'center', gap:6, flexShrink:0 }}>
                   {hasScript && <span style={{ fontSize:10, background:'var(--accent-bg)', color:'var(--accent)', padding:'1px 6px', borderRadius:99, fontWeight:600 }}>📜 Script</span>}
                   <Badge status={camp.status} />
+                  {isAdmin && (
+                    <button
+                      onClick={() => setShowDeleteConfirm(camp.id)}
+                      style={{ width:20, height:20, borderRadius:'50%', border:'none', background:'var(--danger-bg)', color:'var(--danger)', cursor:'pointer', fontSize:14, fontWeight:700, display:'flex', alignItems:'center', justifyContent:'center', lineHeight:1, flexShrink:0 }}
+                      title="Delete campaign"
+                    >×</button>
+                  )}
                 </div>
               </div>
 
