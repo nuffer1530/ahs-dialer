@@ -18,8 +18,15 @@ function timeSince(isoString) {
   if (!isoString) return '—'
   const secs = Math.floor((Date.now() - new Date(isoString)) / 1000)
   if (secs < 60) return `${secs}s`
-  if (secs < 3600) return `${Math.floor(secs/60)}m`
-  return `${Math.floor(secs/3600)}h ${Math.floor((secs%3600)/60)}m`
+  if (secs < 3600) {
+    const m = Math.floor(secs / 60)
+    const s = secs % 60
+    return `${m}m ${s}s`
+  }
+  const h = Math.floor(secs / 3600)
+  const m = Math.floor((secs % 3600) / 60)
+  const s = secs % 60
+  return `${h}h ${m}m ${s}s`
 }
 
 export default function LivePage() {
@@ -39,7 +46,7 @@ export default function LivePage() {
 
   // Tick every 30s to update "time in status"
   useEffect(() => {
-    const t = setInterval(() => setTick(v => v + 1), 30000)
+    const t = setInterval(() => setTick(v => v + 1), 1000)
     return () => clearInterval(t)
   }, [])
 
