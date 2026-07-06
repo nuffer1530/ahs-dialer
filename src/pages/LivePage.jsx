@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import { useData } from '../lib/DataContext'
 import { useAuth } from '../lib/AuthContext'
 import { sb } from '../lib/supabase'
@@ -23,24 +23,16 @@ function timeSince(isoString) {
 }
 
 export default function LivePage() {
-  const { contacts, campaigns } = useData()
+  const { contacts } = useData()
   const { isAdmin } = useAuth()
   const [logs, setLogs] = useState([])
   const [profiles, setProfiles] = useState([])
   const [loading, setLoading] = useState(true)
   const [tick, setTick] = useState(0)
-  const [overrideMenu, setOverrideMenu] = useState(null) // profileId being overridden
-  const menuRef = useRef(null)
-
-  // Close override menu on outside click
-  useEffect(() => {
-    const handler = (e) => { if (menuRef.current && !menuRef.current.contains(e.target)) setOverrideMenu(null) }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [])
+  const [overrideTarget, setOverrideTarget] = useState(null) // { id, name, status }
 
   const adminSetStatus = async (profileId, val) => {
-    setOverrideMenu(null)
+    setOverrideTarget(null)
     await sb.from('profiles').update({ status: val, status_since: new Date().toISOString() }).eq('id', profileId)
     setProfiles(prev => prev.map(p => p.id === profileId ? { ...p, status: val, status_since: new Date().toISOString() } : p))
   }
@@ -53,7 +45,6 @@ export default function LivePage() {
 
   useEffect(() => {
     const since = new Date(Date.now() - 24*60*60*1000).toISOString()
-
     Promise.all([
       sb.from('call_logs').select('*').gte('created_at', since).order('created_at', { ascending: false }),
       sb.from('profiles').select('*').order('name'),
@@ -63,24 +54,17 @@ export default function LivePage() {
       setLoading(false)
     })
 
-    // Real-time: new call logs
     const logChannel = sb.channel('live-logs')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'call_logs' }, payload => {
         setLogs(prev => [payload.new, ...prev])
-      })
-      .subscribe()
+      }).subscribe()
 
-    // Real-time: profile status changes
     const profileChannel = sb.channel('live-profiles')
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'profiles' }, payload => {
         setProfiles(prev => prev.map(p => p.id === payload.new.id ? { ...p, ...payload.new } : p))
-      })
-      .subscribe()
+      }).subscribe()
 
-    return () => {
-      sb.removeChannel(logChannel)
-      sb.removeChannel(profileChannel)
-    }
+    return () => { sb.removeChannel(logChannel); sb.removeChannel(profileChannel) }
   }, [])
 
   const now = new Date()
@@ -92,7 +76,6 @@ export default function LivePage() {
     </div>
   )
 
-  // Sort: Available first, then On Call, Wrap Up, Break, Lunch, Offline
   const statusOrder = ['Available', 'On Call', 'Wrap Up', 'Break', 'Lunch', 'Offline']
   const sortedProfiles = [...profiles].sort((a, b) => {
     const ai = statusOrder.indexOf(a.status || 'Offline')
@@ -103,6 +86,46 @@ export default function LivePage() {
 
   return (
     <div style={{ flex:1, overflowY:'auto', padding:24, display:'flex', flexDirection:'column', gap:20 }}>
+
+      {/* Admin status override modal */}
+      {isAdmin && overrideTarget && (
+        <div
+          onClick={() => setOverrideTarget(null)}
+          style={{ position:'fixed', inset:0, background:'rgba(0,0,0,.45)', zIndex:1000, display:'flex', alignItems:'center', justifyContent:'center' }}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{ background:'var(--surface)', borderRadius:'var(--radius-lg)', padding:24, minWidth:260, boxShadow:'0 8px 32px rgba(0,0,0,.25)' }}
+          >
+            <div style={{ fontSize:13, fontWeight:600, marginBottom:4 }}>Change Status</div>
+            <div style={{ fontSize:12, color:'var(--text-muted)', marginBottom:16 }}>{overrideTarget.name}</div>
+            <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
+              {STATUS_OPTIONS.map(s => (
+                <button
+                  key={s.value}
+                  onClick={() => adminSetStatus(overrideTarget.id, s.value)}
+                  style={{
+                    display:'flex', alignItems:'center', gap:10, padding:'10px 14px',
+                    borderRadius:'var(--radius)', border: overrideTarget.status === s.value ? `2px solid ${s.color}` : '2px solid transparent',
+                    background: overrideTarget.status === s.value ? s.color + '18' : 'var(--surface-2)',
+                    cursor:'pointer', fontSize:13, fontWeight: overrideTarget.status === s.value ? 600 : 400,
+                    color:'var(--text-primary)', textAlign:'left'
+                  }}
+                >
+                  <div style={{ width:10, height:10, borderRadius:'50%', background:s.color, flexShrink:0 }}></div>
+                  {s.value}
+                  {overrideTarget.status === s.value && <span style={{ marginLeft:'auto', fontSize:11, color:s.color }}>✓ Current</span>}
+                </button>
+              ))}
+            </div>
+            <button
+              onClick={() => setOverrideTarget(null)}
+              className="btn sm"
+              style={{ marginTop:16, width:'100%' }}
+            >Cancel</button>
+          </div>
+        </div>
+      )}
 
       {/* Header */}
       <div style={{ display:'flex', alignItems:'center', gap:10 }}>
@@ -157,37 +180,19 @@ export default function LivePage() {
                         <div style={{ width:28, height:28, borderRadius:'50%', background:'var(--accent-bg)', color:'var(--accent-text)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:11, fontWeight:600, flexShrink:0 }}>
                           {(p.name || p.email || '?')[0].toUpperCase()}
                         </div>
-                        <div>
-                          <div style={{ fontSize:13 }}>{p.name || p.email}</div>
-                          
-                        </div>
+                        <div style={{ fontSize:13 }}>{p.name || p.email}</div>
                       </div>
                     </td>
-                    <td style={{ padding:'10px 12px', position:'relative' }} ref={overrideMenu === p.id ? menuRef : null}>
+                    <td style={{ padding:'10px 12px' }}>
                       <span
-                        onClick={() => isAdmin && setOverrideMenu(overrideMenu === p.id ? null : p.id)}
+                        onClick={() => isAdmin && setOverrideTarget({ id: p.id, name: p.name || p.email, status })}
                         style={{ display:'inline-flex', alignItems:'center', gap:6, padding:'3px 10px', borderRadius:99, fontSize:11, fontWeight:600, background: statusObj.color + '20', color: statusObj.color, cursor: isAdmin ? 'pointer' : 'default' }}
                         title={isAdmin ? 'Click to change status' : ''}
                       >
                         <div style={{ width:6, height:6, borderRadius:'50%', background:statusObj.color }}></div>
                         {status}
-                        {isAdmin && <span style={{ fontSize:9, opacity:.6 }}>▾</span>}
+                        {isAdmin && <span style={{ fontSize:9, opacity:.5 }}>▾</span>}
                       </span>
-                      {isAdmin && overrideMenu === p.id && (
-                        <div style={{ position:'absolute', left:12, top:'calc(100% + 4px)', background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius)', boxShadow:'0 4px 16px rgba(0,0,0,.15)', zIndex:200, minWidth:130, overflow:'hidden' }}>
-                          {STATUS_OPTIONS.map(s => (
-                            <button
-                              key={s.value}
-                              onClick={() => adminSetStatus(p.id, s.value)}
-                              style={{ display:'flex', alignItems:'center', gap:8, width:'100%', padding:'8px 12px', background: status === s.value ? 'var(--surface-2)' : 'transparent', border:'none', cursor:'pointer', fontSize:12, fontWeight: status === s.value ? 600 : 400, color:'var(--text-primary)', textAlign:'left' }}
-                            >
-                              <div style={{ width:7, height:7, borderRadius:'50%', background:s.color }}></div>
-                              {s.value}
-                              {status === s.value && <span style={{ marginLeft:'auto', fontSize:10 }}>✓</span>}
-                            </button>
-                          ))}
-                        </div>
-                      )}
                     </td>
                     <td style={{ padding:'10px 12px', fontSize:12, color:'var(--text-muted)' }}>
                       {p.status_since ? timeSince(p.status_since) : '—'}
@@ -217,7 +222,7 @@ export default function LivePage() {
         </div>
       </div>
 
-      {/* Recent Calls Feed — compact */}
+      {/* Recent Calls Feed — last 5 */}
       <div className="card">
         <div className="card-header">
           <div className="card-title">Recent Calls — Live Feed</div>
