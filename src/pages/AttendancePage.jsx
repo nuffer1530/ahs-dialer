@@ -489,7 +489,8 @@ export default function AttendancePage() {
                       </div>
                     </td>
                     {weekDates.map(date => {
-                      const sched = getSchedule(p.id, date)
+                      const schedRaw = getSchedule(p.id, date)
+                      const sched = (schedRaw && (schedRaw.shift_start || ['pto','sick','holiday','off'].includes(schedRaw.day_type))) ? schedRaw : null
                       const isToday = date === today
                       return (
                         <td key={date} style={{ padding:'4px 6px', verticalAlign:'top', background: isToday ? 'rgba(59,130,246,.04)' : undefined }}>
