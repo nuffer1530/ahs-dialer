@@ -18,15 +18,8 @@ function timeSince(isoString) {
   if (!isoString) return '—'
   const secs = Math.floor((Date.now() - new Date(isoString)) / 1000)
   if (secs < 60) return `${secs}s`
-  if (secs < 3600) {
-    const m = Math.floor(secs / 60)
-    const s = secs % 60
-    return `${m}m ${s}s`
-  }
-  const h = Math.floor(secs / 3600)
-  const m = Math.floor((secs % 3600) / 60)
-  const s = secs % 60
-  return `${h}h ${m}m ${s}s`
+  if (secs < 3600) return `${Math.floor(secs/60)}m`
+  return `${Math.floor(secs/3600)}h ${Math.floor((secs%3600)/60)}m`
 }
 
 export default function LivePage() {
@@ -46,7 +39,7 @@ export default function LivePage() {
 
   // Tick every 30s to update "time in status"
   useEffect(() => {
-    const t = setInterval(() => setTick(v => v + 1), 1000)
+    const t = setInterval(() => setTick(v => v + 1), 30000)
     return () => clearInterval(t)
   }, [])
 
@@ -184,8 +177,8 @@ export default function LivePage() {
                   <tr key={p.id}>
                     <td style={{ padding:'10px 12px', fontWeight:500 }}>
                       <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-                        <div style={{ width:28, height:28, borderRadius:'50%', background:'var(--accent-bg)', color:'var(--accent-text)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:11, fontWeight:600, flexShrink:0 }}>
-                          {(p.name || p.email || '?')[0].toUpperCase()}
+                        <div style={{ width:28, height:28, borderRadius:'50%', background:'var(--accent-bg)', color:'var(--accent-text)', display:'flex', alignItems:'center', justifyContent:'center', fontSize: p.avatar ? 18 : 11, fontWeight:600, flexShrink:0 }}>
+                          {p.avatar || (p.name || p.email || '?')[0].toUpperCase()}
                         </div>
                         <div style={{ fontSize:13 }}>{p.name || p.email}</div>
                       </div>
