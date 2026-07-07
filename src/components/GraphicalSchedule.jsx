@@ -17,7 +17,7 @@ const BLOCK_TYPES = [
 const START_HOUR = 6
 const END_HOUR = 22
 const TOTAL_INTERVALS = (END_HOUR - START_HOUR) * 4
-const CELL_WIDTH = 32
+const MIN_CELL_WIDTH = 14  // minimum so labels still readable
 const ROW_HEIGHT = 44
 const LABEL_WIDTH = 150
 
@@ -73,7 +73,13 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
   const [shiftModal, setShiftModal] = useState(null)
   const [shiftForm, setShiftForm] = useState({ shift_start:'08:00', shift_end:'17:00', break1_start:'10:00', break1_duration:15, lunch_start:'12:00', lunch_duration:30, break2_start:'14:30', break2_duration:15, day_type:'work' })
   const [addBlockMenu, setAddBlockMenu] = useState(null)
+  const [containerWidth, setContainerWidth] = useState(0)
   const today = new Date().toISOString().split('T')[0]
+
+  // Dynamic cell width — fills available space, minimum 14px
+  const CELL_WIDTH = containerWidth > 0
+    ? Math.max(MIN_CELL_WIDTH, Math.floor((containerWidth - LABEL_WIDTH) / TOTAL_INTERVALS))
+    : MIN_CELL_WIDTH
 
   // Load schedules for this date
   useEffect(() => {
@@ -92,6 +98,19 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
     update()
     const t = setInterval(update, 60000)
     return () => clearInterval(t)
+  }, [])
+
+  // Track container width for dynamic cell sizing
+  useEffect(() => {
+    if (!containerRef.current) return
+    const obs = new ResizeObserver(entries => {
+      for (const entry of entries) {
+        setContainerWidth(entry.contentRect.width)
+      }
+    })
+    obs.observe(containerRef.current)
+    setContainerWidth(containerRef.current.offsetWidth)
+    return () => obs.disconnect()
   }, [])
 
   // Build blocks from schedules
@@ -300,7 +319,6 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
     return inShift && !busy && !away
   }).length
 
-  const totalWidth = LABEL_WIDTH + TOTAL_INTERVALS * CELL_WIDTH
 
   return (
     <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
@@ -326,8 +344,8 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
       </div>
 
       {/* Grid */}
-      <div ref={containerRef} style={{ overflowX:'auto', border:'1px solid var(--border)', borderRadius:'var(--radius)', userSelect:'none', position:'relative' }}>
-        <div style={{ width: totalWidth, minWidth: totalWidth }}>
+      <div ref={containerRef} style={{ border:'1px solid var(--border)', borderRadius:'var(--radius)', userSelect:'none', position:'relative', width:'100%' }}>
+        <div style={{ width:'100%' }}>
 
           {/* Time header */}
           <div style={{ display:'flex', height:48, borderBottom:'2px solid var(--border)', background:'var(--surface-2)' }}>
