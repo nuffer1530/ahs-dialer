@@ -240,13 +240,13 @@ export default function AttendancePage() {
         <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
           {/* Week nav */}
           <div style={{ display:'flex', alignItems:'center', gap:12 }}>
-            <button className="btn sm" onClick={prevWeek}><- Prev</button>
+            <button className="btn sm" onClick={prevWeek}>Prev</button>
             <span style={{ fontSize:13, fontWeight:600 }}>
               Week of {new Date(weekDates[0] + 'T12:00:00').toLocaleDateString('en-US', { month:'short', day:'numeric' })} - {new Date(weekDates[6] + 'T12:00:00').toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' })}
             </span>
-            <button className="btn sm" onClick={nextWeek}>Next -></button>
+            <button className="btn sm" onClick={nextWeek}>Next</button>
             {isAdmin && (
-              <button className="btn sm" onClick={() => setCopyFrom(weekBase)} style={{ marginLeft:'auto' }}>📋 Copy week -></button>
+              <button className="btn sm" onClick={() => setCopyFrom(weekBase)} style={{ marginLeft:'auto' }}>📋 Copy week</button>
             )}
           </div>
 
@@ -317,11 +317,11 @@ export default function AttendancePage() {
       {tab === 'adherence' && (
         <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
           <div style={{ display:'flex', alignItems:'center', gap:12 }}>
-            <button className="btn sm" onClick={prevWeek}><- Prev</button>
+            <button className="btn sm" onClick={prevWeek}>Prev</button>
             <span style={{ fontSize:13, fontWeight:600 }}>
               Week of {new Date(weekDates[0] + 'T12:00:00').toLocaleDateString('en-US', { month:'short', day:'numeric' })} - {new Date(weekDates[6] + 'T12:00:00').toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' })}
             </span>
-            <button className="btn sm" onClick={nextWeek}>Next -></button>
+            <button className="btn sm" onClick={nextWeek}>Next</button>
           </div>
 
           {profiles.map(p => {
