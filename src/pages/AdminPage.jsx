@@ -7,7 +7,7 @@ import Modal from '../components/Modal'
 const EMOJIS = {
   '🔥 Hype': ['🔥','⚡','💥','🚀','🎯','💪','👊','🏆','👑','💎','🌟','⭐'],
   '😎 Personality': ['😎','🤙','😤','🥶','🤩','😏','🧠','👀','🫡','💯','🤝','🙌'],
-  '🦁 Animals': ['🦁','🐺','🦅','🐉','🦊','🐻','🦈','🐯','🦋','🦎','🐝','🦁'],
+  '🦁 Animals': ['🦁','🐺','🦅','🐉','🦊','🐻','🦈','🐯','🦋','🦎','🐝','🐆'],
   '🏔️ Colorado': ['🏔️','🌊','🌵','🎿','🏕️','⛰️','🌄','🎣','🌲','❄️'],
   '🏠 Home Services': ['🔧','🔨','⚙️','🛠️','💡','🔌','🚿','❄️','🔥','🏠','🪛','🔋'],
   '🎮 Fun': ['🎸','🎲','🎪','🎭','🎨','🎬','🎵','🍕','🌮','☕','🎉','🏋️'],
@@ -28,6 +28,8 @@ export default function AdminPage() {
   const [myAvatar, setMyAvatar] = useState(profile?.avatar || null)
   const [savingProfile, setSavingProfile] = useState(false)
   const [profileMsg, setProfileMsg] = useState('')
+  const [showAvatarPicker, setShowAvatarPicker] = useState(false)
+  const [pickerSelected, setPickerSelected] = useState(null)
 
   useEffect(() => {
     setMyName(profile?.name || '')
@@ -55,6 +57,12 @@ export default function AdminPage() {
     setSavingProfile(false)
   }
 
+  const confirmAvatar = () => {
+    if (pickerSelected) setMyAvatar(pickerSelected)
+    setShowAvatarPicker(false)
+    setPickerSelected(null)
+  }
+
   const saveProfile = async () => {
     if (!editProfile) return
     setSaving(true)
@@ -74,7 +82,6 @@ export default function AdminPage() {
 
       const { data: csrCampData } = await sb.from('csr_campaigns').select('*')
       setCsrCampaigns(csrCampData || [])
-
       setMsg(`✓ ${editProfile.name || editProfile.email} updated successfully`)
       setTimeout(() => setMsg(''), 3000)
       await refreshProfile()
@@ -118,8 +125,7 @@ export default function AdminPage() {
       const newActive = [...active]
       ;[newActive[idx], newActive[swapIdx]] = [newActive[swapIdx], newActive[idx]]
       newActive.forEach((c, i) => c.priority = i + 1)
-      const inactive = prev.campaigns.filter(c => !c.active)
-      return { ...prev, campaigns: [...newActive, ...inactive] }
+      return { ...prev, campaigns: [...newActive, ...prev.campaigns.filter(c => !c.active)] }
     })
   }
 
@@ -143,14 +149,24 @@ export default function AdminPage() {
         </div>
         <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
 
-          {/* Avatar preview + name */}
+          {/* Avatar + name preview */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-            <div style={{ width: 64, height: 64, borderRadius: '50%', background: 'var(--accent-bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: myAvatar ? 38 : 22, fontWeight: 700, flexShrink: 0, border: '2px solid var(--border)' }}>
-              {myAvatar || (myName || profile?.email || '?')[0].toUpperCase()}
+            {/* Clickable avatar with + overlay */}
+            <div style={{ position: 'relative', flexShrink: 0 }}>
+              <div style={{ width: 64, height: 64, borderRadius: '50%', background: 'var(--accent-bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: myAvatar ? 38 : 22, fontWeight: 700, border: '2px solid var(--border)' }}>
+                {myAvatar || (myName || profile?.email || '?')[0].toUpperCase()}
+              </div>
+              <button
+                onClick={() => { setPickerSelected(myAvatar); setShowAvatarPicker(true) }}
+                style={{ position: 'absolute', bottom: 0, right: 0, width: 22, height: 22, borderRadius: '50%', background: 'var(--accent)', border: '2px solid var(--surface)', color: '#fff', fontSize: 14, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1 }}
+                title="Change avatar"
+              >+</button>
             </div>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 13, fontWeight: 600 }}>{profile?.email}</div>
-              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>Click an emoji below to set your avatar</div>
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 600 }}>{myName || profile?.email}</div>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
+                {myAvatar ? `Avatar: ${myAvatar}` : 'No avatar set'} · <span style={{ color: 'var(--accent)', cursor: 'pointer' }} onClick={() => { setPickerSelected(myAvatar); setShowAvatarPicker(true) }}>Change</span>
+              </div>
             </div>
           </div>
 
@@ -160,10 +176,29 @@ export default function AdminPage() {
             <input className="form-input" value={myName} onChange={e => setMyName(e.target.value)} placeholder="Your name" />
           </div>
 
-          {/* Emoji picker inline */}
-          <div>
-            <label className="form-label" style={{ marginBottom: 8, display: 'block' }}>Avatar</label>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12, maxHeight: 320, overflowY: 'auto', padding: '4px 2px' }}>
+          <button className="btn primary" onClick={saveMyProfile} disabled={savingProfile} style={{ alignSelf: 'flex-start' }}>
+            {savingProfile ? 'Saving…' : 'Save profile'}
+          </button>
+        </div>
+      </div>
+
+      {/* EMOJI PICKER MODAL */}
+      {showAvatarPicker && (
+        <Modal title="Choose Your Avatar" onClose={() => setShowAvatarPicker(false)} width={480}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            {/* Preview */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', background: 'var(--surface-2)', borderRadius: 'var(--radius)' }}>
+              <div style={{ width: 48, height: 48, borderRadius: '50%', background: 'var(--accent-bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: pickerSelected ? 28 : 18, fontWeight: 700, flexShrink: 0 }}>
+                {pickerSelected || myAvatar || (myName || profile?.email || '?')[0].toUpperCase()}
+              </div>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 600 }}>{myName || profile?.email}</div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{pickerSelected ? 'Looking good! Hit save to lock it in.' : 'Pick an emoji below'}</div>
+              </div>
+            </div>
+
+            {/* Emoji grid */}
+            <div style={{ maxHeight: 360, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 14 }}>
               {Object.entries(EMOJIS).map(([category, emojis]) => (
                 <div key={category}>
                   <div style={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: .5, color: 'var(--text-muted)', marginBottom: 6 }}>{category}</div>
@@ -171,13 +206,13 @@ export default function AdminPage() {
                     {emojis.map(emoji => (
                       <button
                         key={emoji}
-                        onClick={() => setMyAvatar(emoji)}
+                        onClick={() => setPickerSelected(emoji)}
                         style={{
-                          width: 38, height: 38, borderRadius: 'var(--radius)', fontSize: 20,
-                          border: myAvatar === emoji ? '2px solid var(--accent)' : '2px solid transparent',
-                          background: myAvatar === emoji ? 'var(--accent-bg)' : 'var(--surface-2)',
+                          width: 40, height: 40, borderRadius: 'var(--radius)', fontSize: 22,
+                          border: pickerSelected === emoji ? '2px solid var(--accent)' : '2px solid transparent',
+                          background: pickerSelected === emoji ? 'var(--accent-bg)' : 'var(--surface-2)',
                           cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                          transform: myAvatar === emoji ? 'scale(1.15)' : 'scale(1)', transition: 'all .1s'
+                          transform: pickerSelected === emoji ? 'scale(1.15)' : 'scale(1)', transition: 'all .1s'
                         }}
                       >{emoji}</button>
                     ))}
@@ -186,14 +221,16 @@ export default function AdminPage() {
               ))}
             </div>
           </div>
+          <div className="modal-actions">
+            <button className="btn" onClick={() => setShowAvatarPicker(false)}>Cancel</button>
+            <button className="btn primary" onClick={confirmAvatar} disabled={!pickerSelected}>
+              Select avatar
+            </button>
+          </div>
+        </Modal>
+      )}
 
-          <button className="btn primary" onClick={saveMyProfile} disabled={savingProfile} style={{ alignSelf: 'flex-start' }}>
-            {savingProfile ? 'Saving…' : 'Save profile'}
-          </button>
-        </div>
-      </div>
-
-      {/* ADMIN ONLY sections */}
+      {/* ADMIN ONLY */}
       {isAdmin && (
         <>
           {msg && <div style={{ background: 'var(--success-bg)', color: 'var(--success)', padding: '10px 14px', borderRadius: 'var(--radius)', fontSize: 13 }}>{msg}</div>}
@@ -271,6 +308,7 @@ export default function AdminPage() {
         </>
       )}
 
+      {/* Edit user modal */}
       {editProfile && (
         <Modal title={`Edit — ${editProfile.name || editProfile.email}`} onClose={() => setEditProfile(null)} width={560}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -285,12 +323,9 @@ export default function AdminPage() {
                 <option value="admin">Admin — full access including uploads and user management</option>
               </select>
             </div>
-
             <div>
               <label className="form-label" style={{ marginBottom: 8, display: 'block' }}>Campaign Access & Priority</label>
-              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 10 }}>
-                Toggle campaigns on/off. Use arrows to set priority order — #1 loads first when CSR goes Available.
-              </div>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 10 }}>Toggle campaigns on/off. Use arrows to set priority — #1 loads first when CSR goes Available.</div>
               {editProfile.campaigns.filter(c => c.active).sort((a, b) => a.priority - b.priority).length > 0 && (
                 <div style={{ marginBottom: 8 }}>
                   <div style={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: .5, color: 'var(--text-muted)', marginBottom: 6 }}>Active (priority order)</div>
@@ -323,7 +358,6 @@ export default function AdminPage() {
                 </div>
               )}
             </div>
-
             <div style={{ background: 'var(--warning-bg)', border: '1px solid #C87800', borderRadius: 'var(--radius)', padding: '10px 14px', fontSize: 12, color: 'var(--warning)' }}>
               ⚠ Changes take effect immediately on next page load.
             </div>
