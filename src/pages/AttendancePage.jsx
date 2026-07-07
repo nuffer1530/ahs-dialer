@@ -477,41 +477,13 @@ export default function AttendancePage() {
 
       {/* GRAPHICAL TAB */}
       {tab === 'graphical' && (
-        <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
-          <div style={{ display:'flex', alignItems:'center', gap:10 }}>
-            <button className="btn sm" onClick={prevWeek}>Prev</button>
-            <span style={{ fontSize:13, fontWeight:600 }}>
-              Week of {new Date(weekDates[0] + 'T12:00:00').toLocaleDateString('en-US', { month:'short', day:'numeric' })} - {new Date(weekDates[6] + 'T12:00:00').toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' })}
-            </span>
-            <button className="btn sm" onClick={nextWeek}>Next</button>
-          </div>
-          {weekDates.map(date => {
-            const d = new Date(date + 'T12:00:00')
-            const isToday = date === today
-            const daySchedules = schedules.filter(s => s.date === date)
-            return (
-              <div key={date} className="card">
-                <div className="card-header" style={{ background: isToday ? 'var(--accent-bg)' : undefined }}>
-                  <div className="card-title" style={{ color: isToday ? 'var(--accent)' : undefined }}>
-                    {d.toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric' })}
-                    {isToday && <span style={{ fontSize:10, background:'var(--accent)', color:'#fff', padding:'1px 6px', borderRadius:99, marginLeft:8 }}>Today</span>}
-                  </div>
-                </div>
-                <div style={{ padding:'12px 16px' }}>
-                  <GraphicalSchedule
-                    profiles={profiles}
-                    schedules={daySchedules}
-                    date={date}
-                    onUpdate={async () => {
-                      const { data: s } = await sb.from('schedules').select('*').gte('date', weekDates[0]).lte('date', weekDates[6])
-                      setSchedules(s || [])
-                    }}
-                  />
-                </div>
-              </div>
-            )
-          })}
-        </div>
+        <GraphicalSchedule
+          profiles={profiles}
+          onUpdate={async () => {
+            const { data: s } = await sb.from('schedules').select('*').gte('date', weekDates[0]).lte('date', weekDates[6])
+            setSchedules(s || [])
+          }}
+        />
       )}
 
       {/* ADHERENCE TAB */}
