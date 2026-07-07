@@ -201,7 +201,11 @@ export default function AttendancePage() {
     a.click()
   }
 
-  if (loading) return <div style={{ display:'flex', alignItems:'center', justifyContent:'center', flex:1 }}><div className="spinner lg"></div></div>
+  if (loading) return (
+    <div style={{ display:'flex', alignItems:'center', justifyContent:'center', flex:1 }}>
+      <div className="spinner lg"></div>
+    </div>
+  )
 
   const prevWeek = () => {
     const d = new Date(weekBase)
