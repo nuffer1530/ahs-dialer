@@ -42,15 +42,19 @@ function adherencePct(sched, nonAdherentSeconds) {
   return Math.max(0, Math.round(((totalMins - nonAdherentMins) / totalMins) * 100))
 }
 
+function toYMD(d) {
+  return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0')
+}
 function getWeekDates(baseDate) {
-  const d = new Date(baseDate)
-  const day = d.getDay()
+  // Always returns Mon-Sun for the week containing baseDate
+  const d = new Date(baseDate + 'T12:00:00')
+  const dow = d.getDay() // 0=Sun,1=Mon,...,6=Sat
   const monday = new Date(d)
-  monday.setDate(d.getDate() - (day === 0 ? 6 : day - 1))
+  monday.setDate(d.getDate() - (dow === 0 ? 6 : dow - 1))
   return Array.from({ length: 7 }, (_, i) => {
-    const date = new Date(monday)
-    date.setDate(monday.getDate() + i)
-    return date.toISOString().split('T')[0]
+    const day = new Date(monday)
+    day.setDate(monday.getDate() + i)
+    return toYMD(day)
   })
 }
 
@@ -72,10 +76,11 @@ const POINT_REASONS = [
 export default function AttendancePage() {
   const { profile, isAdmin } = useAuth()
   const getTodayMonday = () => {
-    const d = new Date()
-    const day = d.getDay()
-    d.setDate(d.getDate() - (day === 0 ? 6 : day - 1))
-    return d.toISOString().split('T')[0]
+    const now = new Date()
+    const dow = now.getDay()
+    const monday = new Date(now)
+    monday.setDate(now.getDate() - (dow === 0 ? 6 : dow - 1))
+    return toYMD(monday)
   }
   const [tab, setTab] = useState('schedule')
   const [profiles, setProfiles] = useState([])
@@ -723,23 +728,22 @@ export default function AttendancePage() {
               <>
                 <div className="form-field"><label className="form-label">Shift start</label><input type="time" className="form-input" value={editData.shift_start || ''} onChange={e => setEditData(p => ({ ...p, shift_start: e.target.value }))} /></div>
                 <div className="form-field"><label className="form-label">Shift end</label><input type="time" className="form-input" value={editData.shift_end || ''} onChange={e => setEditData(p => ({ ...p, shift_end: e.target.value }))} /></div>
+                <div style={{ fontSize:11, fontWeight:600, textTransform:'uppercase', letterSpacing:.5, color:'var(--text-muted)' }}>Break 1</div>
+                <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
+                  <div className="form-field"><label className="form-label">Start time</label><input type="time" className="form-input" value={editData.break1_start || ''} onChange={e => setEditData(p => ({ ...p, break1_start: e.target.value }))} /></div>
+                  <div className="form-field"><label className="form-label">Duration (min)</label><input type="number" className="form-input" value={editData.break1_duration || 15} min={5} max={30} onChange={e => setEditData(p => ({ ...p, break1_duration: parseInt(e.target.value) }))} /></div>
+                </div>
+                <div style={{ fontSize:11, fontWeight:600, textTransform:'uppercase', letterSpacing:.5, color:'var(--text-muted)' }}>Lunch</div>
+                <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
+                  <div className="form-field"><label className="form-label">Start time</label><input type="time" className="form-input" value={editData.lunch_start || ''} onChange={e => setEditData(p => ({ ...p, lunch_start: e.target.value }))} /></div>
+                  <div className="form-field"><label className="form-label">Duration (min)</label><select className="form-input" value={editData.lunch_duration || 30} onChange={e => setEditData(p => ({ ...p, lunch_duration: parseInt(e.target.value) }))}><option value={30}>30 min</option><option value={60}>60 min</option></select></div>
+                </div>
+                <div style={{ fontSize:11, fontWeight:600, textTransform:'uppercase', letterSpacing:.5, color:'var(--text-muted)' }}>Break 2</div>
+                <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
+                  <div className="form-field"><label className="form-label">Start time</label><input type="time" className="form-input" value={editData.break2_start || ''} onChange={e => setEditData(p => ({ ...p, break2_start: e.target.value }))} /></div>
+                  <div className="form-field"><label className="form-label">Duration (min)</label><input type="number" className="form-input" value={editData.break2_duration || 15} min={5} max={30} onChange={e => setEditData(p => ({ ...p, break2_duration: parseInt(e.target.value) }))} /></div>
+                </div>
               </>
-            )}
-            <div style={{ fontSize:11, fontWeight:600, textTransform:'uppercase', letterSpacing:.5, color:'var(--text-muted)' }}>Break 1</div>
-            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
-              <div className="form-field"><label className="form-label">Start time</label><input type="time" className="form-input" value={editData.break1_start || ''} onChange={e => setEditData(p => ({ ...p, break1_start: e.target.value }))} /></div>
-              <div className="form-field"><label className="form-label">Duration (min)</label><input type="number" className="form-input" value={editData.break1_duration || 15} min={5} max={30} onChange={e => setEditData(p => ({ ...p, break1_duration: parseInt(e.target.value) }))} /></div>
-            </div>
-            <div style={{ fontSize:11, fontWeight:600, textTransform:'uppercase', letterSpacing:.5, color:'var(--text-muted)' }}>Lunch</div>
-            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
-              <div className="form-field"><label className="form-label">Start time</label><input type="time" className="form-input" value={editData.lunch_start || ''} onChange={e => setEditData(p => ({ ...p, lunch_start: e.target.value }))} /></div>
-              <div className="form-field"><label className="form-label">Duration (min)</label><select className="form-input" value={editData.lunch_duration || 30} onChange={e => setEditData(p => ({ ...p, lunch_duration: parseInt(e.target.value) }))}><option value={30}>30 min</option><option value={60}>60 min</option></select></div>
-            </div>
-            <div style={{ fontSize:11, fontWeight:600, textTransform:'uppercase', letterSpacing:.5, color:'var(--text-muted)' }}>Break 2</div>
-            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
-              <div className="form-field"><label className="form-label">Start time</label><input type="time" className="form-input" value={editData.break2_start || ''} onChange={e => setEditData(p => ({ ...p, break2_start: e.target.value }))} /></div>
-              <div className="form-field"><label className="form-label">Duration (min)</label><input type="number" className="form-input" value={editData.break2_duration || 15} min={5} max={30} onChange={e => setEditData(p => ({ ...p, break2_duration: parseInt(e.target.value) }))} /></div>
-            </div>
             )}
           </div>
           <div className="modal-actions">
