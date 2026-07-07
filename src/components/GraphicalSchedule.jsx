@@ -73,6 +73,7 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
   const [shiftModal, setShiftModal] = useState(null)
   const [shiftForm, setShiftForm] = useState({ shift_start:'08:00', shift_end:'17:00', break1_start:'10:00', break1_duration:15, lunch_start:'12:00', lunch_duration:30, break2_start:'14:30', break2_duration:15, day_type:'work' })
   const [addBlockMenu, setAddBlockMenu] = useState(null)
+  const [contextMenu, setContextMenu] = useState(null) // { x, y, profileId, block }
   const [containerWidth, setContainerWidth] = useState(0)
   const [extraBlocks, setExtraBlocks] = useState([]) // outbound/meeting from schedule_blocks table
   const today = new Date().toISOString().split('T')[0]
@@ -499,13 +500,9 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
                           if (!isAdmin) return
                           e.preventDefault()
                           e.stopPropagation()
-                          if (block.type === 'shift') {
-                            if (confirm('Remove this shift?')) deleteSchedule(p.id)
-                          } else {
-                            removeBlock(p.id, block.id)
-                          }
+                          setContextMenu({ x: e.clientX, y: e.clientY, profileId: p.id, block })
                         }}
-                        title={isAdmin ? 'Right-click to delete' : ''}
+                        title={isAdmin ? 'Right-click for options' : ''}
                         style={{
                           position:'absolute', left, top: isShift ? 6 : 10, height: isShift ? ROW_HEIGHT - 12 : ROW_HEIGHT - 20, width,
                           background: bt.bg, border:`1.5px solid ${bt.color}`, borderRadius:4,
@@ -532,6 +529,74 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
           })}
         </div>
       </div>
+
+      {/* Context menu overlay */}
+      {contextMenu && <div style={{ position:'fixed', inset:0, zIndex:299 }} onMouseDown={() => setContextMenu(null)} />}
+
+      {/* Context menu */}
+      {contextMenu && (() => {
+        const { x, y, profileId, block } = contextMenu
+        const isShift = block.type === 'shift'
+        const bt = BLOCK_TYPES.find(t => t.id === block.type)
+        return (
+          <div style={{ position:'fixed', left: x, top: y, background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius)', boxShadow:'0 4px 20px rgba(0,0,0,.18)', zIndex:300, minWidth:200, overflow:'hidden' }}>
+            {/* Header */}
+            <div style={{ padding:'8px 14px', borderBottom:'1px solid var(--border)', display:'flex', alignItems:'center', gap:8 }}>
+              <span style={{ width:10, height:10, borderRadius:2, background: bt?.color, flexShrink:0 }}></span>
+              <span style={{ fontSize:11, fontWeight:700, color:'var(--text-primary)' }}>{bt?.label || block.type}</span>
+            </div>
+
+            {/* Adjust shift / Edit block */}
+            <button
+              onMouseDown={() => { setContextMenu(null); openShiftModal(profileId) }}
+              style={{ display:'flex', alignItems:'center', gap:10, width:'100%', padding:'10px 14px', background:'transparent', border:'none', cursor:'pointer', fontSize:12, color:'var(--text-primary)', textAlign:'left' }}
+              onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
+              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+            >
+              <span style={{ fontSize:14 }}>✏️</span>
+              {isShift ? 'Adjust shift times' : 'Edit block'}
+            </button>
+
+            {/* Add event (only shown on shift right-click) */}
+            {isShift && (
+              <button
+                onMouseDown={() => {
+                  setContextMenu(null)
+                  const rect = document.getElementById('add-btn-' + profileId)?.getBoundingClientRect()
+                  setAddBlockMenu({ profileId, x: x, y: y + 10 })
+                }}
+                style={{ display:'flex', alignItems:'center', gap:10, width:'100%', padding:'10px 14px', background:'transparent', border:'none', cursor:'pointer', fontSize:12, color:'var(--text-primary)', textAlign:'left' }}
+                onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
+                onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+              >
+                <span style={{ fontSize:14 }}>➕</span>
+                Add event
+              </button>
+            )}
+
+            {/* Divider */}
+            <div style={{ borderTop:'1px solid var(--border)', margin:'2px 0' }} />
+
+            {/* Delete */}
+            <button
+              onMouseDown={() => {
+                setContextMenu(null)
+                if (isShift) {
+                  if (confirm('Delete shift for this day?')) deleteSchedule(profileId)
+                } else {
+                  removeBlock(profileId, block.id)
+                }
+              }}
+              style={{ display:'flex', alignItems:'center', gap:10, width:'100%', padding:'10px 14px', background:'transparent', border:'none', cursor:'pointer', fontSize:12, color:'#ef4444', textAlign:'left' }}
+              onMouseEnter={e => e.currentTarget.style.background = '#fee2e2'}
+              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+            >
+              <span style={{ fontSize:14 }}>🗑️</span>
+              {isShift ? 'Delete shift' : `Remove ${bt?.label || 'block'}`}
+            </button>
+          </div>
+        )
+      })()}
 
       {/* Click outside add block menu */}
       {addBlockMenu && <div style={{ position:'fixed', inset:0, zIndex:199 }} onMouseDown={() => setAddBlockMenu(null)} />}
