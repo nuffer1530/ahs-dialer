@@ -158,6 +158,7 @@ export default function AttendancePage() {
       break2_duration: t.break2_duration || 15,
       lunch_start: t.lunch_start || '',
       lunch_duration: t.lunch_duration || 30,
+      template_color: t.color || null,
     })
   }
 
@@ -165,7 +166,7 @@ export default function AttendancePage() {
     if (!editCell) return
     setSaving(true)
     const { profileId, date } = editCell
-    const isPtoOrSick = editData.day_type === 'pto' || editData.day_type === 'sick' || editData.day_type === 'off'
+    const isPtoOrSick = editData.day_type === 'pto' || editData.day_type === 'sick' || editData.day_type === 'holiday' || editData.day_type === 'off'
     const payload = {
       profile_id: profileId, date,
       day_type: editData.day_type || 'work',
@@ -180,6 +181,7 @@ export default function AttendancePage() {
       lunch_start: isPtoOrSick ? null : (editData.lunch_start || null),
       lunch_end: isPtoOrSick ? null : (editData.lunch_start ? addMinutes(editData.lunch_start, editData.lunch_duration) : null),
       lunch_duration: editData.lunch_duration,
+      template_color: editData.template_color || null,
       created_by: profile.id,
     }
     await sb.from('schedules').upsert(payload, { onConflict: 'profile_id,date' })
@@ -209,6 +211,7 @@ export default function AttendancePage() {
           break1_start: t.break1_start, break1_end: t.break1_start ? addMinutes(t.break1_start, t.break1_duration) : null, break1_duration: t.break1_duration,
           break2_start: t.break2_start, break2_end: t.break2_start ? addMinutes(t.break2_start, t.break2_duration) : null, break2_duration: t.break2_duration,
           lunch_start: t.lunch_start, lunch_end: t.lunch_start ? addMinutes(t.lunch_start, t.lunch_duration) : null, lunch_duration: t.lunch_duration,
+          template_color: t.color || null,
           created_by: profile.id,
         })
       })
@@ -445,7 +448,7 @@ export default function AttendancePage() {
                   // Calculate weekly hours
                   const weeklyMins = weekDates.reduce((sum, date) => {
                     const s = getSchedule(p.id, date)
-                    if (!s || !s.shift_start || !s.shift_end || s.day_type === 'pto' || s.day_type === 'sick') return sum
+                    if (!s || !s.shift_start || !s.shift_end || s.day_type === 'pto' || s.day_type === 'sick' || s.day_type === 'holiday') return sum
                     const [sh, sm] = s.shift_start.split(':').map(Number)
                     const [eh, em] = s.shift_end.split(':').map(Number)
                     return sum + ((eh * 60 + em) - (sh * 60 + sm))
@@ -472,11 +475,13 @@ export default function AttendancePage() {
                         <td key={date} style={{ padding:'4px 6px', verticalAlign:'top', background: isToday ? 'rgba(59,130,246,.04)' : undefined }}>
                           {sched ? (
                             <div onClick={() => isAdmin && openEdit(p.id, date)}
-                              style={{ background: sched.day_type === 'pto' ? '#fef9c3' : sched.day_type === 'sick' ? '#f3f4f6' : (sched.template_color ? sched.template_color + '20' : 'var(--accent-bg)'), border:`1px solid ${sched.day_type === 'pto' ? '#eab308' : sched.day_type === 'sick' ? '#6b7280' : (sched.template_color || 'var(--accent)')}`, borderRadius:'var(--radius)', padding:'5px 7px', cursor: isAdmin ? 'pointer' : 'default', fontSize:10 }}>
+                              style={{ background: sched.day_type === 'pto' ? '#fef9c3' : sched.day_type === 'sick' ? '#f3f4f6' : sched.day_type === 'holiday' ? '#ede9fe' : (sched.template_color ? sched.template_color + '20' : 'var(--accent-bg)'), border:`1px solid ${sched.day_type === 'pto' ? '#eab308' : sched.day_type === 'sick' ? '#6b7280' : sched.day_type === 'holiday' ? '#7c3aed' : (sched.template_color || 'var(--accent)')}`, borderRadius:'var(--radius)', padding:'5px 7px', cursor: isAdmin ? 'pointer' : 'default', fontSize:10 }}>
                               {sched.day_type === 'pto' ? (
                                 <div style={{ fontWeight:600, color:'#a16207' }}>PTO - Full Day</div>
                               ) : sched.day_type === 'sick' ? (
                                 <div style={{ fontWeight:600, color:'#374151' }}>Sick - Full Day</div>
+                              ) : sched.day_type === 'holiday' ? (
+                                <div style={{ fontWeight:600, color:'#7c3aed' }}>Holiday</div>
                               ) : (
                                 <>
                                   <div style={{ fontWeight:600, color:'var(--accent)' }}>{fmt(sched.shift_start)} - {fmt(sched.shift_end)}</div>
@@ -710,6 +715,7 @@ export default function AttendancePage() {
                 <option value="work">Working</option>
                 <option value="pto">PTO - Full Day</option>
                 <option value="sick">Sick - Full Day</option>
+                <option value="holiday">Holiday</option>
                 <option value="off">Off</option>
               </select>
             </div>
