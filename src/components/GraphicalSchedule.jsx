@@ -115,50 +115,9 @@ export default function GraphicalSchedule({ profiles, schedules, date, onUpdate 
     setDragging({ profileId, blockId, mode, startX: e.clientX, containerLeft: containerRect.left + LABEL_WIDTH })
   }
 
-  const handleMouseMove = useCallback((e) => {
-    if (!dragging) return
-    const { profileId, blockId, mode, startX, containerLeft } = dragging
-    const deltaX = e.clientX - startX
-    const deltaIntervals = Math.round(deltaX / CELL_WIDTH)
-    if (deltaIntervals === 0) return
-
-    setBlocks(prev => {
-      const pBlocks = [...(prev[profileId] || [])]
-      const blockIdx = pBlocks.findIndex(b => b.id === blockId)
-      if (blockIdx === -1) return prev
-      const block = { ...pBlocks[blockIdx] }
-
-      if (mode === 'move') {
-        block.start = Math.max(0, Math.min(TOTAL_INTERVALS - block.duration, block.start + deltaIntervals))
-      } else if (mode === 'resize') {
-        block.duration = Math.max(1, Math.min(TOTAL_INTERVALS - block.start, block.duration + deltaIntervals))
-      }
-      pBlocks[blockIdx] = block
-      return { ...prev, [profileId]: pBlocks }
-    })
-    setDragging(prev => ({ ...prev, startX: e.clientX }))
-  }, [dragging])
-
-  const handleMouseUp = useCallback(async () => {
-    if (!dragging) return
-    const { profileId, blockId } = dragging
-    setDragging(null)
-    // Save changes back to schedule
-    await saveBlocks(profileId)
-  }, [dragging, blocks])
-
-  useEffect(() => {
-    window.addEventListener('mousemove', handleMouseMove)
-    window.addEventListener('mouseup', handleMouseUp)
-    return () => {
-      window.removeEventListener('mousemove', handleMouseMove)
-      window.removeEventListener('mouseup', handleMouseUp)
-    }
-  }, [handleMouseMove, handleMouseUp])
-
-  const saveBlocks = async (profileId) => {
+  const saveBlocks = async (profileId, currentBlocks) => {
     setSaving(true)
-    const pBlocks = blocks[profileId] || []
+    const pBlocks = currentBlocks[profileId] || []
     const shiftBlock = pBlocks.find(b => b.type === 'shift')
     const breakBlocks = pBlocks.filter(b => b.type === 'break')
     const lunchBlock = pBlocks.find(b => b.type === 'lunch')
@@ -192,6 +151,47 @@ export default function GraphicalSchedule({ profiles, schedules, date, onUpdate 
     setSaving(false)
   }
 
+  const handleMouseMove = useCallback((e) => {
+    if (!dragging) return
+    const { profileId, blockId, mode, startX, containerLeft } = dragging
+    const deltaX = e.clientX - startX
+    const deltaIntervals = Math.round(deltaX / CELL_WIDTH)
+    if (deltaIntervals === 0) return
+
+    setBlocks(prev => {
+      const pBlocks = [...(prev[profileId] || [])]
+      const blockIdx = pBlocks.findIndex(b => b.id === blockId)
+      if (blockIdx === -1) return prev
+      const block = { ...pBlocks[blockIdx] }
+
+      if (mode === 'move') {
+        block.start = Math.max(0, Math.min(TOTAL_INTERVALS - block.duration, block.start + deltaIntervals))
+      } else if (mode === 'resize') {
+        block.duration = Math.max(1, Math.min(TOTAL_INTERVALS - block.start, block.duration + deltaIntervals))
+      }
+      pBlocks[blockIdx] = block
+      return { ...prev, [profileId]: pBlocks }
+    })
+    setDragging(prev => ({ ...prev, startX: e.clientX }))
+  }, [dragging])
+
+  const handleMouseUp = useCallback(async () => {
+    if (!dragging) return
+    const { profileId, blockId } = dragging
+    setDragging(null)
+    // Save changes back to schedule
+    await saveBlocks(profileId, blocks)
+  }, [dragging, blocks])
+
+  useEffect(() => {
+    window.addEventListener('mousemove', handleMouseMove)
+    window.addEventListener('mouseup', handleMouseUp)
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove)
+      window.removeEventListener('mouseup', handleMouseUp)
+    }
+  }, [handleMouseMove, handleMouseUp])
+
   const addBlock = async (profileId, interval, type) => {
     setAddMenu(null)
     const blockType = BLOCK_TYPES.find(b => b.id === type)
@@ -219,15 +219,16 @@ export default function GraphicalSchedule({ profiles, schedules, date, onUpdate 
       }), newBlock]
     }
     setBlocks(newBlocks)
-    setTimeout(() => saveBlocks(profileId), 100)
+    await saveBlocks(profileId, newBlocks)
   }
 
   const removeBlock = async (profileId, blockId) => {
-    setBlocks(prev => ({
-      ...prev,
-      [profileId]: (prev[profileId] || []).filter(b => b.id !== blockId)
-    }))
-    setTimeout(() => saveBlocks(profileId), 100)
+    const newBlocks = {
+      ...blocks,
+      [profileId]: (blocks[profileId] || []).filter(b => b.id !== blockId)
+    }
+    setBlocks(newBlocks)
+    await saveBlocks(profileId, newBlocks)
   }
 
   const handleRowClick = (e, profileId) => {
