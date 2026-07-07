@@ -11,6 +11,7 @@ const BLOCK_TYPES = [
   { id: 'meeting',   label: 'Meeting/Training', color: '#ef4444', bg: '#fee2e2', text: '#b91c1c' },
   { id: 'pto',       label: 'PTO',              color: '#eab308', bg: '#fef9c3', text: '#a16207' },
   { id: 'sick',      label: 'Sick',             color: '#6b7280', bg: '#f3f4f6', text: '#374151' },
+  { id: 'holiday',   label: 'Holiday',          color: '#7c3aed', bg: '#ede9fe', text: '#5b21b6' },
 ]
 
 const START_HOUR = 6
@@ -38,6 +39,12 @@ function fmt12(timeStr) {
   return `${h % 12 || 12}:${m.toString().padStart(2,'0')} ${ampm}`
 }
 
+function addMins(timeStr, mins) {
+  const [h, m] = timeStr.split(':').map(Number)
+  const t = h * 60 + m + parseInt(mins)
+  return `${String(Math.floor(t/60)).padStart(2,'0')}:${String(t%60).padStart(2,'0')}`
+}
+
 function formatDate(dateStr) {
   return new Date(dateStr + 'T12:00:00').toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric', year:'numeric' })
 }
@@ -63,9 +70,9 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
   const [dragging, setDragging] = useState(null)
   const [currentInterval, setCurrentInterval] = useState(null)
   const [saving, setSaving] = useState(false)
-  const [shiftModal, setShiftModal] = useState(null) // profileId
+  const [shiftModal, setShiftModal] = useState(null)
   const [shiftForm, setShiftForm] = useState({ shift_start:'08:00', shift_end:'17:00', break1_start:'10:00', break1_duration:15, lunch_start:'12:00', lunch_duration:30, break2_start:'14:30', break2_duration:15, day_type:'work' })
-  const [addBlockMenu, setAddBlockMenu] = useState(null) // { profileId, x, y }
+  const [addBlockMenu, setAddBlockMenu] = useState(null)
   const today = new Date().toISOString().split('T')[0]
 
   // Load schedules for this date
@@ -96,6 +103,7 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
       if (!sched) return
       if (sched.day_type === 'pto') { newBlocks[p.id] = [{ id:'pto-'+p.id, type:'pto', start:0, duration:TOTAL_INTERVALS }]; return }
       if (sched.day_type === 'sick') { newBlocks[p.id] = [{ id:'sick-'+p.id, type:'sick', start:0, duration:TOTAL_INTERVALS }]; return }
+      if (sched.day_type === 'holiday') { newBlocks[p.id] = [{ id:'holiday-'+p.id, type:'holiday', start:0, duration:TOTAL_INTERVALS }]; return }
       if (sched.shift_start && sched.shift_end) {
         const s = timeToInterval(sched.shift_start), e = timeToInterval(sched.shift_end)
         if (s !== null && e > s) newBlocks[p.id].push({ id:'shift-'+p.id, type:'shift', start:s, duration:e-s })
@@ -116,38 +124,49 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
     setBlocks(newBlocks)
   }, [schedules, profiles])
 
-  const saveBlocksToDb = useCallback(async (profileId, currentBlocks) => {
+  // FIX: saveBlocksToDb takes profileId + blocksSnapshot — no stale closure issues
+  const saveBlocksToDb = useCallback(async (profileId, blocksSnapshot) => {
     setSaving(true)
-    const pBlocks = currentBlocks[profileId] || []
+    const pBlocks = blocksSnapshot[profileId] || []
     const shiftBlock = pBlocks.find(b => b.type === 'shift')
     const breakBlocks = pBlocks.filter(b => b.type === 'break')
     const lunchBlock = pBlocks.find(b => b.type === 'lunch')
     const ptoBlock = pBlocks.find(b => b.type === 'pto')
     const sickBlock = pBlocks.find(b => b.type === 'sick')
 
+    const holidayBlock = pBlocks.find(b => b.type === 'holiday')
+    const dayType = ptoBlock ? 'pto' : sickBlock ? 'sick' : holidayBlock ? 'holiday' : 'work'
+    const isOff = ptoBlock || sickBlock || holidayBlock
+
     const payload = {
-      profile_id: profileId, date,
-      day_type: ptoBlock ? 'pto' : sickBlock ? 'sick' : 'work',
-      shift_start: (!ptoBlock && !sickBlock && shiftBlock) ? intervalToTimeStr(shiftBlock.start) : null,
-      shift_end: (!ptoBlock && !sickBlock && shiftBlock) ? intervalToTimeStr(shiftBlock.start + shiftBlock.duration) : null,
-      break1_start: (!ptoBlock && !sickBlock && breakBlocks[0]) ? intervalToTimeStr(breakBlocks[0].start) : null,
-      break1_end: (!ptoBlock && !sickBlock && breakBlocks[0]) ? intervalToTimeStr(breakBlocks[0].start + breakBlocks[0].duration) : null,
+      profile_id: profileId,
+      date,
+      day_type: dayType,
+      shift_start: (!isOff && shiftBlock) ? intervalToTimeStr(shiftBlock.start) : null,
+      shift_end: (!isOff && shiftBlock) ? intervalToTimeStr(shiftBlock.start + shiftBlock.duration) : null,
+      break1_start: (!isOff && breakBlocks[0]) ? intervalToTimeStr(breakBlocks[0].start) : null,
+      break1_end: (!isOff && breakBlocks[0]) ? intervalToTimeStr(breakBlocks[0].start + breakBlocks[0].duration) : null,
       break1_duration: breakBlocks[0] ? breakBlocks[0].duration * 15 : 15,
-      break2_start: (!ptoBlock && !sickBlock && breakBlocks[1]) ? intervalToTimeStr(breakBlocks[1].start) : null,
-      break2_end: (!ptoBlock && !sickBlock && breakBlocks[1]) ? intervalToTimeStr(breakBlocks[1].start + breakBlocks[1].duration) : null,
+      break2_start: (!isOff && breakBlocks[1]) ? intervalToTimeStr(breakBlocks[1].start) : null,
+      break2_end: (!isOff && breakBlocks[1]) ? intervalToTimeStr(breakBlocks[1].start + breakBlocks[1].duration) : null,
       break2_duration: breakBlocks[1] ? breakBlocks[1].duration * 15 : 15,
-      lunch_start: (!ptoBlock && !sickBlock && lunchBlock) ? intervalToTimeStr(lunchBlock.start) : null,
-      lunch_end: (!ptoBlock && !sickBlock && lunchBlock) ? intervalToTimeStr(lunchBlock.start + lunchBlock.duration) : null,
+      lunch_start: (!isOff && lunchBlock) ? intervalToTimeStr(lunchBlock.start) : null,
+      lunch_end: (!isOff && lunchBlock) ? intervalToTimeStr(lunchBlock.start + lunchBlock.duration) : null,
       lunch_duration: lunchBlock ? lunchBlock.duration * 15 : 30,
-      created_by: profile.id,
+      created_by: profile?.id,
     }
+
     const { error } = await sb.from('schedules').upsert(payload, { onConflict: 'profile_id,date' })
-    if (error) console.error('Schedule save error:', error.message, payload)
+    if (error) {
+      console.error('Schedule save error:', error.message, JSON.stringify(payload))
+      setSaving(false)
+      return
+    }
     const { data } = await sb.from('schedules').select('*').eq('date', date)
     setSchedules(data || [])
     if (onUpdate) onUpdate()
     setSaving(false)
-  }, [date, profile])
+  }, [date, profile?.id, onUpdate])
 
   const handleMouseMove = useCallback((e) => {
     if (!dragging) return
@@ -171,7 +190,11 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
     if (!dragging) return
     const { profileId } = dragging
     setDragging(null)
-    setBlocks(prev => { saveBlocksToDb(profileId, prev); return prev })
+    // FIX: use functional form so we have fresh blocks state
+    setBlocks(prev => {
+      saveBlocksToDb(profileId, prev)
+      return prev
+    })
   }, [dragging, saveBlocksToDb])
 
   useEffect(() => {
@@ -203,23 +226,25 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
   const saveShiftModal = async () => {
     if (!shiftModal) return
     setSaving(true)
+    const isOff = shiftForm.day_type !== 'work'  // covers pto, sick, holiday, off
     const payload = {
       profile_id: shiftModal, date,
       day_type: shiftForm.day_type,
-      shift_start: shiftForm.day_type === 'work' ? shiftForm.shift_start : null,
-      shift_end: shiftForm.day_type === 'work' ? shiftForm.shift_end : null,
-      break1_start: shiftForm.day_type === 'work' ? shiftForm.break1_start : null,
-      break1_end: shiftForm.day_type === 'work' && shiftForm.break1_start ? (() => { const [h,m] = shiftForm.break1_start.split(':').map(Number); const t = h*60+m+shiftForm.break1_duration; return `${String(Math.floor(t/60)).padStart(2,'0')}:${String(t%60).padStart(2,'0')}` })() : null,
+      shift_start: isOff ? null : shiftForm.shift_start,
+      shift_end: isOff ? null : shiftForm.shift_end,
+      break1_start: isOff ? null : shiftForm.break1_start,
+      break1_end: isOff ? null : shiftForm.break1_start ? addMins(shiftForm.break1_start, shiftForm.break1_duration) : null,
       break1_duration: shiftForm.break1_duration,
-      break2_start: shiftForm.day_type === 'work' ? shiftForm.break2_start : null,
-      break2_end: shiftForm.day_type === 'work' && shiftForm.break2_start ? (() => { const [h,m] = shiftForm.break2_start.split(':').map(Number); const t = h*60+m+shiftForm.break2_duration; return `${String(Math.floor(t/60)).padStart(2,'0')}:${String(t%60).padStart(2,'0')}` })() : null,
+      break2_start: isOff ? null : shiftForm.break2_start,
+      break2_end: isOff ? null : shiftForm.break2_start ? addMins(shiftForm.break2_start, shiftForm.break2_duration) : null,
       break2_duration: shiftForm.break2_duration,
-      lunch_start: shiftForm.day_type === 'work' ? shiftForm.lunch_start : null,
-      lunch_end: shiftForm.day_type === 'work' && shiftForm.lunch_start ? (() => { const [h,m] = shiftForm.lunch_start.split(':').map(Number); const t = h*60+m+shiftForm.lunch_duration; return `${String(Math.floor(t/60)).padStart(2,'0')}:${String(t%60).padStart(2,'0')}` })() : null,
+      lunch_start: isOff ? null : shiftForm.lunch_start,
+      lunch_end: isOff ? null : shiftForm.lunch_start ? addMins(shiftForm.lunch_start, shiftForm.lunch_duration) : null,
       lunch_duration: shiftForm.lunch_duration,
-      created_by: profile.id,
+      created_by: profile?.id,
     }
-    await sb.from('schedules').upsert(payload, { onConflict: 'profile_id,date' })
+    const { error } = await sb.from('schedules').upsert(payload, { onConflict: 'profile_id,date' })
+    if (error) console.error('Shift modal save error:', error.message)
     const { data } = await sb.from('schedules').select('*').eq('date', date)
     setSchedules(data || [])
     if (onUpdate) onUpdate()
@@ -235,19 +260,26 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
 
   const addExtraBlock = (profileId, type) => {
     setAddBlockMenu(null)
-    const shiftBlock = (blocks[profileId] || []).find(b => b.type === 'shift')
+
+    // If "shift" chosen from menu, open the shift modal instead
+    if (type === 'shift') {
+      openShiftModal(profileId)
+      return
+    }
+
+    const existing = blocks[profileId] || []
+    const shiftBlock = existing.find(b => b.type === 'shift')
     const start = shiftBlock ? shiftBlock.start + 4 : 8
     let duration = 2
     if (type === 'outbound') duration = 8
     if (type === 'meeting') duration = 4
     if (type === 'break') duration = 1
     if (type === 'lunch') duration = 2
-    if (type === 'pto' || type === 'sick') duration = TOTAL_INTERVALS
+    if (type === 'pto' || type === 'sick' || type === 'holiday') duration = TOTAL_INTERVALS
 
-    const newBlock = { id: type + '-' + Date.now(), type, start: (type === 'pto' || type === 'sick') ? 0 : start, duration }
-    // For PTO/Sick replace everything; otherwise just add
-    const existing = (type === 'pto' || type === 'sick') ? [] : (blocks[profileId] || [])
-    const newBlocks = { ...blocks, [profileId]: [...existing, newBlock] }
+    const newBlock = { id: type + '-' + Date.now(), type, start: (type === 'pto' || type === 'sick' || type === 'holiday') ? 0 : start, duration }
+    const base = (type === 'pto' || type === 'sick' || type === 'holiday') ? [] : existing
+    const newBlocks = { ...blocks, [profileId]: [...base, newBlock] }
     setBlocks(newBlocks)
     saveBlocksToDb(profileId, newBlocks)
   }
@@ -290,7 +322,7 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
             {bt.label}
           </span>
         ))}
-        {isAdmin && <span style={{ fontSize:11, color:'var(--text-muted)', marginLeft:'auto' }}>Click agent name to set shift | Drag to move | Drag right edge to resize | Right-click to delete</span>}
+        {isAdmin && <span style={{ fontSize:11, color:'var(--text-muted)', marginLeft:'auto' }}>Click name to set shift | Drag to move | Drag right edge to resize | Right-click to delete</span>}
       </div>
 
       {/* Grid */}
@@ -306,9 +338,7 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
                 const h = Math.floor(totalMins / 60)
                 const m = totalMins % 60
                 const isHour = m === 0
-                const label = isHour
-                  ? `${h % 12 || 12}${h >= 12 ? 'PM' : 'AM'}`
-                  : `:${m.toString().padStart(2,'0')}`
+                const label = isHour ? `${h % 12 || 12}${h >= 12 ? 'PM' : 'AM'}` : `:${m.toString().padStart(2,'0')}`
                 return (
                   <div key={i} style={{ width:CELL_WIDTH, flexShrink:0, borderRight: isHour && i > 0 ? '1px solid var(--border)' : '1px solid rgba(0,0,0,.05)', display:'flex', flexDirection:'column', alignItems:'flex-start', justifyContent:'flex-end', paddingBottom:3, paddingLeft:2 }}>
                     <span style={{ fontSize: isHour ? 9 : 8, color: isHour ? 'var(--text-secondary)' : 'var(--text-muted)', whiteSpace:'nowrap', fontWeight: isHour ? 600 : 400 }}>{label}</span>
@@ -340,7 +370,6 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
             const sched = schedules.find(s => s.profile_id === p.id)
             const isPto = pBlocks.some(b => b.type === 'pto')
             const isSick = pBlocks.some(b => b.type === 'sick')
-            const hasShift = pBlocks.some(b => b.type === 'shift')
 
             return (
               <div key={p.id} style={{ display:'flex', height:ROW_HEIGHT, borderBottom:'1px solid var(--border)', background: rowIdx % 2 === 0 ? 'var(--surface)' : 'var(--surface-2)' }}>
@@ -359,7 +388,7 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
                     </div>
                     {sched && (
                       <div style={{ fontSize:9, color:'var(--text-muted)' }}>
-                        {isPto ? 'PTO' : isSick ? 'Sick' : sched.shift_start ? `${fmt12(sched.shift_start)}-${fmt12(sched.shift_end)}` : 'No shift'}
+                        {isPto ? 'PTO' : isSick ? 'Sick' : pBlocks.some(b=>b.type==='holiday') ? 'Holiday' : sched.shift_start ? `${fmt12(sched.shift_start)}-${fmt12(sched.shift_end)}` : 'No shift'}
                       </div>
                     )}
                   </div>
@@ -437,11 +466,13 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
       {/* Click outside add block menu */}
       {addBlockMenu && <div style={{ position:'fixed', inset:0, zIndex:199 }} onMouseDown={() => setAddBlockMenu(null)} />}
 
-      {/* Add block dropdown - fixed position */}
+      {/* Add block dropdown */}
       {addBlockMenu && (
-        <div style={{ position:'fixed', left: addBlockMenu.x, top: addBlockMenu.y, background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius)', boxShadow:'0 4px 16px rgba(0,0,0,.2)', zIndex:300, minWidth:170, overflow:'hidden' }}>
-          {['shift','break','lunch','outbound','meeting','pto','sick'].map(type => {
+        <div style={{ position:'fixed', left: addBlockMenu.x, top: addBlockMenu.y, background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius)', boxShadow:'0 4px 16px rgba(0,0,0,.2)', zIndex:300, minWidth:180, overflow:'hidden' }}>
+          <div style={{ padding:'6px 14px', fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:.5, color:'var(--text-muted)', borderBottom:'1px solid var(--border)' }}>Add Block</div>
+          {['shift','break','lunch','outbound','meeting','pto','sick','holiday'].map(type => {
             const bt = BLOCK_TYPES.find(b => b.id === type)
+            const label = type === 'shift' ? 'Set Shift...' : bt.label
             return (
               <button key={type}
                 onMouseDown={(e) => { e.stopPropagation(); addExtraBlock(addBlockMenu.profileId, type) }}
@@ -449,7 +480,7 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
                 onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
                 onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
                 <span style={{ width:10, height:10, borderRadius:2, background:bt.color, flexShrink:0 }}></span>
-                {bt.label}
+                {label}
               </button>
             )
           })}
@@ -474,6 +505,7 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
                 <option value="work">Working</option>
                 <option value="pto">PTO - Full Day</option>
                 <option value="sick">Sick - Full Day</option>
+                <option value="holiday">Holiday</option>
                 <option value="off">Off</option>
               </select>
             </div>
