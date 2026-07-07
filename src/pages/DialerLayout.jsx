@@ -11,6 +11,7 @@ import NotesPage from './NotesPage'
 import AdminPage from './AdminPage'
 import WarRoomPage from './WarRoomPage'
 import LeaderboardPage from './LeaderboardPage'
+import AttendancePage from './AttendancePage'
 import WinCelebration from '../components/WinCelebration'
 
 const STATUS_OPTIONS = [
@@ -22,13 +23,17 @@ const STATUS_OPTIONS = [
   { value: 'Offline',   color: '#6b7280' },
 ]
 
+const GRACE_MINUTES = 5
+
 export default function DialerLayout() {
   const { profile, isAdmin } = useAuth()
   const { contacts, syncStatus, reload } = useData()
   const navigate = useNavigate()
   const [agentStatus, setAgentStatus] = useState('Offline')
   const [showStatusMenu, setShowStatusMenu] = useState(false)
+  const [alerts, setAlerts] = useState([])
   const menuRef = useRef(null)
+  const currentEventRef = useRef(null) // tracks the open status_event id
 
   // Load status from profile on mount
   useEffect(() => {
@@ -40,9 +45,7 @@ export default function DialerLayout() {
     if (!profile?.id) return
     const channel = sb.channel('nav-status')
       .on('postgres_changes', {
-        event: 'UPDATE',
-        schema: 'public',
-        table: 'profiles',
+        event: 'UPDATE', schema: 'public', table: 'profiles',
         filter: `id=eq.${profile.id}`
       }, payload => {
         if (payload.new?.status) setAgentStatus(payload.new.status)
@@ -50,6 +53,40 @@ export default function DialerLayout() {
       .subscribe()
     return () => sb.removeChannel(channel)
   }, [profile?.id])
+
+  // Admin: watch for break/lunch overruns
+  useEffect(() => {
+    if (!isAdmin) return
+    const interval = setInterval(async () => {
+      const now = new Date()
+      const { data: openEvents } = await sb
+        .from('status_events')
+        .select('*, profiles(name, avatar)')
+        .is('ended_at', null)
+        .in('status', ['Break', 'Lunch'])
+
+      if (!openEvents) return
+      const newAlerts = []
+      openEvents.forEach(ev => {
+        const started = new Date(ev.started_at)
+        const elapsed = Math.floor((now - started) / 60000) // minutes
+        const limit = ev.status === 'Break' ? 15 : 30
+        const threshold = limit + GRACE_MINUTES
+        if (elapsed >= threshold) {
+          newAlerts.push({
+            id: ev.id,
+            name: ev.profiles?.name || 'Unknown',
+            avatar: ev.profiles?.avatar,
+            status: ev.status,
+            elapsed,
+            limit,
+          })
+        }
+      })
+      setAlerts(newAlerts)
+    }, 30000) // check every 30s
+    return () => clearInterval(interval)
+  }, [isAdmin])
 
   // Close menu on outside click
   useEffect(() => {
@@ -60,10 +97,45 @@ export default function DialerLayout() {
     return () => document.removeEventListener('mousedown', handler)
   }, [])
 
+  const logStatusEvent = async (newStatus) => {
+    if (!profile?.id) return
+    const now = new Date().toISOString()
+
+    // Close previous open event
+    const { data: openEvents } = await sb
+      .from('status_events')
+      .select('id, started_at')
+      .eq('profile_id', profile.id)
+      .is('ended_at', null)
+      .order('started_at', { ascending: false })
+      .limit(1)
+
+    if (openEvents?.length > 0) {
+      const prev = openEvents[0]
+      const duration = Math.floor((new Date() - new Date(prev.started_at)) / 1000)
+      await sb.from('status_events').update({
+        ended_at: now,
+        duration_seconds: duration,
+      }).eq('id', prev.id)
+    }
+
+    // Open new event
+    const { data: newEvent } = await sb.from('status_events').insert({
+      profile_id: profile.id,
+      status: newStatus,
+      started_at: now,
+    }).select().single()
+
+    if (newEvent) currentEventRef.current = newEvent.id
+  }
+
   const updateStatus = async (val) => {
     setAgentStatus(val)
     setShowStatusMenu(false)
-    await sb.from('profiles').update({ status: val, status_since: new Date().toISOString() }).eq('id', profile.id)
+    await Promise.all([
+      sb.from('profiles').update({ status: val, status_since: new Date().toISOString() }).eq('id', profile.id),
+      logStatusEvent(val),
+    ])
   }
 
   const signOut = async () => {
@@ -74,21 +146,12 @@ export default function DialerLayout() {
 
   const currentStatusObj = STATUS_OPTIONS.find(s => s.value === agentStatus) || STATUS_OPTIONS[5]
 
-  const sc = {
-    ok:      { bg:'var(--success-bg)', color:'var(--success)' },
-    loading: { bg:'var(--warning-bg)', color:'var(--warning)' },
-    error:   { bg:'var(--danger-bg)',  color:'var(--danger)'  },
-  }[syncStatus] || { bg:'var(--warning-bg)', color:'var(--warning)' }
-
-  const syncLabel = syncStatus === 'ok'
-    ? `✓ ${contacts.length.toLocaleString()} contacts`
-    : syncStatus === 'loading' ? 'Loading…' : '✗ Error'
-
   const navItems = [
     { to:'/', label:'📞 Dialer', end:true },
     { to:'/live', label:'🟢 Live Dashboard' },
     { to:'/leaderboard', label:'🏆 Leaderboard' },
     { to:'/dashboard', label:'📊 Analytics' },
+    { to:'/attendance', label:'🗓️ Attendance' },
     { to:'/notes', label:'🔍 Notes' },
     { to:'/warroom', label:'📺 War Room' },
     { to:'/campaigns', label:'📋 Campaigns' },
@@ -105,6 +168,15 @@ export default function DialerLayout() {
         </div>
         <div style={{ display:'flex', alignItems:'center', gap:12 }}>
           <button className="btn sm" onClick={reload}>↻</button>
+
+          {/* Alert badge for admins */}
+          {isAdmin && alerts.length > 0 && (
+            <div style={{ position:'relative', cursor:'pointer' }} title={alerts.map(a => `${a.name}: ${a.elapsed}m on ${a.status} (limit ${a.limit}m)`).join('\n')}>
+              <span style={{ background:'var(--danger)', color:'#fff', fontSize:11, fontWeight:700, padding:'3px 8px', borderRadius:99, display:'flex', alignItems:'center', gap:4 }}>
+                ⚠️ {alerts.length} overrun{alerts.length > 1 ? 's' : ''}
+              </span>
+            </div>
+          )}
 
           {/* Status picker */}
           <div ref={menuRef} style={{ position:'relative' }}>
@@ -135,9 +207,7 @@ export default function DialerLayout() {
 
           {/* Agent name + avatar */}
           <div style={{ fontSize:12, color:'var(--text-secondary)', display:'flex', alignItems:'center', gap:6 }}>
-            <div
-              style={{ width:28, height:28, borderRadius:'50%', background:'var(--accent-bg)', color:'var(--accent-text)', display:'flex', alignItems:'center', justifyContent:'center', fontSize: profile?.avatar ? 18 : 11, fontWeight:600, flexShrink:0 }}
-            >
+            <div style={{ width:28, height:28, borderRadius:'50%', background:'var(--accent-bg)', color:'var(--accent-text)', display:'flex', alignItems:'center', justifyContent:'center', fontSize: profile?.avatar ? 18 : 11, fontWeight:600, flexShrink:0 }}>
               {profile?.avatar || (profile?.name || profile?.email || '?')[0].toUpperCase()}
             </div>
             <span style={{ maxWidth:120, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{profile?.name || profile?.email}</span>
@@ -167,6 +237,7 @@ export default function DialerLayout() {
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/leaderboard" element={<LeaderboardPage />} />
           <Route path="/live" element={<LivePage />} />
+          <Route path="/attendance" element={<AttendancePage />} />
           <Route path="/warroom" element={<WarRoomPage />} />
           <Route path="/notes" element={<NotesPage />} />
           {isAdmin && <Route path="/admin" element={<AdminPage />} />}
