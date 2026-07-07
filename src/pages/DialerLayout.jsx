@@ -155,7 +155,7 @@ export default function DialerLayout() {
     { to:'/notes', label:'🔍 Notes' },
     { to:'/warroom', label:'📺 War Room' },
     { to:'/campaigns', label:'📋 Campaigns' },
-    ...(isAdmin ? [{ to:'/admin', label:' Admin' }] : []),
+    ...(isAdmin ? [{ to:'/admin', label:'⚙️ Admin' }] : []),
   ]
 
   return (
