@@ -7,7 +7,7 @@ const DAYS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']
 const GRACE = 5 // minutes
 
 function fmt(time) {
-  if (!time) return '—'
+  if (!time) return '-'
   const [h, m] = time.split(':')
   const hour = parseInt(h)
   const ampm = hour >= 12 ? 'PM' : 'AM'
@@ -15,7 +15,7 @@ function fmt(time) {
 }
 
 function fmtDuration(seconds) {
-  if (!seconds) return '—'
+  if (!seconds) return '-'
   const m = Math.floor(seconds / 60)
   const s = seconds % 60
   if (m < 60) return `${m}m ${s}s`
@@ -23,7 +23,7 @@ function fmtDuration(seconds) {
 }
 
 function fmtTime(iso) {
-  if (!iso) return '—'
+  if (!iso) return '-'
   return new Date(iso).toLocaleTimeString('en-US', { hour:'numeric', minute:'2-digit', hour12:true })
 }
 
@@ -189,7 +189,7 @@ export default function AttendancePage() {
     const rows = reportData.map(r => [
       r.profile.name || r.profile.email,
       r.daysScheduled,
-      r.avgAdherence != null ? r.avgAdherence + '%' : '—',
+      r.avgAdherence != null ? r.avgAdherence + '%' : '-',
       r.breakViolations,
       r.lunchViolations,
       fmtDuration(r.totalLateSeconds),
@@ -236,13 +236,13 @@ export default function AttendancePage() {
         <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
           {/* Week nav */}
           <div style={{ display:'flex', alignItems:'center', gap:12 }}>
-            <button className="btn sm" onClick={prevWeek}>← Prev</button>
+            <button className="btn sm" onClick={prevWeek}><- Prev</button>
             <span style={{ fontSize:13, fontWeight:600 }}>
-              Week of {new Date(weekDates[0] + 'T12:00:00').toLocaleDateString('en-US', { month:'short', day:'numeric' })} – {new Date(weekDates[6] + 'T12:00:00').toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' })}
+              Week of {new Date(weekDates[0] + 'T12:00:00').toLocaleDateString('en-US', { month:'short', day:'numeric' })} - {new Date(weekDates[6] + 'T12:00:00').toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' })}
             </span>
-            <button className="btn sm" onClick={nextWeek}>Next →</button>
+            <button className="btn sm" onClick={nextWeek}>Next -></button>
             {isAdmin && (
-              <button className="btn sm" onClick={() => setCopyFrom(weekBase)} style={{ marginLeft:'auto' }}>📋 Copy week →</button>
+              <button className="btn sm" onClick={() => setCopyFrom(weekBase)} style={{ marginLeft:'auto' }}>📋 Copy week -></button>
             )}
           </div>
 
@@ -285,10 +285,10 @@ export default function AttendancePage() {
                               onClick={() => isAdmin && openEdit(p.id, date)}
                               style={{ background:'var(--accent-bg)', border:'1px solid var(--accent)', borderRadius:'var(--radius)', padding:'5px 7px', cursor: isAdmin ? 'pointer' : 'default', fontSize:10 }}
                             >
-                              <div style={{ fontWeight:600, color:'var(--accent)' }}>{fmt(sched.shift_start)} – {fmt(sched.shift_end)}</div>
-                              {sched.break1_start && <div style={{ color:'var(--text-muted)', marginTop:2 }}>☕ {fmt(sched.break1_start)}</div>}
+                              <div style={{ fontWeight:600, color:'var(--accent)' }}>{fmt(sched.shift_start)} - {fmt(sched.shift_end)}</div>
+                              {sched.break1_start && <div style={{ color:'var(--text-muted)', marginTop:2 }}>Break: {fmt(sched.break1_start)}</div>}
                               {sched.lunch_start && <div style={{ color:'var(--text-muted)' }}>🍽 {fmt(sched.lunch_start)} ({sched.lunch_duration}m)</div>}
-                              {sched.break2_start && <div style={{ color:'var(--text-muted)' }}>☕ {fmt(sched.break2_start)}</div>}
+                              {sched.break2_start && <div style={{ color:'var(--text-muted)' }}>Break: {fmt(sched.break2_start)}</div>}
                             </div>
                           ) : (
                             isAdmin ? (
@@ -313,11 +313,11 @@ export default function AttendancePage() {
       {tab === 'adherence' && (
         <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
           <div style={{ display:'flex', alignItems:'center', gap:12 }}>
-            <button className="btn sm" onClick={prevWeek}>← Prev</button>
+            <button className="btn sm" onClick={prevWeek}><- Prev</button>
             <span style={{ fontSize:13, fontWeight:600 }}>
-              Week of {new Date(weekDates[0] + 'T12:00:00').toLocaleDateString('en-US', { month:'short', day:'numeric' })} – {new Date(weekDates[6] + 'T12:00:00').toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' })}
+              Week of {new Date(weekDates[0] + 'T12:00:00').toLocaleDateString('en-US', { month:'short', day:'numeric' })} - {new Date(weekDates[6] + 'T12:00:00').toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' })}
             </span>
-            <button className="btn sm" onClick={nextWeek}>Next →</button>
+            <button className="btn sm" onClick={nextWeek}>Next -></button>
           </div>
 
           {profiles.map(p => {
@@ -371,7 +371,7 @@ export default function AttendancePage() {
                               {new Date(date + 'T12:00:00').toLocaleDateString('en-US', { weekday:'short', month:'short', day:'numeric' })}
                             </td>
                             <td style={{ padding:'8px 12px', fontSize:11 }}>
-                              {sched ? `${fmt(sched.shift_start)} – ${fmt(sched.shift_end)}` : <span style={{ color:'var(--text-muted)' }}>—</span>}
+                              {sched ? `${fmt(sched.shift_start)} - ${fmt(sched.shift_end)}` : <span style={{ color:'var(--text-muted)' }}>-</span>}
                             </td>
                             <td style={{ padding:'8px 12px' }}>
                               {loginEvent ? (
@@ -382,37 +382,37 @@ export default function AttendancePage() {
                               {breakEvents[0] ? (
                                 <span style={{ fontSize:11, color: breakViolation(breakEvents[0], 15) ? 'var(--danger)' : 'var(--text-secondary)' }}>
                                   {fmtTime(breakEvents[0].started_at)} ({fmtDuration(breakEvents[0].duration_seconds)})
-                                  {breakViolation(breakEvents[0], 15) && ' ⚠️'}
+                                  {breakViolation(breakEvents[0], 15) && ' (!)'}
                                 </span>
-                              ) : <span style={{ fontSize:11, color:'var(--text-muted)' }}>—</span>}
+                              ) : <span style={{ fontSize:11, color:'var(--text-muted)' }}>-</span>}
                             </td>
                             <td style={{ padding:'8px 12px' }}>
                               {lunchEvent ? (
                                 <span style={{ fontSize:11, color: breakViolation(lunchEvent, sched?.lunch_duration || 30) ? 'var(--danger)' : 'var(--text-secondary)' }}>
                                   {fmtTime(lunchEvent.started_at)} ({fmtDuration(lunchEvent.duration_seconds)})
-                                  {breakViolation(lunchEvent, sched?.lunch_duration || 30) && ' ⚠️'}
+                                  {breakViolation(lunchEvent, sched?.lunch_duration || 30) && ' (!)'}
                                 </span>
-                              ) : <span style={{ fontSize:11, color:'var(--text-muted)' }}>—</span>}
+                              ) : <span style={{ fontSize:11, color:'var(--text-muted)' }}>-</span>}
                             </td>
                             <td style={{ padding:'8px 12px' }}>
                               {breakEvents[1] ? (
                                 <span style={{ fontSize:11, color: breakViolation(breakEvents[1], 15) ? 'var(--danger)' : 'var(--text-secondary)' }}>
                                   {fmtTime(breakEvents[1].started_at)} ({fmtDuration(breakEvents[1].duration_seconds)})
-                                  {breakViolation(breakEvents[1], 15) && ' ⚠️'}
+                                  {breakViolation(breakEvents[1], 15) && ' (!)'}
                                 </span>
-                              ) : <span style={{ fontSize:11, color:'var(--text-muted)' }}>—</span>}
+                              ) : <span style={{ fontSize:11, color:'var(--text-muted)' }}>-</span>}
                             </td>
                             <td style={{ padding:'8px 12px' }}>
                               {offlineEvent ? (
                                 <span style={{ fontSize:11, color:'var(--text-secondary)' }}>{fmtTime(offlineEvent.started_at)}</span>
-                              ) : <span style={{ fontSize:11, color:'var(--text-muted)' }}>—</span>}
+                              ) : <span style={{ fontSize:11, color:'var(--text-muted)' }}>-</span>}
                             </td>
                             <td style={{ padding:'8px 12px' }}>
                               {pct != null ? (
                                 <span style={{ fontSize:12, fontWeight:700, color: pct >= 90 ? 'var(--success)' : pct >= 75 ? 'var(--warning)' : 'var(--danger)' }}>
                                   {pct}%
                                 </span>
-                              ) : <span style={{ fontSize:11, color:'var(--text-muted)' }}>—</span>}
+                              ) : <span style={{ fontSize:11, color:'var(--text-muted)' }}>-</span>}
                             </td>
                           </tr>
                         )
@@ -441,14 +441,14 @@ export default function AttendancePage() {
                 <input type="date" className="form-input" value={reportRange.end} onChange={e => setReportRange(p => ({ ...p, end: e.target.value }))} />
               </div>
               <button className="btn primary" onClick={runReport} disabled={!reportRange.start || !reportRange.end}>Run report</button>
-              {reportData && <button className="btn success" onClick={exportReport}>⬇ Export CSV</button>}
+              {reportData && <button className="btn success" onClick={exportReport}>v Export CSV</button>}
             </div>
           </div>
 
           {reportData && (
             <div className="card">
               <div className="card-header">
-                <div className="card-title">Attendance Summary — {reportRange.start} to {reportRange.end}</div>
+                <div className="card-title">Attendance Summary - {reportRange.start} to {reportRange.end}</div>
               </div>
               <table className="data-table">
                 <thead>
@@ -467,7 +467,7 @@ export default function AttendancePage() {
                       </td>
                       <td style={{ padding:'10px 12px', textAlign:'center' }}>{r.daysScheduled}</td>
                       <td style={{ padding:'10px 12px', textAlign:'center', fontWeight:700, color: r.avgAdherence == null ? 'var(--text-muted)' : r.avgAdherence >= 90 ? 'var(--success)' : r.avgAdherence >= 75 ? 'var(--warning)' : 'var(--danger)' }}>
-                        {r.avgAdherence != null ? r.avgAdherence + '%' : '—'}
+                        {r.avgAdherence != null ? r.avgAdherence + '%' : '-'}
                       </td>
                       <td style={{ padding:'10px 12px', textAlign:'center', color: r.breakViolations > 0 ? 'var(--danger)' : 'var(--text-secondary)', fontWeight: r.breakViolations > 0 ? 600 : 400 }}>
                         {r.breakViolations}
@@ -488,7 +488,7 @@ export default function AttendancePage() {
       {/* Schedule edit modal */}
       {editCell && (
         <Modal
-          title={`Schedule — ${profiles.find(p => p.id === editCell.profileId)?.name || 'Agent'} · ${new Date(editCell.date + 'T12:00:00').toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric' })}`}
+          title={`Schedule - ${profiles.find(p => p.id === editCell.profileId)?.name || 'Agent'} . ${new Date(editCell.date + 'T12:00:00').toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric' })}`}
           onClose={() => setEditCell(null)}
           width={480}
         >
@@ -549,7 +549,7 @@ export default function AttendancePage() {
               <button className="btn danger" onClick={() => deleteSchedule(editCell.profileId, editCell.date)}>Delete</button>
             )}
             <button className="btn" onClick={() => setEditCell(null)}>Cancel</button>
-            <button className="btn primary" onClick={saveSchedule} disabled={saving}>{saving ? 'Saving…' : 'Save schedule'}</button>
+            <button className="btn primary" onClick={saveSchedule} disabled={saving}>{saving ? 'Saving...' : 'Save schedule'}</button>
           </div>
         </Modal>
       )}
