@@ -83,6 +83,10 @@ export default function AttendancePage() {
     return toYMD(monday)
   }
   const [tab, setTab] = useState('schedule')
+  const switchTab = (t) => {
+    setTab(t)
+    if (t === 'schedule') fetchSchedules()
+  }
   const [profiles, setProfiles] = useState([])
   const [schedules, setSchedules] = useState([])
   const [statusEvents, setStatusEvents] = useState([])
@@ -414,7 +418,7 @@ export default function AttendancePage() {
         <h1 style={{ fontSize:20, fontWeight:600 }}>Attendance and Schedule</h1>
         <div style={{ display:'flex', gap:6 }}>
           {['schedule','graphical','adherence','points','reports'].map(t => (
-            <button key={t} onClick={() => setTab(t)}
+            <button key={t} onClick={() => switchTab(t)}
               style={{ padding:'5px 14px', borderRadius:99, fontSize:12, fontWeight:500, border:'1px solid', cursor:'pointer',
                 borderColor: tab === t ? 'var(--accent)' : 'var(--border)',
                 background: tab === t ? 'var(--accent)' : 'var(--surface)',
@@ -537,7 +541,12 @@ export default function AttendancePage() {
         <GraphicalSchedule
           profiles={profiles}
           onUpdate={async () => {
-            const { data: s } = await sb.from('schedules').select('*').gte('date', weekDates[0]).lte('date', weekDates[6])
+            // Fetch wide window so any day Graphical navigated to is covered
+            const from = new Date(); from.setDate(from.getDate() - 30)
+            const to = new Date(); to.setDate(to.getDate() + 30)
+            const fromStr = from.toISOString().split('T')[0]
+            const toStr = to.toISOString().split('T')[0]
+            const { data: s } = await sb.from('schedules').select('*').gte('date', fromStr).lte('date', toStr)
             setSchedules(s || [])
           }}
         />
