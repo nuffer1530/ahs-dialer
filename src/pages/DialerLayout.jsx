@@ -155,7 +155,7 @@ export default function DialerLayout() {
     { to:'/notes', label:'🔍 Notes' },
     { to:'/warroom', label:'📺 War Room' },
     { to:'/campaigns', label:'📋 Campaigns' },
-    ...(isAdmin ? [{ to:'/admin', label:'⚙️ Admin' }] : []),
+    ...(isAdmin ? [{ to:'/admin', label:' Admin' }] : []),
   ]
 
   return (
@@ -167,13 +167,13 @@ export default function DialerLayout() {
           <span style={{ fontSize:15, fontWeight:600 }}>Dialer</span>
         </div>
         <div style={{ display:'flex', alignItems:'center', gap:12 }}>
-          <button className="btn sm" onClick={reload}>↻</button>
+          <button className="btn sm" onClick={reload}>R</button>
 
           {/* Alert badge for admins */}
           {isAdmin && alerts.length > 0 && (
             <div style={{ position:'relative', cursor:'pointer' }} title={alerts.map(a => `${a.name}: ${a.elapsed}m on ${a.status} (limit ${a.limit}m)`).join('\n')}>
               <span style={{ background:'var(--danger)', color:'#fff', fontSize:11, fontWeight:700, padding:'3px 8px', borderRadius:99, display:'flex', alignItems:'center', gap:4 }}>
-                ⚠️ {alerts.length} overrun{alerts.length > 1 ? 's' : ''}
+                (!) {alerts.length} overrun{alerts.length > 1 ? 's' : ''}
               </span>
             </div>
           )}
@@ -186,7 +186,7 @@ export default function DialerLayout() {
             >
               <div style={{ width:8, height:8, borderRadius:'50%', background:currentStatusObj.color, flexShrink:0 }}></div>
               {currentStatusObj.value}
-              <span style={{ fontSize:10, color:'var(--text-muted)' }}>▾</span>
+              <span style={{ fontSize:10, color:'var(--text-muted)' }}>v</span>
             </button>
             {showStatusMenu && (
               <div style={{ position:'absolute', right:0, top:'calc(100% + 6px)', background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius)', boxShadow:'0 4px 16px rgba(0,0,0,.15)', zIndex:200, minWidth:145, overflow:'hidden' }}>
@@ -198,7 +198,7 @@ export default function DialerLayout() {
                   >
                     <div style={{ width:8, height:8, borderRadius:'50%', background:s.color, flexShrink:0 }}></div>
                     {s.value}
-                    {agentStatus === s.value && <span style={{ marginLeft:'auto', fontSize:10 }}>✓</span>}
+                    {agentStatus === s.value && <span style={{ marginLeft:'auto', fontSize:10 }}>v</span>}
                   </button>
                 ))}
               </div>
