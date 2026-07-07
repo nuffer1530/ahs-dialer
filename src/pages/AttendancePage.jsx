@@ -83,10 +83,6 @@ export default function AttendancePage() {
     return toYMD(monday)
   }
   const [tab, setTab] = useState('schedule')
-  const switchTab = (t) => {
-    setTab(t)
-    if (t === 'schedule') fetchSchedules()
-  }
   const [profiles, setProfiles] = useState([])
   const [schedules, setSchedules] = useState([])
   const [statusEvents, setStatusEvents] = useState([])
@@ -94,6 +90,17 @@ export default function AttendancePage() {
   const [attendancePoints, setAttendancePoints] = useState([])
   const [loading, setLoading] = useState(true)
   const [weekBase, setWeekBase] = useState(() => getTodayMonday())
+  // Refetch schedules when switching back to schedule tab (catches changes from Graphical view)
+  useEffect(() => {
+    if (tab !== 'schedule') return
+    const from = new Date(); from.setDate(from.getDate() - 30)
+    const to = new Date(); to.setDate(to.getDate() + 30)
+    sb.from('schedules').select('*')
+      .gte('date', from.toISOString().split('T')[0])
+      .lte('date', to.toISOString().split('T')[0])
+      .then(({ data }) => setSchedules(data || []))
+  }, [tab])
+
   const [editCell, setEditCell] = useState(null)
   const [editData, setEditData] = useState({})
   const [saving, setSaving] = useState(false)
@@ -418,7 +425,7 @@ export default function AttendancePage() {
         <h1 style={{ fontSize:20, fontWeight:600 }}>Attendance and Schedule</h1>
         <div style={{ display:'flex', gap:6 }}>
           {['schedule','graphical','adherence','points','reports'].map(t => (
-            <button key={t} onClick={() => switchTab(t)}
+            <button key={t} onClick={() => setTab(t)}
               style={{ padding:'5px 14px', borderRadius:99, fontSize:12, fontWeight:500, border:'1px solid', cursor:'pointer',
                 borderColor: tab === t ? 'var(--accent)' : 'var(--border)',
                 background: tab === t ? 'var(--accent)' : 'var(--surface)',
