@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+  import { useState, useEffect } from 'react'
 import { sb } from '../lib/supabase'
 import { useAuth } from '../lib/AuthContext'
 import Modal from '../components/Modal'
@@ -286,18 +286,10 @@ export default function AttendancePage() {
         </div>`
 
       try {
-        const res = await fetch('https://api.resend.com/emails', {
-          method: 'POST',
-          headers: { 'Authorization': `Bearer ${import.meta.env.VITE_RESEND_API_KEY}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            from: 'schedule@awesomeservice.com',
-            to: p.email,
-            subject: `Your Schedule: Week of ${weekLabel}`,
-            html,
-          })
+        const { error } = await sb.functions.invoke('send-schedule-email', {
+          body: { to: p.email, subject: `Your Schedule: Week of ${weekLabel}`, html }
         })
-        const data = await res.json()
-        results.push({ name: p.name || p.email, success: res.ok, error: data.message })
+        results.push({ name: p.name || p.email, success: !error, error: error?.message })
       } catch (e) {
         results.push({ name: p.name || p.email, success: false, error: e.message })
       }
