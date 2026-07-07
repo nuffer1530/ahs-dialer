@@ -289,25 +289,28 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
             {bt.label}
           </span>
         ))}
-        {isAdmin && <span style={{ fontSize:11, color:'var(--text-muted)', marginLeft:'auto' }}>Click agent name to set shift | Drag blocks to move | Drag right edge to resize</span>}
+        {isAdmin && <span style={{ fontSize:11, color:'var(--text-muted)', marginLeft:'auto' }}>Click agent name to set shift | Drag to move | Drag right edge to resize | Right-click to delete</span>}
       </div>
 
       {/* Grid */}
-      <div ref={containerRef} style={{ overflowX:'auto', border:'1px solid var(--border)', borderRadius:'var(--radius)', userSelect:'none' }}>
+      <div ref={containerRef} style={{ overflowX:'auto', border:'1px solid var(--border)', borderRadius:'var(--radius)', userSelect:'none', position:'relative' }}>
         <div style={{ width: totalWidth, minWidth: totalWidth }}>
 
           {/* Time header */}
-          <div style={{ display:'flex', height:40, borderBottom:'2px solid var(--border)', background:'var(--surface-2)' }}>
-            <div style={{ width:LABEL_WIDTH, flexShrink:0, borderRight:'1px solid var(--border)', display:'flex', alignItems:'center', paddingLeft:12, fontSize:11, fontWeight:600, color:'var(--text-muted)' }}>Agent</div>
+          <div style={{ display:'flex', height:48, borderBottom:'2px solid var(--border)', background:'var(--surface-2)' }}>
+            <div style={{ width:LABEL_WIDTH, flexShrink:0, borderRight:'1px solid var(--border)', display:'flex', alignItems:'center', paddingLeft:12, fontSize:11, fontWeight:600, color:'var(--text-muted)', position:'sticky', left:0, zIndex:10, background:'var(--surface-2)' }}>Agent</div>
             <div style={{ display:'flex', flex:1 }}>
               {Array.from({ length: TOTAL_INTERVALS }, (_, i) => {
-                const showLabel = i % 4 === 0
                 const totalMins = START_HOUR * 60 + i * 15
                 const h = Math.floor(totalMins / 60)
-                const label = `${h % 12 || 12}${h >= 12 ? 'PM' : 'AM'}`
+                const m = totalMins % 60
+                const isHour = m === 0
+                const label = isHour
+                  ? `${h % 12 || 12}${h >= 12 ? 'PM' : 'AM'}`
+                  : `:${m.toString().padStart(2,'0')}`
                 return (
-                  <div key={i} style={{ width:CELL_WIDTH, flexShrink:0, borderRight: i % 4 === 3 ? '1px solid var(--border)' : '1px solid rgba(0,0,0,.05)', display:'flex', alignItems:'flex-end', paddingBottom:3 }}>
-                    {showLabel && <span style={{ fontSize:9, color:'var(--text-muted)', paddingLeft:2, whiteSpace:'nowrap' }}>{label}</span>}
+                  <div key={i} style={{ width:CELL_WIDTH, flexShrink:0, borderRight: isHour && i > 0 ? '1px solid var(--border)' : '1px solid rgba(0,0,0,.05)', display:'flex', flexDirection:'column', alignItems:'flex-start', justifyContent:'flex-end', paddingBottom:3, paddingLeft:2 }}>
+                    <span style={{ fontSize: isHour ? 9 : 8, color: isHour ? 'var(--text-secondary)' : 'var(--text-muted)', whiteSpace:'nowrap', fontWeight: isHour ? 600 : 400 }}>{label}</span>
                   </div>
                 )
               })}
@@ -316,7 +319,7 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
 
           {/* Coverage row */}
           <div style={{ display:'flex', height:26, borderBottom:'2px solid var(--border)', background:'var(--surface)' }}>
-            <div style={{ width:LABEL_WIDTH, flexShrink:0, borderRight:'1px solid var(--border)', display:'flex', alignItems:'center', paddingLeft:12, fontSize:10, fontWeight:600, color:'var(--text-muted)' }}>Available</div>
+            <div style={{ width:LABEL_WIDTH, flexShrink:0, borderRight:'1px solid var(--border)', display:'flex', alignItems:'center', paddingLeft:12, fontSize:10, fontWeight:600, color:'var(--text-muted)', position:'sticky', left:0, zIndex:10, background:'var(--surface)' }}>Available</div>
             <div style={{ display:'flex', flex:1 }}>
               {Array.from({ length: TOTAL_INTERVALS }, (_, i) => {
                 const count = getCoverage(i)
@@ -340,8 +343,8 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
 
             return (
               <div key={p.id} style={{ display:'flex', height:ROW_HEIGHT, borderBottom:'1px solid var(--border)', background: rowIdx % 2 === 0 ? 'var(--surface)' : 'var(--surface-2)' }}>
-                {/* Agent label */}
-                <div style={{ width:LABEL_WIDTH, flexShrink:0, borderRight:'1px solid var(--border)', display:'flex', alignItems:'center', gap:6, paddingLeft:8, background: rowIdx % 2 === 0 ? 'var(--surface)' : 'var(--surface-2)', zIndex:2 }}>
+                {/* Agent label - sticky */}
+                <div style={{ width:LABEL_WIDTH, flexShrink:0, borderRight:'1px solid var(--border)', display:'flex', alignItems:'center', gap:6, paddingLeft:8, background: rowIdx % 2 === 0 ? 'var(--surface)' : 'var(--surface-2)', position:'sticky', left:0, zIndex:5 }}>
                   <div style={{ width:22, height:22, borderRadius:'50%', background:'var(--accent-bg)', display:'flex', alignItems:'center', justifyContent:'center', fontSize: p.avatar ? 13 : 9, fontWeight:600, flexShrink:0 }}>
                     {p.avatar || (p.name || p.email || '?')[0].toUpperCase()}
                   </div>
@@ -396,6 +399,13 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
                       <div
                         key={block.id}
                         onMouseDown={(e) => { if (!isAdmin) return; e.preventDefault(); e.stopPropagation(); setDragging({ profileId: p.id, blockId: block.id, mode:'move', startX: e.clientX }) }}
+                        onContextMenu={(e) => {
+                          if (!isAdmin || block.type === 'shift') return
+                          e.preventDefault()
+                          e.stopPropagation()
+                          removeBlock(p.id, block.id)
+                        }}
+                        title={isAdmin && block.type !== 'shift' ? 'Right-click to delete' : ''}
                         style={{
                           position:'absolute', left, top: isShift ? 6 : 10, height: isShift ? ROW_HEIGHT - 12 : ROW_HEIGHT - 20, width,
                           background: bt.bg, border:`1.5px solid ${bt.color}`, borderRadius:4,
@@ -408,18 +418,10 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
                           {bt.label}
                         </span>
                         {isAdmin && (
-                          <>
-                            {block.type !== 'shift' && (
-                              <button
-                                onMouseDown={(e) => { e.stopPropagation(); e.preventDefault(); removeBlock(p.id, block.id) }}
-                                style={{ fontSize:10, color: bt.text, background:'none', border:'none', cursor:'pointer', padding:'0 2px', flexShrink:0 }}
-                              >x</button>
-                            )}
-                            <div
-                              onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); setDragging({ profileId: p.id, blockId: block.id, mode:'resize', startX: e.clientX }) }}
-                              style={{ width:5, height:'100%', background: bt.color, cursor:'ew-resize', flexShrink:0, opacity:.5 }}
-                            />
-                          </>
+                          <div
+                            onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); setDragging({ profileId: p.id, blockId: block.id, mode:'resize', startX: e.clientX }) }}
+                            style={{ width:5, height:'100%', background: bt.color, cursor:'ew-resize', flexShrink:0, opacity:.5 }}
+                          />
                         )}
                       </div>
                     )
