@@ -141,7 +141,8 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
       lunch_duration: lunchBlock ? lunchBlock.duration * 15 : 30,
       created_by: profile.id,
     }
-    await sb.from('schedules').upsert(payload, { onConflict: 'profile_id,date' })
+    const { error } = await sb.from('schedules').upsert(payload, { onConflict: 'profile_id,date' })
+    if (error) console.error('Schedule save error:', error.message, payload)
     const { data } = await sb.from('schedules').select('*').eq('date', date)
     setSchedules(data || [])
     if (onUpdate) onUpdate()
@@ -434,15 +435,16 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
       </div>
 
       {/* Click outside add block menu */}
-      {addBlockMenu && <div style={{ position:'fixed', inset:0, zIndex:99 }} onClick={() => setAddBlockMenu(null)} />}
+      {addBlockMenu && <div style={{ position:'fixed', inset:0, zIndex:199 }} onMouseDown={() => setAddBlockMenu(null)} />}
 
       {/* Add block dropdown - fixed position */}
       {addBlockMenu && (
-        <div style={{ position:'fixed', left: addBlockMenu.x, top: addBlockMenu.y, background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius)', boxShadow:'0 4px 16px rgba(0,0,0,.2)', zIndex:200, minWidth:170, overflow:'hidden' }}>
-          {['break','lunch','outbound','meeting','pto','sick'].map(type => {
+        <div style={{ position:'fixed', left: addBlockMenu.x, top: addBlockMenu.y, background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius)', boxShadow:'0 4px 16px rgba(0,0,0,.2)', zIndex:300, minWidth:170, overflow:'hidden' }}>
+          {['shift','break','lunch','outbound','meeting','pto','sick'].map(type => {
             const bt = BLOCK_TYPES.find(b => b.id === type)
             return (
-              <button key={type} onClick={() => addExtraBlock(addBlockMenu.profileId, type)}
+              <button key={type}
+                onMouseDown={(e) => { e.stopPropagation(); addExtraBlock(addBlockMenu.profileId, type) }}
                 style={{ display:'flex', alignItems:'center', gap:8, width:'100%', padding:'9px 14px', background:'transparent', border:'none', cursor:'pointer', fontSize:12, color:'var(--text-primary)', textAlign:'left' }}
                 onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
                 onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
@@ -451,7 +453,7 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
               </button>
             )
           })}
-          <button onClick={() => setAddBlockMenu(null)}
+          <button onMouseDown={() => setAddBlockMenu(null)}
             style={{ display:'block', width:'100%', padding:'7px 14px', background:'transparent', border:'none', borderTop:'1px solid var(--border)', cursor:'pointer', fontSize:11, color:'var(--text-muted)', textAlign:'left' }}>
             Cancel
           </button>
