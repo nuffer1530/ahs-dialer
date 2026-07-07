@@ -151,7 +151,7 @@ export default function DialerLayout() {
     { to:'/live', label:'🟢 Live Dashboard' },
     { to:'/leaderboard', label:'🏆 Leaderboard' },
     { to:'/dashboard', label:'📊 Analytics' },
-    { to:'/attendance', label:'🗓️ Attendance' },
+    { to:'/attendance', label:'📅 Attendance' },
     { to:'/notes', label:'🔍 Notes' },
     { to:'/warroom', label:'📺 War Room' },
     { to:'/campaigns', label:'📋 Campaigns' },
