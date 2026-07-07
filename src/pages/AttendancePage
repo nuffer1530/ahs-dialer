@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 import { sb } from '../lib/supabase'
 import { useAuth } from '../lib/AuthContext'
 import Modal from '../components/Modal'
@@ -217,7 +217,7 @@ export default function AttendancePage() {
   return (
     <div style={{ flex:1, overflowY:'auto', padding:24, display:'flex', flexDirection:'column', gap:20 }}>
       <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
-        <h1 style={{ fontSize:20, fontWeight:600 }}>🗓️ Attendance & Schedule</h1>
+        <h1 style={{ fontSize:20, fontWeight:600 }}>🗓️ Attendance &amp; Schedule</h1>
         <div style={{ display:'flex', gap:6 }}>
           {['schedule','adherence','reports'].map(t => (
             <button key={t} onClick={() => setTab(t)}
