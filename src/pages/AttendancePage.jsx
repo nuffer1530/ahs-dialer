@@ -1,7 +1,8 @@
-  import { useState, useEffect } from 'react'
+import { useState, useEffect } from 'react'
 import { sb } from '../lib/supabase'
 import { useAuth } from '../lib/AuthContext'
 import Modal from '../components/Modal'
+import GraphicalSchedule from '../components/GraphicalSchedule'
 
 const DAYS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']
 const GRACE = 5
@@ -383,7 +384,7 @@ export default function AttendancePage() {
       <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', flexWrap:'wrap', gap:10 }}>
         <h1 style={{ fontSize:20, fontWeight:600 }}>Attendance and Schedule</h1>
         <div style={{ display:'flex', gap:6 }}>
-          {['schedule','adherence','points','reports'].map(t => (
+          {['schedule','graphical','adherence','points','reports'].map(t => (
             <button key={t} onClick={() => setTab(t)}
               style={{ padding:'5px 14px', borderRadius:99, fontSize:12, fontWeight:500, border:'1px solid', cursor:'pointer',
                 borderColor: tab === t ? 'var(--accent)' : 'var(--border)',
@@ -471,6 +472,45 @@ export default function AttendancePage() {
               </tbody>
             </table>
           </div>
+        </div>
+      )}
+
+      {/* GRAPHICAL TAB */}
+      {tab === 'graphical' && (
+        <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
+          <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+            <button className="btn sm" onClick={prevWeek}>Prev</button>
+            <span style={{ fontSize:13, fontWeight:600 }}>
+              Week of {new Date(weekDates[0] + 'T12:00:00').toLocaleDateString('en-US', { month:'short', day:'numeric' })} - {new Date(weekDates[6] + 'T12:00:00').toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' })}
+            </span>
+            <button className="btn sm" onClick={nextWeek}>Next</button>
+          </div>
+          {weekDates.map(date => {
+            const d = new Date(date + 'T12:00:00')
+            const isToday = date === today
+            const daySchedules = schedules.filter(s => s.date === date)
+            return (
+              <div key={date} className="card">
+                <div className="card-header" style={{ background: isToday ? 'var(--accent-bg)' : undefined }}>
+                  <div className="card-title" style={{ color: isToday ? 'var(--accent)' : undefined }}>
+                    {d.toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric' })}
+                    {isToday && <span style={{ fontSize:10, background:'var(--accent)', color:'#fff', padding:'1px 6px', borderRadius:99, marginLeft:8 }}>Today</span>}
+                  </div>
+                </div>
+                <div style={{ padding:'12px 16px' }}>
+                  <GraphicalSchedule
+                    profiles={profiles}
+                    schedules={daySchedules}
+                    date={date}
+                    onUpdate={async () => {
+                      const { data: s } = await sb.from('schedules').select('*').gte('date', weekDates[0]).lte('date', weekDates[6])
+                      setSchedules(s || [])
+                    }}
+                  />
+                </div>
+              </div>
+            )
+          })}
         </div>
       )}
 
