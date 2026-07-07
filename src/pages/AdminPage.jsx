@@ -5,12 +5,14 @@ import { useData } from '../lib/DataContext'
 import Modal from '../components/Modal'
 
 const EMOJIS = {
-  '🔥 Hype': ['🔥','⚡','💥','🚀','🎯','💪','👊','🏆','👑','💎','🌟','⭐'],
-  '😎 Personality': ['😎','🤙','😤','🥶','🤩','😏','🧠','👀','🫡','💯','🤝','🙌'],
-  '🦁 Animals': ['🦁','🐺','🦅','🐉','🦊','🐻','🦈','🐯','🦋','🦎','🐝','🐆'],
-  '🏔️ Colorado': ['🏔️','🌊','🌵','🎿','🏕️','⛰️','🌄','🎣','🌲','❄️'],
-  '🏠 Home Services': ['🔧','🔨','⚙️','🛠️','💡','🔌','🚿','❄️','🔥','🏠','🪛','🔋'],
-  '🎮 Fun': ['🎸','🎲','🎪','🎭','🎨','🎬','🎵','🍕','🌮','☕','🎉','🏋️'],
+  '🔥 Hype': ['🔥','⚡','💥','🚀','🎯','💪','👊','🏆','👑','💎','🌟','⭐','🔑','💰','🎰','🃏'],
+  '😎 Personality': ['😎','🤙','😤','🥶','🤩','😏','🧠','👀','🫡','💯','🤝','🙌','🥳','😈','🤠','🫶'],
+  '🦁 Animals': ['🦁','🐺','🦅','🐉','🦊','🐻','🦈','🐯','🦋','🦎','🐝','🐆','🦬','🦌','🐘','🦏'],
+  '🏔️ Colorado': ['🏔️','🌊','🌵','🎿','🏕️','⛰️','🌄','🎣','🌲','❄️','🏂','🪂','🧗','🏞️','🌅','🎑'],
+  '🏠 Home Services': ['🔧','🔨','⚙️','🛠️','💡','🔌','🚿','❄️','🔥','🏠','🪛','🔋','🪜','🧱','🪟','🚪'],
+  '🎮 Fun': ['🎸','🎲','🎪','🎭','🎨','🎬','🎵','🍕','🌮','☕','🎉','🏋️','🎳','🎯','🏄','🤿'],
+  '⚽ Sports': ['⚽','🏈','🏒','⛷️','🎽','🏊','🚴','🤸','🏋️','🥊','🎾','⛳','🏇','🛹','🤺','🥋'],
+  '🌈 Vibes': ['🌈','🌙','☀️','🌊','🍀','🦄','🌸','🦋','✨','🔮','🪄','🧿','💫','🌺','🎆','🪩'],
 }
 
 export default function AdminPage() {
@@ -23,7 +25,6 @@ export default function AdminPage() {
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState('')
 
-  // My profile state
   const [myName, setMyName] = useState(profile?.name || '')
   const [myAvatar, setMyAvatar] = useState(profile?.avatar || null)
   const [savingProfile, setSavingProfile] = useState(false)
@@ -67,19 +68,13 @@ export default function AdminPage() {
     if (!editProfile) return
     setSaving(true)
     try {
-      const { error } = await sb.from('profiles')
-        .update({ name: editProfile.name, role: editProfile.role })
-        .eq('id', editProfile.id)
+      const { error } = await sb.from('profiles').update({ name: editProfile.name, role: editProfile.role }).eq('id', editProfile.id)
       if (error) throw error
       const { data } = await sb.from('profiles').select('*').eq('id', editProfile.id).maybeSingle()
       if (data) setProfiles(prev => prev.map(p => p.id === data.id ? data : p))
-
       await sb.from('csr_campaigns').delete().eq('profile_id', editProfile.id)
-      const toInsert = editProfile.campaigns
-        .filter(c => c.active)
-        .map(c => ({ profile_id: editProfile.id, campaign_id: c.campaign_id, priority: c.priority, active: true }))
+      const toInsert = editProfile.campaigns.filter(c => c.active).map(c => ({ profile_id: editProfile.id, campaign_id: c.campaign_id, priority: c.priority, active: true }))
       if (toInsert.length > 0) await sb.from('csr_campaigns').insert(toInsert)
-
       const { data: csrCampData } = await sb.from('csr_campaigns').select('*')
       setCsrCampaigns(csrCampData || [])
       setMsg(`✓ ${editProfile.name || editProfile.email} updated successfully`)
@@ -109,10 +104,7 @@ export default function AdminPage() {
   }
 
   const toggleCampaign = (campaignId) => {
-    setEditProfile(prev => ({
-      ...prev,
-      campaigns: prev.campaigns.map(c => c.campaign_id === campaignId ? { ...c, active: !c.active } : c)
-    }))
+    setEditProfile(prev => ({ ...prev, campaigns: prev.campaigns.map(c => c.campaign_id === campaignId ? { ...c, active: !c.active } : c) }))
   }
 
   const movePriority = (campaignId, direction) => {
@@ -130,28 +122,21 @@ export default function AdminPage() {
   }
 
   const getProfileCampaigns = (profileId) => {
-    return csrCampaigns
-      .filter(c => c.profile_id === profileId && c.active)
-      .sort((a, b) => a.priority - b.priority)
-      .map(c => campaigns.find(camp => camp.id === c.campaign_id)?.name)
-      .filter(Boolean)
+    return csrCampaigns.filter(c => c.profile_id === profileId && c.active).sort((a, b) => a.priority - b.priority).map(c => campaigns.find(camp => camp.id === c.campaign_id)?.name).filter(Boolean)
   }
 
   return (
     <div style={{ flex: 1, overflowY: 'auto', padding: 24, display: 'flex', flexDirection: 'column', gap: 20 }}>
       <h1 style={{ fontSize: 20, fontWeight: 600 }}>⚙️ {isAdmin ? 'Admin Panel' : 'My Profile'}</h1>
 
-      {/* MY PROFILE — visible to everyone */}
+      {/* MY PROFILE */}
       <div className="card">
         <div className="card-header">
           <div className="card-title">My Profile</div>
           {profileMsg && <span style={{ fontSize: 12, color: 'var(--success)' }}>{profileMsg}</span>}
         </div>
         <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-
-          {/* Avatar + name preview */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-            {/* Clickable avatar with + overlay */}
             <div style={{ position: 'relative', flexShrink: 0 }}>
               <div style={{ width: 64, height: 64, borderRadius: '50%', background: 'var(--accent-bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: myAvatar ? 38 : 22, fontWeight: 700, border: '2px solid var(--border)' }}>
                 {myAvatar || (myName || profile?.email || '?')[0].toUpperCase()}
@@ -169,13 +154,10 @@ export default function AdminPage() {
               </div>
             </div>
           </div>
-
-          {/* Name field */}
           <div className="form-field">
             <label className="form-label">Display name</label>
             <input className="form-input" value={myName} onChange={e => setMyName(e.target.value)} placeholder="Your name" />
           </div>
-
           <button className="btn primary" onClick={saveMyProfile} disabled={savingProfile} style={{ alignSelf: 'flex-start' }}>
             {savingProfile ? 'Saving…' : 'Save profile'}
           </button>
@@ -184,9 +166,8 @@ export default function AdminPage() {
 
       {/* EMOJI PICKER MODAL */}
       {showAvatarPicker && (
-        <Modal title="Choose Your Avatar" onClose={() => setShowAvatarPicker(false)} width={480}>
+        <Modal title="Choose Your Avatar" onClose={() => setShowAvatarPicker(false)} width={520}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            {/* Preview */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', background: 'var(--surface-2)', borderRadius: 'var(--radius)' }}>
               <div style={{ width: 48, height: 48, borderRadius: '50%', background: 'var(--accent-bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: pickerSelected ? 28 : 18, fontWeight: 700, flexShrink: 0 }}>
                 {pickerSelected || myAvatar || (myName || profile?.email || '?')[0].toUpperCase()}
@@ -196,9 +177,7 @@ export default function AdminPage() {
                 <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{pickerSelected ? 'Looking good! Hit save to lock it in.' : 'Pick an emoji below'}</div>
               </div>
             </div>
-
-            {/* Emoji grid */}
-            <div style={{ maxHeight: 360, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div style={{ maxHeight: 400, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 14 }}>
               {Object.entries(EMOJIS).map(([category, emojis]) => (
                 <div key={category}>
                   <div style={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: .5, color: 'var(--text-muted)', marginBottom: 6 }}>{category}</div>
@@ -223,9 +202,7 @@ export default function AdminPage() {
           </div>
           <div className="modal-actions">
             <button className="btn" onClick={() => setShowAvatarPicker(false)}>Cancel</button>
-            <button className="btn primary" onClick={confirmAvatar} disabled={!pickerSelected}>
-              Select avatar
-            </button>
+            <button className="btn primary" onClick={confirmAvatar} disabled={!pickerSelected}>Select avatar</button>
           </div>
         </Modal>
       )}
@@ -234,7 +211,6 @@ export default function AdminPage() {
       {isAdmin && (
         <>
           {msg && <div style={{ background: 'var(--success-bg)', color: 'var(--success)', padding: '10px 14px', borderRadius: 'var(--radius)', fontSize: 13 }}>{msg}</div>}
-
           <div className="card">
             <div className="card-header">
               <div className="card-title">User Management</div>
@@ -242,9 +218,7 @@ export default function AdminPage() {
             </div>
             {loading ? <div className="card-body"><div className="spinner"></div></div> : (
               <table className="data-table">
-                <thead>
-                  <tr><th>Name</th><th>Email</th><th>Role</th><th>Active Campaigns</th><th>Actions</th></tr>
-                </thead>
+                <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Active Campaigns</th><th>Actions</th></tr></thead>
                 <tbody>
                   {profiles.map(p => {
                     const activeCamps = getProfileCampaigns(p.id)
@@ -265,14 +239,10 @@ export default function AdminPage() {
                           </span>
                         </td>
                         <td style={{ padding: '10px 12px' }}>
-                          {activeCamps.length === 0 ? (
-                            <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>No campaigns assigned</span>
-                          ) : (
+                          {activeCamps.length === 0 ? <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>No campaigns assigned</span> : (
                             <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                               {activeCamps.map((name, i) => (
-                                <span key={name} style={{ fontSize: 10, padding: '2px 7px', borderRadius: 99, background: 'var(--accent-bg)', color: 'var(--accent)', fontWeight: 600 }}>
-                                  {i + 1}. {name}
-                                </span>
+                                <span key={name} style={{ fontSize: 10, padding: '2px 7px', borderRadius: 99, background: 'var(--accent-bg)', color: 'var(--accent)', fontWeight: 600 }}>{i + 1}. {name}</span>
                               ))}
                             </div>
                           )}
@@ -290,13 +260,10 @@ export default function AdminPage() {
               </table>
             )}
           </div>
-
           <div className="card">
             <div className="card-header"><div className="card-title">Quick SQL Reference</div></div>
             <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
-                For bulk operations, use the <a href="https://supabase.com" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent)' }}>Supabase SQL editor</a>.
-              </div>
+              <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>For bulk operations, use the <a href="https://supabase.com" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent)' }}>Supabase SQL editor</a>.</div>
               <div style={{ background: 'var(--surface-2)', borderRadius: 'var(--radius)', padding: '12px 14px', fontSize: 11, color: 'var(--text-secondary)', fontFamily: 'monospace', lineHeight: 1.8 }}>
                 <div>-- Clean duplicate phone numbers:</div>
                 <div>UPDATE contacts SET phone = TRIM(SPLIT_PART(phone, ',', 1)) WHERE phone LIKE '%,%';</div>
@@ -308,7 +275,6 @@ export default function AdminPage() {
         </>
       )}
 
-      {/* Edit user modal */}
       {editProfile && (
         <Modal title={`Edit — ${editProfile.name || editProfile.email}`} onClose={() => setEditProfile(null)} width={560}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
