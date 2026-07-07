@@ -162,7 +162,7 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
       pBlocks[idx] = block
       return { ...prev, [dragging.profileId]: pBlocks }
     })
-    setDragging(prev => ({ ...prev, startX: e.clientX }))
+    setDragging(prev => ({ ...prev, startX: prev.startX + deltaIntervals * CELL_WIDTH }))
   }, [dragging])
 
   const handleMouseUp = useCallback(() => {
