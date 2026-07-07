@@ -65,7 +65,7 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
   const [saving, setSaving] = useState(false)
   const [shiftModal, setShiftModal] = useState(null) // profileId
   const [shiftForm, setShiftForm] = useState({ shift_start:'08:00', shift_end:'17:00', break1_start:'10:00', break1_duration:15, lunch_start:'12:00', lunch_duration:30, break2_start:'14:30', break2_duration:15, day_type:'work' })
-  const [addBlockMenu, setAddBlockMenu] = useState(null)
+  const [addBlockMenu, setAddBlockMenu] = useState(null) // { profileId, x, y }
   const today = new Date().toISOString().split('T')[0]
 
   // Load schedules for this date
@@ -235,9 +235,18 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
     setAddBlockMenu(null)
     const shiftBlock = (blocks[profileId] || []).find(b => b.type === 'shift')
     const start = shiftBlock ? shiftBlock.start + 4 : 8
-    const duration = type === 'outbound' ? 8 : type === 'meeting' ? 4 : 2
-    const newBlock = { id: type + '-extra-' + Date.now(), type, start, duration }
-    const newBlocks = { ...blocks, [profileId]: [...(blocks[profileId] || []), newBlock] }
+    let duration = 2
+    if (type === 'outbound') duration = 8
+    if (type === 'meeting') duration = 4
+    if (type === 'break') duration = 1
+    if (type === 'lunch') duration = 2
+    if (type === 'pto' || type === 'sick') duration = TOTAL_INTERVALS
+
+    const newBlock = { id: type + '-extra-' + Date.now(), type, start: (type === 'pto' || type === 'sick') ? 0 : start, duration }
+    const filtered = (type === 'pto' || type === 'sick')
+      ? [] // clear everything for full day types
+      : (blocks[profileId] || [])
+    const newBlocks = { ...blocks, [profileId]: [...filtered, newBlock] }
     setBlocks(newBlocks)
     saveBlocksToDb(profileId, newBlocks)
   }
@@ -352,31 +361,14 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
                   </div>
                   {isAdmin && hasShift && !isPto && !isSick && (
                     <button
-                      onClick={() => setAddBlockMenu(addBlockMenu === p.id ? null : p.id)}
-                      style={{ fontSize:14, background:'none', border:'none', cursor:'pointer', color:'var(--accent)', padding:'2px 4px', flexShrink:0 }}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        const rect = e.currentTarget.getBoundingClientRect()
+                        setAddBlockMenu(addBlockMenu?.profileId === p.id ? null : { profileId: p.id, x: rect.left, y: rect.bottom + 4 })
+                      }}
+                      style={{ fontSize:16, background:'none', border:'none', cursor:'pointer', color:'var(--accent)', padding:'2px 4px', flexShrink:0, lineHeight:1 }}
                       title="Add block"
                     >+</button>
-                  )}
-                  {/* Add block dropdown */}
-                  {addBlockMenu === p.id && (
-                    <div style={{ position:'absolute', left:LABEL_WIDTH - 10, top:'auto', background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius)', boxShadow:'0 4px 16px rgba(0,0,0,.15)', zIndex:100, minWidth:160, overflow:'hidden' }}>
-                      {['outbound','meeting'].map(type => {
-                        const bt = BLOCK_TYPES.find(b => b.id === type)
-                        return (
-                          <button key={type} onClick={() => addExtraBlock(p.id, type)}
-                            style={{ display:'flex', alignItems:'center', gap:8, width:'100%', padding:'8px 12px', background:'transparent', border:'none', cursor:'pointer', fontSize:12, color:'var(--text-primary)', textAlign:'left' }}
-                            onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
-                            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-                            <span style={{ width:10, height:10, borderRadius:2, background:bt.color, flexShrink:0 }}></span>
-                            {bt.label}
-                          </button>
-                        )
-                      })}
-                      <button onClick={() => setAddBlockMenu(null)}
-                        style={{ display:'block', width:'100%', padding:'6px 12px', background:'transparent', border:'none', borderTop:'1px solid var(--border)', cursor:'pointer', fontSize:11, color:'var(--text-muted)', textAlign:'left' }}>
-                        Cancel
-                      </button>
-                    </div>
                   )}
                 </div>
 
@@ -441,6 +433,28 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
 
       {/* Click outside add block menu */}
       {addBlockMenu && <div style={{ position:'fixed', inset:0, zIndex:99 }} onClick={() => setAddBlockMenu(null)} />}
+
+      {/* Add block dropdown - fixed position */}
+      {addBlockMenu && (
+        <div style={{ position:'fixed', left: addBlockMenu.x, top: addBlockMenu.y, background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius)', boxShadow:'0 4px 16px rgba(0,0,0,.2)', zIndex:200, minWidth:170, overflow:'hidden' }}>
+          {['break','lunch','outbound','meeting','pto','sick'].map(type => {
+            const bt = BLOCK_TYPES.find(b => b.id === type)
+            return (
+              <button key={type} onClick={() => addExtraBlock(addBlockMenu.profileId, type)}
+                style={{ display:'flex', alignItems:'center', gap:8, width:'100%', padding:'9px 14px', background:'transparent', border:'none', cursor:'pointer', fontSize:12, color:'var(--text-primary)', textAlign:'left' }}
+                onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
+                onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                <span style={{ width:10, height:10, borderRadius:2, background:bt.color, flexShrink:0 }}></span>
+                {bt.label}
+              </button>
+            )
+          })}
+          <button onClick={() => setAddBlockMenu(null)}
+            style={{ display:'block', width:'100%', padding:'7px 14px', background:'transparent', border:'none', borderTop:'1px solid var(--border)', cursor:'pointer', fontSize:11, color:'var(--text-muted)', textAlign:'left' }}>
+            Cancel
+          </button>
+        </div>
+      )}
 
       {/* Shift modal */}
       {shiftModal && (
