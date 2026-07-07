@@ -12,7 +12,6 @@ import AdminPage from './AdminPage'
 import WarRoomPage from './WarRoomPage'
 import LeaderboardPage from './LeaderboardPage'
 import WinCelebration from '../components/WinCelebration'
-import EmojiPicker from '../components/EmojiPicker'
 
 const STATUS_OPTIONS = [
   { value: 'Available', color: '#22c55e' },
@@ -29,7 +28,6 @@ export default function DialerLayout() {
   const navigate = useNavigate()
   const [agentStatus, setAgentStatus] = useState('Offline')
   const [showStatusMenu, setShowStatusMenu] = useState(false)
-  const [showEmojiPicker, setShowEmojiPicker] = useState(false)
   const menuRef = useRef(null)
 
   // Load status from profile on mount
@@ -100,7 +98,6 @@ export default function DialerLayout() {
   return (
     <div style={{ display:'flex', flexDirection:'column', height:'100vh', overflow:'hidden' }}>
       <WinCelebration />
-      {showEmojiPicker && <EmojiPicker onClose={() => setShowEmojiPicker(false)} />}
       <header style={{ background:'var(--surface)', borderBottom:'1px solid var(--border)', padding:'0 20px', display:'flex', alignItems:'center', justifyContent:'space-between', height:52, flexShrink:0, zIndex:100 }}>
         <div style={{ display:'flex', alignItems:'center', gap:10 }}>
           <span style={{ background:'var(--accent)', color:'#fff', fontSize:11, fontWeight:700, padding:'2px 8px', borderRadius:4, letterSpacing:.5 }}>AHS</span>
@@ -139,9 +136,7 @@ export default function DialerLayout() {
           {/* Agent name + avatar */}
           <div style={{ fontSize:12, color:'var(--text-secondary)', display:'flex', alignItems:'center', gap:6 }}>
             <div
-              onClick={() => setShowEmojiPicker(true)}
-              style={{ width:28, height:28, borderRadius:'50%', background:'var(--accent-bg)', color:'var(--accent-text)', display:'flex', alignItems:'center', justifyContent:'center', fontSize: profile?.avatar ? 18 : 11, fontWeight:600, cursor:'pointer', flexShrink:0 }}
-              title="Change avatar"
+              style={{ width:28, height:28, borderRadius:'50%', background:'var(--accent-bg)', color:'var(--accent-text)', display:'flex', alignItems:'center', justifyContent:'center', fontSize: profile?.avatar ? 18 : 11, fontWeight:600, flexShrink:0 }}
             >
               {profile?.avatar || (profile?.name || profile?.email || '?')[0].toUpperCase()}
             </div>
