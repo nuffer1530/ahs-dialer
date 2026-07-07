@@ -189,10 +189,20 @@ export default function AttendancePage() {
       lunch_start: isPtoOrSick ? null : (editData.lunch_start || null),
       lunch_end: isPtoOrSick ? null : (editData.lunch_start ? addMinutes(editData.lunch_start, editData.lunch_duration) : null),
       lunch_duration: editData.lunch_duration,
-      template_color: editData.template_color || null,
       created_by: profile.id,
     }
-    await sb.from('schedules').upsert(payload, { onConflict: 'profile_id,date' })
+    // Try with template_color first; if column doesn't exist yet, retry without it
+    let { error } = await sb.from('schedules').upsert({ ...payload, template_color: editData.template_color || null }, { onConflict: 'profile_id,date' })
+    if (error && error.message?.includes('template_color')) {
+      const result = await sb.from('schedules').upsert(payload, { onConflict: 'profile_id,date' })
+      error = result.error
+    }
+    if (error) {
+      console.error('Schedule save failed:', error.message)
+      alert('Save failed: ' + error.message)
+      setSaving(false)
+      return
+    }
     const { data: s } = await sb.from('schedules').select('*').gte('date', weekDates[0]).lte('date', weekDates[6])
     setSchedules(s || [])
     setSaving(false)
