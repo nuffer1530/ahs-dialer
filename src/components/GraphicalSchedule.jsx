@@ -74,6 +74,7 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
   const [shiftForm, setShiftForm] = useState({ shift_start:'08:00', shift_end:'17:00', break1_start:'10:00', break1_duration:15, lunch_start:'12:00', lunch_duration:30, break2_start:'14:30', break2_duration:15, day_type:'work' })
   const [addBlockMenu, setAddBlockMenu] = useState(null)
   const [containerWidth, setContainerWidth] = useState(0)
+  const [extraBlocks, setExtraBlocks] = useState([]) // outbound/meeting from schedule_blocks table
   const today = new Date().toISOString().split('T')[0]
 
   // Dynamic cell width — fills available space, minimum 14px
@@ -81,10 +82,14 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
     ? Math.max(MIN_CELL_WIDTH, Math.floor((containerWidth - LABEL_WIDTH) / TOTAL_INTERVALS))
     : MIN_CELL_WIDTH
 
-  // Load schedules for this date
+  // Load schedules + extra blocks for this date
   useEffect(() => {
-    sb.from('schedules').select('*').eq('date', date).then(({ data }) => {
-      setSchedules(data || [])
+    Promise.all([
+      sb.from('schedules').select('*').eq('date', date),
+      sb.from('schedule_blocks').select('*').eq('date', date),
+    ]).then(([{ data: scheds }, { data: extras }]) => {
+      setSchedules(scheds || [])
+      setExtraBlocks(extras || [])
     })
   }, [date])
 
@@ -113,13 +118,18 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
     return () => obs.disconnect()
   }, [])
 
-  // Build blocks from schedules
+  // Build blocks from schedules + extraBlocks
   useEffect(() => {
     const newBlocks = {}
     profiles.forEach(p => {
       const sched = schedules.find(s => s.profile_id === p.id)
       newBlocks[p.id] = []
-      if (!sched) return
+      if (!sched) {
+        // Still load any extra blocks even if no shift set
+        const pExtras = extraBlocks.filter(b => b.profile_id === p.id)
+        pExtras.forEach(b => newBlocks[p.id].push({ id: b.id, type: b.type, start: b.start_interval, duration: b.duration_intervals, dbId: b.id }))
+        return
+      }
       if (sched.day_type === 'pto') { newBlocks[p.id] = [{ id:'pto-'+p.id, type:'pto', start:0, duration:TOTAL_INTERVALS }]; return }
       if (sched.day_type === 'sick') { newBlocks[p.id] = [{ id:'sick-'+p.id, type:'sick', start:0, duration:TOTAL_INTERVALS }]; return }
       if (sched.day_type === 'holiday') { newBlocks[p.id] = [{ id:'holiday-'+p.id, type:'holiday', start:0, duration:TOTAL_INTERVALS }]; return }
@@ -139,9 +149,12 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
         const s = timeToInterval(sched.break2_start)
         if (s !== null) newBlocks[p.id].push({ id:'b2-'+p.id, type:'break', start:s, duration:Math.round((sched.break2_duration||15)/15) })
       }
+      // Extra blocks (outbound, meeting) from schedule_blocks table
+      const pExtras = extraBlocks.filter(b => b.profile_id === p.id)
+      pExtras.forEach(b => newBlocks[p.id].push({ id: b.id, type: b.type, start: b.start_interval, duration: b.duration_intervals, dbId: b.id }))
     })
     setBlocks(newBlocks)
-  }, [schedules, profiles])
+  }, [schedules, extraBlocks, profiles])
 
   // FIX: saveBlocksToDb takes profileId + blocksSnapshot — no stale closure issues
   const saveBlocksToDb = useCallback(async (profileId, blocksSnapshot) => {
@@ -207,11 +220,21 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
 
   const handleMouseUp = useCallback(() => {
     if (!dragging) return
-    const { profileId } = dragging
+    const { profileId, blockId } = dragging
     setDragging(null)
-    // FIX: use functional form so we have fresh blocks state
     setBlocks(prev => {
-      saveBlocksToDb(profileId, prev)
+      const movedBlock = (prev[profileId] || []).find(b => b.id === blockId)
+      if (movedBlock?.dbId) {
+        // Extra block — update schedule_blocks table
+        sb.from('schedule_blocks').update({
+          start_interval: movedBlock.start,
+          duration_intervals: movedBlock.duration,
+        }).eq('id', movedBlock.dbId).then(({ error }) => {
+          if (error) console.error('Extra block drag save error:', error.message)
+        })
+      } else {
+        saveBlocksToDb(profileId, prev)
+      }
       return prev
     })
   }, [dragging, saveBlocksToDb])
@@ -277,14 +300,11 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
     setShiftModal(null)
   }
 
-  const addExtraBlock = (profileId, type) => {
+  const addExtraBlock = async (profileId, type) => {
     setAddBlockMenu(null)
 
-    // If "shift" chosen from menu, open the shift modal instead
-    if (type === 'shift') {
-      openShiftModal(profileId)
-      return
-    }
+    // Shift: open the shift modal
+    if (type === 'shift') { openShiftModal(profileId); return }
 
     const existing = blocks[profileId] || []
     const shiftBlock = existing.find(b => b.type === 'shift')
@@ -296,6 +316,23 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
     if (type === 'lunch') duration = 2
     if (type === 'pto' || type === 'sick' || type === 'holiday') duration = TOTAL_INTERVALS
 
+    // Outbound and meeting go to schedule_blocks table (not schedules)
+    if (type === 'outbound' || type === 'meeting') {
+      setSaving(true)
+      const { data: inserted, error } = await sb.from('schedule_blocks').insert({
+        profile_id: profileId, date, type,
+        start_interval: start, duration_intervals: duration,
+        created_by: profile?.id,
+      }).select().single()
+      if (error) { console.error('Extra block save error:', error.message); setSaving(false); return }
+      const newBlock = { id: inserted.id, type, start, duration, dbId: inserted.id }
+      setBlocks(prev => ({ ...prev, [profileId]: [...(prev[profileId] || []), newBlock] }))
+      setExtraBlocks(prev => [...prev, inserted])
+      setSaving(false)
+      return
+    }
+
+    // PTO/Sick/Holiday/Break/Lunch go through schedules table as before
     const newBlock = { id: type + '-' + Date.now(), type, start: (type === 'pto' || type === 'sick' || type === 'holiday') ? 0 : start, duration }
     const base = (type === 'pto' || type === 'sick' || type === 'holiday') ? [] : existing
     const newBlocks = { ...blocks, [profileId]: [...base, newBlock] }
@@ -303,10 +340,16 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
     saveBlocksToDb(profileId, newBlocks)
   }
 
-  const removeBlock = (profileId, blockId) => {
+  const removeBlock = async (profileId, blockId) => {
+    const block = (blocks[profileId] || []).find(b => b.id === blockId)
+    if (block?.dbId) {
+      // Extra block from schedule_blocks table — delete by DB id
+      await sb.from('schedule_blocks').delete().eq('id', block.dbId)
+      setExtraBlocks(prev => prev.filter(b => b.id !== block.dbId))
+    }
     const newBlocks = { ...blocks, [profileId]: (blocks[profileId] || []).filter(b => b.id !== blockId) }
     setBlocks(newBlocks)
-    saveBlocksToDb(profileId, newBlocks)
+    if (!block?.dbId) saveBlocksToDb(profileId, newBlocks)
   }
 
   const getCoverage = (interval) => profiles.filter(p => {
