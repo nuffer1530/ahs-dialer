@@ -7,6 +7,6 @@ export default defineConfig({
   preview: {
     port: parseInt(process.env.PORT) || 8080,
     host: '0.0.0.0',
-    allowedHosts: ['ahs-dialer-production.up.railway.app', 'all']
+    allowedHosts: ['ahs-dialer-production.up.railway.app', 'andi.awesomeservice.com']
   }
 })
