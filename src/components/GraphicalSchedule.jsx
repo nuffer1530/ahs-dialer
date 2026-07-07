@@ -295,8 +295,13 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
   }
 
   const deleteSchedule = async (profileId) => {
-    await sb.from('schedules').delete().eq('profile_id', profileId).eq('date', date)
+    await Promise.all([
+      sb.from('schedules').delete().eq('profile_id', profileId).eq('date', date),
+      sb.from('schedule_blocks').delete().eq('profile_id', profileId).eq('date', date),
+    ])
     setSchedules(prev => prev.filter(s => s.profile_id !== profileId))
+    setExtraBlocks(prev => prev.filter(b => b.profile_id !== profileId))
+    setBlocks(prev => ({ ...prev, [profileId]: [] }))
     setShiftModal(null)
   }
 
