@@ -1,0 +1,575 @@
+import { useState, useEffect, useCallback } from 'react'
+import { sb } from '../lib/supabase'
+import { useAuth } from '../lib/AuthContext'
+import Modal from '../components/Modal'
+
+const DAYS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']
+const GRACE = 5 // minutes
+
+function fmt(time) {
+  if (!time) return '—'
+  const [h, m] = time.split(':')
+  const hour = parseInt(h)
+  const ampm = hour >= 12 ? 'PM' : 'AM'
+  return `${hour % 12 || 12}:${m} ${ampm}`
+}
+
+function fmtDuration(seconds) {
+  if (!seconds) return '—'
+  const m = Math.floor(seconds / 60)
+  const s = seconds % 60
+  if (m < 60) return `${m}m ${s}s`
+  return `${Math.floor(m/60)}h ${m%60}m`
+}
+
+function fmtTime(iso) {
+  if (!iso) return '—'
+  return new Date(iso).toLocaleTimeString('en-US', { hour:'numeric', minute:'2-digit', hour12:true })
+}
+
+function adherencePct(scheduled, nonAdherentSeconds) {
+  if (!scheduled) return null
+  const [sh, sm] = scheduled.shift_start.split(':').map(Number)
+  const [eh, em] = scheduled.shift_end.split(':').map(Number)
+  const totalMins = (eh * 60 + em) - (sh * 60 + sm)
+  if (totalMins <= 0) return null
+  const nonAdherentMins = (nonAdherentSeconds || 0) / 60
+  return Math.max(0, Math.round(((totalMins - nonAdherentMins) / totalMins) * 100))
+}
+
+function getWeekDates(baseDate) {
+  const d = new Date(baseDate)
+  const day = d.getDay()
+  const monday = new Date(d)
+  monday.setDate(d.getDate() - (day === 0 ? 6 : day - 1))
+  return Array.from({ length: 7 }, (_, i) => {
+    const date = new Date(monday)
+    date.setDate(monday.getDate() + i)
+    return date.toISOString().split('T')[0]
+  })
+}
+
+export default function AttendancePage() {
+  const { profile, isAdmin } = useAuth()
+  const [tab, setTab] = useState('schedule') // schedule | adherence | reports
+  const [profiles, setProfiles] = useState([])
+  const [schedules, setSchedules] = useState([])
+  const [statusEvents, setStatusEvents] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [weekBase, setWeekBase] = useState(new Date().toISOString().split('T')[0])
+  const [editCell, setEditCell] = useState(null) // { profileId, date }
+  const [editData, setEditData] = useState({})
+  const [saving, setSaving] = useState(false)
+  const [reportRange, setReportRange] = useState({ start: '', end: '' })
+  const [reportData, setReportData] = useState(null)
+  const [copyFrom, setCopyFrom] = useState(null)
+
+  const weekDates = getWeekDates(weekBase)
+
+  useEffect(() => {
+    const load = async () => {
+      const [{ data: p }, { data: s }, { data: ev }] = await Promise.all([
+        sb.from('profiles').select('id, name, email, avatar').order('name'),
+        sb.from('schedules').select('*').gte('date', weekDates[0]).lte('date', weekDates[6]),
+        sb.from('status_events').select('*').gte('started_at', weekDates[0] + 'T00:00:00').lte('started_at', weekDates[6] + 'T23:59:59'),
+      ])
+      setProfiles(p || [])
+      setSchedules(s || [])
+      setStatusEvents(ev || [])
+      setLoading(false)
+    }
+    load()
+  }, [weekBase])
+
+  const getSchedule = (profileId, date) => schedules.find(s => s.profile_id === profileId && s.date === date)
+
+  const getEvents = (profileId, date) => {
+    return statusEvents
+      .filter(e => e.profile_id === profileId && e.started_at.startsWith(date))
+      .sort((a, b) => new Date(a.started_at) - new Date(b.started_at))
+  }
+
+  const openEdit = (profileId, date) => {
+    const existing = getSchedule(profileId, date)
+    setEditData(existing ? {
+      shift_start: existing.shift_start || '08:00',
+      shift_end: existing.shift_end || '17:00',
+      break1_start: existing.break1_start || '',
+      break1_end: existing.break1_end || '',
+      break2_start: existing.break2_start || '',
+      break2_end: existing.break2_end || '',
+      lunch_start: existing.lunch_start || '',
+      lunch_end: existing.lunch_end || '',
+      lunch_duration: existing.lunch_duration || 30,
+    } : {
+      shift_start: '08:00', shift_end: '17:00',
+      break1_start: '10:00', break1_end: '10:15',
+      break2_start: '14:30', break2_end: '14:45',
+      lunch_start: '12:00', lunch_end: '',
+      lunch_duration: 30,
+    })
+    setEditCell({ profileId, date })
+  }
+
+  const saveSchedule = async () => {
+    if (!editCell) return
+    setSaving(true)
+    const { profileId, date } = editCell
+    const payload = {
+      profile_id: profileId,
+      date,
+      ...editData,
+      lunch_end: editData.lunch_start && editData.lunch_duration
+        ? (() => {
+            const [h, m] = editData.lunch_start.split(':').map(Number)
+            const total = h * 60 + m + parseInt(editData.lunch_duration)
+            return `${String(Math.floor(total/60)).padStart(2,'0')}:${String(total%60).padStart(2,'0')}`
+          })()
+        : editData.lunch_end,
+      created_by: profile.id,
+    }
+    await sb.from('schedules').upsert(payload, { onConflict: 'profile_id,date' })
+    const { data: s } = await sb.from('schedules').select('*').gte('date', weekDates[0]).lte('date', weekDates[6])
+    setSchedules(s || [])
+    setSaving(false)
+    setEditCell(null)
+  }
+
+  const deleteSchedule = async (profileId, date) => {
+    await sb.from('schedules').delete().eq('profile_id', profileId).eq('date', date)
+    setSchedules(prev => prev.filter(s => !(s.profile_id === profileId && s.date === date)))
+    setEditCell(null)
+  }
+
+  const copyWeek = async (targetWeekBase) => {
+    const targetDates = getWeekDates(targetWeekBase)
+    const toInsert = []
+    weekDates.forEach((date, i) => {
+      profiles.forEach(p => {
+        const s = getSchedule(p.id, date)
+        if (s) toInsert.push({ ...s, id: undefined, date: targetDates[i], created_by: profile.id })
+      })
+    })
+    if (toInsert.length > 0) {
+      await sb.from('schedules').upsert(toInsert, { onConflict: 'profile_id,date' })
+    }
+    setWeekBase(targetWeekBase)
+    setCopyFrom(null)
+  }
+
+  const runReport = async () => {
+    if (!reportRange.start || !reportRange.end) return
+    const [{ data: scheds }, { data: events }] = await Promise.all([
+      sb.from('schedules').select('*').gte('date', reportRange.start).lte('date', reportRange.end),
+      sb.from('status_events').select('*').gte('started_at', reportRange.start + 'T00:00:00').lte('started_at', reportRange.end + 'T23:59:59'),
+    ])
+    const results = profiles.map(p => {
+      const pScheds = scheds?.filter(s => s.profile_id === p.id) || []
+      const pEvents = events?.filter(e => e.profile_id === p.id) || []
+      const daysScheduled = pScheds.length
+      const breakEvents = pEvents.filter(e => e.status === 'Break' && e.duration_seconds)
+      const lunchEvents = pEvents.filter(e => e.status === 'Lunch' && e.duration_seconds)
+      const breakViolations = breakEvents.filter(e => e.duration_seconds > (15 + GRACE) * 60).length
+      const lunchViolations = lunchEvents.filter(e => e.duration_seconds > (30 + GRACE) * 60).length
+      const totalLateSeconds = pEvents.filter(e => !e.adherent).reduce((sum, e) => sum + (e.duration_seconds || 0), 0)
+      const avgAdherence = pScheds.length > 0
+        ? Math.round(pScheds.reduce((sum, s) => {
+            const dayEvents = pEvents.filter(e => e.started_at.startsWith(s.date))
+            const late = dayEvents.filter(e => !e.adherent).reduce((a, b) => a + (b.duration_seconds || 0), 0)
+            return sum + (adherencePct(s, late) || 100)
+          }, 0) / pScheds.length)
+        : null
+      return { profile: p, daysScheduled, breakViolations, lunchViolations, totalLateSeconds, avgAdherence }
+    })
+    setReportData(results)
+  }
+
+  const exportReport = () => {
+    if (!reportData) return
+    const rows = reportData.map(r => [
+      r.profile.name || r.profile.email,
+      r.daysScheduled,
+      r.avgAdherence != null ? r.avgAdherence + '%' : '—',
+      r.breakViolations,
+      r.lunchViolations,
+      fmtDuration(r.totalLateSeconds),
+    ])
+    const csv = [['Agent','Days Scheduled','Avg Adherence','Break Violations','Lunch Violations','Total Late Time'], ...rows].map(r => r.join(',')).join('\n')
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }))
+    a.download = `AHS_Attendance_${reportRange.start}_${reportRange.end}.csv`
+    a.click()
+  }
+
+  if (loading) return <div style={{ display:'flex', alignItems:'center', justifyContent:'center', flex:1 }}><div className="spinner lg"></div></div>
+
+  const prevWeek = () => {
+    const d = new Date(weekBase)
+    d.setDate(d.getDate() - 7)
+    setWeekBase(d.toISOString().split('T')[0])
+  }
+  const nextWeek = () => {
+    const d = new Date(weekBase)
+    d.setDate(d.getDate() + 7)
+    setWeekBase(d.toISOString().split('T')[0])
+  }
+
+  return (
+    <div style={{ flex:1, overflowY:'auto', padding:24, display:'flex', flexDirection:'column', gap:20 }}>
+      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+        <h1 style={{ fontSize:20, fontWeight:600 }}>🗓️ Attendance & Schedule</h1>
+        <div style={{ display:'flex', gap:6 }}>
+          {['schedule','adherence','reports'].map(t => (
+            <button key={t} onClick={() => setTab(t)}
+              style={{ padding:'5px 14px', borderRadius:99, fontSize:12, fontWeight:500, border:'1px solid', cursor:'pointer',
+                borderColor: tab === t ? 'var(--accent)' : 'var(--border)',
+                background: tab === t ? 'var(--accent)' : 'var(--surface)',
+                color: tab === t ? '#fff' : 'var(--text-secondary)' }}>
+              {t.charAt(0).toUpperCase() + t.slice(1)}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* SCHEDULE TAB */}
+      {tab === 'schedule' && (
+        <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
+          {/* Week nav */}
+          <div style={{ display:'flex', alignItems:'center', gap:12 }}>
+            <button className="btn sm" onClick={prevWeek}>← Prev</button>
+            <span style={{ fontSize:13, fontWeight:600 }}>
+              Week of {new Date(weekDates[0] + 'T12:00:00').toLocaleDateString('en-US', { month:'short', day:'numeric' })} – {new Date(weekDates[6] + 'T12:00:00').toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' })}
+            </span>
+            <button className="btn sm" onClick={nextWeek}>Next →</button>
+            {isAdmin && (
+              <button className="btn sm" onClick={() => setCopyFrom(weekBase)} style={{ marginLeft:'auto' }}>📋 Copy week →</button>
+            )}
+          </div>
+
+          {/* Schedule grid */}
+          <div style={{ overflowX:'auto' }}>
+            <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
+              <thead>
+                <tr style={{ background:'var(--surface-2)' }}>
+                  <th style={{ padding:'10px 12px', textAlign:'left', fontWeight:600, width:140, borderBottom:'1px solid var(--border)' }}>Agent</th>
+                  {weekDates.map((date, i) => {
+                    const d = new Date(date + 'T12:00:00')
+                    const isToday = date === new Date().toISOString().split('T')[0]
+                    return (
+                      <th key={date} style={{ padding:'10px 8px', textAlign:'center', fontWeight:600, borderBottom:'1px solid var(--border)', minWidth:110, background: isToday ? 'var(--accent-bg)' : undefined, color: isToday ? 'var(--accent)' : undefined }}>
+                        <div>{DAYS[d.getDay()]}</div>
+                        <div style={{ fontSize:10, fontWeight:400, color:'var(--text-muted)' }}>{d.toLocaleDateString('en-US', { month:'short', day:'numeric' })}</div>
+                      </th>
+                    )
+                  })}
+                </tr>
+              </thead>
+              <tbody>
+                {profiles.map(p => (
+                  <tr key={p.id} style={{ borderBottom:'1px solid var(--border)' }}>
+                    <td style={{ padding:'8px 12px', fontWeight:500 }}>
+                      <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+                        <div style={{ width:24, height:24, borderRadius:'50%', background:'var(--accent-bg)', display:'flex', alignItems:'center', justifyContent:'center', fontSize: p.avatar ? 14 : 10, fontWeight:600, flexShrink:0 }}>
+                          {p.avatar || (p.name || p.email || '?')[0].toUpperCase()}
+                        </div>
+                        <span style={{ fontSize:11 }}>{p.name || p.email}</span>
+                      </div>
+                    </td>
+                    {weekDates.map(date => {
+                      const sched = getSchedule(p.id, date)
+                      const isToday = date === new Date().toISOString().split('T')[0]
+                      return (
+                        <td key={date} style={{ padding:'4px 6px', verticalAlign:'top', background: isToday ? 'rgba(59,130,246,.04)' : undefined }}>
+                          {sched ? (
+                            <div
+                              onClick={() => isAdmin && openEdit(p.id, date)}
+                              style={{ background:'var(--accent-bg)', border:'1px solid var(--accent)', borderRadius:'var(--radius)', padding:'5px 7px', cursor: isAdmin ? 'pointer' : 'default', fontSize:10 }}
+                            >
+                              <div style={{ fontWeight:600, color:'var(--accent)' }}>{fmt(sched.shift_start)} – {fmt(sched.shift_end)}</div>
+                              {sched.break1_start && <div style={{ color:'var(--text-muted)', marginTop:2 }}>☕ {fmt(sched.break1_start)}</div>}
+                              {sched.lunch_start && <div style={{ color:'var(--text-muted)' }}>🍽 {fmt(sched.lunch_start)} ({sched.lunch_duration}m)</div>}
+                              {sched.break2_start && <div style={{ color:'var(--text-muted)' }}>☕ {fmt(sched.break2_start)}</div>}
+                            </div>
+                          ) : (
+                            isAdmin ? (
+                              <button
+                                onClick={() => openEdit(p.id, date)}
+                                style={{ width:'100%', padding:'6px', border:'1px dashed var(--border)', borderRadius:'var(--radius)', background:'transparent', color:'var(--text-muted)', cursor:'pointer', fontSize:11 }}
+                              >+ Add</button>
+                            ) : <span style={{ fontSize:10, color:'var(--text-muted)', padding:'4px 6px', display:'block' }}>Off</span>
+                          )}
+                        </td>
+                      )
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* ADHERENCE TAB */}
+      {tab === 'adherence' && (
+        <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
+          <div style={{ display:'flex', alignItems:'center', gap:12 }}>
+            <button className="btn sm" onClick={prevWeek}>← Prev</button>
+            <span style={{ fontSize:13, fontWeight:600 }}>
+              Week of {new Date(weekDates[0] + 'T12:00:00').toLocaleDateString('en-US', { month:'short', day:'numeric' })} – {new Date(weekDates[6] + 'T12:00:00').toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' })}
+            </span>
+            <button className="btn sm" onClick={nextWeek}>Next →</button>
+          </div>
+
+          {profiles.map(p => {
+            const pScheds = schedules.filter(s => s.profile_id === p.id)
+            const pEvents = statusEvents.filter(e => e.profile_id === p.id)
+            if (pScheds.length === 0 && pEvents.length === 0) return null
+            return (
+              <div key={p.id} className="card">
+                <div className="card-header">
+                  <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                    <div style={{ width:28, height:28, borderRadius:'50%', background:'var(--accent-bg)', display:'flex', alignItems:'center', justifyContent:'center', fontSize: p.avatar ? 18 : 11, fontWeight:600 }}>
+                      {p.avatar || (p.name || p.email || '?')[0].toUpperCase()}
+                    </div>
+                    <div className="card-title">{p.name || p.email}</div>
+                  </div>
+                  {pScheds.length > 0 && (() => {
+                    const avg = Math.round(pScheds.reduce((sum, s) => {
+                      const dayEvents = pEvents.filter(e => e.started_at.startsWith(s.date))
+                      const late = dayEvents.filter(e => !e.adherent).reduce((a, b) => a + (b.duration_seconds || 0), 0)
+                      return sum + (adherencePct(s, late) || 100)
+                    }, 0) / pScheds.length)
+                    return (
+                      <span style={{ fontSize:13, fontWeight:700, color: avg >= 90 ? 'var(--success)' : avg >= 75 ? 'var(--warning)' : 'var(--danger)' }}>
+                        {avg}% adherence
+                      </span>
+                    )
+                  })()}
+                </div>
+                <div style={{ overflowX:'auto' }}>
+                  <table className="data-table">
+                    <thead>
+                      <tr><th>Date</th><th>Scheduled</th><th>Login</th><th>Break 1</th><th>Lunch</th><th>Break 2</th><th>Logout</th><th>Adherence</th></tr>
+                    </thead>
+                    <tbody>
+                      {weekDates.map(date => {
+                        const sched = getSchedule(p.id, date)
+                        const dayEvents = getEvents(p.id, date)
+                        const loginEvent = dayEvents.find(e => e.status === 'Available' || e.status === 'On Call')
+                        const breakEvents = dayEvents.filter(e => e.status === 'Break')
+                        const lunchEvent = dayEvents.find(e => e.status === 'Lunch')
+                        const offlineEvent = [...dayEvents].reverse().find(e => e.status === 'Offline')
+                        if (!sched && dayEvents.length === 0) return null
+
+                        const lateSeconds = dayEvents.filter(e => !e.adherent).reduce((a, b) => a + (b.duration_seconds || 0), 0)
+                        const pct = adherencePct(sched, lateSeconds)
+
+                        const breakViolation = (ev, limit) => ev && ev.duration_seconds > (limit + GRACE) * 60
+                        return (
+                          <tr key={date}>
+                            <td style={{ padding:'8px 12px', fontSize:11 }}>
+                              {new Date(date + 'T12:00:00').toLocaleDateString('en-US', { weekday:'short', month:'short', day:'numeric' })}
+                            </td>
+                            <td style={{ padding:'8px 12px', fontSize:11 }}>
+                              {sched ? `${fmt(sched.shift_start)} – ${fmt(sched.shift_end)}` : <span style={{ color:'var(--text-muted)' }}>—</span>}
+                            </td>
+                            <td style={{ padding:'8px 12px' }}>
+                              {loginEvent ? (
+                                <span style={{ fontSize:11, color:'var(--success)' }}>{fmtTime(loginEvent.started_at)}</span>
+                              ) : <span style={{ fontSize:11, color:'var(--danger)' }}>No login</span>}
+                            </td>
+                            <td style={{ padding:'8px 12px' }}>
+                              {breakEvents[0] ? (
+                                <span style={{ fontSize:11, color: breakViolation(breakEvents[0], 15) ? 'var(--danger)' : 'var(--text-secondary)' }}>
+                                  {fmtTime(breakEvents[0].started_at)} ({fmtDuration(breakEvents[0].duration_seconds)})
+                                  {breakViolation(breakEvents[0], 15) && ' ⚠️'}
+                                </span>
+                              ) : <span style={{ fontSize:11, color:'var(--text-muted)' }}>—</span>}
+                            </td>
+                            <td style={{ padding:'8px 12px' }}>
+                              {lunchEvent ? (
+                                <span style={{ fontSize:11, color: breakViolation(lunchEvent, sched?.lunch_duration || 30) ? 'var(--danger)' : 'var(--text-secondary)' }}>
+                                  {fmtTime(lunchEvent.started_at)} ({fmtDuration(lunchEvent.duration_seconds)})
+                                  {breakViolation(lunchEvent, sched?.lunch_duration || 30) && ' ⚠️'}
+                                </span>
+                              ) : <span style={{ fontSize:11, color:'var(--text-muted)' }}>—</span>}
+                            </td>
+                            <td style={{ padding:'8px 12px' }}>
+                              {breakEvents[1] ? (
+                                <span style={{ fontSize:11, color: breakViolation(breakEvents[1], 15) ? 'var(--danger)' : 'var(--text-secondary)' }}>
+                                  {fmtTime(breakEvents[1].started_at)} ({fmtDuration(breakEvents[1].duration_seconds)})
+                                  {breakViolation(breakEvents[1], 15) && ' ⚠️'}
+                                </span>
+                              ) : <span style={{ fontSize:11, color:'var(--text-muted)' }}>—</span>}
+                            </td>
+                            <td style={{ padding:'8px 12px' }}>
+                              {offlineEvent ? (
+                                <span style={{ fontSize:11, color:'var(--text-secondary)' }}>{fmtTime(offlineEvent.started_at)}</span>
+                              ) : <span style={{ fontSize:11, color:'var(--text-muted)' }}>—</span>}
+                            </td>
+                            <td style={{ padding:'8px 12px' }}>
+                              {pct != null ? (
+                                <span style={{ fontSize:12, fontWeight:700, color: pct >= 90 ? 'var(--success)' : pct >= 75 ? 'var(--warning)' : 'var(--danger)' }}>
+                                  {pct}%
+                                </span>
+                              ) : <span style={{ fontSize:11, color:'var(--text-muted)' }}>—</span>}
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {/* REPORTS TAB */}
+      {tab === 'reports' && (
+        <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
+          <div className="card">
+            <div className="card-header"><div className="card-title">Generate Report</div></div>
+            <div className="card-body" style={{ display:'flex', gap:12, alignItems:'flex-end', flexWrap:'wrap' }}>
+              <div className="form-field" style={{ margin:0 }}>
+                <label className="form-label">Start date</label>
+                <input type="date" className="form-input" value={reportRange.start} onChange={e => setReportRange(p => ({ ...p, start: e.target.value }))} />
+              </div>
+              <div className="form-field" style={{ margin:0 }}>
+                <label className="form-label">End date</label>
+                <input type="date" className="form-input" value={reportRange.end} onChange={e => setReportRange(p => ({ ...p, end: e.target.value }))} />
+              </div>
+              <button className="btn primary" onClick={runReport} disabled={!reportRange.start || !reportRange.end}>Run report</button>
+              {reportData && <button className="btn success" onClick={exportReport}>⬇ Export CSV</button>}
+            </div>
+          </div>
+
+          {reportData && (
+            <div className="card">
+              <div className="card-header">
+                <div className="card-title">Attendance Summary — {reportRange.start} to {reportRange.end}</div>
+              </div>
+              <table className="data-table">
+                <thead>
+                  <tr><th>Agent</th><th style={{ textAlign:'center' }}>Days Scheduled</th><th style={{ textAlign:'center' }}>Avg Adherence</th><th style={{ textAlign:'center' }}>Break Violations</th><th style={{ textAlign:'center' }}>Lunch Violations</th><th style={{ textAlign:'center' }}>Total Late</th></tr>
+                </thead>
+                <tbody>
+                  {reportData.map(r => (
+                    <tr key={r.profile.id}>
+                      <td style={{ padding:'10px 12px', fontWeight:500 }}>
+                        <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                          <div style={{ width:24, height:24, borderRadius:'50%', background:'var(--accent-bg)', display:'flex', alignItems:'center', justifyContent:'center', fontSize: r.profile.avatar ? 14 : 10, fontWeight:600 }}>
+                            {r.profile.avatar || (r.profile.name || r.profile.email || '?')[0].toUpperCase()}
+                          </div>
+                          {r.profile.name || r.profile.email}
+                        </div>
+                      </td>
+                      <td style={{ padding:'10px 12px', textAlign:'center' }}>{r.daysScheduled}</td>
+                      <td style={{ padding:'10px 12px', textAlign:'center', fontWeight:700, color: r.avgAdherence == null ? 'var(--text-muted)' : r.avgAdherence >= 90 ? 'var(--success)' : r.avgAdherence >= 75 ? 'var(--warning)' : 'var(--danger)' }}>
+                        {r.avgAdherence != null ? r.avgAdherence + '%' : '—'}
+                      </td>
+                      <td style={{ padding:'10px 12px', textAlign:'center', color: r.breakViolations > 0 ? 'var(--danger)' : 'var(--text-secondary)', fontWeight: r.breakViolations > 0 ? 600 : 400 }}>
+                        {r.breakViolations}
+                      </td>
+                      <td style={{ padding:'10px 12px', textAlign:'center', color: r.lunchViolations > 0 ? 'var(--danger)' : 'var(--text-secondary)', fontWeight: r.lunchViolations > 0 ? 600 : 400 }}>
+                        {r.lunchViolations}
+                      </td>
+                      <td style={{ padding:'10px 12px', textAlign:'center', color:'var(--text-secondary)' }}>{fmtDuration(r.totalLateSeconds)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Schedule edit modal */}
+      {editCell && (
+        <Modal
+          title={`Schedule — ${profiles.find(p => p.id === editCell.profileId)?.name || 'Agent'} · ${new Date(editCell.date + 'T12:00:00').toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric' })}`}
+          onClose={() => setEditCell(null)}
+          width={480}
+        >
+          <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
+              <div className="form-field">
+                <label className="form-label">Shift start</label>
+                <input type="time" className="form-input" value={editData.shift_start} onChange={e => setEditData(p => ({ ...p, shift_start: e.target.value }))} />
+              </div>
+              <div className="form-field">
+                <label className="form-label">Shift end</label>
+                <input type="time" className="form-input" value={editData.shift_end} onChange={e => setEditData(p => ({ ...p, shift_end: e.target.value }))} />
+              </div>
+            </div>
+
+            <div style={{ fontSize:11, fontWeight:600, textTransform:'uppercase', letterSpacing:.5, color:'var(--text-muted)' }}>Break 1</div>
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
+              <div className="form-field">
+                <label className="form-label">Start</label>
+                <input type="time" className="form-input" value={editData.break1_start} onChange={e => setEditData(p => ({ ...p, break1_start: e.target.value }))} />
+              </div>
+              <div className="form-field">
+                <label className="form-label">End</label>
+                <input type="time" className="form-input" value={editData.break1_end} onChange={e => setEditData(p => ({ ...p, break1_end: e.target.value }))} />
+              </div>
+            </div>
+
+            <div style={{ fontSize:11, fontWeight:600, textTransform:'uppercase', letterSpacing:.5, color:'var(--text-muted)' }}>Lunch</div>
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
+              <div className="form-field">
+                <label className="form-label">Start</label>
+                <input type="time" className="form-input" value={editData.lunch_start} onChange={e => setEditData(p => ({ ...p, lunch_start: e.target.value }))} />
+              </div>
+              <div className="form-field">
+                <label className="form-label">Duration</label>
+                <select className="form-input" value={editData.lunch_duration} onChange={e => setEditData(p => ({ ...p, lunch_duration: parseInt(e.target.value) }))}>
+                  <option value={30}>30 minutes</option>
+                  <option value={60}>60 minutes</option>
+                </select>
+              </div>
+            </div>
+
+            <div style={{ fontSize:11, fontWeight:600, textTransform:'uppercase', letterSpacing:.5, color:'var(--text-muted)' }}>Break 2</div>
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
+              <div className="form-field">
+                <label className="form-label">Start</label>
+                <input type="time" className="form-input" value={editData.break2_start} onChange={e => setEditData(p => ({ ...p, break2_start: e.target.value }))} />
+              </div>
+              <div className="form-field">
+                <label className="form-label">End</label>
+                <input type="time" className="form-input" value={editData.break2_end} onChange={e => setEditData(p => ({ ...p, break2_end: e.target.value }))} />
+              </div>
+            </div>
+          </div>
+
+          <div className="modal-actions">
+            {getSchedule(editCell.profileId, editCell.date) && (
+              <button className="btn danger" onClick={() => deleteSchedule(editCell.profileId, editCell.date)}>Delete</button>
+            )}
+            <button className="btn" onClick={() => setEditCell(null)}>Cancel</button>
+            <button className="btn primary" onClick={saveSchedule} disabled={saving}>{saving ? 'Saving…' : 'Save schedule'}</button>
+          </div>
+        </Modal>
+      )}
+
+      {/* Copy week modal */}
+      {copyFrom && (
+        <Modal title="Copy Schedule to Next Week" onClose={() => setCopyFrom(null)} width={400}>
+          <div style={{ fontSize:13, color:'var(--text-secondary)', marginBottom:16 }}>
+            This will copy all schedules from the current week to next week. Existing schedules for next week will be overwritten.
+          </div>
+          <div className="modal-actions">
+            <button className="btn" onClick={() => setCopyFrom(null)}>Cancel</button>
+            <button className="btn primary" onClick={() => {
+              const d = new Date(weekBase)
+              d.setDate(d.getDate() + 7)
+              copyWeek(d.toISOString().split('T')[0])
+            }}>Copy to next week</button>
+          </div>
+        </Modal>
+      )}
+    </div>
+  )
+}
