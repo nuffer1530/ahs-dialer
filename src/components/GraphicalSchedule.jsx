@@ -124,19 +124,20 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
     const lunchBlock = pBlocks.find(b => b.type === 'lunch')
     const ptoBlock = pBlocks.find(b => b.type === 'pto')
     const sickBlock = pBlocks.find(b => b.type === 'sick')
+
     const payload = {
       profile_id: profileId, date,
       day_type: ptoBlock ? 'pto' : sickBlock ? 'sick' : 'work',
-      shift_start: shiftBlock ? intervalToTimeStr(shiftBlock.start) : null,
-      shift_end: shiftBlock ? intervalToTimeStr(shiftBlock.start + shiftBlock.duration) : null,
-      break1_start: breakBlocks[0] ? intervalToTimeStr(breakBlocks[0].start) : null,
-      break1_end: breakBlocks[0] ? intervalToTimeStr(breakBlocks[0].start + breakBlocks[0].duration) : null,
+      shift_start: (!ptoBlock && !sickBlock && shiftBlock) ? intervalToTimeStr(shiftBlock.start) : null,
+      shift_end: (!ptoBlock && !sickBlock && shiftBlock) ? intervalToTimeStr(shiftBlock.start + shiftBlock.duration) : null,
+      break1_start: (!ptoBlock && !sickBlock && breakBlocks[0]) ? intervalToTimeStr(breakBlocks[0].start) : null,
+      break1_end: (!ptoBlock && !sickBlock && breakBlocks[0]) ? intervalToTimeStr(breakBlocks[0].start + breakBlocks[0].duration) : null,
       break1_duration: breakBlocks[0] ? breakBlocks[0].duration * 15 : 15,
-      break2_start: breakBlocks[1] ? intervalToTimeStr(breakBlocks[1].start) : null,
-      break2_end: breakBlocks[1] ? intervalToTimeStr(breakBlocks[1].start + breakBlocks[1].duration) : null,
+      break2_start: (!ptoBlock && !sickBlock && breakBlocks[1]) ? intervalToTimeStr(breakBlocks[1].start) : null,
+      break2_end: (!ptoBlock && !sickBlock && breakBlocks[1]) ? intervalToTimeStr(breakBlocks[1].start + breakBlocks[1].duration) : null,
       break2_duration: breakBlocks[1] ? breakBlocks[1].duration * 15 : 15,
-      lunch_start: lunchBlock ? intervalToTimeStr(lunchBlock.start) : null,
-      lunch_end: lunchBlock ? intervalToTimeStr(lunchBlock.start + lunchBlock.duration) : null,
+      lunch_start: (!ptoBlock && !sickBlock && lunchBlock) ? intervalToTimeStr(lunchBlock.start) : null,
+      lunch_end: (!ptoBlock && !sickBlock && lunchBlock) ? intervalToTimeStr(lunchBlock.start + lunchBlock.duration) : null,
       lunch_duration: lunchBlock ? lunchBlock.duration * 15 : 30,
       created_by: profile.id,
     }
@@ -242,11 +243,10 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
     if (type === 'lunch') duration = 2
     if (type === 'pto' || type === 'sick') duration = TOTAL_INTERVALS
 
-    const newBlock = { id: type + '-extra-' + Date.now(), type, start: (type === 'pto' || type === 'sick') ? 0 : start, duration }
-    const filtered = (type === 'pto' || type === 'sick')
-      ? [] // clear everything for full day types
-      : (blocks[profileId] || [])
-    const newBlocks = { ...blocks, [profileId]: [...filtered, newBlock] }
+    const newBlock = { id: type + '-' + Date.now(), type, start: (type === 'pto' || type === 'sick') ? 0 : start, duration }
+    // For PTO/Sick replace everything; otherwise just add
+    const existing = (type === 'pto' || type === 'sick') ? [] : (blocks[profileId] || [])
+    const newBlocks = { ...blocks, [profileId]: [...existing, newBlock] }
     setBlocks(newBlocks)
     saveBlocksToDb(profileId, newBlocks)
   }
@@ -362,7 +362,7 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
                       </div>
                     )}
                   </div>
-                  {isAdmin && hasShift && !isPto && !isSick && (
+                  {isAdmin && !isPto && !isSick && (
                     <button
                       onClick={(e) => {
                         e.stopPropagation()
