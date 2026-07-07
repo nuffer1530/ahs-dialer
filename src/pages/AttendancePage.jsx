@@ -714,9 +714,11 @@ export default function AttendancePage() {
               </select>
             </div>
             {(!editData.day_type || editData.day_type === 'work') && (
-              <div className="form-field"><label className="form-label">Shift start</label><input type="time" className="form-input" value={editData.shift_start || ''} onChange={e => setEditData(p => ({ ...p, shift_start: e.target.value }))} /></div>
-              <div className="form-field"><label className="form-label">Shift end</label><input type="time" className="form-input" value={editData.shift_end || ''} onChange={e => setEditData(p => ({ ...p, shift_end: e.target.value }))} /></div>
-            </div>
+              <>
+                <div className="form-field"><label className="form-label">Shift start</label><input type="time" className="form-input" value={editData.shift_start || ''} onChange={e => setEditData(p => ({ ...p, shift_start: e.target.value }))} /></div>
+                <div className="form-field"><label className="form-label">Shift end</label><input type="time" className="form-input" value={editData.shift_end || ''} onChange={e => setEditData(p => ({ ...p, shift_end: e.target.value }))} /></div>
+              </>
+            )}
             <div style={{ fontSize:11, fontWeight:600, textTransform:'uppercase', letterSpacing:.5, color:'var(--text-muted)' }}>Break 1</div>
             <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
               <div className="form-field"><label className="form-label">Start time</label><input type="time" className="form-input" value={editData.break1_start || ''} onChange={e => setEditData(p => ({ ...p, break1_start: e.target.value }))} /></div>
