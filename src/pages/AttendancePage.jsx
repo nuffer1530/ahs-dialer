@@ -71,6 +71,12 @@ const POINT_REASONS = [
 
 export default function AttendancePage() {
   const { profile, isAdmin } = useAuth()
+  const getTodayMonday = () => {
+    const d = new Date()
+    const day = d.getDay()
+    d.setDate(d.getDate() - (day === 0 ? 6 : day - 1))
+    return d.toISOString().split('T')[0]
+  }
   const [tab, setTab] = useState('schedule')
   const [profiles, setProfiles] = useState([])
   const [schedules, setSchedules] = useState([])
@@ -78,7 +84,7 @@ export default function AttendancePage() {
   const [templates, setTemplates] = useState([])
   const [attendancePoints, setAttendancePoints] = useState([])
   const [loading, setLoading] = useState(true)
-  const [weekBase, setWeekBase] = useState(new Date().toISOString().split('T')[0])
+  const [weekBase, setWeekBase] = useState(() => getTodayMonday())
   const [editCell, setEditCell] = useState(null)
   const [editData, setEditData] = useState({})
   const [saving, setSaving] = useState(false)
@@ -159,18 +165,20 @@ export default function AttendancePage() {
     if (!editCell) return
     setSaving(true)
     const { profileId, date } = editCell
+    const isPtoOrSick = editData.day_type === 'pto' || editData.day_type === 'sick' || editData.day_type === 'off'
     const payload = {
       profile_id: profileId, date,
-      shift_start: editData.shift_start,
-      shift_end: editData.shift_end,
-      break1_start: editData.break1_start || null,
-      break1_end: editData.break1_start ? addMinutes(editData.break1_start, editData.break1_duration) : null,
+      day_type: editData.day_type || 'work',
+      shift_start: isPtoOrSick ? null : editData.shift_start,
+      shift_end: isPtoOrSick ? null : editData.shift_end,
+      break1_start: isPtoOrSick ? null : (editData.break1_start || null),
+      break1_end: isPtoOrSick ? null : (editData.break1_start ? addMinutes(editData.break1_start, editData.break1_duration) : null),
       break1_duration: editData.break1_duration,
-      break2_start: editData.break2_start || null,
-      break2_end: editData.break2_start ? addMinutes(editData.break2_start, editData.break2_duration) : null,
+      break2_start: isPtoOrSick ? null : (editData.break2_start || null),
+      break2_end: isPtoOrSick ? null : (editData.break2_start ? addMinutes(editData.break2_start, editData.break2_duration) : null),
       break2_duration: editData.break2_duration,
-      lunch_start: editData.lunch_start || null,
-      lunch_end: editData.lunch_start ? addMinutes(editData.lunch_start, editData.lunch_duration) : null,
+      lunch_start: isPtoOrSick ? null : (editData.lunch_start || null),
+      lunch_end: isPtoOrSick ? null : (editData.lunch_start ? addMinutes(editData.lunch_start, editData.lunch_duration) : null),
       lunch_duration: editData.lunch_duration,
       created_by: profile.id,
     }
@@ -433,14 +441,28 @@ export default function AttendancePage() {
                 </tr>
               </thead>
               <tbody>
-                {profiles.map(p => (
+                {profiles.map(p => {
+                  // Calculate weekly hours
+                  const weeklyMins = weekDates.reduce((sum, date) => {
+                    const s = getSchedule(p.id, date)
+                    if (!s || !s.shift_start || !s.shift_end || s.day_type === 'pto' || s.day_type === 'sick') return sum
+                    const [sh, sm] = s.shift_start.split(':').map(Number)
+                    const [eh, em] = s.shift_end.split(':').map(Number)
+                    return sum + ((eh * 60 + em) - (sh * 60 + sm))
+                  }, 0)
+                  const weeklyHrs = (weeklyMins / 60).toFixed(1)
+
+                  return (
                   <tr key={p.id} style={{ borderBottom:'1px solid var(--border)' }}>
                     <td style={{ padding:'8px 12px', fontWeight:500 }}>
                       <div style={{ display:'flex', alignItems:'center', gap:6 }}>
                         <div style={{ width:24, height:24, borderRadius:'50%', background:'var(--accent-bg)', display:'flex', alignItems:'center', justifyContent:'center', fontSize: p.avatar ? 14 : 10, fontWeight:600, flexShrink:0 }}>
                           {p.avatar || (p.name || p.email || '?')[0].toUpperCase()}
                         </div>
-                        <span style={{ fontSize:11 }}>{p.name || p.email}</span>
+                        <div>
+                          <div style={{ fontSize:11 }}>{p.name || p.email}</div>
+                          {weeklyMins > 0 && <div style={{ fontSize:9, color:'var(--text-muted)' }}>{weeklyHrs} hrs/wk</div>}
+                        </div>
                       </div>
                     </td>
                     {weekDates.map(date => {
@@ -450,11 +472,19 @@ export default function AttendancePage() {
                         <td key={date} style={{ padding:'4px 6px', verticalAlign:'top', background: isToday ? 'rgba(59,130,246,.04)' : undefined }}>
                           {sched ? (
                             <div onClick={() => isAdmin && openEdit(p.id, date)}
-                              style={{ background:'var(--accent-bg)', border:'1px solid var(--accent)', borderRadius:'var(--radius)', padding:'5px 7px', cursor: isAdmin ? 'pointer' : 'default', fontSize:10 }}>
-                              <div style={{ fontWeight:600, color:'var(--accent)' }}>{fmt(sched.shift_start)} - {fmt(sched.shift_end)}</div>
-                              {sched.break1_start && <div style={{ color:'var(--text-muted)', marginTop:2 }}>B1: {fmt(sched.break1_start)} ({sched.break1_duration || 15}m)</div>}
-                              {sched.lunch_start && <div style={{ color:'var(--text-muted)' }}>L: {fmt(sched.lunch_start)} ({sched.lunch_duration || 30}m)</div>}
-                              {sched.break2_start && <div style={{ color:'var(--text-muted)' }}>B2: {fmt(sched.break2_start)} ({sched.break2_duration || 15}m)</div>}
+                              style={{ background: sched.day_type === 'pto' ? '#fef9c3' : sched.day_type === 'sick' ? '#f3f4f6' : (sched.template_color ? sched.template_color + '20' : 'var(--accent-bg)'), border:`1px solid ${sched.day_type === 'pto' ? '#eab308' : sched.day_type === 'sick' ? '#6b7280' : (sched.template_color || 'var(--accent)')}`, borderRadius:'var(--radius)', padding:'5px 7px', cursor: isAdmin ? 'pointer' : 'default', fontSize:10 }}>
+                              {sched.day_type === 'pto' ? (
+                                <div style={{ fontWeight:600, color:'#a16207' }}>PTO - Full Day</div>
+                              ) : sched.day_type === 'sick' ? (
+                                <div style={{ fontWeight:600, color:'#374151' }}>Sick - Full Day</div>
+                              ) : (
+                                <>
+                                  <div style={{ fontWeight:600, color:'var(--accent)' }}>{fmt(sched.shift_start)} - {fmt(sched.shift_end)}</div>
+                                  {sched.break1_start && <div style={{ color:'var(--text-muted)', marginTop:2 }}>B1: {fmt(sched.break1_start)} ({sched.break1_duration || 15}m)</div>}
+                                  {sched.lunch_start && <div style={{ color:'var(--text-muted)' }}>L: {fmt(sched.lunch_start)} ({sched.lunch_duration || 30}m)</div>}
+                                  {sched.break2_start && <div style={{ color:'var(--text-muted)' }}>B2: {fmt(sched.break2_start)} ({sched.break2_duration || 15}m)</div>}
+                                </>
+                              )}
                             </div>
                           ) : (
                             isAdmin ? (
@@ -468,7 +498,8 @@ export default function AttendancePage() {
                       )
                     })}
                   </tr>
-                ))}
+                  )
+                })}
               </tbody>
             </table>
           </div>
@@ -673,7 +704,16 @@ export default function AttendancePage() {
                 </select>
               </div>
             )}
-            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
+            <div className="form-field">
+              <label className="form-label">Day type</label>
+              <select className="form-input" value={editData.day_type || 'work'} onChange={e => setEditData(p => ({ ...p, day_type: e.target.value }))}>
+                <option value="work">Working</option>
+                <option value="pto">PTO - Full Day</option>
+                <option value="sick">Sick - Full Day</option>
+                <option value="off">Off</option>
+              </select>
+            </div>
+            {(!editData.day_type || editData.day_type === 'work') && (
               <div className="form-field"><label className="form-label">Shift start</label><input type="time" className="form-input" value={editData.shift_start || ''} onChange={e => setEditData(p => ({ ...p, shift_start: e.target.value }))} /></div>
               <div className="form-field"><label className="form-label">Shift end</label><input type="time" className="form-input" value={editData.shift_end || ''} onChange={e => setEditData(p => ({ ...p, shift_end: e.target.value }))} /></div>
             </div>
@@ -692,6 +732,7 @@ export default function AttendancePage() {
               <div className="form-field"><label className="form-label">Start time</label><input type="time" className="form-input" value={editData.break2_start || ''} onChange={e => setEditData(p => ({ ...p, break2_start: e.target.value }))} /></div>
               <div className="form-field"><label className="form-label">Duration (min)</label><input type="number" className="form-input" value={editData.break2_duration || 15} min={5} max={30} onChange={e => setEditData(p => ({ ...p, break2_duration: parseInt(e.target.value) }))} /></div>
             </div>
+            )}
           </div>
           <div className="modal-actions">
             {getSchedule(editCell.profileId, editCell.date) && <button className="btn danger" onClick={() => deleteSchedule(editCell.profileId, editCell.date)}>Delete</button>}
@@ -755,7 +796,10 @@ export default function AttendancePage() {
             {templates.map(t => (
               <div key={t.id} style={{ display:'flex', alignItems:'center', gap:8, padding:'10px 12px', background:'var(--surface-2)', borderRadius:'var(--radius)', border:'1px solid var(--border)' }}>
                 <div style={{ flex:1 }}>
-                  <div style={{ fontSize:13, fontWeight:600 }}>{t.name}</div>
+                  <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                    <div style={{ width:12, height:12, borderRadius:'50%', background: t.color || '#3b82f6', flexShrink:0 }}></div>
+                    <div style={{ fontSize:13, fontWeight:600 }}>{t.name}</div>
+                  </div>
                   <div style={{ fontSize:11, color:'var(--text-muted)' }}>{fmt(t.shift_start)} - {fmt(t.shift_end)} | B1: {fmt(t.break1_start)} ({t.break1_duration || 15}m) | L: {fmt(t.lunch_start)} ({t.lunch_duration || 30}m) | B2: {fmt(t.break2_start)} ({t.break2_duration || 15}m)</div>
                 </div>
                 <button className="btn sm" onClick={() => setEditTemplate({ ...t })}>Edit</button>
@@ -778,7 +822,13 @@ export default function AttendancePage() {
       {editTemplate && (
         <Modal title={editTemplate.id ? 'Edit Template' : 'New Template'} onClose={() => setEditTemplate(null)} width={480}>
           <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
-            <div className="form-field"><label className="form-label">Template name</label><input className="form-input" value={editTemplate.name || ''} onChange={e => setEditTemplate(p => ({ ...p, name: e.target.value }))} placeholder="e.g. Standard 8-5" /></div>
+            <div style={{ display:'grid', gridTemplateColumns:'1fr auto', gap:10, alignItems:'end' }}>
+              <div className="form-field"><label className="form-label">Template name</label><input className="form-input" value={editTemplate.name || ''} onChange={e => setEditTemplate(p => ({ ...p, name: e.target.value }))} placeholder="e.g. Standard 8-5" /></div>
+              <div className="form-field">
+                <label className="form-label">Color</label>
+                <input type="color" value={editTemplate.color || '#3b82f6'} onChange={e => setEditTemplate(p => ({ ...p, color: e.target.value }))} style={{ width:44, height:36, padding:2, borderRadius:'var(--radius)', border:'1px solid var(--border)', cursor:'pointer' }} />
+              </div>
+            </div>
             <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
               <div className="form-field"><label className="form-label">Shift start</label><input type="time" className="form-input" value={editTemplate.shift_start || ''} onChange={e => setEditTemplate(p => ({ ...p, shift_start: e.target.value }))} /></div>
               <div className="form-field"><label className="form-label">Shift end</label><input type="time" className="form-input" value={editTemplate.shift_end || ''} onChange={e => setEditTemplate(p => ({ ...p, shift_end: e.target.value }))} /></div>
