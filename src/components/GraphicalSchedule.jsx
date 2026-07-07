@@ -491,12 +491,16 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
                         key={block.id}
                         onMouseDown={(e) => { if (!isAdmin) return; e.preventDefault(); e.stopPropagation(); setDragging({ profileId: p.id, blockId: block.id, mode:'move', startX: e.clientX }) }}
                         onContextMenu={(e) => {
-                          if (!isAdmin || block.type === 'shift') return
+                          if (!isAdmin) return
                           e.preventDefault()
                           e.stopPropagation()
-                          removeBlock(p.id, block.id)
+                          if (block.type === 'shift') {
+                            if (confirm('Remove this shift?')) deleteSchedule(p.id)
+                          } else {
+                            removeBlock(p.id, block.id)
+                          }
                         }}
-                        title={isAdmin && block.type !== 'shift' ? 'Right-click to delete' : ''}
+                        title={isAdmin ? 'Right-click to delete' : ''}
                         style={{
                           position:'absolute', left, top: isShift ? 6 : 10, height: isShift ? ROW_HEIGHT - 12 : ROW_HEIGHT - 20, width,
                           background: bt.bg, border:`1.5px solid ${bt.color}`, borderRadius:4,
