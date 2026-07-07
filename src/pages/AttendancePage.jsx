@@ -134,6 +134,7 @@ export default function AttendancePage() {
   const openEdit = (profileId, date) => {
     const existing = getSchedule(profileId, date)
     setEditData(existing ? {
+      day_type: existing.day_type || 'work',
       shift_start: existing.shift_start || '08:00',
       shift_end: existing.shift_end || '17:00',
       break1_start: existing.break1_start || '',
@@ -142,7 +143,9 @@ export default function AttendancePage() {
       break2_duration: existing.break2_duration || 15,
       lunch_start: existing.lunch_start || '',
       lunch_duration: existing.lunch_duration || 30,
+      template_color: existing.template_color || null,
     } : {
+      day_type: 'work',
       shift_start: '08:00', shift_end: '17:00',
       break1_start: '10:00', break1_duration: 15,
       break2_start: '14:30', break2_duration: 15,
@@ -456,7 +459,9 @@ export default function AttendancePage() {
                     if (!s || !s.shift_start || !s.shift_end || s.day_type === 'pto' || s.day_type === 'sick' || s.day_type === 'holiday') return sum
                     const [sh, sm] = s.shift_start.split(':').map(Number)
                     const [eh, em] = s.shift_end.split(':').map(Number)
-                    return sum + ((eh * 60 + em) - (sh * 60 + sm))
+                    const shiftMins = (eh * 60 + em) - (sh * 60 + sm)
+                    const lunchMins = s.lunch_start ? (s.lunch_duration || 30) : 0
+                    return sum + shiftMins - lunchMins
                   }, 0)
                   const weeklyHrs = (weeklyMins / 60).toFixed(1)
 
