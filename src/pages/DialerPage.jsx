@@ -424,10 +424,10 @@ export default function DialerPage() {
           <div style={{ flex:1, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:24, padding:40 }}>
             <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:12, width:'100%', maxWidth:640 }}>
               {[
-                { label:'Total contacts', value:contacts.length.toLocaleString(), accent:'var(--accent)' },
-                { label:'Active', value:contacts.filter(x=>!isDone(x)&&x.status!=='Max Attempts').length.toLocaleString(), accent:'#C87800' },
-                { label:'Booked', value:contacts.filter(x=>x.status==='Booked').length.toLocaleString(), accent:'#16A34A' },
-                { label:'Callbacks', value:cbDue.length, accent:'#7C3AED', click:()=>setFilter('callback') },
+                { label:'My Calls Today', value: todayLogs.length, accent:'var(--accent)' },
+                { label:'My Bookings Today', value: todayLogs.filter(x=>x.outcome==='Booked').length, accent:'#16A34A' },
+                { label:'Booking Rate', value: todayLogs.length > 0 ? Math.round((todayLogs.filter(x=>x.outcome==='Booked').length / todayLogs.length) * 100) + '%' : '—', accent:'#7C3AED' },
+                { label:'Callbacks Due', value: cbDue.length, accent:'#C87800', click:()=>setFilter('callback') },
               ].map(({ label, value, accent, click }) => (
                 <div key={label} onClick={click}
                   style={{ background:'var(--surface)', border:'1px solid var(--border)', borderTop:`3px solid ${accent}`, borderRadius:'var(--radius)', padding:'14px 16px', cursor: click ? 'pointer' : 'default' }}>
