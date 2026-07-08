@@ -193,8 +193,14 @@ export default function DialerLayout() {
       <WinCelebration />
       <header style={{ background:'var(--surface)', borderBottom:'1px solid var(--border)', padding:'0 20px', display:'flex', alignItems:'center', justifyContent:'space-between', height:52, flexShrink:0, zIndex:100 }}>
         <div style={{ display:'flex', alignItems:'center', gap:10 }}>
-          <span style={{ background:'var(--accent)', color:'#fff', fontSize:11, fontWeight:700, padding:'2px 8px', borderRadius:4, letterSpacing:.5 }}>AHS</span>
-          <span style={{ fontSize:15, fontWeight:600 }}>Dialer</span>
+          <svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <rect width="32" height="32" rx="7" fill="#F97316"/>
+            <circle cx="7" cy="16" r="3.5" fill="white"/>
+            <path d="M13 9 Q19 12.5 13 16" stroke="white" strokeWidth="2.2" fill="none" strokeLinecap="round"/>
+            <path d="M18 6 Q26 10.5 18 16.5" stroke="white" strokeWidth="2.2" fill="none" strokeLinecap="round"/>
+            <path d="M23 3 Q33 8.5 23 17" stroke="white" strokeWidth="2.2" fill="none" strokeLinecap="round"/>
+          </svg>
+          <span style={{ fontSize:20, fontWeight:500, letterSpacing:1, color:'var(--text-primary)' }}>andi</span>
         </div>
         <div style={{ display:'flex', alignItems:'center', gap:12 }}>
 
