@@ -58,6 +58,9 @@ export default function DialerPage() {
   const [callStatus, setCallStatus] = useState(null) // null | 'calling' | 'ringing' | 'connected' | 'ended'
   const [callDuration, setCallDuration] = useState(0)
   const callTimerRef = useRef(null)
+  const [statusDuration, setStatusDuration] = useState(0)
+  const statusTimerRef = useRef(null)
+  const statusStartRef = useRef(null)
 
   useEffect(() => {
     const campId = sessionStorage.getItem('powerDialCampaign')
@@ -172,6 +175,18 @@ export default function DialerPage() {
     if (!profile?.id) return
     try {
       await sb.from('profiles').update({ status }).eq('id', profile.id)
+      // Start status duration timer for On Call and Wrap Up
+      if (statusTimerRef.current) clearInterval(statusTimerRef.current)
+      if (status === 'On Call' || status === 'Wrap Up') {
+        statusStartRef.current = Date.now()
+        setStatusDuration(0)
+        statusTimerRef.current = setInterval(() => {
+          setStatusDuration(Math.floor((Date.now() - statusStartRef.current) / 1000))
+        }, 1000)
+      } else {
+        setStatusDuration(0)
+        statusStartRef.current = null
+      }
     } catch (err) {
       console.error('Status update error:', err)
     }
@@ -517,8 +532,8 @@ export default function DialerPage() {
                 animation: callStatus === 'connected' ? 'pulse 1.5s infinite' : 'none' }} />
               {callStatus === 'calling' && 'Calling...'}
               {callStatus === 'ringing' && 'Ringing...'}
-              {callStatus === 'connected' && `Connected ${fmtDuration(callDuration)}`}
-              {callStatus === 'ended' && 'Call ended'}
+              {callStatus === 'connected' && `On Call ${fmtDuration(callDuration)}`}
+              {callStatus === 'ended' && `Wrap Up ${fmtDuration(statusDuration)}`}
             </div>
           )}
           <style>{`@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}`}</style>
