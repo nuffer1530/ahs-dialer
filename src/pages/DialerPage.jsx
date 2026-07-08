@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useData } from '../lib/DataContext'
 import { useAuth } from '../lib/AuthContext'
 import { sb } from '../lib/supabase'
@@ -46,6 +46,14 @@ export default function DialerPage() {
   const [todayLogs, setTodayLogs] = useState([])
   const [activeTab, setActiveTab] = useState('script') // 'script' | 'history'
   const [notesVal, setNotesVal] = useState('')
+
+  // Twilio Device
+  const deviceRef = useRef(null)
+  const callRef = useRef(null)
+  const [twilioReady, setTwilioReady] = useState(false)
+  const [callStatus, setCallStatus] = useState(null) // null | 'calling' | 'ringing' | 'connected' | 'ended'
+  const [callDuration, setCallDuration] = useState(0)
+  const callTimerRef = useRef(null)
 
   useEffect(() => {
     const campId = sessionStorage.getItem('powerDialCampaign')
@@ -107,6 +115,88 @@ export default function DialerPage() {
       .lte('created_at', today + 'T23:59:59')
       .then(({ data }) => setTodayLogs(data || []))
   }, [currentRep])
+
+  // Load Twilio SDK and init Device
+  useEffect(() => {
+    if (!currentRep || currentRep === 'Unknown') return
+    const existing = document.getElementById('twilio-sdk')
+    const init = async () => {
+      try {
+        const res = await fetch('/api/twilio/token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ identity: currentRep.replace(/[^a-zA-Z0-9_]/g, '_') })
+        })
+        const { token } = await res.json()
+        if (!token) return
+        const { Device } = window.Twilio
+        const device = new Device(token, { logLevel: 1, codecPreferences: ['opus', 'pcmu'] })
+        device.on('ready', () => setTwilioReady(true))
+        device.on('registered', () => setTwilioReady(true))
+        device.on('error', (err) => console.error('Twilio Device error:', err))
+        device.on('incoming', (call) => {
+          callRef.current = call
+          setCallStatus('ringing')
+          // Auto-answer for now — could show incoming call UI later
+          call.accept()
+          setCallStatus('connected')
+          startCallTimer()
+          call.on('disconnect', () => { setCallStatus('ended'); stopCallTimer(); setTimeout(() => setCallStatus(null), 3000) })
+        })
+        device.register()
+        deviceRef.current = device
+      } catch (err) {
+        console.error('Twilio init error:', err)
+      }
+    }
+    if (existing) { init(); return }
+    const script = document.createElement('script')
+    script.id = 'twilio-sdk'
+    script.src = 'https://sdk.twilio.com/js/client/v1.14/twilio.min.js'
+    script.onload = init
+    document.head.appendChild(script)
+    return () => {
+      if (deviceRef.current) { deviceRef.current.destroy(); deviceRef.current = null }
+      stopCallTimer()
+    }
+  }, [currentRep])
+
+  const startCallTimer = () => {
+    setCallDuration(0)
+    callTimerRef.current = setInterval(() => setCallDuration(d => d + 1), 1000)
+  }
+  const stopCallTimer = () => {
+    if (callTimerRef.current) { clearInterval(callTimerRef.current); callTimerRef.current = null }
+  }
+  const fmtDuration = (s) => `${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}`
+
+  const makeCall = async (phoneNumber) => {
+    if (!deviceRef.current || !twilioReady) {
+      // Fallback to tel: link if Twilio not ready
+      window.location.href = `tel:${phoneNumber}`
+      return
+    }
+    try {
+      const call = await deviceRef.current.connect({
+        params: { To: phoneNumber, contactId: selectedId || '', contactName: c?.name || '' }
+      })
+      callRef.current = call
+      setCallStatus('calling')
+      call.on('ringing', () => setCallStatus('ringing'))
+      call.on('accept', () => { setCallStatus('connected'); startCallTimer() })
+      call.on('disconnect', () => { setCallStatus('ended'); stopCallTimer(); setTimeout(() => setCallStatus(null), 3000) })
+      call.on('cancel', () => { setCallStatus(null); stopCallTimer() })
+      call.on('error', (err) => { console.error('Call error:', err); setCallStatus(null); stopCallTimer() })
+    } catch (err) {
+      console.error('makeCall error:', err)
+    }
+  }
+
+  const hangUp = () => {
+    if (callRef.current) { callRef.current.disconnect(); callRef.current = null }
+    setCallStatus(null)
+    stopCallTimer()
+  }
 
   const selectContact = (id) => {
     setSelectedId(id)
@@ -405,6 +495,22 @@ export default function DialerPage() {
             {myStats.callbacks > 0 && <span style={{ color:'#C87800' }}>Callbacks: <strong>{myStats.callbacks}</strong></span>}
           </div>
 
+          {/* Live call status bar */}
+          {callStatus && (
+            <div style={{ display:'flex', alignItems:'center', gap:8, padding:'4px 12px', borderRadius:'var(--radius)', fontWeight:600, fontSize:12,
+              background: callStatus === 'connected' ? '#DCFCE7' : callStatus === 'ended' ? '#F3F4F6' : '#FFF8E6',
+              border: `1px solid ${callStatus === 'connected' ? '#16A34A' : callStatus === 'ended' ? '#D1D5DB' : '#C87800'}`,
+              color: callStatus === 'connected' ? '#16A34A' : callStatus === 'ended' ? '#6B7280' : '#C87800' }}>
+              <span style={{ width:8, height:8, borderRadius:'50%', background:'currentColor', display:'inline-block',
+                animation: callStatus === 'connected' ? 'pulse 1.5s infinite' : 'none' }} />
+              {callStatus === 'calling' && 'Calling...'}
+              {callStatus === 'ringing' && 'Ringing...'}
+              {callStatus === 'connected' && `Connected ${fmtDuration(callDuration)}`}
+              {callStatus === 'ended' && 'Call ended'}
+            </div>
+          )}
+          <style>{`@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}`}</style>
+
           {/* Attempt dots */}
           {c && (
             <div style={{ display:'flex', alignItems:'center', gap:4, padding:'4px 10px', background:'var(--surface-2)', borderRadius:'var(--radius)', border:'1px solid var(--border)' }}>
@@ -502,10 +608,18 @@ export default function DialerPage() {
                       {c.phone && (
                         <button className="btn sm" onClick={() => navigator.clipboard.writeText(c.phone)}>Copy</button>
                       )}
-                      <button className="btn sm primary" style={{ fontWeight:600 }}
-                        onClick={() => window.open(`tel:${c.phone}`, '_self')}>
-                        📞 Call
-                      </button>
+                      {callStatus && callRef.current ? (
+                        <button className="btn sm" style={{ background:'#DC2626', borderColor:'#DC2626', color:'#fff', fontWeight:600 }}
+                          onClick={hangUp}>
+                          ⏹ Hang up
+                        </button>
+                      ) : (
+                        <button className="btn sm primary" style={{ fontWeight:600 }}
+                          onClick={() => makeCall(c.phone)}
+                          disabled={!c.phone}>
+                          📞 {twilioReady ? 'Call' : 'Call (loading...)'}
+                        </button>
+                      )}
                     </div>
                     {c.email && <div style={{ fontSize:10, color:'var(--text-muted)', marginTop:4 }}>{c.email}</div>}
                   </div>
