@@ -31,13 +31,24 @@ export default function DialerLayout() {
   const navigate = useNavigate()
   const [agentStatus, setAgentStatus] = useState('Offline')
   const [showStatusMenu, setShowStatusMenu] = useState(false)
+  const [statusDuration, setStatusDuration] = useState(0)
+  const statusTimerRef = useRef(null)
+  const statusStartRef = useRef(null)
   const [alerts, setAlerts] = useState([])
   const menuRef = useRef(null)
   const currentEventRef = useRef(null) // tracks the open status_event id
 
-  // Load status from profile on mount
+  // Load status from profile on mount and start timer
   useEffect(() => {
-    if (profile?.status) setAgentStatus(profile.status)
+    if (profile?.status) {
+      setAgentStatus(profile.status)
+      if (statusTimerRef.current) clearInterval(statusTimerRef.current)
+      statusStartRef.current = profile.status_since ? new Date(profile.status_since).getTime() : Date.now()
+      setStatusDuration(Math.floor((Date.now() - statusStartRef.current) / 1000))
+      statusTimerRef.current = setInterval(() => {
+        setStatusDuration(Math.floor((Date.now() - statusStartRef.current) / 1000))
+      }, 1000)
+    }
   }, [profile])
 
   // Real-time listener for admin status overrides
@@ -132,11 +143,20 @@ export default function DialerLayout() {
   const updateStatus = async (val) => {
     setAgentStatus(val)
     setShowStatusMenu(false)
+    // Reset status timer
+    if (statusTimerRef.current) clearInterval(statusTimerRef.current)
+    statusStartRef.current = Date.now()
+    setStatusDuration(0)
+    statusTimerRef.current = setInterval(() => {
+      setStatusDuration(Math.floor((Date.now() - statusStartRef.current) / 1000))
+    }, 1000)
     await Promise.all([
       sb.from('profiles').update({ status: val, status_since: new Date().toISOString() }).eq('id', profile.id),
       logStatusEvent(val),
     ])
   }
+
+  const fmtDur = (s) => s < 60 ? `${s}s` : `${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}`
 
   const signOut = async () => {
     await updateStatus('Offline')
@@ -167,7 +187,6 @@ export default function DialerLayout() {
           <span style={{ fontSize:15, fontWeight:600 }}>Dialer</span>
         </div>
         <div style={{ display:'flex', alignItems:'center', gap:12 }}>
-          <button className="btn sm" onClick={reload}>R</button>
 
           {/* Alert badge for admins */}
           {isAdmin && alerts.length > 0 && (
@@ -182,11 +201,11 @@ export default function DialerLayout() {
           <div ref={menuRef} style={{ position:'relative' }}>
             <button
               onClick={() => setShowStatusMenu(v => !v)}
-              style={{ display:'flex', alignItems:'center', gap:7, background:'var(--surface-2)', border:'1px solid var(--border)', borderRadius:99, padding:'4px 10px 4px 8px', cursor:'pointer', fontSize:12, fontWeight:500, color:'var(--text-primary)' }}
+              style={{ display:'flex', alignItems:'center', gap:8, background:'var(--surface-2)', border:'1px solid var(--border)', borderRadius:99, padding:'5px 14px 5px 10px', cursor:'pointer', fontSize:13, fontWeight:600, color:'var(--text-primary)' }}
             >
-              <div style={{ width:8, height:8, borderRadius:'50%', background:currentStatusObj.color, flexShrink:0 }}></div>
+              <div style={{ width:10, height:10, borderRadius:'50%', background:currentStatusObj.color, flexShrink:0 }}></div>
               {currentStatusObj.value}
-              <span style={{ fontSize:10, color:'var(--text-muted)' }}>v</span>
+              <span style={{ fontSize:11, color:'var(--text-muted)', fontWeight:400, fontVariantNumeric:'tabular-nums' }}>{fmtDur(statusDuration)}</span>
             </button>
             {showStatusMenu && (
               <div style={{ position:'absolute', right:0, top:'calc(100% + 6px)', background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius)', boxShadow:'0 4px 16px rgba(0,0,0,.15)', zIndex:200, minWidth:145, overflow:'hidden' }}>
@@ -194,11 +213,13 @@ export default function DialerLayout() {
                   <button
                     key={s.value}
                     onClick={() => updateStatus(s.value)}
-                    style={{ display:'flex', alignItems:'center', gap:8, width:'100%', padding:'9px 14px', background: agentStatus === s.value ? 'var(--surface-2)' : 'transparent', border:'none', cursor:'pointer', fontSize:12, fontWeight: agentStatus === s.value ? 600 : 400, color:'var(--text-primary)', textAlign:'left' }}
+                    onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
+                    onMouseLeave={e => e.currentTarget.style.background = agentStatus === s.value ? 'var(--accent-bg)' : 'transparent'}
+                    style={{ display:'flex', alignItems:'center', gap:8, width:'100%', padding:'9px 14px', background: agentStatus === s.value ? 'var(--accent-bg)' : 'transparent', border:'none', cursor:'pointer', fontSize:12, fontWeight: agentStatus === s.value ? 600 : 400, color: agentStatus === s.value ? 'var(--accent)' : 'var(--text-primary)', textAlign:'left' }}
                   >
                     <div style={{ width:8, height:8, borderRadius:'50%', background:s.color, flexShrink:0 }}></div>
                     {s.value}
-                    {agentStatus === s.value && <span style={{ marginLeft:'auto', fontSize:10 }}>v</span>}
+                    {agentStatus === s.value && <span style={{ marginLeft:'auto', fontSize:11 }}>✓</span>}
                   </button>
                 ))}
               </div>
