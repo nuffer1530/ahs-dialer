@@ -20,7 +20,7 @@ const twilioPhone = process.env.TWILIO_PHONE_NUMBER
 const appUrl = process.env.APP_URL || 'https://andi.awesomeservice.com'
 
 const supabase = createClient(
-  process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL,
+  process.env.VITE_SUPABASE_URL,
   process.env.SUPABASE_SERVICE_KEY
 )
 
@@ -161,6 +161,9 @@ app.post('/api/twilio/hangup', async (req, res) => {
 // ── Serve React frontend (must be AFTER all API routes)
 const distPath = join(__dirname, 'dist')
 if (existsSync(distPath)) {
+  // Serve root-level static files (favicon, logo, etc.)
+  app.use(express.static(__dirname))
+  // Serve built React app
   app.use(express.static(distPath))
   app.get('*', (req, res) => {
     res.sendFile(join(distPath, 'index.html'))
