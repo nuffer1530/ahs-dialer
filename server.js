@@ -2,6 +2,12 @@ import express from 'express'
 import twilio from 'twilio'
 import { createClient } from '@supabase/supabase-js'
 import cors from 'cors'
+import { fileURLToPath } from 'url'
+import { dirname, join } from 'path'
+import { existsSync } from 'fs'
+
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = dirname(__filename)
 
 const app = express()
 app.use(cors())
@@ -21,10 +27,12 @@ const supabase = createClient(
 const twilioClient = twilio(accountSid, authToken)
 const VoiceResponse = twilio.twiml.VoiceResponse
 
+// ── Health check
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', phone: twilioPhone })
 })
 
+// ── Generate Twilio Access Token for browser SDK
 app.post('/api/twilio/token', async (req, res) => {
   try {
     const { identity } = req.body
@@ -47,6 +55,7 @@ app.post('/api/twilio/token', async (req, res) => {
   }
 })
 
+// ── Outbound call
 app.post('/api/twilio/call', async (req, res) => {
   try {
     const { to, identity, contactId, contactName } = req.body
@@ -77,6 +86,7 @@ app.post('/api/twilio/call', async (req, res) => {
   }
 })
 
+// ── TwiML for outbound
 app.post('/api/twilio/twiml/outbound', (req, res) => {
   const twiml = new VoiceResponse()
   const dial = twiml.dial({ callerId: twilioPhone, timeout: 30 })
@@ -85,6 +95,7 @@ app.post('/api/twilio/twiml/outbound', (req, res) => {
   res.send(twiml.toString())
 })
 
+// ── Inbound call webhook
 app.post('/api/twilio/inbound', async (req, res) => {
   const { From, CallSid, To } = req.body
   console.log(`Inbound call from ${From}, SID: ${CallSid}`)
@@ -113,6 +124,7 @@ app.post('/api/twilio/inbound', async (req, res) => {
   res.send(twiml.toString())
 })
 
+// ── Inbound complete
 app.post('/api/twilio/inbound/complete', async (req, res) => {
   const { CallSid, DialCallStatus } = req.body
   await supabase.from('active_calls').update({ status: DialCallStatus, ended_at: new Date().toISOString() }).eq('call_sid', CallSid)
@@ -124,6 +136,7 @@ app.post('/api/twilio/inbound/complete', async (req, res) => {
   res.send(twiml.toString())
 })
 
+// ── Call status updates
 app.post('/api/twilio/status', async (req, res) => {
   const { CallSid, CallStatus, Duration } = req.body
   await supabase.from('active_calls').update({
@@ -134,6 +147,7 @@ app.post('/api/twilio/status', async (req, res) => {
   res.sendStatus(200)
 })
 
+// ── Hangup
 app.post('/api/twilio/hangup', async (req, res) => {
   const { callSid } = req.body
   try {
@@ -144,5 +158,14 @@ app.post('/api/twilio/hangup', async (req, res) => {
   }
 })
 
-const PORT = process.env.API_PORT || 3001
-app.listen(PORT, () => console.log(`Andi API server running on port ${PORT}`))
+// ── Serve React frontend (must be AFTER all API routes)
+const distPath = join(__dirname, 'dist')
+if (existsSync(distPath)) {
+  app.use(express.static(distPath))
+  app.get('*', (req, res) => {
+    res.sendFile(join(distPath, 'index.html'))
+  })
+}
+
+const PORT = process.env.PORT || 3001
+app.listen(PORT, '0.0.0.0', () => console.log(`Andi server running on port ${PORT}`))
