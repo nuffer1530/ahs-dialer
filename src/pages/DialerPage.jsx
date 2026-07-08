@@ -116,45 +116,38 @@ export default function DialerPage() {
       .then(({ data }) => setTodayLogs(data || []))
   }, [currentRep])
 
-  // Load Twilio SDK and init Device
+  // Init Twilio Device using npm package
   useEffect(() => {
     if (!currentRep || currentRep === 'Unknown') return
-    const existing = document.getElementById('twilio-sdk')
+    let device = null
     const init = async () => {
       try {
+        const { Device } = await import('@twilio/voice-sdk')
         const res = await fetch('/api/twilio/token', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ identity: currentRep.replace(/[^a-zA-Z0-9_]/g, '_') })
         })
         const { token } = await res.json()
-        if (!token) return
-        const { Device } = window.Twilio
-        const device = new Device(token, { logLevel: 1, codecPreferences: ['opus', 'pcmu'] })
-        device.on('ready', () => setTwilioReady(true))
-        device.on('registered', () => setTwilioReady(true))
+        if (!token) { console.error('No token returned'); return }
+        device = new Device(token, { logLevel: 1, codecPreferences: ['opus', 'pcmu'] })
+        device.on('registered', () => { console.log('Twilio ready'); setTwilioReady(true) })
         device.on('error', (err) => console.error('Twilio Device error:', err))
         device.on('incoming', (call) => {
           callRef.current = call
           setCallStatus('ringing')
-          // Auto-answer for now — could show incoming call UI later
           call.accept()
           setCallStatus('connected')
           startCallTimer()
           call.on('disconnect', () => { setCallStatus('ended'); stopCallTimer(); setTimeout(() => setCallStatus(null), 3000) })
         })
-        device.register()
+        await device.register()
         deviceRef.current = device
       } catch (err) {
         console.error('Twilio init error:', err)
       }
     }
-    if (existing) { init(); return }
-    const script = document.createElement('script')
-    script.id = 'twilio-sdk'
-    script.src = 'https://sdk.twilio.com/js/client/v1.14/twilio.min.js'
-    script.onload = init
-    document.head.appendChild(script)
+    init()
     return () => {
       if (deviceRef.current) { deviceRef.current.destroy(); deviceRef.current = null }
       stopCallTimer()
