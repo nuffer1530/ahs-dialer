@@ -59,7 +59,17 @@ export default function DialerLayout() {
         event: 'UPDATE', schema: 'public', table: 'profiles',
         filter: `id=eq.${profile.id}`
       }, payload => {
-        if (payload.new?.status) setAgentStatus(payload.new.status)
+        if (payload.new?.status) {
+          setAgentStatus(payload.new.status)
+          // Reset timer when status changes externally (e.g. from DialerPage call events)
+          if (statusTimerRef.current) clearInterval(statusTimerRef.current)
+          const since = payload.new.status_since ? new Date(payload.new.status_since).getTime() : Date.now()
+          statusStartRef.current = since
+          setStatusDuration(Math.floor((Date.now() - since) / 1000))
+          statusTimerRef.current = setInterval(() => {
+            setStatusDuration(Math.floor((Date.now() - statusStartRef.current) / 1000))
+          }, 1000)
+        }
       })
       .subscribe()
     return () => sb.removeChannel(channel)
