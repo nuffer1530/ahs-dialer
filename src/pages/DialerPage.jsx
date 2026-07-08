@@ -47,6 +47,10 @@ export default function DialerPage() {
   const [activeTab, setActiveTab] = useState('script') // 'script' | 'history'
   const [notesVal, setNotesVal] = useState('')
 
+  // Manual dialpad
+  const [showDialpad, setShowDialpad] = useState(false)
+  const [dialpadNumber, setDialpadNumber] = useState('')
+
   // Twilio Device
   const deviceRef = useRef(null)
   const callRef = useRef(null)
@@ -469,6 +473,10 @@ export default function DialerPage() {
           <button className="btn sm primary" onClick={navNextPending} style={{ fontWeight:600 }}>
             Next pending →
           </button>
+          <button className="btn sm" onClick={() => setShowDialpad(true)} title="Manual dial any number"
+            style={{ fontSize:16, padding:'4px 10px' }}>
+            ⌨️
+          </button>
 
           {/* Power dial */}
           {powerDialActive && (
@@ -811,6 +819,53 @@ export default function DialerPage() {
           </div>
         )}
       </div>
+
+      {/* ── DIALPAD MODAL ── */}
+      {showDialpad && (
+        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,.5)', zIndex:500, display:'flex', alignItems:'center', justifyContent:'center' }}
+          onClick={(e) => { if (e.target === e.currentTarget) setShowDialpad(false) }}>
+          <div style={{ background:'var(--surface)', borderRadius:16, padding:28, width:280, boxShadow:'0 8px 40px rgba(0,0,0,.3)' }}>
+            <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:16 }}>
+              <span style={{ fontSize:14, fontWeight:700, color:'var(--text-primary)' }}>Manual Dial</span>
+              <button onClick={() => setShowDialpad(false)} style={{ background:'none', border:'none', fontSize:18, cursor:'pointer', color:'var(--text-muted)' }}>×</button>
+            </div>
+            {/* Number display */}
+            <div style={{ background:'var(--surface-2)', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'10px 14px', fontSize:20, fontWeight:600, letterSpacing:2, textAlign:'center', marginBottom:16, minHeight:48, color:'var(--text-primary)' }}>
+              {dialpadNumber || <span style={{ color:'var(--text-muted)', fontSize:14, fontWeight:400 }}>Enter number</span>}
+            </div>
+            {/* Keypad */}
+            <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:8, marginBottom:16 }}>
+              {['1','2','3','4','5','6','7','8','9','*','0','#'].map(k => (
+                <button key={k} onClick={() => setDialpadNumber(p => p.length < 15 ? p + k : p)}
+                  style={{ padding:'14px 0', fontSize:18, fontWeight:600, border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface-2)', cursor:'pointer', color:'var(--text-primary)' }}
+                  onMouseEnter={e => e.currentTarget.style.background='var(--accent-bg)'}
+                  onMouseLeave={e => e.currentTarget.style.background='var(--surface-2)'}>
+                  {k}
+                </button>
+              ))}
+            </div>
+            {/* Actions */}
+            <div style={{ display:'flex', gap:8 }}>
+              <button onClick={() => setDialpadNumber(p => p.slice(0,-1))}
+                style={{ flex:1, padding:'10px 0', border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface-2)', cursor:'pointer', fontSize:16, color:'var(--text-muted)' }}>
+                ⌫
+              </button>
+              {callStatus && callRef.current ? (
+                <button onClick={() => { hangUp(); }}
+                  style={{ flex:2, padding:'10px 0', border:'none', borderRadius:'var(--radius)', background:'#DC2626', cursor:'pointer', fontSize:14, fontWeight:700, color:'#fff' }}>
+                  ⏹ Hang up
+                </button>
+              ) : (
+                <button onClick={() => { if (dialpadNumber.length >= 10) { makeCall(dialpadNumber); } }}
+                  disabled={dialpadNumber.length < 10}
+                  style={{ flex:2, padding:'10px 0', border:'none', borderRadius:'var(--radius)', background: dialpadNumber.length >= 10 ? '#16A34A' : 'var(--border)', cursor: dialpadNumber.length >= 10 ? 'pointer' : 'not-allowed', fontSize:16, fontWeight:700, color:'#fff' }}>
+                  📞 Call
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── WIN CELEBRATION ── */}
       {celebration && (
