@@ -192,8 +192,14 @@ export default function DialerLayout() {
     <div style={{ display:'flex', flexDirection:'column', height:'100vh', overflow:'hidden' }}>
       <WinCelebration />
       <header style={{ background:'var(--surface)', borderBottom:'1px solid var(--border)', padding:'0 20px', display:'flex', alignItems:'center', justifyContent:'space-between', height:52, flexShrink:0, zIndex:100 }}>
-        <div style={{ display:'flex', alignItems:'center' }}>
-          <img src="/andi-logo.png" style={{ height:36, width:'auto' }} alt="andi" />
+        <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+          <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
+            <circle cx="6" cy="14" r="3.5" fill="#F97316"/>
+            <path d="M13 6 Q20 10 13 14" stroke="#F97316" strokeWidth="2.8" fill="none" strokeLinecap="round"/>
+            <path d="M19 2 Q29 8 19 15" stroke="#F97316" strokeWidth="2.8" fill="none" strokeLinecap="round"/>
+            <path d="M25 -1 Q38 6 25 16" stroke="#F97316" strokeWidth="2.8" fill="none" strokeLinecap="round"/>
+          </svg>
+          <span style={{ fontSize:20, fontWeight:500, letterSpacing:1, color:'var(--text-primary)', fontFamily:'-apple-system, BlinkMacSystemFont, sans-serif' }}>andi</span>
         </div>
         <div style={{ display:'flex', alignItems:'center', gap:12 }}>
 
