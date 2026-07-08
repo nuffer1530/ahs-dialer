@@ -143,7 +143,8 @@ export default function DialerPage() {
           call.accept()
           setCallStatus('connected')
           startCallTimer()
-          call.on('disconnect', () => { setCallStatus('ended'); stopCallTimer(); setTimeout(() => setCallStatus(null), 3000) })
+          updateAgentStatus('On Call')
+          call.on('disconnect', () => { setCallStatus('ended'); stopCallTimer(); setTimeout(() => setCallStatus(null), 3000); updateAgentStatus('Available') })
         })
         await device.register()
         deviceRef.current = device
@@ -167,6 +168,15 @@ export default function DialerPage() {
   }
   const fmtDuration = (s) => `${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}`
 
+  const updateAgentStatus = async (status) => {
+    if (!profile?.id) return
+    try {
+      await sb.from('profiles').update({ status }).eq('id', profile.id)
+    } catch (err) {
+      console.error('Status update error:', err)
+    }
+  }
+
   const makeCall = async (phoneNumber) => {
     if (!deviceRef.current || !twilioReady) {
       // Fallback to tel: link if Twilio not ready
@@ -180,8 +190,8 @@ export default function DialerPage() {
       callRef.current = call
       setCallStatus('calling')
       call.on('ringing', () => setCallStatus('ringing'))
-      call.on('accept', () => { setCallStatus('connected'); startCallTimer() })
-      call.on('disconnect', () => { setCallStatus('ended'); stopCallTimer(); setTimeout(() => setCallStatus(null), 3000) })
+      call.on('accept', () => { setCallStatus('connected'); startCallTimer(); updateAgentStatus('On Call') })
+      call.on('disconnect', () => { setCallStatus('ended'); stopCallTimer(); setTimeout(() => setCallStatus(null), 3000); updateAgentStatus('Available') })
       call.on('cancel', () => { setCallStatus(null); stopCallTimer() })
       call.on('error', (err) => { console.error('Call error:', err); setCallStatus(null); stopCallTimer() })
     } catch (err) {
@@ -823,16 +833,22 @@ export default function DialerPage() {
       {/* ── DIALPAD MODAL ── */}
       {showDialpad && (
         <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,.5)', zIndex:500, display:'flex', alignItems:'center', justifyContent:'center' }}
-          onClick={(e) => { if (e.target === e.currentTarget) setShowDialpad(false) }}>
+          onClick={(e) => { if (e.target === e.currentTarget) { setShowDialpad(false); setDialpadNumber('') } }}>
           <div style={{ background:'var(--surface)', borderRadius:16, padding:28, width:280, boxShadow:'0 8px 40px rgba(0,0,0,.3)' }}>
             <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:16 }}>
               <span style={{ fontSize:14, fontWeight:700, color:'var(--text-primary)' }}>Manual Dial</span>
-              <button onClick={() => setShowDialpad(false)} style={{ background:'none', border:'none', fontSize:18, cursor:'pointer', color:'var(--text-muted)' }}>×</button>
+              <button onClick={() => { setShowDialpad(false); setDialpadNumber('') }} style={{ background:'none', border:'none', fontSize:18, cursor:'pointer', color:'var(--text-muted)' }}>×</button>
             </div>
-            {/* Number display */}
-            <div style={{ background:'var(--surface-2)', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'10px 14px', fontSize:20, fontWeight:600, letterSpacing:2, textAlign:'center', marginBottom:16, minHeight:48, color:'var(--text-primary)' }}>
-              {dialpadNumber || <span style={{ color:'var(--text-muted)', fontSize:14, fontWeight:400 }}>Enter number</span>}
-            </div>
+            {/* Number display — supports typing */}
+            <input
+              autoFocus
+              type="tel"
+              value={dialpadNumber}
+              onChange={e => setDialpadNumber(e.target.value.replace(/[^0-9*#]/g, '').slice(0,15))}
+              onKeyDown={e => { if (e.key === 'Enter' && dialpadNumber.length >= 10) { makeCall(dialpadNumber); } if (e.key === 'Backspace') { e.preventDefault(); setDialpadNumber(p => p.slice(0,-1)) } }}
+              placeholder="Enter number"
+              style={{ width:'100%', background:'var(--surface-2)', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'10px 14px', fontSize:20, fontWeight:600, letterSpacing:2, textAlign:'center', marginBottom:16, color:'var(--text-primary)', boxSizing:'border-box', outline:'none' }}
+            />
             {/* Keypad */}
             <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:8, marginBottom:16 }}>
               {['1','2','3','4','5','6','7','8','9','*','0','#'].map(k => (
