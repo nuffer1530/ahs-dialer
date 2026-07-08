@@ -161,9 +161,6 @@ app.post('/api/twilio/hangup', async (req, res) => {
 // ── Serve React frontend (must be AFTER all API routes)
 const distPath = join(__dirname, 'dist')
 if (existsSync(distPath)) {
-  // Serve root-level static files (favicon, logo, etc.)
-  app.use(express.static(__dirname))
-  // Serve built React app
   app.use(express.static(distPath))
   app.get('*', (req, res) => {
     res.sendFile(join(distPath, 'index.html'))
