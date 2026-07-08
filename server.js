@@ -20,7 +20,7 @@ const twilioPhone = process.env.TWILIO_PHONE_NUMBER
 const appUrl = process.env.APP_URL || 'https://andi.awesomeservice.com'
 
 const supabase = createClient(
-  process.env.VITE_SUPABASE_URL,
+  process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL,
   process.env.SUPABASE_SERVICE_KEY
 )
 
