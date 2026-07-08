@@ -512,7 +512,7 @@ export default function DialerPage() {
                 ) : !c.claimed_by ? (
                   <div style={{ padding:'8px 18px', display:'flex', alignItems:'center', justifyContent:'space-between', background:'var(--surface-2)' }}>
                     <span style={{ fontSize:12, color:'var(--text-muted)' }}>Unclaimed</span>
-                    <button className="btn sm primary" onClick={() => claimContact(c.id)}>Claim &amp; call</button>
+                    <button className="btn sm primary" onClick={() => claimContact(c.id)}>Claim & call</button>
                   </div>
                 ) : isMe ? (
                   <div style={{ padding:'8px 18px', display:'flex', alignItems:'center', justifyContent:'space-between', background:'var(--accent-bg)' }}>
@@ -584,7 +584,7 @@ export default function DialerPage() {
                       <button className="btn sm warning" disabled={!isMe} onClick={openCallbackModal}>
                         📅 Schedule callback
                       </button>
-                      <div style={{ display:'flex', gap:6' }}>
+                      <div style={{ display:'flex', gap:6 }}>
                         <button className="btn sm" disabled={!isMe || !selectedOutcome || saving} onClick={() => logOutcome(true)}>
                           {saving ? 'Saving...' : 'Log & stay'}
                         </button>
@@ -636,7 +636,7 @@ export default function DialerPage() {
                     )}
                     {camp?.tips && (
                       <div>
-                        <div style={{ fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color:'var(--text-muted)', marginBottom:6 }}>Tips &amp; Talking Points</div>
+                        <div style={{ fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color:'var(--text-muted)', marginBottom:6 }}>Tips & Talking Points</div>
                         <div style={{ background:'#FFFBEB', border:'1px solid #FCD34D', borderRadius:'var(--radius)', padding:'12px 14px', fontSize:13, lineHeight:1.8, whiteSpace:'pre-wrap', color:'#78350F' }}>
                           {camp.tips}
                         </div>
