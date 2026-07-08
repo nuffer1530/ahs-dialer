@@ -144,7 +144,7 @@ export default function DialerPage() {
           setCallStatus('connected')
           startCallTimer()
           updateAgentStatus('On Call')
-          call.on('disconnect', () => { setCallStatus('ended'); stopCallTimer(); setTimeout(() => setCallStatus(null), 3000); updateAgentStatus('Available') })
+          call.on('disconnect', () => { setCallStatus('ended'); stopCallTimer(); setTimeout(() => setCallStatus(null), 3000); updateAgentStatus('Wrap Up') })
         })
         await device.register()
         deviceRef.current = device
@@ -191,7 +191,7 @@ export default function DialerPage() {
       setCallStatus('calling')
       call.on('ringing', () => setCallStatus('ringing'))
       call.on('accept', () => { setCallStatus('connected'); startCallTimer(); updateAgentStatus('On Call') })
-      call.on('disconnect', () => { setCallStatus('ended'); stopCallTimer(); setTimeout(() => setCallStatus(null), 3000); updateAgentStatus('Available') })
+      call.on('disconnect', () => { setCallStatus('ended'); stopCallTimer(); setTimeout(() => setCallStatus(null), 3000); updateAgentStatus('Wrap Up') })
       call.on('cancel', () => { setCallStatus(null); stopCallTimer() })
       call.on('error', (err) => { console.error('Call error:', err); setCallStatus(null); stopCallTimer() })
     } catch (err) {
@@ -280,6 +280,7 @@ export default function DialerPage() {
 
       setSelectedOutcome(null)
       setNotesVal('')
+      updateAgentStatus('Available')
       const { data: logs } = await sb.from('call_logs').select('*').eq('contact_id', c.id).order('created_at', { ascending: false })
       setContactLogs(logs || [])
 
