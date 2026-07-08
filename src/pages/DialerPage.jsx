@@ -42,7 +42,8 @@ export default function DialerPage() {
   const [mobileView, setMobileView] = useState('queue')
   const [powerDialActive, setPowerDialActive] = useState(false)
   const [celebration, setCelebration] = useState(null)
-  const [queueCollapsed, setQueueCollapsed] = useState(false)
+  const [queueCollapsed, setQueueCollapsed] = useState(true) // collapsed by default
+  const [todayLogs, setTodayLogs] = useState([])
   const [activeTab, setActiveTab] = useState('script') // 'script' | 'history'
   const [notesVal, setNotesVal] = useState('')
 
@@ -95,6 +96,17 @@ export default function DialerPage() {
 
   // Reset notes when contact changes
   useEffect(() => { setNotesVal('') }, [selectedId])
+
+  // Load today's call logs for this rep
+  useEffect(() => {
+    if (!currentRep) return
+    const today = new Date().toISOString().split('T')[0]
+    sb.from('call_logs').select('*')
+      .eq('rep', currentRep)
+      .gte('created_at', today + 'T00:00:00')
+      .lte('created_at', today + 'T23:59:59')
+      .then(({ data }) => setTodayLogs(data || []))
+  }, [currentRep])
 
   const selectContact = (id) => {
     setSelectedId(id)
@@ -238,8 +250,8 @@ export default function DialerPage() {
   const cbDue = contacts.filter(x => isCallbackDueToday(x) && !isDone(x))
   const camp = c ? campaigns.find(x => x.id === c.campaign_id) : null
   const myStats = {
-    calls: contacts.filter(x => x.status && x.status !== 'Pending').length,
-    booked: contacts.filter(x => x.status === 'Booked').length,
+    calls: todayLogs.length,
+    booked: todayLogs.filter(x => x.outcome === 'Booked').length,
     callbacks: cbDue.length,
   }
 
@@ -310,37 +322,33 @@ export default function DialerPage() {
           </div>
         )}
 
-        {/* Queue list */}
+        {/* Up Next — slim list, just next 8 */}
         <div style={{ flex:1, overflowY:'auto' }}>
-          {filtered.slice(0, queuePage * PAGE_SIZE).map(contact => {
-            const s = contact.status || 'Pending'
+          <div style={{ padding:'6px 12px 4px', fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color:'var(--text-muted)' }}>
+            Up next
+          </div>
+          {filtered.slice(0, 8).map((contact, idx) => {
             const attempts = contact.attempts || 0
             const isMyContact = contact.claimed_by === currentRep
-            const isOtherContact = contact.claimed_by && !isMyContact
             const active = contact.id === selectedId
-            const isDNCContact = dncSet.has(normPhone(contact.phone || ''))
             const hasCb = isCallbackDueToday(contact)
             return (
               <div key={contact.id} onClick={() => selectContact(contact.id)}
                 style={{
-                  padding:'9px 12px', borderBottom:'1px solid var(--border)', cursor:'pointer',
+                  padding:'8px 12px', borderBottom:'1px solid var(--border)', cursor:'pointer',
                   background: active ? 'var(--accent-bg)' : 'transparent',
-                  borderLeft: active ? '3px solid var(--accent)' : isDNCContact ? '3px solid #DC2626' : '3px solid transparent',
-                  opacity: isOtherContact ? .55 : 1,
+                  borderLeft: active ? '3px solid var(--accent)' : '3px solid transparent',
                 }}>
-                <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:1 }}>
-                  <span style={{ fontWeight:600, fontSize:12, color: active ? 'var(--accent)' : 'var(--text-primary)' }}>
-                    {contact.name || '—'}
-                  </span>
-                  <div style={{ display:'flex', gap:3 }}>
-                    {hasCb && <span style={{ fontSize:9 }}>📅</span>}
-                    {isMyContact && <span style={{ fontSize:9, background:'var(--accent)', color:'#fff', borderRadius:4, padding:'1px 4px' }}>You</span>}
+                <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+                  <span style={{ fontSize:10, color:'var(--text-muted)', width:14, flexShrink:0 }}>{idx+1}</span>
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <div style={{ fontWeight:600, fontSize:12, color: active ? 'var(--accent)' : 'var(--text-primary)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                      {hasCb && '📅 '}{contact.name || '—'}
+                      {isMyContact && <span style={{ marginLeft:4, fontSize:9, background:'var(--accent)', color:'#fff', borderRadius:3, padding:'1px 4px' }}>You</span>}
+                    </div>
+                    <div style={{ fontSize:10, color:'var(--text-muted)' }}>{contact.phone || 'No phone'}</div>
                   </div>
-                </div>
-                <div style={{ fontSize:10, color:'var(--text-muted)', marginBottom:3 }}>{contact.phone || 'No phone'}</div>
-                <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
-                  <span style={{ fontSize:9, background:'var(--surface-2)', color:'var(--text-muted)', padding:'1px 5px', borderRadius:3 }}>{campName(contact) || '—'}</span>
-                  <div style={{ display:'flex', gap:2 }}>
+                  <div style={{ display:'flex', gap:2, flexShrink:0 }}>
                     {Array.from({length:MAX_ATTEMPTS},(_,i)=>(
                       <div key={i} style={{width:4,height:4,borderRadius:'50%',background:i<attempts?'var(--accent)':'var(--border)'}}></div>
                     ))}
@@ -349,11 +357,10 @@ export default function DialerPage() {
               </div>
             )
           })}
-          {filtered.length > queuePage * PAGE_SIZE && (
-            <button onClick={() => setQueuePage(p => p+1)}
-              style={{ width:'100%', padding:8, fontSize:11, color:'var(--accent)', background:'transparent', border:'none', borderTop:'1px solid var(--border)', cursor:'pointer' }}>
-              Load {filtered.length - queuePage * PAGE_SIZE} more
-            </button>
+          {filtered.length > 8 && (
+            <div style={{ padding:'8px 12px', fontSize:11, color:'var(--text-muted)', textAlign:'center', borderTop:'1px solid var(--border)' }}>
+              +{(filtered.length - 8).toLocaleString()} more in queue
+            </div>
           )}
         </div>
       </aside>
