@@ -322,7 +322,7 @@ export default function DialerPage() {
 
   const openInServiceTitan = (contact) => {
     if (contact.external_id) {
-      window.open(`https://go.servicetitan.com/Customer/Detail/${contact.external_id}`, '_blank')
+      window.open(`https://go.servicetitan.com/#/customer/${contact.external_id}`, '_blank')
     } else {
       const name = encodeURIComponent(contact.name || '')
       const phone = encodeURIComponent(contact.phone || '')
