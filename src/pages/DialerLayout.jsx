@@ -164,7 +164,7 @@ export default function DialerLayout() {
         {/* Logo */}
         <div style={{ display:'flex', alignItems:'center', gap:8 }}>
           {/* Icon: dot + 3 arcs */}
-          <svg width="28" height="28" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <svg width="28" height="28" viewBox="-2 0 112 100" fill="none" xmlns="http://www.w3.org/2000/svg">
             <circle cx="18" cy="50" r="10" fill="#ff751f"/>
             <path d="M36 28 Q62 50 36 72" stroke="#ff751f" strokeWidth="8" fill="none" strokeLinecap="round"/>
             <path d="M54 14 Q94 50 54 86" stroke="#ff751f" strokeWidth="8" fill="none" strokeLinecap="round"/>
