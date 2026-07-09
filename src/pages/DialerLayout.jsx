@@ -30,7 +30,7 @@ const NAV_ITEMS = [
   { to:'/live', label:'Live Dashboard', icon:'🟢' },
   { to:'/analytics', label:'Analytics', icon:'📊' },
   { to:'/leaderboard', label:'Leaderboard', icon:'🏆' },
-  { to:'/attendance', label:'Attendance', icon:'📋' },
+  { to:'/attendance', label:'WFM', icon:'📋' },
   { to:'/notes', label:'Notes', icon:'📝' },
   { to:'/warroom', label:'Call Center TV', icon:'📺' },
 ]
