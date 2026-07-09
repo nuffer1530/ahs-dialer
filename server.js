@@ -104,11 +104,35 @@ app.post('/api/st/note', async (req, res) => {
   try {
     const { customerId, note, repName } = req.body
     if (!customerId || !note) return res.status(400).json({ error: 'customerId and note required' })
-    const body = {
-      text: `[Andi - ${repName || 'CSR'}] ${note}`,
-      pinToTop: false,
+
+    // Try v2 endpoint first, fall back to v1
+    let data, lastErr
+    const noteText = `[Andi - ${repName || 'CSR'}] ${note}`
+
+    // Attempt 1: CRM v2
+    try {
+      data = await stPost(`/crm/v2/tenant/${ST_TENANT_ID}/customers/${customerId}/notes`, {
+        text: noteText,
+        pinToTop: false,
+      })
+    } catch (e) {
+      lastErr = e
+      // Attempt 2: CRM v1 notes (different body shape)
+      try {
+        data = await stPost(`/crm/v1/tenant/${ST_TENANT_ID}/customers/${customerId}/notes`, {
+          text: noteText,
+        })
+      } catch (e2) {
+        lastErr = e2
+        // Attempt 3: use the /notes endpoint at root crm path
+        data = await stPost(`/crm/v2/tenant/${ST_TENANT_ID}/notes`, {
+          customerId: parseInt(customerId),
+          text: noteText,
+          pinToTop: false,
+        })
+      }
     }
-    const data = await stPost(`/crm/v2/tenant/${ST_TENANT_ID}/customers/${customerId}/notes`, body)
+
     res.json({ ok: true, data })
   } catch (err) {
     console.error('ST note error:', err.message)
