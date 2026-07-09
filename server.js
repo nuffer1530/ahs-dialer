@@ -27,6 +27,150 @@ const supabase = createClient(
 const twilioClient = twilio(accountSid, authToken)
 const VoiceResponse = twilio.twiml.VoiceResponse
 
+// ─────────────────────────────────────────────
+// ── SERVICETITAN API LAYER
+// ─────────────────────────────────────────────
+
+const ST_CLIENT_ID     = process.env.ST_CLIENT_ID
+const ST_CLIENT_SECRET = process.env.ST_CLIENT_SECRET
+const ST_TENANT_ID     = process.env.ST_TENANT_ID || '3101065365'
+const ST_AUTH_URL      = 'https://auth.servicetitan.io/connect/token'
+const ST_API_BASE      = `https://api.servicetitan.io`
+
+let stTokenCache = null
+
+async function getSTToken() {
+  // Return cached token if still valid (with 60s buffer)
+  if (stTokenCache && stTokenCache.expiresAt > Date.now() + 60000) {
+    return stTokenCache.token
+  }
+  const params = new URLSearchParams({
+    grant_type: 'client_credentials',
+    client_id: ST_CLIENT_ID,
+    client_secret: ST_CLIENT_SECRET,
+  })
+  const res = await fetch(ST_AUTH_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: params.toString(),
+  })
+  if (!res.ok) {
+    const err = await res.text()
+    throw new Error(`ST auth failed: ${err}`)
+  }
+  const data = await res.json()
+  stTokenCache = {
+    token: data.access_token,
+    expiresAt: Date.now() + (data.expires_in * 1000),
+  }
+  return stTokenCache.token
+}
+
+async function stGet(path) {
+  const token = await getSTToken()
+  const res = await fetch(`${ST_API_BASE}${path}`, {
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'ST-App-Key': ST_CLIENT_ID,
+    },
+  })
+  if (!res.ok) {
+    const err = await res.text()
+    throw new Error(`ST GET ${path} failed: ${err}`)
+  }
+  return res.json()
+}
+
+async function stPost(path, body) {
+  const token = await getSTToken()
+  const res = await fetch(`${ST_API_BASE}${path}`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'ST-App-Key': ST_CLIENT_ID,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) {
+    const err = await res.text()
+    throw new Error(`ST POST ${path} failed: ${err}`)
+  }
+  return res.json()
+}
+
+// ── ST: Add note to customer record
+app.post('/api/st/note', async (req, res) => {
+  try {
+    const { customerId, note, repName } = req.body
+    if (!customerId || !note) return res.status(400).json({ error: 'customerId and note required' })
+    const body = {
+      text: `[Andi - ${repName || 'CSR'}] ${note}`,
+      pinToTop: false,
+    }
+    const data = await stPost(`/crm/v2/tenant/${ST_TENANT_ID}/customers/${customerId}/notes`, body)
+    res.json({ ok: true, data })
+  } catch (err) {
+    console.error('ST note error:', err.message)
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// ── ST: Get customer by ID
+app.get('/api/st/customer/:id', async (req, res) => {
+  try {
+    const data = await stGet(`/crm/v2/tenant/${ST_TENANT_ID}/customers/${req.params.id}`)
+    res.json(data)
+  } catch (err) {
+    console.error('ST customer error:', err.message)
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// ── ST: Get availability (capacity slots)
+app.get('/api/st/availability', async (req, res) => {
+  try {
+    const { jobTypeId, from, to, zip } = req.query
+    // Build query params
+    const params = new URLSearchParams({
+      startsOnOrAfter: from || new Date().toISOString(),
+      endsOnOrBefore: to || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+    })
+    if (jobTypeId) params.set('jobTypeId', jobTypeId)
+    if (zip) params.set('zip', zip)
+    const data = await stGet(`/jpm/v2/tenant/${ST_TENANT_ID}/availability?${params}`)
+    res.json(data)
+  } catch (err) {
+    console.error('ST availability error:', err.message)
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// ── ST: Get job types (for availability dropdown)
+app.get('/api/st/jobtypes', async (req, res) => {
+  try {
+    const data = await stGet(`/jpm/v2/tenant/${ST_TENANT_ID}/job-types?active=true&pageSize=200`)
+    res.json(data)
+  } catch (err) {
+    console.error('ST job types error:', err.message)
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// ── ST: Health check (verify credentials work)
+app.get('/api/st/health', async (req, res) => {
+  try {
+    await getSTToken()
+    res.json({ ok: true, tenant: ST_TENANT_ID })
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message })
+  }
+})
+
+// ─────────────────────────────────────────────
+// ── TWILIO
+// ─────────────────────────────────────────────
+
 // ── Health check
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', phone: twilioPhone })
@@ -158,7 +302,9 @@ app.post('/api/twilio/hangup', async (req, res) => {
   }
 })
 
-// ── Serve React frontend (must be AFTER all API routes)
+// ─────────────────────────────────────────────
+// ── SERVE REACT FRONTEND (must be last)
+// ─────────────────────────────────────────────
 const distPath = join(__dirname, 'dist')
 if (existsSync(distPath)) {
   app.use(express.static(distPath))
