@@ -29,9 +29,10 @@ const NAV_ITEMS = [
   { to:'/', label:'Dialer', icon:'📞', end:true },
   { to:'/live', label:'Live Dashboard', icon:'🟢' },
   { to:'/analytics', label:'Analytics', icon:'📊' },
+  { to:'/leaderboard', label:'Leaderboard', icon:'🏆' },
   { to:'/attendance', label:'Attendance', icon:'📋' },
   { to:'/notes', label:'Notes', icon:'📝' },
-  { to:'/warroom', label:'War Room', icon:'📺' },
+  { to:'/warroom', label:'Call Center TV', icon:'📺' },
 ]
 
 const SETTINGS_ITEMS = [
@@ -174,11 +175,24 @@ export default function DialerLayout() {
     color: isActive ? 'var(--accent)' : 'var(--text-muted)',
     background: isActive ? 'var(--accent-bg)' : 'transparent',
     textDecoration: 'none',
-    transition: 'all .1s',
+    transition: 'background .1s, color .1s',
     whiteSpace: 'nowrap',
     overflow: 'hidden',
     marginBottom: 2,
   })
+
+  const handleNavHover = (e, isActive) => {
+    if (!isActive) {
+      e.currentTarget.style.background = 'var(--surface-2)'
+      e.currentTarget.style.color = 'var(--text-primary)'
+    }
+  }
+  const handleNavLeave = (e, isActive) => {
+    if (!isActive) {
+      e.currentTarget.style.background = 'transparent'
+      e.currentTarget.style.color = 'var(--text-muted)'
+    }
+  }
 
   return (
     <div style={{ display:'flex', height:'100vh', overflow:'hidden' }}>
@@ -221,7 +235,9 @@ export default function DialerLayout() {
         {/* Nav links */}
         <div style={{ flex:1, overflowY:'auto', padding:'10px 8px', display:'flex', flexDirection:'column' }}>
           {NAV_ITEMS.map(({ to, label, icon, end }) => (
-            <NavLink key={to} to={to} end={end} style={navLinkStyle} title={navCollapsed ? label : undefined}>
+            <NavLink key={to} to={to} end={end} style={navLinkStyle} title={navCollapsed ? label : undefined}
+              onMouseEnter={e => { const isActive = e.currentTarget.style.fontWeight === '600'; handleNavHover(e, isActive) }}
+              onMouseLeave={e => { const isActive = e.currentTarget.style.fontWeight === '600'; handleNavLeave(e, isActive) }}>
               <span style={{ fontSize:16, flexShrink:0 }}>{icon}</span>
               {!navCollapsed && <span>{label}</span>}
             </NavLink>
@@ -231,7 +247,9 @@ export default function DialerLayout() {
           {isAdmin && (
             <>
               <div style={{ height:1, background:'var(--border)', margin:'8px 0' }} />
-              <NavLink to="/settings" style={navLinkStyle} title={navCollapsed ? 'Settings' : undefined}>
+              <NavLink to="/settings" style={navLinkStyle} title={navCollapsed ? 'Settings' : undefined}
+                onMouseEnter={e => { const isActive = e.currentTarget.style.fontWeight === '600'; handleNavHover(e, isActive) }}
+                onMouseLeave={e => { const isActive = e.currentTarget.style.fontWeight === '600'; handleNavLeave(e, isActive) }}>
                 <span style={{ fontSize:16, flexShrink:0 }}>⚙️</span>
                 {!navCollapsed && <span>Settings</span>}
               </NavLink>
@@ -313,6 +331,7 @@ export default function DialerLayout() {
           <Route path="/" element={<DialerPage />} />
           <Route path="/live" element={<LivePage />} />
           <Route path="/analytics" element={<DashboardPage />} />
+          <Route path="/leaderboard" element={<LeaderboardPage />} />
           <Route path="/attendance" element={<AttendancePage />} />
           <Route path="/notes" element={<NotesPage />} />
           <Route path="/warroom" element={<WarRoomPage />} />
