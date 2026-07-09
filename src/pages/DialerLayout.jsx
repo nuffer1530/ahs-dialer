@@ -135,8 +135,13 @@ export default function DialerLayout() {
   }
 
   const signOut = async () => {
+    const now = new Date().toISOString()
+    // Write Offline to profile first — direct write, no shortcuts
+    await sb.from('profiles').update({ status: 'Offline', status_since: now }).eq('id', profile.id)
+    // Close any open status event
     if (currentEventRef.current) {
-      await sb.from('status_events').update({ ended_at: new Date().toISOString() }).eq('id', currentEventRef.current)
+      await sb.from('status_events').update({ ended_at: now }).eq('id', currentEventRef.current)
+      currentEventRef.current = null
     }
     await sb.auth.signOut()
     navigate('/login')
