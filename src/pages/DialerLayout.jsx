@@ -161,15 +161,17 @@ export default function DialerLayout() {
       <WinCelebration />
       <header style={{ background:'var(--surface)', borderBottom:'1px solid var(--border)', padding:'0 20px', display:'flex', alignItems:'center', justifyContent:'space-between', height:52, flexShrink:0, zIndex:100 }}>
 
-        {/* Logo - inline SVG, no external file needed */}
-        <div style={{ display:'flex', alignItems:'center' }}>
-          <svg width="90" height="30" viewBox="0 0 420 120" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <circle cx="28" cy="60" r="14" fill="#ff751f"/>
-            <path d="M52 38 Q90 60 52 82" stroke="#ff751f" strokeWidth="10" fill="none" strokeLinecap="round"/>
-            <path d="M72 22 Q128 60 72 98" stroke="#ff751f" strokeWidth="10" fill="none" strokeLinecap="round"/>
-            <path d="M94 8 Q168 60 94 112" stroke="#ff751f" strokeWidth="10" fill="none" strokeLinecap="round"/>
-            <text x="130" y="82" fontFamily="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" fontSize="72" fontWeight="400" fill="#1C1B19" letterSpacing="2">andi</text>
+        {/* Logo */}
+        <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+          {/* Icon: dot + 3 arcs */}
+          <svg width="28" height="28" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <circle cx="18" cy="50" r="10" fill="#ff751f"/>
+            <path d="M36 28 Q62 50 36 72" stroke="#ff751f" strokeWidth="8" fill="none" strokeLinecap="round"/>
+            <path d="M54 14 Q94 50 54 86" stroke="#ff751f" strokeWidth="8" fill="none" strokeLinecap="round"/>
+            <path d="M72 2 Q126 50 72 98" stroke="#ff751f" strokeWidth="8" fill="none" strokeLinecap="round"/>
           </svg>
+          {/* Wordmark */}
+          <span style={{ fontSize:20, fontWeight:400, letterSpacing:1, color:'var(--text-primary)', fontFamily:'-apple-system, BlinkMacSystemFont, sans-serif' }}>andi</span>
         </div>
 
         <div style={{ display:'flex', alignItems:'center', gap:12 }}>
