@@ -71,7 +71,7 @@ async function stGet(path) {
   const res = await fetch(`${ST_API_BASE}${path}`, {
     headers: {
       'Authorization': `Bearer ${token}`,
-      'ST-App-Key': ST_CLIENT_ID,
+      'ST-App-Key': process.env.ST_APP_KEY,
     },
   })
   if (!res.ok) {
@@ -87,7 +87,7 @@ async function stPost(path, body) {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${token}`,
-      'ST-App-Key': ST_CLIENT_ID,
+      'ST-App-Key': process.env.ST_APP_KEY,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify(body),
