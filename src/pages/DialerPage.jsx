@@ -259,6 +259,19 @@ export default function DialerPage() {
         }).catch(err => console.warn('Zapier webhook failed:', err))
       }
 
+      // ── Sync notes to ST customer record (silent background call)
+      if (notes && c.external_id) {
+        fetch('/api/st/note', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            customerId: c.external_id,
+            note: `${selectedOutcome}: ${notes}`,
+            repName: currentRep,
+          })
+        }).catch(err => console.warn('ST note sync failed:', err))
+      }
+
       setSelectedOutcome(null)
       setNotesVal('')
       updateAgentStatus('Available')
