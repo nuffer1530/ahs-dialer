@@ -10,12 +10,12 @@ import { OUTCOMES, MAX_ATTEMPTS, DONE_OUTCOMES } from '../lib/constants'
 const PAGE_SIZE = 50
 
 const OUTCOME_CONFIG = {
-  'No Answer':     { border:'#C87800', bg:'#FFF8E6', color:'#C87800', emoji:'📵' },
-  'Voicemail':     { border:'#7C3AED', bg:'#F3E8FF', color:'#7C3AED', emoji:'📬' },
-  'Booked':        { border:'#16A34A', bg:'#DCFCE7', color:'#16A34A', emoji:'✅' },
-  'Not Interested':{ border:'#DC2626', bg:'#FEE2E2', color:'#DC2626', emoji:'🚫' },
-  'DNC':           { border:'#7F1D1D', bg:'#FEF2F2', color:'#7F1D1D', emoji:'⛔' },
-  'Bad Data':      { border:'#6B7280', bg:'#F3F4F6', color:'#6B7280', emoji:'🗑️' },
+  'No Answer':      { border:'#C87800', bg:'#FFF8E6', color:'#C87800', emoji:'📵' },
+  'Voicemail':      { border:'#7C3AED', bg:'#F3E8FF', color:'#7C3AED', emoji:'📬' },
+  'Booked':         { border:'#16A34A', bg:'#DCFCE7', color:'#16A34A', emoji:'✅' },
+  'Not Interested': { border:'#DC2626', bg:'#FEE2E2', color:'#DC2626', emoji:'🚫' },
+  'DNC':            { border:'#7F1D1D', bg:'#FEF2F2', color:'#7F1D1D', emoji:'⛔' },
+  'Bad Data':       { border:'#6B7280', bg:'#F3F4F6', color:'#6B7280', emoji:'🗑️' },
 }
 
 export default function DialerPage() {
@@ -42,9 +42,9 @@ export default function DialerPage() {
   const [mobileView, setMobileView] = useState('queue')
   const [powerDialActive, setPowerDialActive] = useState(false)
   const [celebration, setCelebration] = useState(null)
-  const [queueCollapsed, setQueueCollapsed] = useState(true) // collapsed by default
+  const [queueCollapsed, setQueueCollapsed] = useState(true)
   const [todayLogs, setTodayLogs] = useState([])
-  const [activeTab, setActiveTab] = useState('script') // 'script' | 'history'
+  const [activeTab, setActiveTab] = useState('script')
   const [notesVal, setNotesVal] = useState('')
 
   // Manual dialpad
@@ -55,7 +55,7 @@ export default function DialerPage() {
   const deviceRef = useRef(null)
   const callRef = useRef(null)
   const [twilioReady, setTwilioReady] = useState(false)
-  const [callStatus, setCallStatus] = useState(null) // null | 'calling' | 'ringing' | 'connected' | 'ended'
+  const [callStatus, setCallStatus] = useState(null)
   const [callDuration, setCallDuration] = useState(0)
   const callTimerRef = useRef(null)
 
@@ -106,10 +106,8 @@ export default function DialerPage() {
       .then(({ data }) => { setContactLogs(data || []); setLogsLoading(false) })
   }, [selectedId])
 
-  // Reset notes when contact changes
   useEffect(() => { setNotesVal('') }, [selectedId])
 
-  // Load today's call logs for this rep
   useEffect(() => {
     if (!currentRep) return
     const today = new Date().toISOString().split('T')[0]
@@ -120,7 +118,7 @@ export default function DialerPage() {
       .then(({ data }) => setTodayLogs(data || []))
   }, [currentRep])
 
-  // Init Twilio Device using npm package
+  // Init Twilio Device
   useEffect(() => {
     if (!currentRep || currentRep === 'Unknown') return
     let device = null
@@ -170,67 +168,50 @@ export default function DialerPage() {
 
   const updateAgentStatus = async (status) => {
     if (!profile?.id) return
-    try {
-      await sb.from('profiles').update({ status, status_since: new Date().toISOString() }).eq('id', profile.id)
-    } catch (err) {
-      console.error('Status update error:', err)
-    }
+    await sb.from('profiles').update({ status, status_since: new Date().toISOString() }).eq('id', profile.id)
   }
 
-  const makeCall = async (phoneNumber) => {
-    if (!deviceRef.current || !twilioReady) {
-      // Fallback to tel: link if Twilio not ready
-      window.location.href = `tel:${phoneNumber}`
-      return
-    }
+  const makeCall = async (number) => {
+    if (!deviceRef.current) { alert('Twilio not ready yet'); return }
     try {
-      const call = await deviceRef.current.connect({
-        params: { To: phoneNumber, contactId: selectedId || '', contactName: c?.name || '' }
-      })
+      const params = { To: number, identity: currentRep.replace(/[^a-zA-Z0-9_]/g, '_'), contactId: selectedId || '', contactName: selectedContact?.name || '' }
+      const call = await deviceRef.current.connect({ params })
       callRef.current = call
       setCallStatus('calling')
+      updateAgentStatus('On Call')
       call.on('ringing', () => setCallStatus('ringing'))
-      call.on('accept', () => { setCallStatus('connected'); startCallTimer(); updateAgentStatus('On Call') })
+      call.on('accept', () => { setCallStatus('connected'); startCallTimer() })
       call.on('disconnect', () => { setCallStatus('ended'); stopCallTimer(); setTimeout(() => setCallStatus(null), 3000); updateAgentStatus('Wrap Up') })
-      call.on('cancel', () => { setCallStatus(null); stopCallTimer() })
-      call.on('error', (err) => { console.error('Call error:', err); setCallStatus(null); stopCallTimer() })
+      call.on('error', (err) => { console.error('Call error:', err); setCallStatus('ended'); stopCallTimer(); setTimeout(() => setCallStatus(null), 2000) })
     } catch (err) {
       console.error('makeCall error:', err)
+      setCallStatus(null)
     }
   }
 
   const hangUp = () => {
     if (callRef.current) { callRef.current.disconnect(); callRef.current = null }
-    setCallStatus(null)
+    setCallStatus('ended')
     stopCallTimer()
+    setTimeout(() => setCallStatus(null), 2000)
+    updateAgentStatus('Wrap Up')
   }
 
   const selectContact = (id) => {
     setSelectedId(id)
     setSelectedOutcome(null)
-    setMobileView('contact')
-    setActiveTab('script')
+    setMobileView('detail')
   }
 
   const navNextPending = () => {
-    const cb = contacts.find(c => isCallbackDueToday(c) && !isDone(c) && !c.claimed_by)
-    if (cb) { selectContact(cb.id); return }
-    const next = contacts.find(c => (c.status || 'Pending') === 'Pending' && !c.claimed_by)
+    const next = filtered.find(x => !isDone(x) && x.status !== 'Max Attempts' && !x.claimed_by)
     if (next) selectContact(next.id)
-    else alert('No unclaimed pending contacts!')
   }
 
-  const claimContact = async (id) => {
-    const alreadyClaimed = contacts.find(c => c.claimed_by === currentRep && c.id !== id)
-    if (alreadyClaimed) {
-      alert(`You already have ${alreadyClaimed.name} claimed. Log an outcome first.`); return
-    }
-    const { data: fresh } = await sb.from('contacts').select('claimed_by').eq('id', id).single()
-    if (fresh?.claimed_by && fresh.claimed_by !== currentRep) {
-      alert(`${fresh.claimed_by} just claimed this.`); return
-    }
-    const { data } = await sb.from('contacts').update({ claimed_by: currentRep, claimed_at: new Date().toISOString() }).eq('id', id).select().single()
-    if (data) setContacts(prev => prev.map(c => c.id === id ? data : c))
+  const claimContact = async () => {
+    if (!selectedContact || selectedContact.claimed_by) return
+    const { data } = await sb.from('contacts').update({ claimed_by: currentRep, claimed_at: new Date().toISOString() }).eq('id', selectedId).select().single()
+    if (data) setContacts(prev => prev.map(c => c.id === selectedId ? data : c))
   }
 
   const releaseContact = async (id) => {
@@ -339,6 +320,16 @@ export default function DialerPage() {
     setShowCorrectModal(false)
   }
 
+  const openInServiceTitan = (contact) => {
+    if (contact.external_id) {
+      window.open(`https://go.servicetitan.com/#/Customer/Index/${contact.external_id}`, '_blank')
+    } else {
+      const name = encodeURIComponent(contact.name || '')
+      const phone = encodeURIComponent(contact.phone || '')
+      window.open(`https://go.servicetitan.com/#/Customer/Index?name=${name}&phone=${phone}`, '_blank')
+    }
+  }
+
   const c = selectedContact
   const isMe = c?.claimed_by === currentRep
   const isOther = c?.claimed_by && !isMe
@@ -363,7 +354,6 @@ export default function DialerPage() {
         display:'flex', flexDirection:'column', overflow:'hidden',
         transition:'width .2s, min-width .2s',
       }}>
-        {/* Sidebar header */}
         <div style={{ padding:'10px 12px 8px', borderBottom:'1px solid var(--border)', flexShrink:0 }}>
           <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:8 }}>
             <span style={{ fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:.8, color:'var(--text-muted)' }}>Queue</span>
@@ -373,7 +363,6 @@ export default function DialerPage() {
             style={{ width:'100%', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'5px 8px', fontSize:12, background:'var(--surface-2)', color:'var(--text-primary)' }}
             placeholder="Search..." value={search} onChange={e => { setSearch(e.target.value); setQueuePage(1) }}
           />
-          {/* Filter pills */}
           <div style={{ display:'flex', gap:3, marginTop:6, flexWrap:'wrap' }}>
             {[
               { id:'active', label:'Active' },
@@ -393,47 +382,21 @@ export default function DialerPage() {
             ))}
           </div>
           <select value={campFilter} onChange={e => setCampFilter(e.target.value)}
-            style={{ width:'100%', marginTop:6, border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'4px 8px', fontSize:11, background:'var(--surface-2)', color:'var(--text-primary)' }}>
+            style={{ width:'100%', marginTop:6, border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'4px 6px', fontSize:11, background:'var(--surface-2)', color:'var(--text-primary)' }}>
             <option value="">All campaigns</option>
             {campaigns.map(camp => <option key={camp.id} value={camp.id}>{camp.name}</option>)}
           </select>
         </div>
 
-        {/* Callbacks due */}
-        {cbDue.length > 0 && (
-          <div style={{ background:'#FFFBEB', borderBottom:'2px solid #FCD34D', maxHeight:140, overflowY:'auto', flexShrink:0 }}>
-            <div style={{ padding:'5px 12px', fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:.5, color:'#92400E' }}>
-              Callbacks due ({cbDue.length})
-            </div>
-            {cbDue.map(cb => {
-              const d = new Date(cb.callback_at); const overdue = d < new Date()
-              return (
-                <div key={cb.id} onClick={() => selectContact(cb.id)}
-                  style={{ padding:'6px 12px', borderBottom:'1px solid #FDE68A', cursor:'pointer', background: overdue ? '#FEF2F2' : 'transparent' }}>
-                  <div style={{ fontSize:10, fontWeight:600, color: overdue ? '#DC2626' : '#92400E' }}>
-                    {overdue ? 'OVERDUE' : d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}
-                  </div>
-                  <div style={{ fontSize:12, fontWeight:500, color:'var(--text-primary)' }}>{cb.name}</div>
-                </div>
-              )
-            })}
-          </div>
-        )}
-
-        {/* Up Next — slim list, just next 8 */}
         <div style={{ flex:1, overflowY:'auto' }}>
-          <div style={{ padding:'6px 12px 4px', fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color:'var(--text-muted)' }}>
-            Up next
-          </div>
-          {filtered.slice(0, 8).map((contact, idx) => {
+          {filtered.slice(0, PAGE_SIZE).map((contact, idx) => {
+            const active = contact.id === selectedId
+            const hasCb = isCallbackDueToday(contact) && !isDone(contact)
             const attempts = contact.attempts || 0
             const isMyContact = contact.claimed_by === currentRep
-            const active = contact.id === selectedId
-            const hasCb = isCallbackDueToday(contact)
             return (
               <div key={contact.id} onClick={() => selectContact(contact.id)}
-                style={{
-                  padding:'8px 12px', borderBottom:'1px solid var(--border)', cursor:'pointer',
+                style={{ padding:'8px 12px', cursor:'pointer', borderBottom:'1px solid var(--border)',
                   background: active ? 'var(--accent-bg)' : 'transparent',
                   borderLeft: active ? '3px solid var(--accent)' : '3px solid transparent',
                 }}>
@@ -455,9 +418,9 @@ export default function DialerPage() {
               </div>
             )
           })}
-          {filtered.length > 8 && (
+          {filtered.length > PAGE_SIZE && (
             <div style={{ padding:'8px 12px', fontSize:11, color:'var(--text-muted)', textAlign:'center', borderTop:'1px solid var(--border)' }}>
-              +{(filtered.length - 8).toLocaleString()} more in queue
+              +{(filtered.length - PAGE_SIZE).toLocaleString()} more in queue
             </div>
           )}
         </div>
@@ -468,14 +431,12 @@ export default function DialerPage() {
 
         {/* Top bar */}
         <div style={{ display:'flex', alignItems:'center', gap:8, padding:'8px 16px', background:'var(--surface)', borderBottom:'1px solid var(--border)', flexShrink:0 }}>
-          {/* Toggle sidebar */}
           <button onClick={() => setQueueCollapsed(p => !p)}
             style={{ width:28, height:28, border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface-2)', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', fontSize:12, color:'var(--text-muted)', flexShrink:0 }}
             title={queueCollapsed ? 'Show queue' : 'Hide queue'}>
             {queueCollapsed ? '›' : '‹'}
           </button>
 
-          {/* Nav */}
           <div style={{ display:'flex', gap:4 }}>
             <button className="btn sm" disabled={selectedIdx <= 0} onClick={() => { const prev = filtered[selectedIdx-1]; if(prev) selectContact(prev.id) }}>‹ Prev</button>
             <button className="btn sm" disabled={selectedIdx >= filtered.length-1} onClick={() => { const next = filtered[selectedIdx+1]; if(next) selectContact(next.id) }}>Next ›</button>
@@ -489,7 +450,6 @@ export default function DialerPage() {
             ⌨️
           </button>
 
-          {/* Power dial */}
           {powerDialActive && (
             <div style={{ display:'flex', alignItems:'center', gap:8, padding:'4px 12px', background:'var(--accent)', borderRadius:'var(--radius)', color:'#fff', fontSize:12 }}>
               <span>⚡</span> <strong>Power Dial</strong>
@@ -497,54 +457,37 @@ export default function DialerPage() {
             </div>
           )}
 
-          {/* Spacer */}
           <div style={{ flex:1 }} />
 
-          {/* My stats */}
           <div style={{ display:'flex', gap:12, fontSize:11, color:'var(--text-muted)' }}>
             <span>Calls: <strong style={{ color:'var(--text-primary)' }}>{myStats.calls}</strong></span>
             <span>Booked: <strong style={{ color:'#16A34A' }}>{myStats.booked}</strong></span>
             {myStats.callbacks > 0 && <span style={{ color:'#C87800' }}>Callbacks: <strong>{myStats.callbacks}</strong></span>}
           </div>
 
-          {/* Live call status bar */}
           {callStatus && (
             <div style={{ display:'flex', alignItems:'center', gap:8, padding:'4px 12px', borderRadius:'var(--radius)', fontWeight:600, fontSize:12,
               background: callStatus === 'connected' ? '#DCFCE7' : callStatus === 'ended' ? '#F3F4F6' : '#FFF8E6',
               border: `1px solid ${callStatus === 'connected' ? '#16A34A' : callStatus === 'ended' ? '#D1D5DB' : '#C87800'}`,
               color: callStatus === 'connected' ? '#16A34A' : callStatus === 'ended' ? '#6B7280' : '#C87800' }}>
               <span style={{ width:8, height:8, borderRadius:'50%', background:'currentColor', display:'inline-block',
-                animation: callStatus === 'connected' ? 'pulse 1.5s infinite' : 'none' }} />
-              {callStatus === 'calling' && 'Calling...'}
-              {callStatus === 'ringing' && 'Ringing...'}
-              {callStatus === 'connected' && `On Call ${fmtDuration(callDuration)}`}
-              {callStatus === 'ended' && 'Wrap Up — log your outcome'}
-            </div>
-          )}
-          <style>{`@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}`}</style>
-
-          {/* Attempt dots */}
-          {c && (
-            <div style={{ display:'flex', alignItems:'center', gap:4, padding:'4px 10px', background:'var(--surface-2)', borderRadius:'var(--radius)', border:'1px solid var(--border)' }}>
-              <span style={{ fontSize:10, color:'var(--text-muted)' }}>Attempts</span>
-              <div style={{ display:'flex', gap:3 }}>
-                {Array.from({length:MAX_ATTEMPTS},(_,i)=>(
-                  <div key={i} style={{width:7,height:7,borderRadius:'50%',background:i<(c.attempts||0)?'var(--accent)':'var(--border)'}}></div>
-                ))}
-              </div>
-              <span style={{ fontSize:10, color:'var(--text-muted)' }}>{c.attempts||0}/{MAX_ATTEMPTS}</span>
+                animation: callStatus === 'connected' ? 'pulse 1.5s infinite' : 'none' }}></span>
+              {callStatus === 'calling' ? 'Dialing...' : callStatus === 'ringing' ? 'Ringing...' : callStatus === 'connected' ? `Connected ${fmtDuration(callDuration)}` : 'Call ended'}
+              {(callStatus === 'calling' || callStatus === 'ringing' || callStatus === 'connected') && (
+                <button onClick={hangUp} style={{ background:'#DC2626', border:'none', color:'#fff', padding:'2px 8px', borderRadius:4, cursor:'pointer', fontSize:11, marginLeft:4 }}>Hang up</button>
+              )}
             </div>
           )}
         </div>
 
-        {/* ── IDLE STATE ── */}
+        {/* ── EMPTY STATE ── */}
         {!c && (
-          <div style={{ flex:1, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:24, padding:40 }}>
-            <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:12, width:'100%', maxWidth:640 }}>
+          <div style={{ flex:1, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:24, padding:32 }}>
+            <div style={{ display:'grid', gridTemplateColumns:'repeat(2,1fr)', gap:12, width:'100%', maxWidth:480 }}>
               {[
-                { label:'My Calls Today', value: todayLogs.length, accent:'var(--accent)' },
-                { label:'My Bookings Today', value: todayLogs.filter(x=>x.outcome==='Booked').length, accent:'#16A34A' },
-                { label:'Booking Rate', value: todayLogs.length > 0 ? Math.round((todayLogs.filter(x=>x.outcome==='Booked').length / todayLogs.length) * 100) + '%' : '—', accent:'#7C3AED' },
+                { label:'Calls Today', value: myStats.calls, accent:'var(--accent)' },
+                { label:'Booked Today', value: myStats.booked, accent:'#16A34A' },
+                { label:'Booking Rate', value: todayLogs.length ? Math.round((todayLogs.filter(x=>x.outcome==='Booked').length / todayLogs.length) * 100) + '%' : '—', accent:'#7C3AED' },
                 { label:'Callbacks Due', value: cbDue.length, accent:'#C87800', click:()=>setFilter('callback') },
               ].map(({ label, value, accent, click }) => (
                 <div key={label} onClick={click}
@@ -570,9 +513,8 @@ export default function DialerPage() {
           <div style={{ flex:1, overflowY:'auto', display:'grid', gridTemplateColumns:'1fr 320px', gridTemplateRows:'auto 1fr', gap:0 }}>
 
             {/* ── LEFT: Contact + Outcome ── */}
-            <div style={{ padding:'16px 16px 16px 16px', display:'flex', flexDirection:'column', gap:12, overflowY:'auto', borderRight:'1px solid var(--border)' }}>
+            <div style={{ padding:'16px', display:'flex', flexDirection:'column', gap:12, overflowY:'auto', borderRight:'1px solid var(--border)' }}>
 
-              {/* Warnings */}
               {isDNC && (
                 <div style={{ background:'#FEF2F2', border:'1px solid #FECACA', borderRadius:'var(--radius)', padding:'8px 12px', fontSize:12, color:'#7F1D1D', display:'flex', alignItems:'center', gap:8, fontWeight:600 }}>
                   ⛔ DNC — Do not dial this number
@@ -585,91 +527,72 @@ export default function DialerPage() {
               )}
               {c.callback_at && (
                 <div style={{ background:'#FFFBEB', border:'1px solid #FCD34D', borderRadius:'var(--radius)', padding:'8px 12px', fontSize:12, color:'#92400E', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
-                  <span>📅 <strong>Callback:</strong> {fmtDate(c.callback_at)}{c.callback_note ? ' — ' + c.callback_note : ''}</span>
-                  <button className="btn sm" onClick={() => clearCallback(c.id)}>Clear</button>
+                  <span>📅 <strong>Callback:</strong> {fmtDate(c.callback_at)}{c.callback_note ? ` — ${c.callback_note}` : ''}</span>
+                  <button className="btn sm" onClick={() => clearCallback(c.id)} style={{ fontSize:10 }}>Clear</button>
                 </div>
               )}
 
-              {/* ── CONTACT CARD ── */}
+              {/* Contact card */}
               <div style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius)', overflow:'hidden' }}>
-                {/* Header */}
-                <div style={{ padding:'16px 18px', display:'flex', alignItems:'flex-start', gap:14, borderBottom:'1px solid var(--border)' }}>
-                  {/* Avatar */}
-                  <div style={{ width:48, height:48, borderRadius:'50%', background:'var(--accent-bg)', color:'var(--accent)', fontWeight:700, fontSize:16, display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0, border:'2px solid var(--accent)' }}>
-                    {getInitials(c.name)}
-                  </div>
-                  {/* Name + address */}
-                  <div style={{ flex:1, minWidth:0 }}>
-                    <div style={{ fontSize:18, fontWeight:700, color:'var(--text-primary)', lineHeight:1.2 }}>{c.name || '—'}</div>
-                    <div style={{ fontSize:12, color:'var(--text-secondary)', marginTop:3 }}>
-                      {[c.address, c.city, c.state, c.zip].filter(Boolean).join(', ') || 'No address'}
+                <div style={{ padding:'12px 14px', borderBottom:'1px solid var(--border)', display:'flex', alignItems:'center', justifyContent:'space-between', gap:8 }}>
+                  <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+                    <div style={{ width:36, height:36, borderRadius:'50%', background:'var(--accent-bg)', color:'var(--accent)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:13, fontWeight:700, flexShrink:0 }}>
+                      {getInitials(c.name)}
                     </div>
-                    {camp && (
-                      <span style={{ display:'inline-block', marginTop:6, padding:'2px 8px', borderRadius:4, fontSize:10, fontWeight:600, background:'var(--accent-bg)', color:'var(--accent)' }}>
-                        {camp.name}
-                      </span>
+                    <div>
+                      <div style={{ fontSize:15, fontWeight:700, color:'var(--text-primary)' }}>{c.name || '—'}</div>
+                      <div style={{ fontSize:11, color:'var(--text-muted)' }}>{campName(c) || 'No campaign'}</div>
+                    </div>
+                  </div>
+                  <div style={{ display:'flex', gap:6, alignItems:'center' }}>
+                    <Badge status={c.status || 'Pending'} />
+                    {!c.claimed_by && !done && (
+                      <button className="btn sm primary" onClick={claimContact}>Claim</button>
                     )}
-                  </div>
-                  {/* Phone + actions */}
-                  <div style={{ textAlign:'right', flexShrink:0 }}>
-                    <a href={`tel:${c.phone}`}
-                      style={{ display:'block', fontSize:20, fontWeight:700, color:'var(--accent)', textDecoration:'none', letterSpacing:-.3, lineHeight:1.2 }}>
-                      {c.phone || 'No phone'}
-                    </a>
-                    <div style={{ display:'flex', gap:6, marginTop:6, justifyContent:'flex-end' }}>
-                      {c.phone && (
-                        <button className="btn sm" onClick={() => navigator.clipboard.writeText(c.phone)}>Copy</button>
-                      )}
-                      {callStatus && callRef.current ? (
-                        <button className="btn sm" style={{ background:'#DC2626', borderColor:'#DC2626', color:'#fff', fontWeight:600 }}
-                          onClick={hangUp}>
-                          ⏹ Hang up
-                        </button>
-                      ) : (
-                        <button className="btn sm primary" style={{ fontWeight:600 }}
-                          onClick={() => makeCall(c.phone)}
-                          disabled={!c.phone}>
-                          📞 {twilioReady ? 'Call' : 'Call (loading...)'}
-                        </button>
-                      )}
-                    </div>
-                    {c.email && <div style={{ fontSize:10, color:'var(--text-muted)', marginTop:4 }}>{c.email}</div>}
+                    {isMe && !done && (
+                      <button className="btn sm" onClick={() => releaseContact(c.id)}>Release</button>
+                    )}
+                    {isOther && (
+                      <span style={{ fontSize:11, color:'var(--text-muted)' }}>Claimed by {c.claimed_by}</span>
+                    )}
                   </div>
                 </div>
 
-                {/* Claim bar */}
-                {done ? (
-                  <div style={{ padding:'8px 18px', background:'#DCFCE7', fontSize:12, color:'#16A34A', fontWeight:600 }}>
-                    ✓ Complete — {c.status}
-                  </div>
-                ) : !c.claimed_by ? (
-                  <div style={{ padding:'8px 18px', display:'flex', alignItems:'center', justifyContent:'space-between', background:'var(--surface-2)' }}>
-                    <span style={{ fontSize:12, color:'var(--text-muted)' }}>Unclaimed</span>
-                    <button className="btn sm primary" onClick={() => claimContact(c.id)}>Claim & call</button>
-                  </div>
-                ) : isMe ? (
-                  <div style={{ padding:'8px 18px', display:'flex', alignItems:'center', justifyContent:'space-between', background:'var(--accent-bg)' }}>
-                    <span style={{ fontSize:12, color:'var(--accent)', fontWeight:600 }}>✓ Claimed by you</span>
-                    <button className="btn sm" onClick={() => releaseContact(c.id)}>Release</button>
-                  </div>
-                ) : (
-                  <div style={{ padding:'8px 18px', background:'#FFFBEB', fontSize:12, color:'#92400E', fontWeight:500 }}>
-                    ⚠ Claimed by <strong>{c.claimed_by}</strong>
-                  </div>
-                )}
-
-                {/* Meta row */}
-                <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', borderTop:'1px solid var(--border)' }}>
+                {/* Contact details grid */}
+                <div style={{ display:'flex', flexWrap:'wrap', borderBottom:'1px solid var(--border)' }}>
                   {[
-                    { label:'Status', value: <Badge status={c.status || 'Pending'} /> },
+                    { label:'Phone', value: c.phone || '—' },
+                    { label:'Email', value: c.email || '—' },
+                    { label:'Address', value: [c.address, c.city, c.state, c.zip].filter(Boolean).join(', ') || '—' },
                     { label:'Source', value: c.source || '—' },
-                    { label:'Ext. ID', value: c.external_id || '—' },
+                    { label:'Attempts', value: `${c.attempts || 0} / ${MAX_ATTEMPTS}` },
+                    { label:'ST Customer ID', value: c.external_id || '—' },
                   ].map(({ label, value }) => (
-                    <div key={label} style={{ padding:'8px 14px', borderRight:'1px solid var(--border)' }}>
+                    <div key={label} style={{ padding:'8px 14px', borderRight:'1px solid var(--border)', minWidth:'33%' }}>
                       <div style={{ fontSize:9, textTransform:'uppercase', letterSpacing:.6, color:'var(--text-muted)', marginBottom:2 }}>{label}</div>
                       <div style={{ fontSize:12, color:'var(--text-primary)' }}>{value}</div>
                     </div>
                   ))}
+                </div>
+
+                {/* Action buttons */}
+                <div style={{ padding:'10px 14px', display:'flex', gap:8 }}>
+                  {c.phone && (
+                    <button
+                      onClick={() => makeCall(c.phone)}
+                      disabled={!twilioReady || !!callStatus}
+                      style={{ flex:1, padding:'8px 0', border:'none', borderRadius:'var(--radius)', background: twilioReady && !callStatus ? '#16A34A' : 'var(--border)', cursor: twilioReady && !callStatus ? 'pointer' : 'not-allowed', fontSize:13, fontWeight:700, color:'#fff', display:'flex', alignItems:'center', justifyContent:'center', gap:6 }}>
+                      📞 {callStatus ? 'On call...' : 'Call'}
+                    </button>
+                  )}
+                  {/* ── OPEN IN SERVICETITAN BUTTON ── */}
+                  <button
+                    onClick={() => openInServiceTitan(c)}
+                    style={{ flex:1, padding:'8px 0', border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface)', cursor:'pointer', fontSize:12, fontWeight:600, color:'var(--text-primary)', display:'flex', alignItems:'center', justifyContent:'center', gap:6 }}
+                    onMouseEnter={e => e.currentTarget.style.background='var(--accent-bg)'}
+                    onMouseLeave={e => e.currentTarget.style.background='var(--surface)'}>
+                    {c.external_id ? '🔗 Open in ST' : '🔍 Search in ST'}
+                  </button>
                 </div>
               </div>
 
@@ -683,7 +606,6 @@ export default function DialerPage() {
                     )}
                   </div>
                   <div style={{ padding:'12px 14px', display:'flex', flexDirection:'column', gap:10 }}>
-                    {/* Outcome buttons */}
                     <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:8 }}>
                       {OUTCOMES.map(o => {
                         const sel = selectedOutcome === o.id
@@ -705,14 +627,12 @@ export default function DialerPage() {
                       })}
                     </div>
 
-                    {/* Notes */}
                     <textarea
                       value={notesVal} onChange={e => setNotesVal(e.target.value)}
                       disabled={!isMe} placeholder={selectedOutcome === 'Booked' ? 'Notes required before booking...' : 'Add notes...'}
                       style={{ width:'100%', border:`1px solid ${selectedOutcome === 'Booked' ? 'var(--accent)' : 'var(--border)'}`, borderRadius:'var(--radius)', padding:'8px 10px', fontSize:12, fontFamily:'inherit', resize:'vertical', minHeight:60, background:'var(--surface-2)', color:'var(--text-primary)', opacity: isMe ? 1 : .4 }}
                     />
 
-                    {/* Actions */}
                     <div style={{ display:'flex', gap:6, justifyContent:'space-between', flexWrap:'wrap' }}>
                       <button className="btn sm warning" disabled={!isMe} onClick={openCallbackModal}>
                         📅 Schedule callback
@@ -740,11 +660,11 @@ export default function DialerPage() {
 
             {/* ── RIGHT PANEL: Script / History ── */}
             <div style={{ display:'flex', flexDirection:'column', overflow:'hidden', background:'var(--surface-2)' }}>
-              {/* Tabs */}
               <div style={{ display:'flex', borderBottom:'1px solid var(--border)', flexShrink:0, background:'var(--surface)' }}>
                 {['script', 'history'].map(t => (
                   <button key={t} onClick={() => setActiveTab(t)}
-                    style={{ flex:1, padding:'10px 0', fontSize:12, fontWeight: activeTab===t ? 600 : 400, border:'none', cursor:'pointer',
+                    style={{ flex:1, padding:'10px 0', fontSize:12, fontWeight: activeTab===t ? 600 : 400, border:'none',
+                      cursor:'pointer',
                       background: activeTab===t ? 'var(--surface-2)' : 'var(--surface)',
                       color: activeTab===t ? 'var(--accent)' : 'var(--text-muted)',
                       borderBottom: activeTab===t ? '2px solid var(--accent)' : '2px solid transparent' }}>
@@ -775,21 +695,6 @@ export default function DialerPage() {
                         </div>
                       </div>
                     )}
-                    {/* Open in ST button */}
-                    <div style={{ marginTop:8, paddingTop:12, borderTop:'1px solid var(--border)' }}>
-                      <div style={{ fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color:'var(--text-muted)', marginBottom:8 }}>ServiceTitan</div>
-                      <button
-                        onClick={() => {
-                          const name = encodeURIComponent(c.name || '')
-                          const phone = encodeURIComponent(c.phone || '')
-                          window.open(`https://go.servicetitan.com/#/Dispatch/Booking?customerName=${name}&phone=${phone}`, '_blank')
-                        }}
-                        style={{ width:'100%', padding:'9px 0', border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface)', cursor:'pointer', fontSize:12, fontWeight:600, color:'var(--text-primary)', display:'flex', alignItems:'center', justifyContent:'center', gap:6 }}
-                        onMouseEnter={e => e.currentTarget.style.background='var(--accent-bg)'}
-                        onMouseLeave={e => e.currentTarget.style.background='var(--surface)'}>
-                        Open in ServiceTitan →
-                      </button>
-                    </div>
                   </div>
                 )}
 
@@ -816,9 +721,8 @@ export default function DialerPage() {
                             </div>
                             <span style={{ fontSize:10, color:'var(--text-muted)' }}>{fmtShort(l.created_at)}</span>
                           </div>
-                          <div style={{ fontSize:10, color:'var(--text-muted)', marginBottom: l.notes ? 4 : 0 }}>{l.rep}</div>
-                          {l.notes && <div style={{ fontSize:11, color:'var(--text-secondary)', lineHeight:1.5 }}>{l.notes}</div>}
-                          {l.correction && <div style={{ fontSize:10, color:'var(--text-muted)', marginTop:3 }}>✏️ Corrected from {l.correction}</div>}
+                          {l.notes && <div style={{ fontSize:11, color:'var(--text-secondary)', marginTop:2, lineHeight:1.5 }}>{l.notes}</div>}
+                          <div style={{ fontSize:10, color:'var(--text-muted)', marginTop:4 }}>by {l.rep}</div>
                         </div>
                       ))
                     )}
@@ -826,115 +730,87 @@ export default function DialerPage() {
                 )}
               </div>
             </div>
-
           </div>
         )}
       </div>
 
-      {/* ── DIALPAD MODAL ── */}
-      {showDialpad && (
-        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,.5)', zIndex:500, display:'flex', alignItems:'center', justifyContent:'center' }}
-          onClick={(e) => { if (e.target === e.currentTarget) { setShowDialpad(false); setDialpadNumber('') } }}>
-          <div style={{ background:'var(--surface)', borderRadius:16, padding:28, width:280, boxShadow:'0 8px 40px rgba(0,0,0,.3)' }}>
-            <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:16 }}>
-              <span style={{ fontSize:14, fontWeight:700, color:'var(--text-primary)' }}>Manual Dial</span>
-              <button onClick={() => { setShowDialpad(false); setDialpadNumber('') }} style={{ background:'none', border:'none', fontSize:18, cursor:'pointer', color:'var(--text-muted)' }}>×</button>
-            </div>
-            {/* Number display — supports typing */}
-            <input
-              autoFocus
-              type="tel"
-              value={dialpadNumber}
-              onChange={e => setDialpadNumber(e.target.value.replace(/[^0-9*#]/g, '').slice(0,15))}
-              onKeyDown={e => { if (e.key === 'Enter' && dialpadNumber.length >= 10) { makeCall(dialpadNumber); } if (e.key === 'Backspace') { e.preventDefault(); setDialpadNumber(p => p.slice(0,-1)) } }}
-              placeholder="Enter number"
-              style={{ width:'100%', background:'var(--surface-2)', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'10px 14px', fontSize:20, fontWeight:600, letterSpacing:2, textAlign:'center', marginBottom:16, color:'var(--text-primary)', boxSizing:'border-box', outline:'none' }}
-            />
-            {/* Keypad */}
-            <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:8, marginBottom:16 }}>
-              {['1','2','3','4','5','6','7','8','9','*','0','#'].map(k => (
-                <button key={k} onClick={() => setDialpadNumber(p => p.length < 15 ? p + k : p)}
-                  style={{ padding:'14px 0', fontSize:18, fontWeight:600, border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface-2)', cursor:'pointer', color:'var(--text-primary)' }}
-                  onMouseEnter={e => e.currentTarget.style.background='var(--accent-bg)'}
-                  onMouseLeave={e => e.currentTarget.style.background='var(--surface-2)'}>
-                  {k}
-                </button>
-              ))}
-            </div>
-            {/* Actions */}
-            <div style={{ display:'flex', gap:8 }}>
-              <button onClick={() => setDialpadNumber(p => p.slice(0,-1))}
-                style={{ flex:1, padding:'10px 0', border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface-2)', cursor:'pointer', fontSize:16, color:'var(--text-muted)' }}>
-                ⌫
-              </button>
-              {callStatus && callRef.current ? (
-                <button onClick={() => { hangUp(); }}
-                  style={{ flex:2, padding:'10px 0', border:'none', borderRadius:'var(--radius)', background:'#DC2626', cursor:'pointer', fontSize:14, fontWeight:700, color:'#fff' }}>
-                  ⏹ Hang up
-                </button>
-              ) : (
-                <button onClick={() => { if (dialpadNumber.length >= 10) { makeCall(dialpadNumber); } }}
-                  disabled={dialpadNumber.length < 10}
-                  style={{ flex:2, padding:'10px 0', border:'none', borderRadius:'var(--radius)', background: dialpadNumber.length >= 10 ? '#16A34A' : 'var(--border)', cursor: dialpadNumber.length >= 10 ? 'pointer' : 'not-allowed', fontSize:16, fontWeight:700, color:'#fff' }}>
-                  📞 Call
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── WIN CELEBRATION ── */}
-      {celebration && (
-        <>
-          <style>{`@keyframes fall{0%{transform:translateY(0) rotate(0deg);opacity:1}100%{transform:translateY(100vh) rotate(720deg);opacity:0}} @keyframes popIn{0%{transform:translate(-50%,-50%) scale(0.5);opacity:0}70%{transform:translate(-50%,-50%) scale(1.05);opacity:1}100%{transform:translate(-50%,-50%) scale(1);opacity:1}}`}</style>
-          {Array.from({length:60},(_,i)=>(
-            <div key={i} style={{position:'fixed',borderRadius:3,left:`${Math.random()*100}%`,top:`-${Math.random()*20+10}px`,width:`${Math.random()*10+6}px`,height:`${Math.random()*10+6}px`,background:['#1A5C8A','#2E7D52','#FFC107','#E91E63','#9C27B0','#FF5722','#00BCD4'][Math.floor(Math.random()*7)],animation:`fall ${Math.random()*1.5+2}s ease-in ${Math.random()*1.5}s forwards`,pointerEvents:'none',zIndex:9999}}/>
-          ))}
-          <div style={{position:'fixed',top:'50%',left:'50%',zIndex:10000,animation:'popIn 0.5s cubic-bezier(0.175,0.885,0.32,1.275) forwards',background:'white',borderRadius:20,padding:'40px 48px',boxShadow:'0 20px 60px rgba(0,0,0,.3)',textAlign:'center',border:'3px solid #16A34A',minWidth:340}}>
-            <div style={{fontSize:64,marginBottom:8}}>🎉</div>
-            <div style={{fontSize:28,fontWeight:800,color:'#16A34A',marginBottom:6}}>BOOKED!</div>
-            <div style={{fontSize:18,fontWeight:600,color:'#1C1B19',marginBottom:4}}>{celebration.contactName}</div>
-            <div style={{fontSize:14,color:'#6B6760'}}>{celebration.rep} just closed one! 🔥</div>
-            <button onClick={()=>setCelebration(null)} style={{marginTop:20,padding:'8px 24px',background:'#16A34A',color:'white',border:'none',borderRadius:8,cursor:'pointer',fontSize:13,fontWeight:600}}>Let's go! 💪</button>
-          </div>
-          <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.4)',zIndex:9998}} onClick={()=>setCelebration(null)}/>
-        </>
-      )}
-
-      {/* CALLBACK MODAL */}
+      {/* ── CALLBACK MODAL ── */}
       {showCallbackModal && (
-        <Modal title="📅 Schedule callback" onClose={() => setShowCallbackModal(false)}>
-          <div className="form-field"><label className="form-label">Date</label><input className="form-input" type="date" value={cbDate} onChange={e=>setCbDate(e.target.value)} /></div>
-          <div className="form-field"><label className="form-label">Time</label><input className="form-input" type="time" value={cbTime} onChange={e=>setCbTime(e.target.value)} /></div>
-          <div className="form-field"><label className="form-label">Note (optional)</label><input className="form-input" placeholder="e.g. Husband home after 5pm" value={cbNote} onChange={e=>setCbNote(e.target.value)} /></div>
+        <Modal title="Schedule Callback" onClose={() => setShowCallbackModal(false)} width={360}>
+          <div className="form-field">
+            <label className="form-label">Date</label>
+            <input className="form-input" type="date" value={cbDate} onChange={e => setCbDate(e.target.value)} />
+          </div>
+          <div className="form-field">
+            <label className="form-label">Time</label>
+            <input className="form-input" type="time" value={cbTime} onChange={e => setCbTime(e.target.value)} />
+          </div>
+          <div className="form-field">
+            <label className="form-label">Note</label>
+            <input className="form-input" value={cbNote} onChange={e => setCbNote(e.target.value)} placeholder="Optional note..." />
+          </div>
           <div className="modal-actions">
-            {c?.callback_at && <button className="btn danger" onClick={() => { clearCallback(c.id); setShowCallbackModal(false) }}>Clear</button>}
             <button className="btn" onClick={() => setShowCallbackModal(false)}>Cancel</button>
-            <button className="btn primary" onClick={saveCallback}>Schedule</button>
+            <button className="btn primary" onClick={saveCallback}>Save callback</button>
           </div>
         </Modal>
       )}
 
-      {/* CORRECT MODAL */}
-      {showCorrectModal && contactLogs[0] && (
-        <Modal title="✏️ Correct last outcome" onClose={() => setShowCorrectModal(false)}>
-          <div style={{ fontSize:13, color:'var(--text-secondary)', marginBottom:14 }}>
-            Last logged: <Badge status={contactLogs[0].outcome} /> by {contactLogs[0].rep} at {fmtDate(contactLogs[0].created_at)}
-          </div>
+      {/* ── CORRECT MODAL ── */}
+      {showCorrectModal && (
+        <Modal title="Correct Last Outcome" onClose={() => setShowCorrectModal(false)} width={360}>
           <div className="form-field">
-            <label className="form-label">Change outcome to</label>
-            <select className="form-input" value={correctOutcome} onChange={e=>setCorrectOutcome(e.target.value)}>
-              {OUTCOMES.map(o => <option key={o.id} value={o.id}>{o.emoji} {o.id}</option>)}
+            <label className="form-label">New outcome</label>
+            <select className="form-input" value={correctOutcome} onChange={e => setCorrectOutcome(e.target.value)}>
+              {OUTCOMES.map(o => <option key={o.id} value={o.id}>{o.id}</option>)}
             </select>
           </div>
           <div className="form-field">
             <label className="form-label">Correction note</label>
-            <input className="form-input" placeholder="e.g. Mis-clicked, meant Booked" value={correctNote} onChange={e=>setCorrectNote(e.target.value)} />
+            <input className="form-input" value={correctNote} onChange={e => setCorrectNote(e.target.value)} placeholder="Why the correction?" />
           </div>
           <div className="modal-actions">
             <button className="btn" onClick={() => setShowCorrectModal(false)}>Cancel</button>
             <button className="btn primary" onClick={applyCorrection}>Apply correction</button>
+          </div>
+        </Modal>
+      )}
+
+      {/* ── DIALPAD MODAL ── */}
+      {showDialpad && (
+        <Modal title="Manual Dial" onClose={() => { setShowDialpad(false); setDialpadNumber('') }} width={280}>
+          <div style={{ textAlign:'center', marginBottom:12 }}>
+            <div style={{ fontSize:22, fontWeight:600, letterSpacing:3, color:'var(--text-primary)', minHeight:34, padding:'4px 0', borderBottom:'2px solid var(--accent)' }}>
+              {dialpadNumber || ' '}
+            </div>
+          </div>
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:8, marginBottom:12 }}>
+            {['1','2','3','4','5','6','7','8','9','*','0','#'].map(k => (
+              <button key={k} onClick={() => setDialpadNumber(p => p + k)}
+                style={{ padding:'14px 0', fontSize:18, fontWeight:600, border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface-2)', cursor:'pointer', color:'var(--text-primary)' }}
+                onMouseEnter={e => e.currentTarget.style.background='var(--accent-bg)'}
+                onMouseLeave={e => e.currentTarget.style.background='var(--surface-2)'}>
+                {k}
+              </button>
+            ))}
+          </div>
+          <div style={{ display:'flex', gap:8 }}>
+            <button onClick={() => setDialpadNumber(p => p.slice(0,-1))}
+              style={{ flex:1, padding:'10px 0', border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface-2)', cursor:'pointer', fontSize:16, color:'var(--text-muted)' }}>
+              ⌫
+            </button>
+            {callStatus && callRef.current ? (
+              <button onClick={hangUp}
+                style={{ flex:2, padding:'10px 0', border:'none', borderRadius:'var(--radius)', background:'#DC2626', cursor:'pointer', fontSize:14, fontWeight:700, color:'#fff' }}>
+                ⏹ Hang up
+              </button>
+            ) : (
+              <button onClick={() => { if (dialpadNumber.length >= 10) { makeCall(dialpadNumber); setShowDialpad(false) } }}
+                disabled={dialpadNumber.length < 10}
+                style={{ flex:2, padding:'10px 0', border:'none', borderRadius:'var(--radius)', background: dialpadNumber.length >= 10 ? '#16A34A' : 'var(--border)', cursor: dialpadNumber.length >= 10 ? 'pointer' : 'not-allowed', fontSize:14, fontWeight:700, color:'#fff' }}>
+                📞 Call
+              </button>
+            )}
           </div>
         </Modal>
       )}
