@@ -52,6 +52,18 @@ export default function DialerLayout() {
   const menuRef = useRef(null)
   const currentEventRef = useRef(null)
   const [navCollapsed, setNavCollapsed] = useState(false)
+  const [darkMode, setDarkMode] = useState(() => {
+    const saved = localStorage.getItem('andi-theme')
+    if (saved) { document.documentElement.setAttribute('data-theme', saved); return saved === 'dark' }
+    return false
+  })
+
+  const toggleTheme = () => {
+    const next = darkMode ? 'light' : 'dark'
+    setDarkMode(!darkMode)
+    document.documentElement.setAttribute('data-theme', next === 'dark' ? 'dark' : '')
+    localStorage.setItem('andi-theme', next)
+  }
 
   useEffect(() => {
     if (profile?.status) {
@@ -314,6 +326,16 @@ export default function DialerLayout() {
               </div>
             </div>
           )}
+
+          {/* Theme toggle */}
+          <button onClick={toggleTheme}
+            style={{ width:'100%', padding: navCollapsed ? '8px 0' : '7px 10px', background:'transparent', border:'1px solid var(--border)', borderRadius:'var(--radius)', cursor:'pointer', fontSize:12, color:'var(--text-muted)', display:'flex', alignItems:'center', justifyContent: navCollapsed ? 'center' : 'flex-start', gap:8, marginBottom:6 }}
+            onMouseEnter={e => { e.currentTarget.style.background = 'var(--surface-2)'; e.currentTarget.style.color = 'var(--text-primary)' }}
+            onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-muted)' }}
+            title={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}>
+            <span style={{ fontSize:14 }}>{darkMode ? '☀️' : '🌙'}</span>
+            {!navCollapsed && <span>{darkMode ? 'Light mode' : 'Dark mode'}</span>}
+          </button>
 
           {/* Sign out */}
           <button onClick={signOut}
