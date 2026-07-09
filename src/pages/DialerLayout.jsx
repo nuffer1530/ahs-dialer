@@ -36,9 +36,8 @@ export default function DialerLayout() {
   const statusStartRef = useRef(null)
   const [alerts, setAlerts] = useState([])
   const menuRef = useRef(null)
-  const currentEventRef = useRef(null) // tracks the open status_event id
+  const currentEventRef = useRef(null)
 
-  // Load status from profile on mount and start timer
   useEffect(() => {
     if (profile?.status) {
       setAgentStatus(profile.status)
@@ -51,7 +50,6 @@ export default function DialerLayout() {
     }
   }, [profile])
 
-  // Real-time listener for admin status overrides
   useEffect(() => {
     if (!profile?.id) return
     const channel = sb.channel('nav-status')
@@ -61,7 +59,6 @@ export default function DialerLayout() {
       }, payload => {
         if (payload.new?.status) {
           setAgentStatus(payload.new.status)
-          // Reset timer when status changes externally (e.g. from DialerPage call events)
           if (statusTimerRef.current) clearInterval(statusTimerRef.current)
           const since = payload.new.status_since ? new Date(payload.new.status_since).getTime() : Date.now()
           statusStartRef.current = since
@@ -75,116 +72,87 @@ export default function DialerLayout() {
     return () => sb.removeChannel(channel)
   }, [profile?.id])
 
-  // Admin: watch for break/lunch overruns
+  useEffect(() => {
+    const handleClick = (e) => {
+      if (menuRef.current && !menuRef.current.contains(e.target)) setShowStatusMenu(false)
+    }
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [])
+
   useEffect(() => {
     if (!isAdmin) return
-    const interval = setInterval(async () => {
-      const now = new Date()
-      const { data: openEvents } = await sb
-        .from('status_events')
-        .select('*, profiles(name, avatar)')
-        .is('ended_at', null)
-        .in('status', ['Break', 'Lunch'])
-
-      if (!openEvents) return
+    const checkAlerts = async () => {
+      const { data: profiles } = await sb.from('profiles').select('id, name, status, status_since').neq('status', 'Offline')
+      if (!profiles) return
+      const { data: schedules } = await sb.from('schedules').select('*').eq('date', new Date().toISOString().slice(0,10))
+      const now = Date.now()
       const newAlerts = []
-      openEvents.forEach(ev => {
-        const started = new Date(ev.started_at)
-        const elapsed = Math.floor((now - started) / 60000) // minutes
-        const limit = ev.status === 'Break' ? 15 : 30
-        const threshold = limit + GRACE_MINUTES
-        if (elapsed >= threshold) {
-          newAlerts.push({
-            id: ev.id,
-            name: ev.profiles?.name || 'Unknown',
-            avatar: ev.profiles?.avatar,
-            status: ev.status,
-            elapsed,
-            limit,
-          })
+      for (const p of profiles) {
+        const elapsed = p.status_since ? Math.floor((now - new Date(p.status_since).getTime()) / 60000) : 0
+        const sched = schedules?.find(s => s.profile_id === p.id)
+        let limit = null
+        if (p.status === 'Break') limit = (sched?.break1_duration || 15) + GRACE_MINUTES
+        else if (p.status === 'Lunch') limit = (sched?.lunch_duration || 30) + GRACE_MINUTES
+        if (limit && elapsed > limit) {
+          newAlerts.push({ id: p.id, name: p.name, status: p.status, elapsed, limit })
         }
-      })
+      }
       setAlerts(newAlerts)
-    }, 30000) // check every 30s
+    }
+    checkAlerts()
+    const interval = setInterval(checkAlerts, 60000)
     return () => clearInterval(interval)
   }, [isAdmin])
 
-  // Close menu on outside click
-  useEffect(() => {
-    const handler = (e) => {
-      if (menuRef.current && !menuRef.current.contains(e.target)) setShowStatusMenu(false)
-    }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [])
-
-  const logStatusEvent = async (newStatus) => {
-    if (!profile?.id) return
-    const now = new Date().toISOString()
-
-    // Close previous open event
-    const { data: openEvents } = await sb
-      .from('status_events')
-      .select('id, started_at')
-      .eq('profile_id', profile.id)
-      .is('ended_at', null)
-      .order('started_at', { ascending: false })
-      .limit(1)
-
-    if (openEvents?.length > 0) {
-      const prev = openEvents[0]
-      const duration = Math.floor((new Date() - new Date(prev.started_at)) / 1000)
-      await sb.from('status_events').update({
-        ended_at: now,
-        duration_seconds: duration,
-      }).eq('id', prev.id)
-    }
-
-    // Open new event
-    const { data: newEvent } = await sb.from('status_events').insert({
-      profile_id: profile.id,
-      status: newStatus,
-      started_at: now,
-    }).select().single()
-
-    if (newEvent) currentEventRef.current = newEvent.id
+  const fmtDur = (secs) => {
+    const h = Math.floor(secs / 3600)
+    const m = Math.floor((secs % 3600) / 60)
+    const s = secs % 60
+    if (h > 0) return `${h}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`
+    return `${m}:${String(s).padStart(2,'0')}`
   }
 
-  const updateStatus = async (val) => {
-    setAgentStatus(val)
+  const updateStatus = async (newStatus) => {
     setShowStatusMenu(false)
-    // Reset status timer
+    setAgentStatus(newStatus)
     if (statusTimerRef.current) clearInterval(statusTimerRef.current)
+    const now = new Date().toISOString()
     statusStartRef.current = Date.now()
     setStatusDuration(0)
     statusTimerRef.current = setInterval(() => {
       setStatusDuration(Math.floor((Date.now() - statusStartRef.current) / 1000))
     }, 1000)
-    await Promise.all([
-      sb.from('profiles').update({ status: val, status_since: new Date().toISOString() }).eq('id', profile.id),
-      logStatusEvent(val),
-    ])
+    if (currentEventRef.current) {
+      await sb.from('status_events').update({ ended_at: now }).eq('id', currentEventRef.current)
+      currentEventRef.current = null
+    }
+    await sb.from('profiles').update({ status: newStatus, status_since: now }).eq('id', profile.id)
+    const { data: evt } = await sb.from('status_events').insert({
+      profile_id: profile.id, status: newStatus, started_at: now
+    }).select().single()
+    if (evt) currentEventRef.current = evt.id
   }
 
-  const fmtDur = (s) => s < 60 ? `${s}s` : `${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}`
-
   const signOut = async () => {
-    await updateStatus('Offline')
+    if (currentEventRef.current) {
+      await sb.from('status_events').update({ ended_at: new Date().toISOString() }).eq('id', currentEventRef.current)
+    }
     await sb.auth.signOut()
     navigate('/login')
   }
 
-  const currentStatusObj = STATUS_OPTIONS.find(s => s.value === agentStatus) || STATUS_OPTIONS[5]
+  const currentStatusObj = STATUS_OPTIONS.find(s => s.value === agentStatus) || STATUS_OPTIONS[STATUS_OPTIONS.length - 1]
 
   const navItems = [
     { to:'/', label:'📞 Dialer', end:true },
     { to:'/live', label:'🟢 Live Dashboard' },
     { to:'/leaderboard', label:'🏆 Leaderboard' },
-    { to:'/dashboard', label:'📊 Analytics' },
-    { to:'/attendance', label:'📅 Attendance' },
-    { to:'/notes', label:'🔍 Notes' },
+    { to:'/analytics', label:'📊 Analytics' },
+    { to:'/attendance', label:'📋 Attendance' },
+    { to:'/notes', label:'📝 Notes' },
     { to:'/warroom', label:'📺 War Room' },
-    { to:'/campaigns', label:'📋 Campaigns' },
+    { to:'/campaigns', label:'📣 Campaigns' },
     ...(isAdmin ? [{ to:'/admin', label:'⚙️ Admin' }] : []),
   ]
 
@@ -192,15 +160,12 @@ export default function DialerLayout() {
     <div style={{ display:'flex', flexDirection:'column', height:'100vh', overflow:'hidden' }}>
       <WinCelebration />
       <header style={{ background:'var(--surface)', borderBottom:'1px solid var(--border)', padding:'0 20px', display:'flex', alignItems:'center', justifyContent:'space-between', height:52, flexShrink:0, zIndex:100 }}>
-        <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-          <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
-            <circle cx="6" cy="14" r="3.5" fill="#F97316"/>
-            <path d="M13 6 Q20 10 13 14" stroke="#F97316" strokeWidth="2.8" fill="none" strokeLinecap="round"/>
-            <path d="M19 2 Q29 8 19 15" stroke="#F97316" strokeWidth="2.8" fill="none" strokeLinecap="round"/>
-            <path d="M25 -1 Q38 6 25 16" stroke="#F97316" strokeWidth="2.8" fill="none" strokeLinecap="round"/>
-          </svg>
-          <span style={{ fontSize:20, fontWeight:500, letterSpacing:1, color:'var(--text-primary)', fontFamily:'-apple-system, BlinkMacSystemFont, sans-serif' }}>andi</span>
+
+        {/* Logo */}
+        <div style={{ display:'flex', alignItems:'center' }}>
+          <img src="/andi-logo.svg" alt="andi" style={{ height:30, width:'auto' }} />
         </div>
+
         <div style={{ display:'flex', alignItems:'center', gap:12 }}>
 
           {/* Alert badge for admins */}
