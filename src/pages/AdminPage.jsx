@@ -4,7 +4,6 @@ import { useAuth } from '../lib/AuthContext'
 import { useData } from '../lib/DataContext'
 import Modal from '../components/Modal'
 import CampaignsPage from './CampaignsPage'
-import LeaderboardPage from './LeaderboardPage'
 
 const EMOJIS = {
   '🔥 Hype': ['🔥','⚡','💥','🚀','🎯','💪','👊','🏆','👑','💎','🌟','⭐','🔑','💰','🎰','🃏'],
@@ -128,7 +127,7 @@ export default function AdminPage() {
   }
 
   const TABS = isAdmin
-    ? [{ id:'users', label:'Users' }, { id:'campaigns', label:'Campaigns' }, { id:'leaderboard', label:'Leaderboard' }]
+    ? [{ id:'users', label:'Users' }, { id:'campaigns', label:'Campaigns' }]
     : [{ id:'users', label:'My Profile' }]
 
   return (
@@ -152,8 +151,6 @@ export default function AdminPage() {
       {/* Campaigns tab — full CampaignsPage */}
       {settingsTab === 'campaigns' && <CampaignsPage />}
 
-      {/* Leaderboard tab — full LeaderboardPage */}
-      {settingsTab === 'leaderboard' && <LeaderboardPage />}
 
       {/* Users tab */}
       {settingsTab === 'users' && (
