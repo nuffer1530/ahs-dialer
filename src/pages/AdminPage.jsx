@@ -3,6 +3,8 @@ import { sb } from '../lib/supabase'
 import { useAuth } from '../lib/AuthContext'
 import { useData } from '../lib/DataContext'
 import Modal from '../components/Modal'
+import CampaignsPage from './CampaignsPage'
+import LeaderboardPage from './LeaderboardPage'
 
 const EMOJIS = {
   '🔥 Hype': ['🔥','⚡','💥','🚀','🎯','💪','👊','🏆','👑','💎','🌟','⭐','🔑','💰','🎰','🃏'],
@@ -18,13 +20,13 @@ const EMOJIS = {
 export default function AdminPage() {
   const { profile, isAdmin, refreshProfile } = useAuth()
   const { campaigns } = useData()
+  const [settingsTab, setSettingsTab] = useState('users')
   const [profiles, setProfiles] = useState([])
   const [loading, setLoading] = useState(true)
   const [editProfile, setEditProfile] = useState(null)
   const [csrCampaigns, setCsrCampaigns] = useState([])
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState('')
-
   const [myName, setMyName] = useState(profile?.name || '')
   const [myAvatar, setMyAvatar] = useState(profile?.avatar || null)
   const [savingProfile, setSavingProfile] = useState(false)
@@ -125,214 +127,241 @@ export default function AdminPage() {
     return csrCampaigns.filter(c => c.profile_id === profileId && c.active).sort((a, b) => a.priority - b.priority).map(c => campaigns.find(camp => camp.id === c.campaign_id)?.name).filter(Boolean)
   }
 
-  return (
-    <div style={{ flex: 1, overflowY: 'auto', padding: 24, display: 'flex', flexDirection: 'column', gap: 20 }}>
-      <h1 style={{ fontSize: 20, fontWeight: 600 }}>⚙️ {isAdmin ? 'Admin Panel' : 'My Profile'}</h1>
+  const TABS = isAdmin
+    ? [{ id:'users', label:'Users' }, { id:'campaigns', label:'Campaigns' }, { id:'leaderboard', label:'Leaderboard' }]
+    : [{ id:'users', label:'My Profile' }]
 
-      {/* MY PROFILE */}
-      <div className="card">
-        <div className="card-header">
-          <div className="card-title">My Profile</div>
-          {profileMsg && <span style={{ fontSize: 12, color: 'var(--success)' }}>{profileMsg}</span>}
-        </div>
-        <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-            <div style={{ position: 'relative', flexShrink: 0 }}>
-              <div style={{ width: 64, height: 64, borderRadius: '50%', background: 'var(--accent-bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: myAvatar ? 38 : 22, fontWeight: 700, border: '2px solid var(--border)' }}>
-                {myAvatar || (myName || profile?.email || '?')[0].toUpperCase()}
-              </div>
-              <button
-                onClick={() => { setPickerSelected(myAvatar); setShowAvatarPicker(true) }}
-                style={{ position: 'absolute', bottom: 0, right: 0, width: 22, height: 22, borderRadius: '50%', background: 'var(--accent)', border: '2px solid var(--surface)', color: '#fff', fontSize: 14, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1 }}
-                title="Change avatar"
-              >+</button>
-            </div>
-            <div>
-              <div style={{ fontSize: 13, fontWeight: 600 }}>{myName || profile?.email}</div>
-              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
-                {myAvatar ? `Avatar: ${myAvatar}` : 'No avatar set'} · <span style={{ color: 'var(--accent)', cursor: 'pointer' }} onClick={() => { setPickerSelected(myAvatar); setShowAvatarPicker(true) }}>Change</span>
-              </div>
-            </div>
-          </div>
-          <div className="form-field">
-            <label className="form-label">Display name</label>
-            <input className="form-input" value={myName} onChange={e => setMyName(e.target.value)} placeholder="Your name" />
-          </div>
-          <button className="btn primary" onClick={saveMyProfile} disabled={savingProfile} style={{ alignSelf: 'flex-start' }}>
-            {savingProfile ? 'Saving…' : 'Save profile'}
+  return (
+    <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden' }}>
+
+      {/* Tab bar header */}
+      <div style={{ background:'var(--surface)', borderBottom:'1px solid var(--border)', padding:'0 24px', display:'flex', alignItems:'center', gap:2, flexShrink:0 }}>
+        <span style={{ fontSize:16, fontWeight:600, marginRight:16, color:'var(--text-primary)' }}>Settings</span>
+        {TABS.map(t => (
+          <button key={t.id} onClick={() => setSettingsTab(t.id)}
+            style={{ padding:'12px 16px', fontSize:12, fontWeight: settingsTab===t.id ? 600 : 400,
+              color: settingsTab===t.id ? 'var(--accent)' : 'var(--text-muted)',
+              borderBottom: settingsTab===t.id ? '2px solid var(--accent)' : '2px solid transparent',
+              background:'none', border:'none', borderBottom: settingsTab===t.id ? '2px solid var(--accent)' : '2px solid transparent',
+              cursor:'pointer', transition:'all .1s' }}>
+            {t.label}
           </button>
-        </div>
+        ))}
       </div>
 
-      {/* EMOJI PICKER MODAL */}
-      {showAvatarPicker && (
-        <Modal title="Choose Your Avatar" onClose={() => setShowAvatarPicker(false)} width={520}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', background: 'var(--surface-2)', borderRadius: 'var(--radius)' }}>
-              <div style={{ width: 48, height: 48, borderRadius: '50%', background: 'var(--accent-bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: pickerSelected ? 28 : 18, fontWeight: 700, flexShrink: 0 }}>
-                {pickerSelected || myAvatar || (myName || profile?.email || '?')[0].toUpperCase()}
-              </div>
-              <div>
-                <div style={{ fontSize: 13, fontWeight: 600 }}>{myName || profile?.email}</div>
-                <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{pickerSelected ? 'Looking good! Hit save to lock it in.' : 'Pick an emoji below'}</div>
-              </div>
-            </div>
-            <div style={{ maxHeight: 400, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 14 }}>
-              {Object.entries(EMOJIS).map(([category, emojis]) => (
-                <div key={category}>
-                  <div style={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: .5, color: 'var(--text-muted)', marginBottom: 6 }}>{category}</div>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                    {emojis.map(emoji => (
-                      <button
-                        key={emoji}
-                        onClick={() => setPickerSelected(emoji)}
-                        style={{
-                          width: 40, height: 40, borderRadius: 'var(--radius)', fontSize: 22,
-                          border: pickerSelected === emoji ? '2px solid var(--accent)' : '2px solid transparent',
-                          background: pickerSelected === emoji ? 'var(--accent-bg)' : 'var(--surface-2)',
-                          cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                          transform: pickerSelected === emoji ? 'scale(1.15)' : 'scale(1)', transition: 'all .1s'
-                        }}
-                      >{emoji}</button>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-          <div className="modal-actions">
-            <button className="btn" onClick={() => setShowAvatarPicker(false)}>Cancel</button>
-            <button className="btn primary" onClick={confirmAvatar} disabled={!pickerSelected}>Select avatar</button>
-          </div>
-        </Modal>
-      )}
+      {/* Campaigns tab — full CampaignsPage */}
+      {settingsTab === 'campaigns' && <CampaignsPage />}
 
-      {/* ADMIN ONLY */}
-      {isAdmin && (
-        <>
-          {msg && <div style={{ background: 'var(--success-bg)', color: 'var(--success)', padding: '10px 14px', borderRadius: 'var(--radius)', fontSize: 13 }}>{msg}</div>}
+      {/* Leaderboard tab — full LeaderboardPage */}
+      {settingsTab === 'leaderboard' && <LeaderboardPage />}
+
+      {/* Users tab */}
+      {settingsTab === 'users' && (
+        <div style={{ flex:1, overflowY:'auto', padding:24, display:'flex', flexDirection:'column', gap:20 }}>
+
+          {/* MY PROFILE */}
           <div className="card">
             <div className="card-header">
-              <div className="card-title">User Management</div>
-              <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>New reps sign up at the login page — set their role and campaigns here</span>
+              <div className="card-title">My Profile</div>
+              {profileMsg && <span style={{ fontSize:12, color:'var(--success)' }}>{profileMsg}</span>}
             </div>
-            {loading ? <div className="card-body"><div className="spinner"></div></div> : (
-              <table className="data-table">
-                <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Active Campaigns</th><th>Actions</th></tr></thead>
-                <tbody>
-                  {profiles.map(p => {
-                    const activeCamps = getProfileCampaigns(p.id)
-                    return (
-                      <tr key={p.id}>
-                        <td style={{ padding: '10px 12px', fontWeight: 500 }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                            <div style={{ width: 28, height: 28, borderRadius: '50%', background: 'var(--accent-bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: p.avatar ? 18 : 11, fontWeight: 600, flexShrink: 0 }}>
-                              {p.avatar || (p.name || p.email || '?')[0].toUpperCase()}
-                            </div>
-                            {p.name || '—'}
-                          </div>
-                        </td>
-                        <td style={{ padding: '10px 12px', color: 'var(--text-secondary)', fontSize: 12 }}>{p.email}</td>
-                        <td style={{ padding: '10px 12px' }}>
-                          <span style={{ display: 'inline-block', padding: '2px 8px', borderRadius: 99, fontSize: 10, fontWeight: 600, background: p.role === 'admin' ? 'var(--accent-bg)' : 'var(--surface-2)', color: p.role === 'admin' ? 'var(--accent)' : 'var(--text-secondary)' }}>
-                            {p.role || 'rep'}
-                          </span>
-                        </td>
-                        <td style={{ padding: '10px 12px' }}>
-                          {activeCamps.length === 0 ? <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>No campaigns assigned</span> : (
-                            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                              {activeCamps.map((name, i) => (
-                                <span key={name} style={{ fontSize: 10, padding: '2px 7px', borderRadius: 99, background: 'var(--accent-bg)', color: 'var(--accent)', fontWeight: 600 }}>{i + 1}. {name}</span>
-                              ))}
-                            </div>
-                          )}
-                        </td>
-                        <td style={{ padding: '10px 12px' }}>
-                          <div style={{ display: 'flex', gap: 6 }}>
-                            <button className="btn sm" onClick={() => openEdit(p)}>Edit</button>
-                            <button className="btn sm danger" onClick={() => deleteUser(p.id)}>Remove</button>
-                          </div>
-                        </td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-            )}
-          </div>
-          <div className="card">
-            <div className="card-header"><div className="card-title">Quick SQL Reference</div></div>
-            <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>For bulk operations, use the <a href="https://supabase.com" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent)' }}>Supabase SQL editor</a>.</div>
-              <div style={{ background: 'var(--surface-2)', borderRadius: 'var(--radius)', padding: '12px 14px', fontSize: 11, color: 'var(--text-secondary)', fontFamily: 'monospace', lineHeight: 1.8 }}>
-                <div>-- Clean duplicate phone numbers:</div>
-                <div>UPDATE contacts SET phone = TRIM(SPLIT_PART(phone, ',', 1)) WHERE phone LIKE '%,%';</div>
-                <div style={{ marginTop: 6 }}>-- Clear all contacts (careful!):</div>
-                <div>DELETE FROM call_logs; DELETE FROM contacts;</div>
-              </div>
-            </div>
-          </div>
-        </>
-      )}
-
-      {editProfile && (
-        <Modal title={`Edit — ${editProfile.name || editProfile.email}`} onClose={() => setEditProfile(null)} width={560}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            <div className="form-field">
-              <label className="form-label">Display name</label>
-              <input className="form-input" value={editProfile.name || ''} onChange={e => setEditProfile(p => ({ ...p, name: e.target.value }))} />
-            </div>
-            <div className="form-field">
-              <label className="form-label">Role</label>
-              <select className="form-input" value={editProfile.role || 'rep'} onChange={e => setEditProfile(p => ({ ...p, role: e.target.value }))}>
-                <option value="rep">Rep — can dial, view dashboard, see all stats</option>
-                <option value="admin">Admin — full access including uploads and user management</option>
-              </select>
-            </div>
-            <div>
-              <label className="form-label" style={{ marginBottom: 8, display: 'block' }}>Campaign Access & Priority</label>
-              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 10 }}>Toggle campaigns on/off. Use arrows to set priority — #1 loads first when CSR goes Available.</div>
-              {editProfile.campaigns.filter(c => c.active).sort((a, b) => a.priority - b.priority).length > 0 && (
-                <div style={{ marginBottom: 8 }}>
-                  <div style={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: .5, color: 'var(--text-muted)', marginBottom: 6 }}>Active (priority order)</div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                    {editProfile.campaigns.filter(c => c.active).sort((a, b) => a.priority - b.priority).map((c, idx, arr) => (
-                      <div key={c.campaign_id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', background: 'var(--success-bg)', border: '1px solid var(--success)', borderRadius: 'var(--radius)' }}>
-                        <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--success)', minWidth: 18 }}>#{idx + 1}</span>
-                        <span style={{ fontSize: 13, fontWeight: 500, flex: 1 }}>{c.name}</span>
-                        <div style={{ display: 'flex', gap: 2 }}>
-                          <button onClick={() => movePriority(c.campaign_id, 'up')} disabled={idx === 0} style={{ padding: '2px 6px', fontSize: 11, borderRadius: 4, border: '1px solid var(--border)', background: 'var(--surface)', cursor: idx === 0 ? 'not-allowed' : 'pointer', opacity: idx === 0 ? .3 : 1 }}>▲</button>
-                          <button onClick={() => movePriority(c.campaign_id, 'down')} disabled={idx === arr.length - 1} style={{ padding: '2px 6px', fontSize: 11, borderRadius: 4, border: '1px solid var(--border)', background: 'var(--surface)', cursor: idx === arr.length - 1 ? 'not-allowed' : 'pointer', opacity: idx === arr.length - 1 ? .3 : 1 }}>▼</button>
-                        </div>
-                        <button onClick={() => toggleCampaign(c.campaign_id)} style={{ padding: '2px 8px', fontSize: 11, borderRadius: 4, border: '1px solid var(--danger)', background: 'var(--danger-bg)', color: 'var(--danger)', cursor: 'pointer', fontWeight: 500 }}>Remove</button>
-                      </div>
-                    ))}
+            <div className="card-body" style={{ display:'flex', flexDirection:'column', gap:16 }}>
+              <div style={{ display:'flex', alignItems:'center', gap:16 }}>
+                <div style={{ position:'relative', flexShrink:0 }}>
+                  <div style={{ width:64, height:64, borderRadius:'50%', background:'var(--accent-bg)', display:'flex', alignItems:'center', justifyContent:'center', fontSize: myAvatar ? 38 : 22, fontWeight:700, border:'2px solid var(--border)' }}>
+                    {myAvatar || (myName || profile?.email || '?')[0].toUpperCase()}
                   </div>
+                  <button onClick={() => { setPickerSelected(myAvatar); setShowAvatarPicker(true) }}
+                    style={{ position:'absolute', bottom:0, right:0, width:22, height:22, borderRadius:'50%', background:'var(--accent)', border:'2px solid var(--surface)', color:'#fff', fontSize:14, fontWeight:700, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' }}
+                    title="Change avatar">+</button>
                 </div>
-              )}
-              {editProfile.campaigns.filter(c => !c.active).length > 0 && (
                 <div>
-                  <div style={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: .5, color: 'var(--text-muted)', marginBottom: 6 }}>Available to add</div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                    {editProfile.campaigns.filter(c => !c.active).map(c => (
-                      <div key={c.campaign_id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 'var(--radius)' }}>
-                        <span style={{ fontSize: 13, flex: 1, color: 'var(--text-muted)' }}>{c.name}</span>
-                        <button onClick={() => toggleCampaign(c.campaign_id)} style={{ padding: '2px 8px', fontSize: 11, borderRadius: 4, border: '1px solid var(--accent)', background: 'var(--accent-bg)', color: 'var(--accent)', cursor: 'pointer', fontWeight: 500 }}>+ Add</button>
-                      </div>
-                    ))}
+                  <div style={{ fontSize:13, fontWeight:600 }}>{myName || profile?.email}</div>
+                  <div style={{ fontSize:11, color:'var(--text-muted)', marginTop:2 }}>
+                    {myAvatar ? `Avatar: ${myAvatar}` : 'No avatar set'} · <span style={{ color:'var(--accent)', cursor:'pointer' }} onClick={() => { setPickerSelected(myAvatar); setShowAvatarPicker(true) }}>Change</span>
                   </div>
                 </div>
-              )}
-            </div>
-            <div style={{ background: 'var(--warning-bg)', border: '1px solid #C87800', borderRadius: 'var(--radius)', padding: '10px 14px', fontSize: 12, color: 'var(--warning)' }}>
-              ⚠ Changes take effect immediately on next page load.
+              </div>
+              <div className="form-field">
+                <label className="form-label">Display name</label>
+                <input className="form-input" value={myName} onChange={e => setMyName(e.target.value)} placeholder="Your name" />
+              </div>
+              <button className="btn primary" onClick={saveMyProfile} disabled={savingProfile} style={{ alignSelf:'flex-start' }}>
+                {savingProfile ? 'Saving...' : 'Save profile'}
+              </button>
             </div>
           </div>
-          <div className="modal-actions">
-            <button className="btn" onClick={() => setEditProfile(null)}>Cancel</button>
-            <button className="btn primary" onClick={saveProfile} disabled={saving}>{saving ? 'Saving…' : 'Save changes'}</button>
-          </div>
-        </Modal>
+
+          {/* EMOJI PICKER MODAL */}
+          {showAvatarPicker && (
+            <Modal title="Choose Your Avatar" onClose={() => setShowAvatarPicker(false)} width={520}>
+              <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
+                <div style={{ display:'flex', alignItems:'center', gap:12, padding:'12px 16px', background:'var(--surface-2)', borderRadius:'var(--radius)' }}>
+                  <div style={{ width:48, height:48, borderRadius:'50%', background:'var(--accent-bg)', display:'flex', alignItems:'center', justifyContent:'center', fontSize: pickerSelected ? 28 : 18, fontWeight:700, flexShrink:0 }}>
+                    {pickerSelected || myAvatar || (myName || profile?.email || '?')[0].toUpperCase()}
+                  </div>
+                  <div>
+                    <div style={{ fontSize:13, fontWeight:600 }}>{myName || profile?.email}</div>
+                    <div style={{ fontSize:11, color:'var(--text-muted)' }}>{pickerSelected ? 'Looking good! Hit save to lock it in.' : 'Pick an emoji below'}</div>
+                  </div>
+                </div>
+                <div style={{ maxHeight:400, overflowY:'auto', display:'flex', flexDirection:'column', gap:14 }}>
+                  {Object.entries(EMOJIS).map(([category, emojis]) => (
+                    <div key={category}>
+                      <div style={{ fontSize:10, fontWeight:600, textTransform:'uppercase', letterSpacing:.5, color:'var(--text-muted)', marginBottom:6 }}>{category}</div>
+                      <div style={{ display:'flex', flexWrap:'wrap', gap:6 }}>
+                        {emojis.map(emoji => (
+                          <button key={emoji} onClick={() => setPickerSelected(emoji)}
+                            style={{ width:40, height:40, borderRadius:'var(--radius)', fontSize:22,
+                              border: pickerSelected===emoji ? '2px solid var(--accent)' : '2px solid transparent',
+                              background: pickerSelected===emoji ? 'var(--accent-bg)' : 'var(--surface-2)',
+                              cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center',
+                              transform: pickerSelected===emoji ? 'scale(1.15)' : 'scale(1)', transition:'all .1s' }}>
+                            {emoji}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="modal-actions">
+                <button className="btn" onClick={() => setShowAvatarPicker(false)}>Cancel</button>
+                <button className="btn primary" onClick={confirmAvatar} disabled={!pickerSelected}>Select avatar</button>
+              </div>
+            </Modal>
+          )}
+
+          {/* ADMIN ONLY — User Management */}
+          {isAdmin && (
+            <>
+              {msg && <div style={{ background:'var(--success-bg)', color:'var(--success)', padding:'10px 14px', borderRadius:'var(--radius)', fontSize:13 }}>{msg}</div>}
+              <div className="card">
+                <div className="card-header">
+                  <div className="card-title">User Management</div>
+                  <span style={{ fontSize:11, color:'var(--text-muted)' }}>New reps sign up at the login page — set their role and campaigns here</span>
+                </div>
+                {loading ? <div className="card-body"><div className="spinner"></div></div> : (
+                  <table className="data-table">
+                    <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Active Campaigns</th><th>Actions</th></tr></thead>
+                    <tbody>
+                      {profiles.map(p => {
+                        const activeCamps = getProfileCampaigns(p.id)
+                        return (
+                          <tr key={p.id}>
+                            <td style={{ padding:'10px 12px', fontWeight:500 }}>
+                              <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                                <div style={{ width:28, height:28, borderRadius:'50%', background:'var(--accent-bg)', display:'flex', alignItems:'center', justifyContent:'center', fontSize: p.avatar ? 18 : 11, fontWeight:600, flexShrink:0 }}>
+                                  {p.avatar || (p.name || p.email || '?')[0].toUpperCase()}
+                                </div>
+                                {p.name || '—'}
+                              </div>
+                            </td>
+                            <td style={{ padding:'10px 12px', color:'var(--text-secondary)', fontSize:12 }}>{p.email}</td>
+                            <td style={{ padding:'10px 12px' }}>
+                              <span style={{ display:'inline-block', padding:'2px 8px', borderRadius:99, fontSize:10, fontWeight:600, background: p.role==='admin' ? 'var(--accent-bg)' : 'var(--surface-2)', color: p.role==='admin' ? 'var(--accent)' : 'var(--text-secondary)' }}>
+                                {p.role || 'rep'}
+                              </span>
+                            </td>
+                            <td style={{ padding:'10px 12px' }}>
+                              {activeCamps.length === 0 ? <span style={{ fontSize:11, color:'var(--text-muted)' }}>No campaigns assigned</span> : (
+                                <div style={{ display:'flex', gap:4, flexWrap:'wrap' }}>
+                                  {activeCamps.map((name, i) => (
+                                    <span key={name} style={{ fontSize:10, padding:'2px 7px', borderRadius:99, background:'var(--accent-bg)', color:'var(--accent)', fontWeight:600 }}>{i+1}. {name}</span>
+                                  ))}
+                                </div>
+                              )}
+                            </td>
+                            <td style={{ padding:'10px 12px' }}>
+                              <div style={{ display:'flex', gap:6 }}>
+                                <button className="btn sm" onClick={() => openEdit(p)}>Edit</button>
+                                <button className="btn sm danger" onClick={() => deleteUser(p.id)}>Remove</button>
+                              </div>
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+
+              <div className="card">
+                <div className="card-header"><div className="card-title">Quick SQL Reference</div></div>
+                <div className="card-body" style={{ display:'flex', flexDirection:'column', gap:10 }}>
+                  <div style={{ fontSize:13, color:'var(--text-secondary)' }}>For bulk operations, use the <a href="https://supabase.com" target="_blank" rel="noopener noreferrer" style={{ color:'var(--accent)' }}>Supabase SQL editor</a>.</div>
+                  <div style={{ background:'var(--surface-2)', borderRadius:'var(--radius)', padding:'12px 14px', fontSize:11, color:'var(--text-secondary)', fontFamily:'monospace', lineHeight:1.8 }}>
+                    <div>-- Clean duplicate phone numbers:</div>
+                    <div>UPDATE contacts SET phone = TRIM(SPLIT_PART(phone, ',', 1)) WHERE phone LIKE '%,%';</div>
+                    <div style={{ marginTop:6 }}>-- Clear all contacts (careful!):</div>
+                    <div>DELETE FROM call_logs; DELETE FROM contacts;</div>
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
+
+          {/* Edit user modal */}
+          {editProfile && (
+            <Modal title={`Edit — ${editProfile.name || editProfile.email}`} onClose={() => setEditProfile(null)} width={560}>
+              <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
+                <div className="form-field">
+                  <label className="form-label">Display name</label>
+                  <input className="form-input" value={editProfile.name || ''} onChange={e => setEditProfile(p => ({ ...p, name: e.target.value }))} />
+                </div>
+                <div className="form-field">
+                  <label className="form-label">Role</label>
+                  <select className="form-input" value={editProfile.role || 'rep'} onChange={e => setEditProfile(p => ({ ...p, role: e.target.value }))}>
+                    <option value="rep">Rep — can dial, view dashboard, see all stats</option>
+                    <option value="admin">Admin — full access including uploads and user management</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="form-label" style={{ marginBottom:8, display:'block' }}>Campaign Access & Priority</label>
+                  <div style={{ fontSize:11, color:'var(--text-muted)', marginBottom:10 }}>Toggle campaigns on/off. Use arrows to set priority — #1 loads first when CSR goes Available.</div>
+                  {editProfile.campaigns.filter(c => c.active).sort((a, b) => a.priority - b.priority).length > 0 && (
+                    <div style={{ marginBottom:8 }}>
+                      <div style={{ fontSize:10, fontWeight:600, textTransform:'uppercase', letterSpacing:.5, color:'var(--text-muted)', marginBottom:6 }}>Active (priority order)</div>
+                      <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
+                        {editProfile.campaigns.filter(c => c.active).sort((a, b) => a.priority - b.priority).map((c, idx, arr) => (
+                          <div key={c.campaign_id} style={{ display:'flex', alignItems:'center', gap:8, padding:'8px 10px', background:'var(--success-bg)', border:'1px solid var(--success)', borderRadius:'var(--radius)' }}>
+                            <span style={{ fontSize:11, fontWeight:700, color:'var(--success)', minWidth:18 }}>#{idx+1}</span>
+                            <span style={{ fontSize:13, fontWeight:500, flex:1 }}>{c.name}</span>
+                            <div style={{ display:'flex', gap:2 }}>
+                              <button onClick={() => movePriority(c.campaign_id, 'up')} disabled={idx===0} style={{ padding:'2px 6px', fontSize:11, borderRadius:4, border:'1px solid var(--border)', background:'var(--surface)', cursor: idx===0 ? 'not-allowed' : 'pointer', opacity: idx===0 ? .3 : 1 }}>▲</button>
+                              <button onClick={() => movePriority(c.campaign_id, 'down')} disabled={idx===arr.length-1} style={{ padding:'2px 6px', fontSize:11, borderRadius:4, border:'1px solid var(--border)', background:'var(--surface)', cursor: idx===arr.length-1 ? 'not-allowed' : 'pointer', opacity: idx===arr.length-1 ? .3 : 1 }}>▼</button>
+                            </div>
+                            <button onClick={() => toggleCampaign(c.campaign_id)} style={{ padding:'2px 8px', fontSize:11, borderRadius:4, border:'1px solid var(--danger)', background:'var(--danger-bg)', color:'var(--danger)', cursor:'pointer', fontWeight:500 }}>Remove</button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {editProfile.campaigns.filter(c => !c.active).length > 0 && (
+                    <div>
+                      <div style={{ fontSize:10, fontWeight:600, textTransform:'uppercase', letterSpacing:.5, color:'var(--text-muted)', marginBottom:6 }}>Available to add</div>
+                      <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
+                        {editProfile.campaigns.filter(c => !c.active).map(c => (
+                          <div key={c.campaign_id} style={{ display:'flex', alignItems:'center', gap:8, padding:'8px 10px', background:'var(--surface-2)', border:'1px solid var(--border)', borderRadius:'var(--radius)' }}>
+                            <span style={{ fontSize:13, flex:1, color:'var(--text-muted)' }}>{c.name}</span>
+                            <button onClick={() => toggleCampaign(c.campaign_id)} style={{ padding:'2px 8px', fontSize:11, borderRadius:4, border:'1px solid var(--accent)', background:'var(--accent-bg)', color:'var(--accent)', cursor:'pointer', fontWeight:500 }}>+ Add</button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+                <div style={{ background:'var(--warning-bg)', border:'1px solid #C87800', borderRadius:'var(--radius)', padding:'10px 14px', fontSize:12, color:'var(--warning)' }}>
+                  ⚠ Changes take effect immediately on next page load.
+                </div>
+              </div>
+              <div className="modal-actions">
+                <button className="btn" onClick={() => setEditProfile(null)}>Cancel</button>
+                <button className="btn primary" onClick={saveProfile} disabled={saving}>{saving ? 'Saving...' : 'Save changes'}</button>
+              </div>
+            </Modal>
+          )}
+        </div>
       )}
     </div>
   )
