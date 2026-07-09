@@ -10,8 +10,13 @@ export default function App() {
   if (loading) return (
     <div style={{ display:'flex', alignItems:'center', justifyContent:'center', height:'100vh', flexDirection:'column', gap:16 }}>
       <div style={{ display:'flex', alignItems:'center', gap:10 }}>
-        <span style={{ background:'#1A5C8A', color:'#fff', fontWeight:700, padding:'3px 10px', borderRadius:6, fontSize:14, letterSpacing:.5 }}>AHS</span>
-        <span style={{ fontSize:16, fontWeight:600 }}>Dialer</span>
+        <svg width="36" height="36" viewBox="-2 0 112 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <circle cx="18" cy="50" r="10" fill="#ff751f"/>
+          <path d="M36 28 Q62 50 36 72" stroke="#ff751f" strokeWidth="8" fill="none" strokeLinecap="round"/>
+          <path d="M54 14 Q94 50 54 86" stroke="#ff751f" strokeWidth="8" fill="none" strokeLinecap="round"/>
+          <path d="M72 2 Q126 50 72 98" stroke="#ff751f" strokeWidth="8" fill="none" strokeLinecap="round"/>
+        </svg>
+        <span style={{ fontSize:24, fontWeight:400, letterSpacing:1, color:'var(--text-primary)', fontFamily:'-apple-system, BlinkMacSystemFont, sans-serif' }}>andi</span>
       </div>
       <div className="spinner lg"></div>
     </div>
