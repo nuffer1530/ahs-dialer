@@ -22,7 +22,6 @@ export default function LoginPage() {
         }
         const { data, error } = await sb.auth.signUp({ email, password })
         if (error) throw error
-        // Create profile
         if (data.user) {
           await sb.from('profiles').insert({ id: data.user.id, email, name: email.split('@')[0], role: 'rep' })
         }
@@ -43,11 +42,17 @@ export default function LoginPage() {
   return (
     <div style={{ minHeight:'100vh', background:'var(--bg)', display:'flex', alignItems:'center', justifyContent:'center', padding:20 }}>
       <div style={{ width:'100%', maxWidth:400 }}>
+
         {/* Logo */}
         <div style={{ textAlign:'center', marginBottom:32 }}>
           <div style={{ display:'inline-flex', alignItems:'center', gap:10, marginBottom:8 }}>
-            <span style={{ background:'var(--accent)', color:'#fff', fontWeight:700, padding:'4px 12px', borderRadius:6, fontSize:16, letterSpacing:.5 }}>AHS</span>
-            <span style={{ fontSize:20, fontWeight:600 }}>Dialer</span>
+            <svg width="36" height="36" viewBox="-2 0 112 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <circle cx="18" cy="50" r="10" fill="#ff751f"/>
+              <path d="M36 28 Q62 50 36 72" stroke="#ff751f" strokeWidth="8" fill="none" strokeLinecap="round"/>
+              <path d="M54 14 Q94 50 54 86" stroke="#ff751f" strokeWidth="8" fill="none" strokeLinecap="round"/>
+              <path d="M72 2 Q126 50 72 98" stroke="#ff751f" strokeWidth="8" fill="none" strokeLinecap="round"/>
+            </svg>
+            <span style={{ fontSize:28, fontWeight:400, letterSpacing:1, color:'var(--text-primary)', fontFamily:'-apple-system, BlinkMacSystemFont, sans-serif' }}>andi</span>
           </div>
           <div style={{ fontSize:13, color:'var(--text-muted)' }}>Awesome Home Services</div>
         </div>
@@ -82,7 +87,7 @@ export default function LoginPage() {
               <button className="btn ghost sm" onClick={()=>setMode('reset')}>Forgot password?</button>
               <button className="btn ghost sm" onClick={()=>setMode('signup')}>New rep? Create account</button>
             </>}
-            {mode !== 'login' && <button className="btn ghost sm" onClick={()=>setMode('login')}>← Back to sign in</button>}
+            {mode !== 'login' && <button className="btn ghost sm" onClick={()=>setMode('login')}>Back to sign in</button>}
           </div>
         </div>
       </div>
