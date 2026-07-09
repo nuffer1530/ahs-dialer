@@ -99,41 +99,25 @@ async function stPost(path, body) {
   return res.json()
 }
 
-// ── ST: Add note to customer record
+// ── ST: Add note to customer record (via primary location)
 app.post('/api/st/note', async (req, res) => {
   try {
     const { customerId, note, repName } = req.body
     if (!customerId || !note) return res.status(400).json({ error: 'customerId and note required' })
-
-    // Try v2 endpoint first, fall back to v1
-    let data, lastErr
     const noteText = `[Andi - ${repName || 'CSR'}] ${note}`
 
-    // Attempt 1: CRM v2
-    try {
-      data = await stPost(`/crm/v2/tenant/${ST_TENANT_ID}/customers/${customerId}/notes`, {
-        text: noteText,
-        pinToTop: false,
-      })
-    } catch (e) {
-      lastErr = e
-      // Attempt 2: CRM v1 notes (different body shape)
-      try {
-        data = await stPost(`/crm/v1/tenant/${ST_TENANT_ID}/customers/${customerId}/notes`, {
-          text: noteText,
-        })
-      } catch (e2) {
-        lastErr = e2
-        // Attempt 3: use the /notes endpoint at root crm path
-        data = await stPost(`/crm/v2/tenant/${ST_TENANT_ID}/notes`, {
-          customerId: parseInt(customerId),
-          text: noteText,
-          pinToTop: false,
-        })
-      }
-    }
+    // Step 1: Get customer's primary location ID
+    const locData = await stGet(`/crm/v2/tenant/${ST_TENANT_ID}/locations?customerId=${customerId}&pageSize=1`)
+    const locationId = locData?.data?.[0]?.id
+    if (!locationId) throw new Error(`No location found for customer ${customerId}`)
 
-    res.json({ ok: true, data })
+    // Step 2: Post note to the location
+    const data = await stPost(`/crm/v2/tenant/${ST_TENANT_ID}/locations/${locationId}/notes`, {
+      text: noteText,
+      pinToTop: false,
+    })
+
+    res.json({ ok: true, locationId, data })
   } catch (err) {
     console.error('ST note error:', err.message)
     res.status(500).json({ error: err.message })
