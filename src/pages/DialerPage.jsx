@@ -639,7 +639,7 @@ export default function DialerPage() {
                             <select value={selectedBU} onChange={e => { setSelectedBU(e.target.value); setAvailability([]); setBookingResult(null) }}
                               style={{ width:'100%', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'6px 8px', fontSize:11, background:'var(--surface)', color:'var(--text-primary)' }}>
                               <option value="">Select business unit...</option>
-                              {stBusinessUnits.map(bu => <option key={bu.id} value={bu.id}>{bu.name}</option>)}
+                              {[...stBusinessUnits].sort((a,b) => a.name.localeCompare(b.name)).map(bu => <option key={bu.id} value={bu.id}>{bu.name}</option>)}
                             </select>
                           </div>
                           <div>
