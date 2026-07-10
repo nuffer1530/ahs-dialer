@@ -165,6 +165,59 @@ app.get('/api/st/jobtypes', async (req, res) => {
   }
 })
 
+
+// ── ST: Get business units (for booking dropdown)
+app.get('/api/st/businessunits', async (req, res) => {
+  try {
+    const data = await stGet(`/businessunits/v2/tenant/${ST_TENANT_ID}/business-units?active=true&pageSize=200`)
+    res.json(data)
+  } catch (err) {
+    console.error('ST business units error:', err.message)
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// ── ST: Create booking (direct to dispatch board, unscheduled)
+app.post('/api/st/book', async (req, res) => {
+  try {
+    const { customerId, jobTypeId, businessUnitId, notes, repName, contactName, phone, zip } = req.body
+    if (!customerId || !jobTypeId || !businessUnitId) {
+      return res.status(400).json({ error: 'customerId, jobTypeId, and businessUnitId required' })
+    }
+
+    // Step 1: Get customer's primary location
+    const locData = await stGet(`/crm/v2/tenant/${ST_TENANT_ID}/locations?customerId=${customerId}&pageSize=1`)
+    const location = locData?.data?.[0]
+    if (!location) throw new Error(`No location found for customer ${customerId}`)
+
+    // Step 2: Create the job (unscheduled = no start/end time = lands at bottom of dispatch board)
+    const jobBody = {
+      customerId: parseInt(customerId),
+      locationId: location.id,
+      jobTypeId: parseInt(jobTypeId),
+      businessUnitId: parseInt(businessUnitId),
+      priority: 'Normal',
+      summary: notes || `Outbound booking via Andi — ${repName || 'CSR'}`,
+      tagTypeIds: [],
+    }
+
+    const jobData = await stPost(`/jpm/v2/tenant/${ST_TENANT_ID}/jobs`, jobBody)
+    const jobId = jobData?.id
+    const jobNumber = jobData?.jobNumber
+
+    // Step 3: Also post a note to the location
+    await stPost(`/crm/v2/tenant/${ST_TENANT_ID}/locations/${location.id}/notes`, {
+      text: `[Andi - ${repName || 'CSR'}] Booked: ${notes || 'Outbound call booking'}`,
+      pinToTop: false,
+    }).catch(e => console.warn('Note post failed:', e.message))
+
+    res.json({ ok: true, jobId, jobNumber, locationId: location.id })
+  } catch (err) {
+    console.error('ST booking error:', err.message)
+    res.status(500).json({ error: err.message })
+  }
+})
+
 // ── ST: Health check (verify credentials work)
 app.get('/api/st/health', async (req, res) => {
   try {
