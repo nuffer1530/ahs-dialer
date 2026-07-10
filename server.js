@@ -169,7 +169,7 @@ app.get('/api/st/jobtypes', async (req, res) => {
 // ── ST: Get business units (for booking dropdown)
 app.get('/api/st/businessunits', async (req, res) => {
   try {
-    const data = await stGet(`/businessunits/v2/tenant/${ST_TENANT_ID}/business-units?active=true&pageSize=200`)
+    const data = await stGet(`/settings/v2/tenant/${ST_TENANT_ID}/business-units?active=true&pageSize=200`)
     res.json(data)
   } catch (err) {
     console.error('ST business units error:', err.message)
