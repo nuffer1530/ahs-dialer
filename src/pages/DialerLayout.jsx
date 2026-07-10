@@ -299,7 +299,7 @@ export default function DialerLayout() {
               )}
             </button>
             {showStatusMenu && (
-              <div style={{ position:'absolute', bottom: navCollapsed ? 0 : 'calc(100% + 6px)', left: navCollapsed ? 'calc(100% + 8px)' : 0, right: navCollapsed ? 'auto' : 0, minWidth:160, background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius)', boxShadow:'0 4px 16px rgba(0,0,0,.15)', zIndex:200, overflow:'hidden' }}>
+              <div style={{ position:'fixed', bottom: navCollapsed ? 'auto' : undefined, top: navCollapsed ? 'auto' : undefined, left: navCollapsed ? NAV_WIDTH + 8 : 8, right: navCollapsed ? 'auto' : undefined, bottom: 80, minWidth:175, background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius)', boxShadow:'0 4px 24px rgba(0,0,0,.2)', zIndex:999, overflow:'hidden' }}>
                 {STATUS_OPTIONS.map(s => (
                   <button key={s.value} onClick={() => updateStatus(s.value)}
                     onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
