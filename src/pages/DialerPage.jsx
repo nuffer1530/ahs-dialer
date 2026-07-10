@@ -9,13 +9,56 @@ import { OUTCOMES, MAX_ATTEMPTS, DONE_OUTCOMES } from '../lib/constants'
 
 const PAGE_SIZE = 50
 
+const OUTCOME_ICONS = {
+  'No Answer': (color) => (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+      <path d="M6.6 10.8c1.4 2.8 3.8 5.1 6.6 6.6l2.2-2.2c.3-.3.7-.4 1-.2 1.1.4 2.3.6 3.6.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1C10.6 21 3 13.4 3 4c0-.6.4-1 1-1h3.5c.6 0 1 .4 1 1 0 1.3.2 2.5.6 3.6.1.3 0 .7-.2 1L6.6 10.8z" fill={color}/>
+      <line x1="18" y1="6" x2="6" y2="18" stroke={color} strokeWidth="2" strokeLinecap="round"/>
+    </svg>
+  ),
+  'Voicemail': (color) => (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+      <circle cx="7" cy="13" r="3" stroke={color} strokeWidth="1.8" fill="none"/>
+      <circle cx="17" cy="13" r="3" stroke={color} strokeWidth="1.8" fill="none"/>
+      <path d="M7 16h10M4 16h2M18 16h2" stroke={color} strokeWidth="1.8" strokeLinecap="round"/>
+      <path d="M12 7v4" stroke={color} strokeWidth="1.8" strokeLinecap="round"/>
+      <circle cx="12" cy="5" r="1.5" fill={color}/>
+    </svg>
+  ),
+  'Booked': (color) => (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+      <rect x="3" y="4" width="18" height="17" rx="2" stroke={color} strokeWidth="1.8" fill="none"/>
+      <path d="M16 2v4M8 2v4M3 10h18" stroke={color} strokeWidth="1.8" strokeLinecap="round"/>
+      <path d="M8 15l3 3 5-5" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+  ),
+  'Not Interested': (color) => (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+      <circle cx="12" cy="12" r="9" stroke={color} strokeWidth="1.8" fill="none"/>
+      <path d="M6 18L18 6" stroke={color} strokeWidth="2" strokeLinecap="round"/>
+    </svg>
+  ),
+  'DNC': (color) => (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+      <circle cx="12" cy="12" r="9" stroke={color} strokeWidth="1.8" fill="none"/>
+      <path d="M12 7v6M12 16v1" stroke={color} strokeWidth="2" strokeLinecap="round"/>
+    </svg>
+  ),
+  'Bad Data': (color) => (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+      <path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
+      <path d="M10 11v6M14 11v6" stroke={color} strokeWidth="1.8" strokeLinecap="round"/>
+    </svg>
+  ),
+}
+
 const OUTCOME_CONFIG = {
-  'No Answer':      { border:'#C87800', bg:'#FFF8E6', color:'#C87800', emoji:'📵' },
-  'Voicemail':      { border:'#7C3AED', bg:'#F3E8FF', color:'#7C3AED', emoji:'📬' },
-  'Booked':         { border:'#16A34A', bg:'#DCFCE7', color:'#16A34A', emoji:'✅' },
-  'Not Interested': { border:'#DC2626', bg:'#FEE2E2', color:'#DC2626', emoji:'🚫' },
-  'DNC':            { border:'#7F1D1D', bg:'#FEF2F2', color:'#7F1D1D', emoji:'⛔' },
-  'Bad Data':       { border:'#6B7280', bg:'#F3F4F6', color:'#6B7280', emoji:'🗑️' },
+  'No Answer':      { border:'#C87800', bg:'#FFF8E6', color:'#C87800' },
+  'Voicemail':      { border:'#7C3AED', bg:'#F3E8FF', color:'#7C3AED' },
+  'Booked':         { border:'#16A34A', bg:'#DCFCE7', color:'#16A34A' },
+  'Not Interested': { border:'#DC2626', bg:'#FEE2E2', color:'#DC2626' },
+  'DNC':            { border:'#7F1D1D', bg:'#FEF2F2', color:'#7F1D1D' },
+  'Bad Data':       { border:'#6B7280', bg:'#F3F4F6', color:'#6B7280' },
 }
 
 export default function DialerPage() {
@@ -577,7 +620,7 @@ export default function DialerPage() {
                         return (
                           <button key={o.id} disabled={!isMe} onClick={() => setSelectedOutcome(sel ? null : o.id)}
                             style={{ padding:'10px 6px', borderRadius:'var(--radius)', fontSize:12, fontWeight: sel ? 700 : 500, border: sel ? `2px solid ${cm.border}` : '1.5px solid var(--border)', background: sel ? cm.bg : 'var(--surface-2)', color: sel ? cm.color : 'var(--text-secondary)', cursor: isMe ? 'pointer' : 'not-allowed', opacity: isMe ? 1 : .4, textAlign:'center', transition:'all .1s', transform: sel ? 'scale(1.02)' : 'scale(1)' }}>
-                            <div style={{ fontSize:13, marginBottom:2 }}>{cm.emoji}</div>
+                            <div style={{ marginBottom:3, display:'flex', alignItems:'center', justifyContent:'center' }}>{OUTCOME_ICONS[o.id]?.(cm.color)}</div>
                             <div style={{ fontSize:10, fontWeight: sel ? 700 : 500 }}>{o.id}</div>
                           </button>
                         )
@@ -592,19 +635,19 @@ export default function DialerPage() {
                         <div style={{ fontSize:11, fontWeight:700, color:'var(--success)', marginBottom:2 }}>📋 ServiceTitan Booking Details</div>
                         <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8 }}>
                           <div>
-                            <label style={{ fontSize:9, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color:'var(--text-muted)', display:'block', marginBottom:4 }}>Job Type</label>
-                            <select value={selectedJobType} onChange={e => { setSelectedJobType(e.target.value); setAvailability([]); setBookingResult(null) }}
-                              style={{ width:'100%', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'6px 8px', fontSize:11, background:'var(--surface)', color:'var(--text-primary)' }}>
-                              <option value="">Select job type...</option>
-                              {stJobTypes.map(jt => <option key={jt.id} value={jt.id}>{jt.name}</option>)}
-                            </select>
-                          </div>
-                          <div>
                             <label style={{ fontSize:9, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color:'var(--text-muted)', display:'block', marginBottom:4 }}>Business Unit</label>
                             <select value={selectedBU} onChange={e => { setSelectedBU(e.target.value); setAvailability([]); setBookingResult(null) }}
                               style={{ width:'100%', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'6px 8px', fontSize:11, background:'var(--surface)', color:'var(--text-primary)' }}>
                               <option value="">Select business unit...</option>
                               {stBusinessUnits.map(bu => <option key={bu.id} value={bu.id}>{bu.name}</option>)}
+                            </select>
+                          </div>
+                          <div>
+                            <label style={{ fontSize:9, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color:'var(--text-muted)', display:'block', marginBottom:4 }}>Job Type</label>
+                            <select value={selectedJobType} onChange={e => { setSelectedJobType(e.target.value); setAvailability([]); setBookingResult(null) }}
+                              style={{ width:'100%', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'6px 8px', fontSize:11, background:'var(--surface)', color:'var(--text-primary)' }}>
+                              <option value="">Select job type...</option>
+                              {[...stJobTypes].sort((a,b) => a.name.localeCompare(b.name)).map(jt => <option key={jt.id} value={jt.id}>{jt.name}</option>)}
                             </select>
                           </div>
                         </div>
@@ -706,7 +749,7 @@ export default function DialerPage() {
                         <div key={l.id} style={{ padding:'10px 12px', marginBottom:8, background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius)', borderLeft:`3px solid ${OUTCOME_CONFIG[l.outcome]?.border || 'var(--border)'}` }}>
                           <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:4 }}>
                             <div style={{ display:'flex', alignItems:'center', gap:6 }}>
-                              <span style={{ fontSize:14 }}>{OUTCOME_CONFIG[l.outcome]?.emoji || '•'}</span>
+                              <span style={{ display:'flex', alignItems:'center' }}>{OUTCOME_ICONS[l.outcome]?.(OUTCOME_CONFIG[l.outcome]?.color || '#9E9B96') || <span style={{fontSize:12}}>•</span>}</span>
                               <span style={{ fontSize:12, fontWeight:600, color: OUTCOME_CONFIG[l.outcome]?.color || 'var(--text-primary)' }}>{l.outcome}</span>
                             </div>
                             <span style={{ fontSize:10, color:'var(--text-muted)' }}>{fmtShort(l.created_at)}</span>
