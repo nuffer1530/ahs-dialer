@@ -25,14 +25,101 @@ const STATUS_OPTIONS = [
 
 const GRACE_MINUTES = 5
 
+const ICON_COLOR = '#ff751f'
+const ICON_MUTED = '#9E9B96'
+
+const NAV_ICONS = {
+  dialer: (active) => {
+    const c = active ? ICON_COLOR : ICON_MUTED
+    return (
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M5.4 11.1C6.8 13.9 9.1 16.1 12 17.5l2.3-2.3c.3-.3.7-.4 1-.2 1.1.4 2.3.6 3.7.6.6 0 1 .4 1 1v3.6c0 .6-.4 1-1 1C9.6 21.2 2.8 14.4 2.8 6c0-.6.4-1 1-1H7.4c.6 0 1 .4 1 1 0 1.4.2 2.6.6 3.7.1.4 0 .7-.3 1L5.4 11.1z" fill={c}/>
+      </svg>
+    )
+  },
+  live: (active) => {
+    const c = active ? ICON_COLOR : ICON_MUTED
+    return (
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="12" cy="12" r="3" fill={c}/>
+        <path d="M8.5 8.5a5 5 0 000 7M15.5 8.5a5 5 0 010 7" stroke={c} strokeWidth="1.8" strokeLinecap="round" fill="none"/>
+        <path d="M5.6 5.6a9 9 0 000 12.8M18.4 5.6a9 9 0 010 12.8" stroke={c} strokeWidth="1.8" strokeLinecap="round" fill="none" opacity=".5"/>
+      </svg>
+    )
+  },
+  analytics: (active) => {
+    const c = active ? ICON_COLOR : ICON_MUTED
+    return (
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <rect x="3" y="13" width="4" height="8" rx="1" fill={c} opacity=".5"/>
+        <rect x="10" y="8" width="4" height="13" rx="1" fill={c} opacity=".75"/>
+        <rect x="17" y="3" width="4" height="18" rx="1" fill={c}/>
+        <path d="M3 21h18" stroke={c} strokeWidth="1.5" strokeLinecap="round"/>
+      </svg>
+    )
+  },
+  leaderboard: (active) => {
+    const c = active ? ICON_COLOR : ICON_MUTED
+    return (
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M8 6H5a1 1 0 00-1 1v3a4 4 0 004 4h.5M16 6h3a1 1 0 011 1v3a4 4 0 01-4 4h-.5" stroke={c} strokeWidth="1.8" strokeLinecap="round" fill="none"/>
+        <path d="M12 2l1.5 4.5h4L14 9l1.5 4.5L12 11l-3.5 2.5L10 9 6.5 6.5h4L12 2z" fill={c}/>
+        <path d="M9 17h6M12 14v7" stroke={c} strokeWidth="1.8" strokeLinecap="round"/>
+      </svg>
+    )
+  },
+  wfm: (active) => {
+    const c = active ? ICON_COLOR : ICON_MUTED
+    return (
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <rect x="3" y="4" width="18" height="17" rx="2" stroke={c} strokeWidth="1.8" fill="none"/>
+        <path d="M16 2v4M8 2v4M3 10h18" stroke={c} strokeWidth="1.8" strokeLinecap="round"/>
+        <circle cx="8" cy="15" r="1.2" fill={c}/>
+        <circle cx="12" cy="15" r="1.2" fill={c}/>
+        <circle cx="16" cy="15" r="1.2" fill={c}/>
+      </svg>
+    )
+  },
+  notes: (active) => {
+    const c = active ? ICON_COLOR : ICON_MUTED
+    return (
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6z" stroke={c} strokeWidth="1.8" fill="none" strokeLinejoin="round"/>
+        <path d="M14 2v6h6" stroke={c} strokeWidth="1.8" strokeLinejoin="round"/>
+        <path d="M8 13h8M8 17h6" stroke={c} strokeWidth="1.8" strokeLinecap="round"/>
+      </svg>
+    )
+  },
+  tv: (active) => {
+    const c = active ? ICON_COLOR : ICON_MUTED
+    return (
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <rect x="2" y="4" width="20" height="13" rx="2" stroke={c} strokeWidth="1.8" fill="none"/>
+        <path d="M8 21h8M12 17v4" stroke={c} strokeWidth="1.8" strokeLinecap="round"/>
+        <circle cx="8.5" cy="10.5" r="2.5" fill={c} opacity=".3"/>
+        <path d="M13 8.5h4M13 11.5h3M13 14h2" stroke={c} strokeWidth="1.5" strokeLinecap="round"/>
+      </svg>
+    )
+  },
+  settings: (active) => {
+    const c = active ? ICON_COLOR : ICON_MUTED
+    return (
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="12" cy="12" r="3" stroke={c} strokeWidth="1.8" fill="none"/>
+        <path d="M12 2v2M12 20v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M2 12h2M20 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" stroke={c} strokeWidth="1.8" strokeLinecap="round"/>
+      </svg>
+    )
+  },
+}
+
 const NAV_ITEMS = [
-  { to:'/', label:'Dialer', icon:'📞', end:true },
-  { to:'/live', label:'Live Dashboard', icon:'🟢' },
-  { to:'/analytics', label:'Analytics', icon:'📊' },
-  { to:'/leaderboard', label:'Leaderboard', icon:'🏆' },
-  { to:'/attendance', label:'WFM', icon:'📋' },
-  { to:'/notes', label:'Notes', icon:'📝' },
-  { to:'/warroom', label:'Call Center TV', icon:'📺' },
+  { to:'/', label:'Dialer', iconKey:'dialer', end:true },
+  { to:'/live', label:'Live Dashboard', iconKey:'live' },
+  { to:'/analytics', label:'Analytics', iconKey:'analytics' },
+  { to:'/leaderboard', label:'Leaderboard', iconKey:'leaderboard' },
+  { to:'/attendance', label:'WFM', iconKey:'wfm' },
+  { to:'/notes', label:'Notes', iconKey:'notes' },
+  { to:'/warroom', label:'Call Center TV', iconKey:'tv' },
 ]
 
 const SETTINGS_ITEMS = [
@@ -246,12 +333,16 @@ export default function DialerLayout() {
 
         {/* Nav links */}
         <div style={{ flex:1, overflowY:'auto', padding:'10px 8px', display:'flex', flexDirection:'column' }}>
-          {NAV_ITEMS.map(({ to, label, icon, end }) => (
+          {NAV_ITEMS.map(({ to, label, iconKey, end }) => (
             <NavLink key={to} to={to} end={end} style={navLinkStyle} title={navCollapsed ? label : undefined}
               onMouseEnter={e => { const isActive = e.currentTarget.style.fontWeight === '600'; handleNavHover(e, isActive) }}
               onMouseLeave={e => { const isActive = e.currentTarget.style.fontWeight === '600'; handleNavLeave(e, isActive) }}>
-              <span style={{ fontSize:16, flexShrink:0 }}>{icon}</span>
-              {!navCollapsed && <span>{label}</span>}
+              {({ isActive }) => (
+                <>
+                  <span style={{ flexShrink:0, display:'flex', alignItems:'center' }}>{NAV_ICONS[iconKey]?.(isActive)}</span>
+                  {!navCollapsed && <span>{label}</span>}
+                </>
+              )}
             </NavLink>
           ))}
 
@@ -262,8 +353,12 @@ export default function DialerLayout() {
               <NavLink to="/settings" style={navLinkStyle} title={navCollapsed ? 'Settings' : undefined}
                 onMouseEnter={e => { const isActive = e.currentTarget.style.fontWeight === '600'; handleNavHover(e, isActive) }}
                 onMouseLeave={e => { const isActive = e.currentTarget.style.fontWeight === '600'; handleNavLeave(e, isActive) }}>
-                <span style={{ fontSize:16, flexShrink:0 }}>⚙️</span>
-                {!navCollapsed && <span>Settings</span>}
+                {({ isActive }) => (
+                  <>
+                    <span style={{ flexShrink:0, display:'flex', alignItems:'center' }}>{NAV_ICONS.settings(isActive)}</span>
+                    {!navCollapsed && <span>Settings</span>}
+                  </>
+                )}
               </NavLink>
             </>
           )}
