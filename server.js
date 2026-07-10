@@ -169,7 +169,28 @@ app.get('/api/st/jobtypes', async (req, res) => {
 // ── ST: Get business units (for booking dropdown)
 app.get('/api/st/businessunits', async (req, res) => {
   try {
-    const data = await stGet(`/settings/v2/tenant/${ST_TENANT_ID}/business-units?active=true&pageSize=200`)
+    // Try settings/v2 first, fall back to other known paths
+    let data
+    const paths = [
+      `/settings/v2/tenant/${ST_TENANT_ID}/business-units?active=true&pageSize=200`,
+      `/settings/v2/tenant/${ST_TENANT_ID}/business-units?pageSize=200`,
+      `/accounting/v2/tenant/${ST_TENANT_ID}/business-units?active=true&pageSize=200`,
+      `/crm/v2/tenant/${ST_TENANT_ID}/business-units?pageSize=200`,
+    ]
+    let lastErr
+    for (const path of paths) {
+      try {
+        data = await stGet(path)
+        if (data?.data?.length > 0) {
+          console.log('Business units found at:', path)
+          break
+        }
+      } catch (e) {
+        lastErr = e
+        console.log('BU path failed:', path, e.message)
+      }
+    }
+    if (!data) throw lastErr || new Error('No business units found')
     res.json(data)
   } catch (err) {
     console.error('ST business units error:', err.message)
