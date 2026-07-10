@@ -174,8 +174,11 @@ app.get('/api/st/businessunits', async (req, res) => {
     const paths = [
       `/settings/v2/tenant/${ST_TENANT_ID}/business-units?active=true&pageSize=200`,
       `/settings/v2/tenant/${ST_TENANT_ID}/business-units?pageSize=200`,
+      `/jpm/v2/tenant/${ST_TENANT_ID}/business-units?active=true&pageSize=200`,
+      `/dispatch/v2/tenant/${ST_TENANT_ID}/business-units?active=true&pageSize=200`,
       `/accounting/v2/tenant/${ST_TENANT_ID}/business-units?active=true&pageSize=200`,
-      `/crm/v2/tenant/${ST_TENANT_ID}/business-units?pageSize=200`,
+      `/memberships/v2/tenant/${ST_TENANT_ID}/business-units?pageSize=200`,
+      `/payroll/v2/tenant/${ST_TENANT_ID}/business-units?pageSize=200`,
     ]
     let lastErr
     for (const path of paths) {
