@@ -496,7 +496,7 @@ export default function DialerPage() {
 
         {/* ── CONTACT WORKSPACE ── */}
         {c && (
-          <div style={{ flex:1, overflowY:'auto', display:'grid', gridTemplateColumns:'1fr 300px 280px', gap:0 }}>
+          <div style={{ flex:1, overflowY:'auto', display:'grid', gridTemplateColumns:'1fr 300px', gap:0 }}>
 
             {/* ── COL 1: Contact + Outcome ── */}
             <div style={{ padding:16, display:'flex', flexDirection:'column', gap:12, overflowY:'auto', borderRight:'1px solid var(--border)' }}>
@@ -577,8 +577,8 @@ export default function DialerPage() {
                         return (
                           <button key={o.id} disabled={!isMe} onClick={() => setSelectedOutcome(sel ? null : o.id)}
                             style={{ padding:'10px 6px', borderRadius:'var(--radius)', fontSize:12, fontWeight: sel ? 700 : 500, border: sel ? `2px solid ${cm.border}` : '1.5px solid var(--border)', background: sel ? cm.bg : 'var(--surface-2)', color: sel ? cm.color : 'var(--text-secondary)', cursor: isMe ? 'pointer' : 'not-allowed', opacity: isMe ? 1 : .4, textAlign:'center', transition:'all .1s', transform: sel ? 'scale(1.02)' : 'scale(1)' }}>
-                            <div style={{ fontSize:16 }}>{cm.emoji}</div>
-                            <div style={{ fontSize:11 }}>{o.id}</div>
+                            <div style={{ fontSize:13, marginBottom:2 }}>{cm.emoji}</div>
+                            <div style={{ fontSize:10, fontWeight: sel ? 700 : 500 }}>{o.id}</div>
                           </button>
                         )
                       })}
@@ -586,6 +586,60 @@ export default function DialerPage() {
                     <textarea value={notesVal} onChange={e => setNotesVal(e.target.value)} disabled={!isMe}
                       placeholder={selectedOutcome === 'Booked' ? 'Notes required before booking...' : 'Add notes...'}
                       style={{ width:'100%', border:`1px solid ${selectedOutcome==='Booked' ? 'var(--accent)' : 'var(--border)'}`, borderRadius:'var(--radius)', padding:'8px 10px', fontSize:12, fontFamily:'inherit', resize:'vertical', minHeight:60, background:'var(--surface-2)', color:'var(--text-primary)', opacity: isMe ? 1 : .4 }} />
+                    {/* ST Booking fields — only shown when Booked is selected */}
+                    {selectedOutcome === 'Booked' && (
+                      <div style={{ display:'flex', flexDirection:'column', gap:8, padding:'12px', background:'var(--success-bg)', border:'1px solid var(--success)', borderRadius:'var(--radius)' }}>
+                        <div style={{ fontSize:11, fontWeight:700, color:'var(--success)', marginBottom:2 }}>📋 ServiceTitan Booking Details</div>
+                        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8 }}>
+                          <div>
+                            <label style={{ fontSize:9, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color:'var(--text-muted)', display:'block', marginBottom:4 }}>Job Type</label>
+                            <select value={selectedJobType} onChange={e => { setSelectedJobType(e.target.value); setAvailability([]); setBookingResult(null) }}
+                              style={{ width:'100%', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'6px 8px', fontSize:11, background:'var(--surface)', color:'var(--text-primary)' }}>
+                              <option value="">Select job type...</option>
+                              {stJobTypes.map(jt => <option key={jt.id} value={jt.id}>{jt.name}</option>)}
+                            </select>
+                          </div>
+                          <div>
+                            <label style={{ fontSize:9, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color:'var(--text-muted)', display:'block', marginBottom:4 }}>Business Unit</label>
+                            <select value={selectedBU} onChange={e => { setSelectedBU(e.target.value); setAvailability([]); setBookingResult(null) }}
+                              style={{ width:'100%', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'6px 8px', fontSize:11, background:'var(--surface)', color:'var(--text-primary)' }}>
+                              <option value="">Select business unit...</option>
+                              {stBusinessUnits.map(bu => <option key={bu.id} value={bu.id}>{bu.name}</option>)}
+                            </select>
+                          </div>
+                        </div>
+                        <button onClick={checkAvailability} disabled={!selectedJobType || !selectedBU || availLoading}
+                          style={{ width:'100%', padding:'7px 0', border:'1px solid #16A34A', borderRadius:'var(--radius)', background:'#fff', color:'#16A34A', fontSize:11, fontWeight:600, cursor: selectedJobType && selectedBU ? 'pointer' : 'not-allowed', opacity: selectedJobType && selectedBU ? 1 : .5, display:'flex', alignItems:'center', justifyContent:'center', gap:6 }}>
+                          {availLoading ? <><div className="spinner" style={{width:12,height:12,borderWidth:2}}></div> Checking...</> : '📅 Check Availability'}
+                        </button>
+                        {availError && <div style={{ fontSize:11, color:'var(--danger)' }}>{availError}</div>}
+                        {availability.length > 0 && (
+                          <div style={{ maxHeight:120, overflowY:'auto', display:'flex', flexDirection:'column', gap:3 }}>
+                            {availability.slice(0,8).map((slot, i) => {
+                              const start = new Date(slot.start || slot.startsOn || slot.date)
+                              const end = slot.end || slot.endsOn ? new Date(slot.end || slot.endsOn) : null
+                              return (
+                                <div key={i} style={{ padding:'4px 8px', background:'#fff', border:'1px solid #16A34A', borderRadius:4, fontSize:10, color:'#15803D', fontWeight:500 }}>
+                                  {start.toLocaleDateString('en-US', { weekday:'short', month:'short', day:'numeric' })} · {start.toLocaleTimeString('en-US', { hour:'numeric', minute:'2-digit' })}{end && ` – ${end.toLocaleTimeString('en-US', { hour:'numeric', minute:'2-digit' })}`}
+                                </div>
+                              )
+                            })}
+                            {availability.length > 8 && <div style={{ fontSize:10, color:'#15803D', textAlign:'center' }}>+{availability.length - 8} more slots</div>}
+                          </div>
+                        )}
+                        <button onClick={bookInST} disabled={!c.external_id || !selectedJobType || !selectedBU || booking}
+                          style={{ width:'100%', padding:'9px 0', border:'none', borderRadius:'var(--radius)', background: c.external_id && selectedJobType && selectedBU ? '#16A34A' : 'var(--border)', color:'#fff', fontSize:13, fontWeight:700, cursor: c.external_id && selectedJobType && selectedBU ? 'pointer' : 'not-allowed', display:'flex', alignItems:'center', justifyContent:'center', gap:8 }}>
+                          {booking ? <><div className="spinner" style={{width:14,height:14,borderWidth:2,borderTopColor:'#fff'}}></div> Booking...</> : '✅ Book in ServiceTitan'}
+                        </button>
+                        {!c.external_id && <div style={{ fontSize:10, color:'var(--warning)', textAlign:'center' }}>⚠ No ST Customer ID on this contact</div>}
+                        {bookingResult && (
+                          <div style={{ padding:'8px 10px', borderRadius:'var(--radius)', fontSize:11, fontWeight:500, background: bookingResult.ok ? '#fff' : '#FEE2E2', border:`1px solid ${bookingResult.ok ? '#16A34A' : '#DC2626'}`, color: bookingResult.ok ? '#15803D' : '#DC2626' }}>
+                            {bookingResult.ok ? `✅ Job #${bookingResult.jobNumber || bookingResult.jobId} created on dispatch board!` : `❌ ${bookingResult.error}`}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
                     <div style={{ display:'flex', gap:6, justifyContent:'space-between', flexWrap:'wrap' }}>
                       <button className="btn sm warning" disabled={!isMe} onClick={openCallbackModal}>📅 Callback</button>
                       <div style={{ display:'flex', gap:6 }}>
@@ -667,161 +721,6 @@ export default function DialerPage() {
               </div>
             </div>
 
-            {/* ── COL 3: Book & Availability ── */}
-            <div style={{ display:'flex', flexDirection:'column', overflow:'hidden', background:'var(--surface)' }}>
-              <div style={{ padding:'10px 14px', borderBottom:'1px solid var(--border)', background:'var(--surface)', flexShrink:0 }}>
-                <div style={{ fontSize:11, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color:'var(--text-muted)' }}>Book & Availability</div>
-              </div>
-              <div style={{ flex:1, overflowY:'auto', padding:14, display:'flex', flexDirection:'column', gap:14 }}>
-
-                {/* Job Type */}
-                <div>
-                  <label style={{ fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color:'var(--text-muted)', display:'block', marginBottom:5 }}>Job Type</label>
-                  {stLoading ? <div style={{ fontSize:11, color:'var(--text-muted)' }}>Loading from ST...</div> : (
-                    <select value={selectedJobType} onChange={e => { setSelectedJobType(e.target.value); setAvailability([]); setBookingResult(null) }}
-                      style={{ width:'100%', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'7px 10px', fontSize:12, background:'var(--surface-2)', color:'var(--text-primary)' }}>
-                      <option value="">Select job type...</option>
-                      {stJobTypes.map(jt => <option key={jt.id} value={jt.id}>{jt.name}</option>)}
-                    </select>
-                  )}
-                </div>
-
-                {/* Business Unit */}
-                <div>
-                  <label style={{ fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color:'var(--text-muted)', display:'block', marginBottom:5 }}>Business Unit</label>
-                  {stLoading ? <div style={{ fontSize:11, color:'var(--text-muted)' }}>Loading from ST...</div> : (
-                    <select value={selectedBU} onChange={e => { setSelectedBU(e.target.value); setAvailability([]); setBookingResult(null) }}
-                      style={{ width:'100%', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'7px 10px', fontSize:12, background:'var(--surface-2)', color:'var(--text-primary)' }}>
-                      <option value="">Select business unit...</option>
-                      {stBusinessUnits.map(bu => <option key={bu.id} value={bu.id}>{bu.name}</option>)}
-                    </select>
-                  )}
-                </div>
-
-                {/* Check Availability */}
-                <button onClick={checkAvailability} disabled={!selectedJobType || !selectedBU || availLoading}
-                  style={{ width:'100%', padding:'9px 0', border:'1px solid var(--accent)', borderRadius:'var(--radius)', background:'var(--accent-bg)', color:'var(--accent)', fontSize:12, fontWeight:600, cursor: selectedJobType && selectedBU ? 'pointer' : 'not-allowed', opacity: selectedJobType && selectedBU ? 1 : .5, display:'flex', alignItems:'center', justifyContent:'center', gap:6 }}>
-                  {availLoading ? <><div className="spinner" style={{width:14,height:14,borderWidth:2}}></div> Checking...</> : '📅 Check Availability'}
-                </button>
-
-                {availError && <div style={{ fontSize:12, color:'var(--danger)', background:'var(--danger-bg)', padding:'8px 10px', borderRadius:'var(--radius)' }}>{availError}</div>}
-
-                {/* Availability slots */}
-                {availability.length > 0 && (
-                  <div>
-                    <div style={{ fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color:'var(--text-muted)', marginBottom:8 }}>Open Slots — Next 14 Days</div>
-                    <div style={{ display:'flex', flexDirection:'column', gap:4, maxHeight:200, overflowY:'auto' }}>
-                      {availability.slice(0, 20).map((slot, i) => {
-                        const start = new Date(slot.start || slot.startsOn || slot.date)
-                        const end = slot.end || slot.endsOn ? new Date(slot.end || slot.endsOn) : null
-                        return (
-                          <div key={i} style={{ padding:'7px 10px', background:'var(--success-bg)', border:'1px solid var(--success)', borderRadius:'var(--radius)', fontSize:11, color:'var(--success)', fontWeight:500 }}>
-                            {start.toLocaleDateString('en-US', { weekday:'short', month:'short', day:'numeric' })}
-                            {' · '}
-                            {start.toLocaleTimeString('en-US', { hour:'numeric', minute:'2-digit' })}
-                            {end && ` – ${end.toLocaleTimeString('en-US', { hour:'numeric', minute:'2-digit' })}`}
-                          </div>
-                        )
-                      })}
-                      {availability.length > 20 && <div style={{ fontSize:10, color:'var(--text-muted)', textAlign:'center', padding:'4px 0' }}>+{availability.length - 20} more slots</div>}
-                    </div>
-                  </div>
-                )}
-
-                {availability.length === 0 && !availLoading && selectedJobType && selectedBU && !availError && (
-                  <div style={{ fontSize:12, color:'var(--text-muted)', fontStyle:'italic', textAlign:'center', padding:'12px 0' }}>No slots found for selected criteria</div>
-                )}
-
-                <div style={{ height:1, background:'var(--border)' }} />
-
-                {/* Book directly in ST */}
-                <div>
-                  <div style={{ fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color:'var(--text-muted)', marginBottom:8 }}>Direct Booking</div>
-                  {!c.external_id && (
-                    <div style={{ fontSize:11, color:'var(--warning)', background:'var(--warning-bg)', padding:'8px 10px', borderRadius:'var(--radius)', marginBottom:8 }}>
-                      ⚠ No ST Customer ID — add it to enable direct booking
-                    </div>
-                  )}
-                  <button onClick={bookInST} disabled={!c.external_id || !selectedJobType || !selectedBU || booking}
-                    style={{ width:'100%', padding:'10px 0', border:'none', borderRadius:'var(--radius)', background: c.external_id && selectedJobType && selectedBU ? '#16A34A' : 'var(--border)', color:'#fff', fontSize:13, fontWeight:700, cursor: c.external_id && selectedJobType && selectedBU ? 'pointer' : 'not-allowed', display:'flex', alignItems:'center', justifyContent:'center', gap:8 }}>
-                    {booking ? <><div className="spinner" style={{width:14,height:14,borderWidth:2,borderTopColor:'#fff'}}></div> Booking...</> : '✅ Book in ServiceTitan'}
-                  </button>
-                </div>
-
-                {/* Booking result */}
-                {bookingResult && (
-                  <div style={{ padding:'10px 12px', borderRadius:'var(--radius)', fontSize:12, fontWeight:500, background: bookingResult.ok ? '#DCFCE7' : '#FEE2E2', border:`1px solid ${bookingResult.ok ? '#16A34A' : '#DC2626'}`, color: bookingResult.ok ? '#15803D' : '#DC2626' }}>
-                    {bookingResult.ok
-                      ? `✅ Booked! Job #${bookingResult.jobNumber || bookingResult.jobId} created and added to dispatch board.`
-                      : `❌ Booking failed: ${bookingResult.error}`}
-                  </div>
-                )}
-              </div>
-            </div>
           </div>
         )}
       </div>
-
-      {/* ── CALLBACK MODAL ── */}
-      {showCallbackModal && (
-        <Modal title="Schedule Callback" onClose={() => setShowCallbackModal(false)} width={360}>
-          <div className="form-field"><label className="form-label">Date</label><input className="form-input" type="date" value={cbDate} onChange={e => setCbDate(e.target.value)} /></div>
-          <div className="form-field"><label className="form-label">Time</label><input className="form-input" type="time" value={cbTime} onChange={e => setCbTime(e.target.value)} /></div>
-          <div className="form-field"><label className="form-label">Note</label><input className="form-input" value={cbNote} onChange={e => setCbNote(e.target.value)} placeholder="Optional note..." /></div>
-          <div className="modal-actions">
-            <button className="btn" onClick={() => setShowCallbackModal(false)}>Cancel</button>
-            <button className="btn primary" onClick={saveCallback}>Save callback</button>
-          </div>
-        </Modal>
-      )}
-
-      {/* ── CORRECT MODAL ── */}
-      {showCorrectModal && (
-        <Modal title="Correct Last Outcome" onClose={() => setShowCorrectModal(false)} width={360}>
-          <div className="form-field"><label className="form-label">New outcome</label>
-            <select className="form-input" value={correctOutcome} onChange={e => setCorrectOutcome(e.target.value)}>
-              {OUTCOMES.map(o => <option key={o.id} value={o.id}>{o.id}</option>)}
-            </select>
-          </div>
-          <div className="form-field"><label className="form-label">Correction note</label><input className="form-input" value={correctNote} onChange={e => setCorrectNote(e.target.value)} placeholder="Why the correction?" /></div>
-          <div className="modal-actions">
-            <button className="btn" onClick={() => setShowCorrectModal(false)}>Cancel</button>
-            <button className="btn primary" onClick={applyCorrection}>Apply correction</button>
-          </div>
-        </Modal>
-      )}
-
-      {/* ── DIALPAD MODAL ── */}
-      {showDialpad && (
-        <Modal title="Manual Dial" onClose={() => { setShowDialpad(false); setDialpadNumber('') }} width={280}>
-          <div style={{ textAlign:'center', marginBottom:12 }}>
-            <input autoFocus type="tel" value={dialpadNumber}
-              onChange={e => setDialpadNumber(e.target.value.replace(/[^0-9*#]/g, '').slice(0,15))}
-              onKeyDown={e => { if (e.key === 'Enter' && dialpadNumber.length >= 10) { makeCall(dialpadNumber); setShowDialpad(false) } }}
-              placeholder="Enter number"
-              style={{ width:'100%', background:'var(--surface-2)', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'10px 14px', fontSize:20, fontWeight:600, letterSpacing:2, textAlign:'center', color:'var(--text-primary)', outline:'none' }} />
-          </div>
-          <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:8, marginBottom:12 }}>
-            {['1','2','3','4','5','6','7','8','9','*','0','#'].map(k => (
-              <button key={k} onClick={() => setDialpadNumber(p => p.length < 15 ? p + k : p)}
-                style={{ padding:'14px 0', fontSize:18, fontWeight:600, border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface-2)', cursor:'pointer', color:'var(--text-primary)' }}
-                onMouseEnter={e => e.currentTarget.style.background='var(--accent-bg)'}
-                onMouseLeave={e => e.currentTarget.style.background='var(--surface-2)'}>
-                {k}
-              </button>
-            ))}
-          </div>
-          <div style={{ display:'flex', gap:8 }}>
-            <button onClick={() => setDialpadNumber(p => p.slice(0,-1))}
-              style={{ flex:1, padding:'10px 0', border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface-2)', cursor:'pointer', fontSize:16, color:'var(--text-muted)' }}>⌫</button>
-            <button onClick={() => { if (dialpadNumber.length >= 10) { makeCall(dialpadNumber); setShowDialpad(false) } }}
-              disabled={dialpadNumber.length < 10}
-              style={{ flex:2, padding:'10px 0', border:'none', borderRadius:'var(--radius)', background: dialpadNumber.length >= 10 ? '#16A34A' : 'var(--border)', cursor: dialpadNumber.length >= 10 ? 'pointer' : 'not-allowed', fontSize:14, fontWeight:700, color:'#fff' }}>
-              📞 Call
-            </button>
-          </div>
-        </Modal>
-      )}
-    </div>
-  )
-}
