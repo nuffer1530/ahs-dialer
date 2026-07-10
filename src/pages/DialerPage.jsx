@@ -724,3 +724,66 @@ export default function DialerPage() {
           </div>
         )}
       </div>
+      {/* ── CALLBACK MODAL ── */}
+      {showCallbackModal && (
+        <Modal title="Schedule Callback" onClose={() => setShowCallbackModal(false)} width={360}>
+          <div className="form-field"><label className="form-label">Date</label><input className="form-input" type="date" value={cbDate} onChange={e => setCbDate(e.target.value)} /></div>
+          <div className="form-field"><label className="form-label">Time</label><input className="form-input" type="time" value={cbTime} onChange={e => setCbTime(e.target.value)} /></div>
+          <div className="form-field"><label className="form-label">Note</label><input className="form-input" value={cbNote} onChange={e => setCbNote(e.target.value)} placeholder="Optional note..." /></div>
+          <div className="modal-actions">
+            <button className="btn" onClick={() => setShowCallbackModal(false)}>Cancel</button>
+            <button className="btn primary" onClick={saveCallback}>Save callback</button>
+          </div>
+        </Modal>
+      )}
+
+      {/* ── CORRECT MODAL ── */}
+      {showCorrectModal && (
+        <Modal title="Correct Last Outcome" onClose={() => setShowCorrectModal(false)} width={360}>
+          <div className="form-field"><label className="form-label">New outcome</label>
+            <select className="form-input" value={correctOutcome} onChange={e => setCorrectOutcome(e.target.value)}>
+              {OUTCOMES.map(o => <option key={o.id} value={o.id}>{o.id}</option>)}
+            </select>
+          </div>
+          <div className="form-field"><label className="form-label">Correction note</label><input className="form-input" value={correctNote} onChange={e => setCorrectNote(e.target.value)} placeholder="Why the correction?" /></div>
+          <div className="modal-actions">
+            <button className="btn" onClick={() => setShowCorrectModal(false)}>Cancel</button>
+            <button className="btn primary" onClick={applyCorrection}>Apply correction</button>
+          </div>
+        </Modal>
+      )}
+
+      {/* ── DIALPAD MODAL ── */}
+      {showDialpad && (
+        <Modal title="Manual Dial" onClose={() => { setShowDialpad(false); setDialpadNumber('') }} width={280}>
+          <div style={{ textAlign:'center', marginBottom:12 }}>
+            <input autoFocus type="tel" value={dialpadNumber}
+              onChange={e => setDialpadNumber(e.target.value.replace(/[^0-9*#]/g, '').slice(0,15))}
+              onKeyDown={e => { if (e.key === 'Enter' && dialpadNumber.length >= 10) { makeCall(dialpadNumber); setShowDialpad(false) } }}
+              placeholder="Enter number"
+              style={{ width:'100%', background:'var(--surface-2)', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'10px 14px', fontSize:20, fontWeight:600, letterSpacing:2, textAlign:'center', color:'var(--text-primary)', outline:'none' }} />
+          </div>
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:8, marginBottom:12 }}>
+            {['1','2','3','4','5','6','7','8','9','*','0','#'].map(k => (
+              <button key={k} onClick={() => setDialpadNumber(p => p.length < 15 ? p + k : p)}
+                style={{ padding:'14px 0', fontSize:18, fontWeight:600, border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface-2)', cursor:'pointer', color:'var(--text-primary)' }}
+                onMouseEnter={e => e.currentTarget.style.background='var(--accent-bg)'}
+                onMouseLeave={e => e.currentTarget.style.background='var(--surface-2)'}>
+                {k}
+              </button>
+            ))}
+          </div>
+          <div style={{ display:'flex', gap:8 }}>
+            <button onClick={() => setDialpadNumber(p => p.slice(0,-1))}
+              style={{ flex:1, padding:'10px 0', border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface-2)', cursor:'pointer', fontSize:16, color:'var(--text-muted)' }}>⌫</button>
+            <button onClick={() => { if (dialpadNumber.length >= 10) { makeCall(dialpadNumber); setShowDialpad(false) } }}
+              disabled={dialpadNumber.length < 10}
+              style={{ flex:2, padding:'10px 0', border:'none', borderRadius:'var(--radius)', background: dialpadNumber.length >= 10 ? '#16A34A' : 'var(--border)', cursor: dialpadNumber.length >= 10 ? 'pointer' : 'not-allowed', fontSize:14, fontWeight:700, color:'#fff' }}>
+              📞 Call
+            </button>
+          </div>
+        </Modal>
+      )}
+    </div>
+  )
+}
