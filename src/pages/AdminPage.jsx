@@ -283,18 +283,6 @@ export default function AdminPage() {
                 )}
               </div>
 
-              <div className="card">
-                <div className="card-header"><div className="card-title">Quick SQL Reference</div></div>
-                <div className="card-body" style={{ display:'flex', flexDirection:'column', gap:10 }}>
-                  <div style={{ fontSize:13, color:'var(--text-secondary)' }}>For bulk operations, use the <a href="https://supabase.com" target="_blank" rel="noopener noreferrer" style={{ color:'var(--accent)' }}>Supabase SQL editor</a>.</div>
-                  <div style={{ background:'var(--surface-2)', borderRadius:'var(--radius)', padding:'12px 14px', fontSize:11, color:'var(--text-secondary)', fontFamily:'monospace', lineHeight:1.8 }}>
-                    <div>-- Clean duplicate phone numbers:</div>
-                    <div>UPDATE contacts SET phone = TRIM(SPLIT_PART(phone, ',', 1)) WHERE phone LIKE '%,%';</div>
-                    <div style={{ marginTop:6 }}>-- Clear all contacts (careful!):</div>
-                    <div>DELETE FROM call_logs; DELETE FROM contacts;</div>
-                  </div>
-                </div>
-              </div>
             </>
           )}
 
