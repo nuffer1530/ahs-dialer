@@ -157,7 +157,7 @@ app.get('/api/st/availability', async (req, res) => {
 // ── ST: Get job types (for availability dropdown)
 app.get('/api/st/jobtypes', async (req, res) => {
   try {
-    const data = await stGet(`/jpm/v2/tenant/${ST_TENANT_ID}/job-types?active=true&pageSize=200`)
+    const data = await stGet(`/jpm/v2/tenant/${ST_TENANT_ID}/job-types?active=true&pageSize=500`)
     res.json(data)
   } catch (err) {
     console.error('ST job types error:', err.message)
