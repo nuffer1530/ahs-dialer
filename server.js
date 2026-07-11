@@ -138,15 +138,34 @@ app.get('/api/st/customer/:id', async (req, res) => {
 // ── ST: Get availability (capacity slots)
 app.get('/api/st/availability', async (req, res) => {
   try {
-    const { jobTypeId, from, to, zip } = req.query
-    // Build query params
+    const { jobTypeId, businessUnitId, from, to, zip } = req.query
     const params = new URLSearchParams({
       startsOnOrAfter: from || new Date().toISOString(),
-      endsOnOrBefore: to || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+      endsOnOrBefore: to || new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
+      pageSize: 50,
     })
-    if (jobTypeId) params.set('jobTypeId', jobTypeId)
+    if (jobTypeId) params.set('jobTypeIds', jobTypeId)
+    if (businessUnitId) params.set('businessUnitIds', businessUnitId)
     if (zip) params.set('zip', zip)
-    const data = await stGet(`/jpm/v2/tenant/${ST_TENANT_ID}/availability?${params}`)
+
+    // Try dispatch/v2 first (correct namespace for capacity/availability)
+    let data, lastErr
+    const paths = [
+      `/dispatch/v2/tenant/${ST_TENANT_ID}/capacity?${params}`,
+      `/dispatch/v2/tenant/${ST_TENANT_ID}/availability-windows?${params}`,
+      `/jbce/v2/tenant/${ST_TENANT_ID}/availability?${params}`,
+    ]
+    for (const path of paths) {
+      try {
+        data = await stGet(path)
+        console.log('Availability found at:', path)
+        break
+      } catch (e) {
+        lastErr = e
+        console.log('Availability path failed:', path, e.message)
+      }
+    }
+    if (!data) throw lastErr || new Error('No availability data found')
     res.json(data)
   } catch (err) {
     console.error('ST availability error:', err.message)
