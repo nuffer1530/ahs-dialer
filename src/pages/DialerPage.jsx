@@ -636,7 +636,7 @@ export default function DialerPage() {
                         <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8 }}>
                           <div>
                             <label style={{ fontSize:9, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color:'var(--text-muted)', display:'block', marginBottom:4 }}>Business Unit</label>
-                            <select value={selectedBU} onChange={e => { setSelectedBU(e.target.value); setAvailability([]); setBookingResult(null) }}
+                            <select value={selectedBU} onChange={e => { setSelectedBU(e.target.value); setSelectedJobType(''); setAvailability([]); setBookingResult(null) }}
                               style={{ width:'100%', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'6px 8px', fontSize:11, background:'var(--surface)', color:'var(--text-primary)' }}>
                               <option value="">Select business unit...</option>
                               {[...stBusinessUnits].sort((a,b) => a.name.localeCompare(b.name)).map(bu => <option key={bu.id} value={bu.id}>{bu.name}</option>)}
@@ -647,7 +647,10 @@ export default function DialerPage() {
                             <select value={selectedJobType} onChange={e => { setSelectedJobType(e.target.value); setAvailability([]); setBookingResult(null) }}
                               style={{ width:'100%', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'6px 8px', fontSize:11, background:'var(--surface)', color:'var(--text-primary)' }}>
                               <option value="">Select job type...</option>
-                              {[...stJobTypes].sort((a,b) => a.name.localeCompare(b.name)).map(jt => <option key={jt.id} value={jt.id}>{jt.name}</option>)}
+                              {[...stJobTypes]
+                                .filter(jt => !selectedBU || (jt.businessUnitIds?.includes(parseInt(selectedBU)) || jt.businessUnitId === parseInt(selectedBU)))
+                                .sort((a,b) => a.name.localeCompare(b.name))
+                                .map(jt => <option key={jt.id} value={jt.id}>{jt.name}</option>)}
                             </select>
                           </div>
                         </div>
