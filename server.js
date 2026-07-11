@@ -135,37 +135,23 @@ app.get('/api/st/customer/:id', async (req, res) => {
   }
 })
 
-// ── ST: Get availability (capacity slots)
+// ── ST: Get availability (capacity slots) — POST dispatch/v2/capacity
 app.get('/api/st/availability', async (req, res) => {
   try {
-    const { jobTypeId, businessUnitId, from, to, zip } = req.query
-    const params = new URLSearchParams({
+    const { jobTypeId, businessUnitId, from, to } = req.query
+    if (!jobTypeId || !businessUnitId) {
+      return res.status(400).json({ error: 'jobTypeId and businessUnitId required' })
+    }
+
+    const body = {
       startsOnOrAfter: from || new Date().toISOString(),
       endsOnOrBefore: to || new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
-      pageSize: 50,
-    })
-    if (jobTypeId) params.set('jobTypeIds', jobTypeId)
-    if (businessUnitId) params.set('businessUnitIds', businessUnitId)
-    if (zip) params.set('zip', zip)
-
-    // Try dispatch/v2 first (correct namespace for capacity/availability)
-    let data, lastErr
-    const paths = [
-      `/dispatch/v2/tenant/${ST_TENANT_ID}/capacity?${params}`,
-      `/dispatch/v2/tenant/${ST_TENANT_ID}/availability-windows?${params}`,
-      `/jbce/v2/tenant/${ST_TENANT_ID}/availability?${params}`,
-    ]
-    for (const path of paths) {
-      try {
-        data = await stGet(path)
-        console.log('Availability found at:', path)
-        break
-      } catch (e) {
-        lastErr = e
-        console.log('Availability path failed:', path, e.message)
-      }
+      businessUnitIds: [parseInt(businessUnitId)],
+      jobTypeId: parseInt(jobTypeId),
+      skillBasedAvailability: true,
     }
-    if (!data) throw lastErr || new Error('No availability data found')
+
+    const data = await stPost(`/dispatch/v2/tenant/${ST_TENANT_ID}/capacity`, body)
     res.json(data)
   } catch (err) {
     console.error('ST availability error:', err.message)
