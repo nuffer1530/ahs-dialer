@@ -463,19 +463,19 @@ export default function DialerPage() {
       <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden', minWidth:0 }}>
 
         {/* ── TOP BAR ── */}
-        <div style={{ display:'flex', alignItems:'center', gap:8, padding:'8px 16px', background:'var(--surface)', borderBottom:'1px solid var(--border)', flexShrink:0 }}>
+        <div style={{ display:'flex', alignItems:'center', gap:10, padding:'10px 20px', background:'var(--surface)', borderBottom:'1px solid var(--border)', flexShrink:0 }}>
           <button onClick={() => setQueueCollapsed(p => !p)}
-            style={{ width:28, height:28, border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface-2)', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', fontSize:12, color:'var(--text-muted)', flexShrink:0 }}
+            style={{ width:34, height:34, border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface-2)', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', fontSize:14, color:'var(--text-muted)', flexShrink:0 }}
             title={queueCollapsed ? 'Show queue' : 'Hide queue'}>
             {queueCollapsed ? '›' : '‹'}
           </button>
-          <button className="btn sm" disabled={selectedIdx <= 0} onClick={() => { const prev = filtered[selectedIdx-1]; if(prev) selectContact(prev.id) }}>‹ Prev</button>
-          <button className="btn sm" disabled={selectedIdx >= filtered.length-1} onClick={() => { const next = filtered[selectedIdx+1]; if(next) selectContact(next.id) }}>Next ›</button>
-          <button className="btn sm primary" onClick={navNextPending} style={{ fontWeight:600 }}>Next pending →</button>
+          <button className="btn" disabled={selectedIdx <= 0} onClick={() => { const prev = filtered[selectedIdx-1]; if(prev) selectContact(prev.id) }} style={{fontSize:13, padding:"7px 14px"}}>‹ Prev</button>
+          <button className="btn" disabled={selectedIdx >= filtered.length-1} onClick={() => { const next = filtered[selectedIdx+1]; if(next) selectContact(next.id) }} style={{fontSize:13, padding:"7px 14px"}}>Next ›</button>
+          <button className="btn primary" onClick={navNextPending} style={{ fontWeight:600, fontSize:13, padding:"7px 16px" }}>Next pending →</button>
 
           {/* ── PROMINENT DIAL BUTTON ── */}
           <button onClick={() => setShowDialpad(true)}
-            style={{ display:'flex', alignItems:'center', gap:8, padding:'6px 16px', background: twilioReady ? '#16A34A' : 'var(--border)', border:'none', borderRadius:'var(--radius)', cursor: twilioReady ? 'pointer' : 'not-allowed', fontSize:13, fontWeight:700, color:'#fff', transition:'all .1s' }}
+            style={{ display:'flex', alignItems:'center', gap:8, padding:'8px 20px', background: twilioReady ? '#16A34A' : 'var(--border)', border:'none', borderRadius:'var(--radius)', cursor: twilioReady ? 'pointer' : 'not-allowed', fontSize:14, fontWeight:700, color:'#fff', transition:'all .1s' }}
             title="Manual dial any number">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="white">
               <path d="M6.6 10.8c1.4 2.8 3.8 5.1 6.6 6.6l2.2-2.2c.3-.3.7-.4 1-.2 1.1.4 2.3.6 3.6.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1C10.6 21 3 13.4 3 4c0-.6.4-1 1-1h3.5c.6 0 1 .4 1 1 0 1.3.2 2.5.6 3.6.1.3 0 .7-.2 1L6.6 10.8z"/>
@@ -561,7 +561,7 @@ export default function DialerPage() {
                       {getInitials(c.name)}
                     </div>
                     <div>
-                      <div style={{ fontSize:15, fontWeight:700, color:'var(--text-primary)' }}>{c.name || '—'}</div>
+                      <div style={{ fontSize:17, fontWeight:700, color:'var(--text-primary)' }}>{c.name || '—'}</div>
                       <div style={{ fontSize:11, color:'var(--text-muted)' }}>{campName(c) || 'No campaign'}</div>
                     </div>
                   </div>
@@ -583,8 +583,8 @@ export default function DialerPage() {
                     { label:'ST Customer ID', value: c.external_id || '—' },
                   ].map(({ label, value }) => (
                     <div key={label} style={{ padding:'8px 14px', borderRight:'1px solid var(--border)', minWidth:'33%' }}>
-                      <div style={{ fontSize:9, textTransform:'uppercase', letterSpacing:.6, color:'var(--text-muted)', marginBottom:2 }}>{label}</div>
-                      <div style={{ fontSize:12, color:'var(--text-primary)' }}>{value}</div>
+                      <div style={{ fontSize:10, textTransform:'uppercase', letterSpacing:.6, color:'var(--text-muted)', marginBottom:3 }}>{label}</div>
+                      <div style={{ fontSize:13, color:'var(--text-primary)' }}>{value}</div>
                     </div>
                   ))}
                 </div>
@@ -592,12 +592,12 @@ export default function DialerPage() {
                 <div style={{ padding:'10px 14px', display:'flex', gap:8 }}>
                   {c.phone && (
                     <button onClick={() => makeCall(c.phone)} disabled={!twilioReady || !!callStatus}
-                      style={{ flex:1, padding:'8px 0', border:'none', borderRadius:'var(--radius)', background: twilioReady && !callStatus ? '#16A34A' : 'var(--border)', cursor: twilioReady && !callStatus ? 'pointer' : 'not-allowed', fontSize:13, fontWeight:700, color:'#fff', display:'flex', alignItems:'center', justifyContent:'center', gap:6 }}>
+                      style={{ flex:1, padding:'11px 0', border:'none', borderRadius:'var(--radius)', background: twilioReady && !callStatus ? '#16A34A' : 'var(--border)', cursor: twilioReady && !callStatus ? 'pointer' : 'not-allowed', fontSize:14, fontWeight:700, color:'#fff', display:'flex', alignItems:'center', justifyContent:'center', gap:6 }}>
                       📞 {callStatus ? 'On call...' : 'Call'}
                     </button>
                   )}
                   <button onClick={() => openInST(c)}
-                    style={{ flex:1, padding:'8px 0', border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface)', cursor:'pointer', fontSize:12, fontWeight:600, color:'var(--text-primary)', display:'flex', alignItems:'center', justifyContent:'center', gap:6 }}
+                    style={{ flex:1, padding:'11px 0', border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface)', cursor:'pointer', fontSize:13, fontWeight:600, color:'var(--text-primary)', display:'flex', alignItems:'center', justifyContent:'center', gap:6 }}
                     onMouseEnter={e => e.currentTarget.style.background='var(--accent-bg)'}
                     onMouseLeave={e => e.currentTarget.style.background='var(--surface)'}>
                     {c.external_id ? '🔗 Open in ST' : '🔍 Search in ST'}
@@ -619,33 +619,33 @@ export default function DialerPage() {
                         const cm = OUTCOME_CONFIG[o.id] || {}
                         return (
                           <button key={o.id} disabled={!isMe} onClick={() => setSelectedOutcome(sel ? null : o.id)}
-                            style={{ padding:'10px 6px', borderRadius:'var(--radius)', fontSize:12, fontWeight: sel ? 700 : 500, border: sel ? `2px solid ${cm.border}` : '1.5px solid var(--border)', background: sel ? cm.bg : 'var(--surface-2)', color: sel ? cm.color : 'var(--text-secondary)', cursor: isMe ? 'pointer' : 'not-allowed', opacity: isMe ? 1 : .4, textAlign:'center', transition:'all .1s', transform: sel ? 'scale(1.02)' : 'scale(1)' }}>
-                            <div style={{ marginBottom:3, display:'flex', alignItems:'center', justifyContent:'center' }}>{OUTCOME_ICONS[o.id]?.(cm.color)}</div>
-                            <div style={{ fontSize:10, fontWeight: sel ? 700 : 500 }}>{o.id}</div>
+                            style={{ padding:'14px 8px', borderRadius:'var(--radius)', fontSize:13, fontWeight: sel ? 700 : 500, border: sel ? `2px solid ${cm.border}` : '1.5px solid var(--border)', background: sel ? cm.bg : 'var(--surface-2)', color: sel ? cm.color : 'var(--text-secondary)', cursor: isMe ? 'pointer' : 'not-allowed', opacity: isMe ? 1 : .4, textAlign:'center', transition:'all .1s', transform: sel ? 'scale(1.02)' : 'scale(1)' }}>
+                            <div style={{ marginBottom:4, display:'flex', alignItems:'center', justifyContent:'center' }}>{OUTCOME_ICONS[o.id]?.(cm.color)}</div>
+                            <div style={{ fontSize:11, fontWeight: sel ? 700 : 500 }}>{o.id}</div>
                           </button>
                         )
                       })}
                     </div>
                     <textarea value={notesVal} onChange={e => setNotesVal(e.target.value)} disabled={!isMe}
                       placeholder={selectedOutcome === 'Booked' ? 'Notes required before booking...' : 'Add notes...'}
-                      style={{ width:'100%', border:`1px solid ${selectedOutcome==='Booked' ? 'var(--accent)' : 'var(--border)'}`, borderRadius:'var(--radius)', padding:'8px 10px', fontSize:12, fontFamily:'inherit', resize:'vertical', minHeight:60, background:'var(--surface-2)', color:'var(--text-primary)', opacity: isMe ? 1 : .4 }} />
+                      style={{ width:'100%', border:`1px solid ${selectedOutcome==='Booked' ? 'var(--accent)' : 'var(--border)'}`, borderRadius:'var(--radius)', padding:'8px 10px', fontSize:12, fontFamily:'inherit', resize:'vertical', minHeight:80, background:'var(--surface)', color:'var(--text-primary)', opacity: isMe ? 1 : .4 }} />
                     {/* ST Booking fields — only shown when Booked is selected */}
                     {selectedOutcome === 'Booked' && (
                       <div style={{ display:'flex', flexDirection:'column', gap:8, padding:'12px', background:'var(--success-bg)', border:'1px solid var(--success)', borderRadius:'var(--radius)' }}>
                         <div style={{ fontSize:11, fontWeight:700, color:'var(--success)', marginBottom:2 }}>📋 ServiceTitan Booking Details</div>
                         <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8 }}>
                           <div>
-                            <label style={{ fontSize:9, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color:'var(--text-muted)', display:'block', marginBottom:4 }}>Business Unit</label>
+                            <label style={{ fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color:'var(--text-muted)', display:'block', marginBottom:5 }}>Business Unit</label>
                             <select value={selectedBU} onChange={e => { setSelectedBU(e.target.value); setSelectedJobType(''); setAvailability([]); setBookingResult(null) }}
-                              style={{ width:'100%', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'6px 8px', fontSize:11, background:'var(--surface)', color:'var(--text-primary)' }}>
+                              style={{ width:'100%', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'8px 10px', fontSize:12, background:'var(--surface)', color:'var(--text-primary)' }}>
                               <option value="">Select business unit...</option>
                               {[...stBusinessUnits].sort((a,b) => a.name.localeCompare(b.name)).map(bu => <option key={bu.id} value={bu.id}>{bu.name}</option>)}
                             </select>
                           </div>
                           <div>
-                            <label style={{ fontSize:9, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color:'var(--text-muted)', display:'block', marginBottom:4 }}>Job Type</label>
+                            <label style={{ fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color:'var(--text-muted)', display:'block', marginBottom:5 }}>Job Type</label>
                             <select value={selectedJobType} onChange={e => { setSelectedJobType(e.target.value); setAvailability([]); setBookingResult(null) }}
-                              style={{ width:'100%', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'6px 8px', fontSize:11, background:'var(--surface)', color:'var(--text-primary)' }}>
+                              style={{ width:'100%', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'8px 10px', fontSize:12, background:'var(--surface)', color:'var(--text-primary)' }}>
                               <option value="">Select job type...</option>
                               {[...stJobTypes]
                                 .filter(jt => !selectedBU || (jt.businessUnitIds?.includes(parseInt(selectedBU)) || jt.businessUnitId === parseInt(selectedBU)))
@@ -687,11 +687,11 @@ export default function DialerPage() {
                     )}
 
                     <div style={{ display:'flex', gap:6, justifyContent:'space-between', flexWrap:'wrap' }}>
-                      <button className="btn sm warning" disabled={!isMe} onClick={openCallbackModal}>📅 Callback</button>
+                      <button className="btn warning" disabled={!isMe} onClick={openCallbackModal} style={{fontSize:13}}>📅 Callback</button>
                       <div style={{ display:'flex', gap:6 }}>
-                        <button className="btn sm" disabled={!isMe || !selectedOutcome || saving} onClick={() => logOutcome(true)}>{saving ? 'Saving...' : 'Log & stay'}</button>
-                        <button className="btn sm" disabled={!isMe || !selectedOutcome || saving} onClick={() => logOutcome(false)}
-                          style={{ background:'#16A34A', borderColor:'#16A34A', color:'#fff', fontWeight:600 }}>
+                        <button className="btn" disabled={!isMe || !selectedOutcome || saving} onClick={() => logOutcome(true)} style={{fontSize:13}}>{saving ? 'Saving...' : 'Log & stay'}</button>
+                        <button className="btn" disabled={!isMe || !selectedOutcome || saving} onClick={() => logOutcome(false)}
+                          style={{ background:'#16A34A', borderColor:'#16A34A', color:'#fff', fontWeight:600, fontSize:13 }}>
                           {saving ? 'Saving...' : 'Log & next →'}
                         </button>
                       </div>
