@@ -103,6 +103,8 @@ export default function DialerPage() {
   const [booking, setBooking] = useState(false)
   const [bookingResult, setBookingResult] = useState(null)
   const [selectedSlot, setSelectedSlot] = useState(null)
+  const [showAvailModal, setShowAvailModal] = useState(false)
+  const [availWeekOffset, setAvailWeekOffset] = useState(0)
   const [stLoading, setStLoading] = useState(false)
 
   // Twilio
@@ -325,6 +327,29 @@ export default function DialerPage() {
     } catch (e) {
       setAvailError(e.message)
     } finally { setAvailLoading(false) }
+  }
+
+  const WEEK_DAYS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']
+  const MONTHS_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+
+  const getWeekDates = (offset) => {
+    const start = new Date()
+    start.setHours(0,0,0,0)
+    start.setDate(start.getDate() - start.getDay() + offset * 7)
+    return Array.from({length:7}, (_,i) => { const d = new Date(start); d.setDate(d.getDate()+i); return d })
+  }
+
+  const getSlotsByDay = (weekDates) => {
+    const byDay = {}
+    weekDates.forEach((date, i) => {
+      const dayStart = new Date(date); dayStart.setHours(0,0,0,0)
+      const dayEnd = new Date(date); dayEnd.setHours(23,59,59,999)
+      byDay[i] = availability.filter(s => {
+        const d = new Date(s.start)
+        return d >= dayStart && d <= dayEnd
+      })
+    })
+    return byDay
   }
 
   // ST Direct Booking
@@ -659,27 +684,21 @@ export default function DialerPage() {
                           </div>
                         </div>
                         <button onClick={checkAvailability} disabled={!selectedJobType || !selectedBU || availLoading}
-                          style={{ width:'100%', padding:'7px 0', border:'1px solid #16A34A', borderRadius:'var(--radius)', background:'#fff', color:'#16A34A', fontSize:11, fontWeight:600, cursor: selectedJobType && selectedBU ? 'pointer' : 'not-allowed', opacity: selectedJobType && selectedBU ? 1 : .5, display:'flex', alignItems:'center', justifyContent:'center', gap:6 }}>
-                          {availLoading ? <><div className="spinner" style={{width:12,height:12,borderWidth:2}}></div> Checking...</> : '📅 Check Availability'}
+                          style={{ width:'100%', padding:'9px 0', border:'1px solid #16A34A', borderRadius:'var(--radius)', background:'#fff', color:'#16A34A', fontSize:12, fontWeight:600, cursor: selectedJobType && selectedBU ? 'pointer' : 'not-allowed', opacity: selectedJobType && selectedBU ? 1 : .5, display:'flex', alignItems:'center', justifyContent:'center', gap:6 }}>
+                          {availLoading ? <><div className="spinner" style={{width:13,height:13,borderWidth:2}}></div> Loading availability...</> : '📅 Check Availability'}
                         </button>
-                        {availError && <div style={{ fontSize:11, color:'var(--danger)' }}>{availError}</div>}
-                        {availability.length > 0 && (
-                          <div style={{ maxHeight:200, overflowY:'auto', display:'flex', flexDirection:'column', gap:5 }}>
-                            {availability.slice(0,14).map((slot, i) => {
-                              const start = new Date(slot.start)
-                              const end = new Date(slot.end)
-                              const hasAvail = (slot.openAvailability || 0) > 0
-                              const isSelected = selectedSlot?.start === slot.start
-                              return (
-                                <div key={i} onClick={() => hasAvail && setSelectedSlot(isSelected ? null : slot)}
-                                  style={{ padding:'8px 10px', background: isSelected ? '#16A34A' : hasAvail ? '#fff' : '#F9FAFB', border:`2px solid ${isSelected ? '#16A34A' : hasAvail ? '#16A34A' : '#E5E7EB'}`, borderRadius:6, fontSize:11, color: isSelected ? '#fff' : hasAvail ? '#15803D' : '#9CA3AF', fontWeight:500, display:'flex', justifyContent:'space-between', alignItems:'center', cursor: hasAvail ? 'pointer' : 'default', transition:'all .1s' }}>
-                                  <span>{start.toLocaleDateString('en-US', { weekday:'short', month:'short', day:'numeric' })} · {start.toLocaleTimeString('en-US', { hour:'numeric', minute:'2-digit' })} – {end.toLocaleTimeString('en-US', { hour:'numeric', minute:'2-digit' })}</span>
-                                  <span style={{ fontSize:10, fontWeight:700, marginLeft:8 }}>{isSelected ? '✓ Selected' : hasAvail ? `${slot.openAvailability}h open` : 'Full'}</span>
-                                </div>
-                              )
-                            })}
-                            {availability.length > 14 && <div style={{ fontSize:10, color:'#15803D', textAlign:'center', padding:'4px 0' }}>+{availability.length - 14} more slots</div>}
+                        {availError && <div style={{ fontSize:11, color:'var(--danger)', padding:'6px 8px', background:'var(--danger-bg)', borderRadius:'var(--radius)' }}>{availError}</div>}
+                        {selectedSlot && (
+                          <div style={{ padding:'8px 10px', background:'#DCFCE7', border:'2px solid #16A34A', borderRadius:'var(--radius)', fontSize:12, color:'#15803D', fontWeight:600, display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+                            <span>✓ {new Date(selectedSlot.start).toLocaleDateString('en-US', { weekday:'short', month:'short', day:'numeric' })} · {new Date(selectedSlot.start).toLocaleTimeString('en-US', { hour:'numeric', minute:'2-digit' })} – {new Date(selectedSlot.end).toLocaleTimeString('en-US', { hour:'numeric', minute:'2-digit' })}</span>
+                            <button onClick={() => { setSelectedSlot(null); setShowAvailModal(true) }} style={{ fontSize:10, padding:'2px 8px', background:'#16A34A', color:'#fff', border:'none', borderRadius:4, cursor:'pointer' }}>Change</button>
                           </div>
+                        )}
+                        {availability.length > 0 && !selectedSlot && (
+                          <button onClick={() => setShowAvailModal(true)}
+                            style={{ width:'100%', padding:'7px 0', border:'1px dashed #16A34A', borderRadius:'var(--radius)', background:'transparent', color:'#16A34A', fontSize:11, fontWeight:500, cursor:'pointer' }}>
+                            View {availability.length} available slots →
+                          </button>
                         )}
                         {availability.length > 0 && !selectedSlot && (
                           <div style={{ fontSize:11, color:'#92400E', background:'#FFFBEB', border:'1px solid #FCD34D', borderRadius:'var(--radius)', padding:'7px 10px', textAlign:'center' }}>
@@ -789,7 +808,136 @@ export default function DialerPage() {
           </div>
         )}
       </div>
-      {/* ── CALLBACK MODAL ── */}
+      {/* ── AVAILABILITY CALENDAR MODAL ── */}
+      {showAvailModal && (() => {
+        const weekDates = getWeekDates(availWeekOffset)
+        const byDay = getSlotsByDay(weekDates)
+        const weekStart = weekDates[0]
+        const weekEnd = weekDates[6]
+        const hasNext = availability.some(s => new Date(s.start) > weekEnd)
+        const hasPrev = availWeekOffset > 0
+
+        return (
+          <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,.5)', zIndex:600, display:'flex', alignItems:'center', justifyContent:'center', padding:20 }}>
+            <div style={{ background:'var(--surface)', borderRadius:12, width:'100%', maxWidth:780, boxShadow:'0 8px 32px rgba(0,0,0,.2)', overflow:'hidden', display:'flex', flexDirection:'column', maxHeight:'90vh' }}>
+
+              {/* Header */}
+              <div style={{ padding:'16px 20px', borderBottom:'1px solid var(--border)', display:'flex', alignItems:'center', justifyContent:'space-between', flexShrink:0 }}>
+                <div>
+                  <div style={{ fontSize:16, fontWeight:600, color:'var(--text-primary)' }}>Check availability</div>
+                  <div style={{ fontSize:12, color:'var(--text-muted)', marginTop:2 }}>
+                    {stBusinessUnits.find(b => b.id === parseInt(selectedBU))?.name} · {stJobTypes.find(j => j.id === parseInt(selectedJobType))?.name}
+                  </div>
+                </div>
+                <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                  <button onClick={() => setAvailWeekOffset(p => p-1)} disabled={!hasPrev}
+                    style={{ width:32, height:32, borderRadius:'var(--radius)', border:'1px solid var(--border)', background:'var(--surface-2)', cursor: hasPrev ? 'pointer' : 'not-allowed', opacity: hasPrev ? 1 : .3, fontSize:16, color:'var(--text-secondary)', display:'flex', alignItems:'center', justifyContent:'center' }}>‹</button>
+                  <span style={{ fontSize:13, fontWeight:500, color:'var(--text-primary)', minWidth:160, textAlign:'center' }}>
+                    {MONTHS_SHORT[weekStart.getMonth()]} {weekStart.getDate()} – {MONTHS_SHORT[weekEnd.getMonth()]} {weekEnd.getDate()}, {weekEnd.getFullYear()}
+                  </span>
+                  <button onClick={() => setAvailWeekOffset(p => p+1)} disabled={!hasNext}
+                    style={{ width:32, height:32, borderRadius:'var(--radius)', border:'1px solid var(--border)', background:'var(--surface-2)', cursor: hasNext ? 'pointer' : 'not-allowed', opacity: hasNext ? 1 : .3, fontSize:16, color:'var(--text-secondary)', display:'flex', alignItems:'center', justifyContent:'center' }}>›</button>
+                  <button onClick={() => setShowAvailModal(false)}
+                    style={{ width:32, height:32, borderRadius:'var(--radius)', border:'1px solid var(--border)', background:'var(--surface-2)', cursor:'pointer', fontSize:18, color:'var(--text-muted)', display:'flex', alignItems:'center', justifyContent:'center', marginLeft:4 }}>×</button>
+                </div>
+              </div>
+
+              {/* Calendar grid */}
+              <div style={{ padding:'16px 20px', overflowY:'auto', flex:1 }}>
+                <div style={{ display:'grid', gridTemplateColumns:'repeat(7,1fr)', gap:10 }}>
+                  {weekDates.map((date, i) => {
+                    const isToday = date.toDateString() === new Date().toDateString()
+                    const daySlots = byDay[i] || []
+                    return (
+                      <div key={i} style={{ display:'flex', flexDirection:'column', gap:6 }}>
+                        {/* Day header */}
+                        <div style={{ textAlign:'center', marginBottom:4 }}>
+                          <div style={{ fontSize:10, fontWeight:600, textTransform:'uppercase', letterSpacing:.8, color:'var(--text-muted)' }}>{WEEK_DAYS[i]}</div>
+                          <div style={{ width:28, height:28, borderRadius:'50%', background: isToday ? '#3b82f6' : 'transparent', color: isToday ? '#fff' : 'var(--text-primary)', fontSize:14, fontWeight: isToday ? 600 : 400, display:'inline-flex', alignItems:'center', justifyContent:'center', marginTop:3 }}>
+                            {date.getDate()}
+                          </div>
+                        </div>
+
+                        {/* Slots */}
+                        {daySlots.length === 0 ? (
+                          <div style={{ height:56, borderRadius:'var(--radius)', border:'1px dashed var(--border)' }} />
+                        ) : daySlots.map((slot, si) => {
+                          const start = new Date(slot.start)
+                          const end = new Date(slot.end)
+                          const open = slot.openAvailability || 0
+                          const total = slot.totalAvailability || open
+                          const pct = total ? Math.round((open/total)*100) : 0
+                          const isSelected = selectedSlot?.start === slot.start
+                          const hasOpen = open > 0
+
+                          let bg, border, textColor, barColor
+                          if (isSelected) { bg='#16A34A'; border='2px solid #16A34A'; textColor='#fff'; barColor='rgba(255,255,255,.4)' }
+                          else if (!hasOpen) { bg='var(--surface-2)'; border='1px solid var(--border)'; textColor='var(--text-muted)'; barColor='var(--border)' }
+                          else if (pct >= 70) { bg='#FEF3C7'; border='1px solid #F59E0B'; textColor='#92400E'; barColor='#F59E0B' }
+                          else { bg='#DCFCE7'; border='1px solid #16A34A'; textColor='#15803D'; barColor='#16A34A' }
+
+                          return (
+                            <div key={si} onClick={() => { if (!hasOpen) return; setSelectedSlot(isSelected ? null : slot); if (!isSelected) setShowAvailModal(false) }}
+                              style={{ padding:'8px 10px', borderRadius:'var(--radius)', background:bg, border, cursor: hasOpen ? 'pointer' : 'default', transition:'all .12s' }}
+                              onMouseEnter={e => { if (hasOpen && !isSelected) e.currentTarget.style.opacity='.85' }}
+                              onMouseLeave={e => { e.currentTarget.style.opacity='1' }}>
+                              <div style={{ fontSize:10, fontWeight:600, color:textColor, lineHeight:1.3 }}>
+                                {start.toLocaleTimeString('en-US', { hour:'numeric', minute:'2-digit' })}
+                              </div>
+                              <div style={{ fontSize:10, color:textColor, opacity:.8 }}>
+                                – {end.toLocaleTimeString('en-US', { hour:'numeric', minute:'2-digit' })}
+                              </div>
+                              {/* Availability bar */}
+                              <div style={{ marginTop:6, height:3, background:'rgba(0,0,0,.1)', borderRadius:99, overflow:'hidden' }}>
+                                <div style={{ height:'100%', width:`${pct}%`, background:barColor, borderRadius:99 }} />
+                              </div>
+                              <div style={{ fontSize:9, color:textColor, marginTop:3, opacity:.9 }}>
+                                {isSelected ? '✓ Selected' : hasOpen ? `${open}h open` : 'Full'}
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )
+                  })}
+                </div>
+
+                {/* Legend */}
+                <div style={{ display:'flex', gap:16, marginTop:16, paddingTop:12, borderTop:'1px solid var(--border)' }}>
+                  {[['#DCFCE7','#16A34A','#15803D','Available'],['#FEF3C7','#F59E0B','#92400E','Filling up'],['var(--surface-2)','var(--border)','var(--text-muted)','Full']].map(([bg,bdr,txt,label]) => (
+                    <div key={label} style={{ display:'flex', alignItems:'center', gap:6 }}>
+                      <div style={{ width:12, height:12, borderRadius:3, background:bg, border:`1px solid ${bdr}` }} />
+                      <span style={{ fontSize:11, color:'var(--text-muted)' }}>{label}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Footer */}
+              {selectedSlot ? (
+                <div style={{ padding:'12px 20px', borderTop:'1px solid var(--border)', background:'#DCFCE7', display:'flex', alignItems:'center', justifyContent:'space-between', flexShrink:0 }}>
+                  <div>
+                    <div style={{ fontSize:13, fontWeight:600, color:'#15803D' }}>
+                      ✓ {new Date(selectedSlot.start).toLocaleDateString('en-US', { weekday:'long', month:'short', day:'numeric' })} · {new Date(selectedSlot.start).toLocaleTimeString('en-US', { hour:'numeric', minute:'2-digit' })} – {new Date(selectedSlot.end).toLocaleTimeString('en-US', { hour:'numeric', minute:'2-digit' })}
+                    </div>
+                    <div style={{ fontSize:11, color:'#15803D', opacity:.7, marginTop:1 }}>Slot selected — close to confirm booking details</div>
+                  </div>
+                  <button onClick={() => setShowAvailModal(false)}
+                    style={{ padding:'8px 20px', background:'#16A34A', color:'#fff', border:'none', borderRadius:'var(--radius)', fontSize:13, fontWeight:600, cursor:'pointer' }}>
+                    Confirm slot →
+                  </button>
+                </div>
+              ) : (
+                <div style={{ padding:'12px 20px', borderTop:'1px solid var(--border)', flexShrink:0 }}>
+                  <div style={{ fontSize:12, color:'var(--text-muted)', textAlign:'center' }}>Click an available slot to select it</div>
+                </div>
+              )}
+            </div>
+          </div>
+        )
+      })()}
+
+      {/* ── CALLBACK MODAL ── */}}
       {showCallbackModal && (
         <Modal title="Schedule Callback" onClose={() => setShowCallbackModal(false)} width={360}>
           <div className="form-field"><label className="form-label">Date</label><input className="form-input" type="date" value={cbDate} onChange={e => setCbDate(e.target.value)} /></div>
