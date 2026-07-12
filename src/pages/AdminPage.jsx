@@ -25,6 +25,11 @@ export default function AdminPage() {
   const [editProfile, setEditProfile] = useState(null)
   const [csrCampaigns, setCsrCampaigns] = useState([])
   const [saving, setSaving] = useState(false)
+  const [commissionRates, setCommissionRates] = useState({ booking: 2.00, membership: 2.00 })
+  const [commissionHistory, setCommissionHistory] = useState([])
+  const [allRepEarnings, setAllRepEarnings] = useState([])
+  const [commLoading, setCommLoading] = useState(false)
+  const [savingRates, setSavingRates] = useState(false)
   const [msg, setMsg] = useState('')
   const [myName, setMyName] = useState(profile?.name || '')
   const [myAvatar, setMyAvatar] = useState(profile?.avatar || null)
@@ -49,6 +54,54 @@ export default function AdminPage() {
       setLoading(false)
     })
   }, [isAdmin])
+
+  // Load commission data
+  useEffect(() => {
+    if (settingsTab !== 'commission') return
+    setCommLoading(true)
+    const today = new Date().toISOString().split('T')[0]
+    const dow = new Date().getDay()
+    const monday = new Date()
+    monday.setDate(monday.getDate() - (dow === 0 ? 6 : dow - 1))
+    monday.setHours(0,0,1,0)
+
+    Promise.all([
+      sb.from('commission_settings').select('*'),
+      sb.from('commissions').select('*, profiles(name)').gte('earned_at', monday.toISOString()).order('earned_at', { ascending: false }),
+    ]).then(([{ data: rates }, { data: history }]) => {
+      if (rates?.length) {
+        const r = {}
+        rates.forEach(x => r[x.event_type] = parseFloat(x.amount))
+        setCommissionRates(prev => ({ ...prev, ...r }))
+      }
+      setCommissionHistory(history || [])
+
+      // Aggregate by rep for admin view
+      const byRep = {}
+      ;(history || []).forEach(c => {
+        const name = c.profiles?.name || c.rep_name || 'Unknown'
+        if (!byRep[name]) byRep[name] = { daily: 0, weekly: 0, bookings: 0, memberships: 0 }
+        const earned = parseFloat(c.amount)
+        byRep[name].weekly += earned
+        if (new Date(c.earned_at).toISOString().split('T')[0] === today) byRep[name].daily += earned
+        if (c.event_type === 'booking') byRep[name].bookings++
+        if (c.event_type === 'membership') byRep[name].memberships++
+      })
+      setAllRepEarnings(Object.entries(byRep).sort((a,b) => b[1].weekly - a[1].weekly))
+      setCommLoading(false)
+    })
+  }, [settingsTab])
+
+  const saveCommissionRates = async () => {
+    setSavingRates(true)
+    await Promise.all([
+      sb.from('commission_settings').upsert({ event_type: 'booking', amount: commissionRates.booking, updated_at: new Date().toISOString() }, { onConflict: 'event_type' }),
+      sb.from('commission_settings').upsert({ event_type: 'membership', amount: commissionRates.membership, updated_at: new Date().toISOString() }, { onConflict: 'event_type' }),
+    ])
+    setSavingRates(false)
+    setMsg('✓ Commission rates saved!')
+    setTimeout(() => setMsg(''), 3000)
+  }
 
   const saveMyProfile = async () => {
     setSavingProfile(true)
@@ -127,8 +180,8 @@ export default function AdminPage() {
   }
 
   const TABS = isAdmin
-    ? [{ id:'users', label:'Users' }, { id:'campaigns', label:'Campaigns' }]
-    : [{ id:'users', label:'My Profile' }]
+    ? [{ id:'users', label:'Users' }, { id:'campaigns', label:'Campaigns' }, { id:'commission', label:'💰 Commission' }]
+    : [{ id:'users', label:'My Profile' }, { id:'commission', label:'💰 My Earnings' }]
 
   return (
     <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden' }}>
@@ -150,6 +203,108 @@ export default function AdminPage() {
 
       {/* Campaigns tab — full CampaignsPage */}
       {settingsTab === 'campaigns' && <CampaignsPage />}
+
+      {/* Commission tab */}
+      {settingsTab === 'commission' && (
+        <div style={{ flex:1, overflowY:'auto', padding:24, display:'flex', flexDirection:'column', gap:20 }}>
+          {commLoading ? <div className="spinner" style={{ margin:'40px auto' }} /> : (
+            <>
+              {/* Admin: Rate settings */}
+              {isAdmin && (
+                <div className="card">
+                  <div className="card-header">
+                    <div className="card-title">Commission Rates</div>
+                    {msg && <span style={{ fontSize:12, color:'var(--success)' }}>{msg}</span>}
+                  </div>
+                  <div className="card-body" style={{ display:'flex', flexDirection:'column', gap:16 }}>
+                    <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16 }}>
+                      <div className="form-field">
+                        <label className="form-label">Booking Payout ($)</label>
+                        <input className="form-input" type="number" step="0.50" min="0" value={commissionRates.booking}
+                          onChange={e => setCommissionRates(p => ({ ...p, booking: parseFloat(e.target.value) || 0 }))} />
+                        <div style={{ fontSize:11, color:'var(--text-muted)', marginTop:4 }}>Paid when a rep books a job via Andi</div>
+                      </div>
+                      <div className="form-field">
+                        <label className="form-label">Membership Payout ($)</label>
+                        <input className="form-input" type="number" step="0.50" min="0" value={commissionRates.membership}
+                          onChange={e => setCommissionRates(p => ({ ...p, membership: parseFloat(e.target.value) || 0 }))} />
+                        <div style={{ fontSize:11, color:'var(--text-muted)', marginTop:4 }}>Added when "Also sold a membership" is checked</div>
+                      </div>
+                    </div>
+                    <button className="btn primary" onClick={saveCommissionRates} disabled={savingRates} style={{ alignSelf:'flex-start' }}>
+                      {savingRates ? 'Saving...' : 'Save rates'}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Admin: All rep earnings this week */}
+              {isAdmin && allRepEarnings.length > 0 && (
+                <div className="card">
+                  <div className="card-header"><div className="card-title">Team Earnings — This Week</div></div>
+                  <table className="data-table">
+                    <thead><tr><th>Rep</th><th style={{textAlign:'center'}}>Today</th><th style={{textAlign:'center'}}>This Week</th><th style={{textAlign:'center'}}>Bookings</th><th style={{textAlign:'center'}}>Memberships</th></tr></thead>
+                    <tbody>
+                      {allRepEarnings.map(([name, d]) => (
+                        <tr key={name}>
+                          <td style={{padding:'10px 12px', fontWeight:600}}>{name}</td>
+                          <td style={{padding:'10px 12px', textAlign:'center', fontWeight:700, color:'#16A34A'}}>${d.daily.toFixed(2)}</td>
+                          <td style={{padding:'10px 12px', textAlign:'center', fontWeight:700, color:'var(--accent)'}}>${d.weekly.toFixed(2)}</td>
+                          <td style={{padding:'10px 12px', textAlign:'center'}}>{d.bookings}</td>
+                          <td style={{padding:'10px 12px', textAlign:'center'}}>{d.memberships}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {/* Rep: Personal earnings summary */}
+              {!isAdmin && (
+                <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16 }}>
+                  {[
+                    { label:'Today', value: commissionHistory.filter(c => new Date(c.earned_at).toISOString().split('T')[0] === new Date().toISOString().split('T')[0]).reduce((s,c) => s + parseFloat(c.amount), 0), accent:'#16A34A', note:'Resets at midnight' },
+                    { label:'This Week', value: commissionHistory.reduce((s,c) => s + parseFloat(c.amount), 0), accent:'var(--accent)', note:'Resets Monday 12:01am' },
+                  ].map(({ label, value, accent, note }) => (
+                    <div key={label} style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:16, padding:'24px', textAlign:'center' }}>
+                      <div style={{ fontSize:12, fontWeight:600, textTransform:'uppercase', letterSpacing:.8, color:'var(--text-muted)', marginBottom:8 }}>{label}</div>
+                      <div style={{ fontSize:42, fontWeight:900, color:accent, letterSpacing:-1 }}>${value.toFixed(2)}</div>
+                      <div style={{ fontSize:11, color:'var(--text-muted)', marginTop:6 }}>{note}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Commission history */}
+              <div className="card">
+                <div className="card-header"><div className="card-title">Commission History — This Week</div></div>
+                {commissionHistory.length === 0 ? (
+                  <div className="empty-state"><div className="empty-icon">💰</div><div>No commissions earned yet this week</div></div>
+                ) : (
+                  <table className="data-table">
+                    <thead><tr>{isAdmin && <th>Rep</th>}<th>Event</th><th>Contact</th><th style={{textAlign:'right'}}>Amount</th><th>When</th></tr></thead>
+                    <tbody>
+                      {commissionHistory.filter(c => !isAdmin ? c.profile_id === profile?.id : true).map(c => (
+                        <tr key={c.id}>
+                          {isAdmin && <td style={{padding:'10px 12px', fontWeight:500}}>{c.profiles?.name || c.rep_name}</td>}
+                          <td style={{padding:'10px 12px'}}>
+                            <span style={{ padding:'2px 8px', borderRadius:99, fontSize:11, fontWeight:600, background: c.event_type==='booking' ? '#DCFCE7' : '#EFF6FF', color: c.event_type==='booking' ? '#16A34A' : '#3b82f6' }}>
+                              {c.event_type === 'booking' ? '📋 Booking' : '⭐ Membership'}
+                            </span>
+                          </td>
+                          <td style={{padding:'10px 12px', color:'var(--text-secondary)'}}>{c.contact_name}</td>
+                          <td style={{padding:'10px 12px', textAlign:'right', fontWeight:700, color:'#16A34A'}}>${parseFloat(c.amount).toFixed(2)}</td>
+                          <td style={{padding:'10px 12px', color:'var(--text-muted)', fontSize:11}}>{new Date(c.earned_at).toLocaleString('en-US', { month:'short', day:'numeric', hour:'numeric', minute:'2-digit' })}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      )}
 
 
       {/* Users tab */}
