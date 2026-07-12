@@ -102,6 +102,7 @@ export default function DialerPage() {
   const [availError, setAvailError] = useState(null)
   const [booking, setBooking] = useState(false)
   const [bookingResult, setBookingResult] = useState(null)
+  const [selectedSlot, setSelectedSlot] = useState(null)
   const [stLoading, setStLoading] = useState(false)
 
   // Twilio
@@ -320,6 +321,7 @@ export default function DialerPage() {
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Failed to load availability')
       setAvailability(data?.availabilities || data?.data || [])
+      setSelectedSlot(null)
     } catch (e) {
       setAvailError(e.message)
     } finally { setAvailLoading(false) }
@@ -339,6 +341,8 @@ export default function DialerPage() {
           customerId: c.external_id, jobTypeId: selectedJobType, businessUnitId: selectedBU,
           notes: notes || `Outbound call booked by ${currentRep} via Andi`,
           repName: currentRep, contactName: c.name, phone: c.phone, zip: c.zip,
+          start: selectedSlot?.start || null,
+          end: selectedSlot?.end || null,
         })
       })
       const data = await res.json()
@@ -631,7 +635,7 @@ export default function DialerPage() {
                       style={{ width:'100%', border:`1px solid ${selectedOutcome==='Booked' ? 'var(--accent)' : 'var(--border)'}`, borderRadius:'var(--radius)', padding:'8px 10px', fontSize:12, fontFamily:'inherit', resize:'vertical', minHeight:80, background:'var(--surface)', color:'var(--text-primary)', opacity: isMe ? 1 : .4 }} />
                     {/* ST Booking fields — only shown when Booked is selected */}
                     {selectedOutcome === 'Booked' && (
-                      <div style={{ display:'flex', flexDirection:'column', gap:8, padding:'12px', background:'var(--success-bg)', border:'1px solid var(--success)', borderRadius:'var(--radius)' }}>
+                      <div style={{ display:'flex', flexDirection:'column', gap:10, padding:'16px', background:'var(--success-bg)', border:'1px solid var(--success)', borderRadius:'var(--radius)' }}>
                         <div style={{ fontSize:11, fontWeight:700, color:'var(--success)', marginBottom:2 }}>📋 ServiceTitan Booking Details</div>
                         <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8 }}>
                           <div>
@@ -660,24 +664,37 @@ export default function DialerPage() {
                         </button>
                         {availError && <div style={{ fontSize:11, color:'var(--danger)' }}>{availError}</div>}
                         {availability.length > 0 && (
-                          <div style={{ maxHeight:120, overflowY:'auto', display:'flex', flexDirection:'column', gap:3 }}>
-                            {availability.slice(0,10).map((slot, i) => {
+                          <div style={{ maxHeight:200, overflowY:'auto', display:'flex', flexDirection:'column', gap:5 }}>
+                            {availability.slice(0,14).map((slot, i) => {
                               const start = new Date(slot.start)
                               const end = new Date(slot.end)
                               const hasAvail = (slot.openAvailability || 0) > 0
+                              const isSelected = selectedSlot?.start === slot.start
                               return (
-                                <div key={i} style={{ padding:'6px 8px', background: hasAvail ? '#fff' : '#FEF2F2', border:`1px solid ${hasAvail ? '#16A34A' : '#FECACA'}`, borderRadius:4, fontSize:10, color: hasAvail ? '#15803D' : '#9CA3AF', fontWeight:500, display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                                <div key={i} onClick={() => hasAvail && setSelectedSlot(isSelected ? null : slot)}
+                                  style={{ padding:'8px 10px', background: isSelected ? '#16A34A' : hasAvail ? '#fff' : '#F9FAFB', border:`2px solid ${isSelected ? '#16A34A' : hasAvail ? '#16A34A' : '#E5E7EB'}`, borderRadius:6, fontSize:11, color: isSelected ? '#fff' : hasAvail ? '#15803D' : '#9CA3AF', fontWeight:500, display:'flex', justifyContent:'space-between', alignItems:'center', cursor: hasAvail ? 'pointer' : 'default', transition:'all .1s' }}>
                                   <span>{start.toLocaleDateString('en-US', { weekday:'short', month:'short', day:'numeric' })} · {start.toLocaleTimeString('en-US', { hour:'numeric', minute:'2-digit' })} – {end.toLocaleTimeString('en-US', { hour:'numeric', minute:'2-digit' })}</span>
-                                  <span style={{ fontSize:9, fontWeight:700, color: hasAvail ? '#16A34A' : '#9CA3AF', marginLeft:6 }}>{hasAvail ? `${slot.openAvailability}h open` : 'Full'}</span>
+                                  <span style={{ fontSize:10, fontWeight:700, marginLeft:8 }}>{isSelected ? '✓ Selected' : hasAvail ? `${slot.openAvailability}h open` : 'Full'}</span>
                                 </div>
                               )
                             })}
-                            {availability.length > 10 && <div style={{ fontSize:10, color:'#15803D', textAlign:'center' }}>+{availability.length - 10} more slots</div>}
+                            {availability.length > 14 && <div style={{ fontSize:10, color:'#15803D', textAlign:'center', padding:'4px 0' }}>+{availability.length - 14} more slots</div>}
                           </div>
                         )}
-                        <button onClick={bookInST} disabled={!c.external_id || !selectedJobType || !selectedBU || booking}
-                          style={{ width:'100%', padding:'9px 0', border:'none', borderRadius:'var(--radius)', background: c.external_id && selectedJobType && selectedBU ? '#16A34A' : 'var(--border)', color:'#fff', fontSize:13, fontWeight:700, cursor: c.external_id && selectedJobType && selectedBU ? 'pointer' : 'not-allowed', display:'flex', alignItems:'center', justifyContent:'center', gap:8 }}>
-                          {booking ? <><div className="spinner" style={{width:14,height:14,borderWidth:2,borderTopColor:'#fff'}}></div> Booking...</> : '✅ Book in ServiceTitan'}
+                        {availability.length > 0 && !selectedSlot && (
+                          <div style={{ fontSize:11, color:'#92400E', background:'#FFFBEB', border:'1px solid #FCD34D', borderRadius:'var(--radius)', padding:'7px 10px', textAlign:'center' }}>
+                            👆 Select an available slot above to book it
+                          </div>
+                        )}
+                        <button onClick={bookInST} disabled={!c.external_id || !selectedJobType || !selectedBU || booking || (availability.length > 0 && !selectedSlot)}
+                          style={{ width:'100%', padding:'11px 0', border:'none', borderRadius:'var(--radius)',
+                            background: c.external_id && selectedJobType && selectedBU && (availability.length === 0 || selectedSlot) ? '#16A34A' : 'var(--border)',
+                            color:'#fff', fontSize:13, fontWeight:700,
+                            cursor: c.external_id && selectedJobType && selectedBU && (availability.length === 0 || selectedSlot) ? 'pointer' : 'not-allowed',
+                            display:'flex', alignItems:'center', justifyContent:'center', gap:8 }}>
+                          {booking ? <><div className="spinner" style={{width:14,height:14,borderWidth:2,borderTopColor:'#fff'}}></div> Booking...</> :
+                            selectedSlot ? `✅ Book ${new Date(selectedSlot.start).toLocaleDateString('en-US', { weekday:'short', month:'short', day:'numeric' })} ${new Date(selectedSlot.start).toLocaleTimeString('en-US', { hour:'numeric', minute:'2-digit' })}` :
+                            '✅ Book in ServiceTitan (Unscheduled)'}
                         </button>
                         {!c.external_id && <div style={{ fontSize:10, color:'var(--warning)', textAlign:'center' }}>⚠ No ST Customer ID on this contact</div>}
                         {bookingResult && (
