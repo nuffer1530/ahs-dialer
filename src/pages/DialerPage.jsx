@@ -319,7 +319,7 @@ export default function DialerPage() {
       const res = await fetch(`/api/st/availability?${params}`)
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Failed to load availability')
-      setAvailability(data?.data || data?.slots || [])
+      setAvailability(data?.availabilities || data?.data || [])
     } catch (e) {
       setAvailError(e.message)
     } finally { setAvailLoading(false) }
@@ -661,16 +661,18 @@ export default function DialerPage() {
                         {availError && <div style={{ fontSize:11, color:'var(--danger)' }}>{availError}</div>}
                         {availability.length > 0 && (
                           <div style={{ maxHeight:120, overflowY:'auto', display:'flex', flexDirection:'column', gap:3 }}>
-                            {availability.slice(0,8).map((slot, i) => {
-                              const start = new Date(slot.start || slot.startsOn || slot.date)
-                              const end = slot.end || slot.endsOn ? new Date(slot.end || slot.endsOn) : null
+                            {availability.slice(0,10).map((slot, i) => {
+                              const start = new Date(slot.start)
+                              const end = new Date(slot.end)
+                              const hasAvail = (slot.openAvailability || 0) > 0
                               return (
-                                <div key={i} style={{ padding:'4px 8px', background:'#fff', border:'1px solid #16A34A', borderRadius:4, fontSize:10, color:'#15803D', fontWeight:500 }}>
-                                  {start.toLocaleDateString('en-US', { weekday:'short', month:'short', day:'numeric' })} · {start.toLocaleTimeString('en-US', { hour:'numeric', minute:'2-digit' })}{end && ` – ${end.toLocaleTimeString('en-US', { hour:'numeric', minute:'2-digit' })}`}
+                                <div key={i} style={{ padding:'6px 8px', background: hasAvail ? '#fff' : '#FEF2F2', border:`1px solid ${hasAvail ? '#16A34A' : '#FECACA'}`, borderRadius:4, fontSize:10, color: hasAvail ? '#15803D' : '#9CA3AF', fontWeight:500, display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                                  <span>{start.toLocaleDateString('en-US', { weekday:'short', month:'short', day:'numeric' })} · {start.toLocaleTimeString('en-US', { hour:'numeric', minute:'2-digit' })} – {end.toLocaleTimeString('en-US', { hour:'numeric', minute:'2-digit' })}</span>
+                                  <span style={{ fontSize:9, fontWeight:700, color: hasAvail ? '#16A34A' : '#9CA3AF', marginLeft:6 }}>{hasAvail ? `${slot.openAvailability}h open` : 'Full'}</span>
                                 </div>
                               )
                             })}
-                            {availability.length > 8 && <div style={{ fontSize:10, color:'#15803D', textAlign:'center' }}>+{availability.length - 8} more slots</div>}
+                            {availability.length > 10 && <div style={{ fontSize:10, color:'#15803D', textAlign:'center' }}>+{availability.length - 10} more slots</div>}
                           </div>
                         )}
                         <button onClick={bookInST} disabled={!c.external_id || !selectedJobType || !selectedBU || booking}
