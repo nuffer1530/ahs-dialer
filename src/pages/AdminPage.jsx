@@ -622,7 +622,6 @@ export default function AdminPage() {
           )}
         </div>
       )}
-    </div>
 
       {/* ── PASSWORD CHANGE MODAL ── */}
       {pwModal && (
