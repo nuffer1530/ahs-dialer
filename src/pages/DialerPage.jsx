@@ -80,6 +80,11 @@ export default function DialerPage() {
   const [queueCollapsed, setQueueCollapsed] = useState(true)
   const [todayLogs, setTodayLogs] = useState([])
   const [powerDialActive, setPowerDialActive] = useState(false)
+  const [alsoMembership, setAlsoMembership] = useState(false)
+  const [commissionRates, setCommissionRates] = useState({ booking: 2.00, membership: 2.00 })
+  const [dailyEarnings, setDailyEarnings] = useState(0)
+  const [weeklyEarnings, setWeeklyEarnings] = useState(0)
+  const [showEarningsDetail, setShowEarningsDetail] = useState(false)
 
   // Modals
   const [showCallbackModal, setShowCallbackModal] = useState(false)
@@ -181,7 +186,7 @@ export default function DialerPage() {
       .then(({ data }) => { setContactLogs(data || []); setLogsLoading(false) })
   }, [selectedId])
 
-  useEffect(() => { setNotesVal(''); setBookingResult(null) }, [selectedId])
+  useEffect(() => { setNotesVal(''); setBookingResult(null); setAlsoMembership(false) }, [selectedId])
 
   useEffect(() => {
     if (!currentRep) return
@@ -190,6 +195,46 @@ export default function DialerPage() {
       .gte('created_at', today + 'T00:00:00').lte('created_at', today + 'T23:59:59')
       .then(({ data }) => setTodayLogs(data || []))
   }, [currentRep])
+
+  // Load commission rates
+  useEffect(() => {
+    sb.from('commission_settings').select('*').then(({ data }) => {
+      if (data?.length) {
+        const rates = {}
+        data.forEach(r => rates[r.event_type] = parseFloat(r.amount))
+        setCommissionRates(prev => ({ ...prev, ...rates }))
+      }
+    })
+  }, [])
+
+  // Load daily + weekly earnings
+  useEffect(() => {
+    if (!profile?.id) return
+    const today = new Date()
+    const todayStr = today.toISOString().split('T')[0]
+    // Week starts Monday
+    const dow = today.getDay()
+    const monday = new Date(today)
+    monday.setDate(today.getDate() - (dow === 0 ? 6 : dow - 1))
+    monday.setHours(0,0,1,0)
+    const mondayStr = monday.toISOString()
+
+    sb.from('commissions').select('amount, earned_at')
+      .eq('profile_id', profile.id)
+      .gte('earned_at', todayStr + 'T00:00:00')
+      .then(({ data }) => {
+        const daily = (data || []).reduce((sum, c) => sum + parseFloat(c.amount), 0)
+        setDailyEarnings(daily)
+      })
+
+    sb.from('commissions').select('amount, earned_at')
+      .eq('profile_id', profile.id)
+      .gte('earned_at', mondayStr)
+      .then(({ data }) => {
+        const weekly = (data || []).reduce((sum, c) => sum + parseFloat(c.amount), 0)
+        setWeeklyEarnings(weekly)
+      })
+  }, [profile?.id])
 
   // Init Twilio
   useEffect(() => {
@@ -295,6 +340,22 @@ export default function DialerPage() {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ customerId: c.external_id, note: `${selectedOutcome}: ${notes}`, repName: currentRep })
         }).catch(err => console.warn('ST note sync failed:', err))
+      }
+
+      // Commission tracking for Booked outcome
+      if (selectedOutcome === 'Booked' && profile?.id) {
+        const bookingAmt = commissionRates.booking || 2
+        const membershipAmt = alsoMembership ? (commissionRates.membership || 2) : 0
+        const totalAmt = bookingAmt + membershipAmt
+        await sb.from('commissions').insert({
+          profile_id: profile.id, contact_id: c.id, event_type: 'booking',
+          amount: bookingAmt, rep_name: currentRep, contact_name: c.name || 'Unknown',
+          also_membership: alsoMembership, membership_amount: membershipAmt,
+          earned_at: new Date().toISOString(),
+        })
+        setDailyEarnings(prev => prev + totalAmt)
+        setWeeklyEarnings(prev => prev + totalAmt)
+        setAlsoMembership(false)
       }
 
       setSelectedOutcome(null); setNotesVal(''); updateAgentStatus('Available')
@@ -524,10 +585,35 @@ export default function DialerPage() {
 
           <div style={{ flex:1 }} />
 
-          <div style={{ display:'flex', gap:12, fontSize:11, color:'var(--text-muted)' }}>
+          <div style={{ display:'flex', alignItems:'center', gap:12, fontSize:11, color:'var(--text-muted)' }}>
             <span>Calls: <strong style={{ color:'var(--text-primary)' }}>{myStats.calls}</strong></span>
             <span>Booked: <strong style={{ color:'#16A34A' }}>{myStats.booked}</strong></span>
             {cbDue.length > 0 && <span style={{ color:'#C87800' }}>Callbacks: <strong>{cbDue.length}</strong></span>}
+            {/* Daily earnings pill */}
+            <div style={{ position:'relative' }}>
+              <button onClick={() => setShowEarningsDetail(p => !p)}
+                style={{ display:'flex', alignItems:'center', gap:6, padding:'4px 12px', background: dailyEarnings > 0 ? '#16A34A' : 'var(--surface-2)', border:`1px solid ${dailyEarnings > 0 ? '#16A34A' : 'var(--border)'}`, borderRadius:99, cursor:'pointer', color: dailyEarnings > 0 ? '#fff' : 'var(--text-muted)', fontSize:12, fontWeight:700 }}>
+                💰 ${dailyEarnings.toFixed(2)}
+              </button>
+              {showEarningsDetail && (
+                <div style={{ position:'fixed', right:16, top:52, background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius)', boxShadow:'0 4px 20px rgba(0,0,0,.15)', zIndex:300, minWidth:200, overflow:'hidden' }}
+                  onMouseLeave={() => setShowEarningsDetail(false)}>
+                  <div style={{ padding:'12px 16px', borderBottom:'1px solid var(--border)', fontSize:11, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color:'var(--text-muted)' }}>My Earnings</div>
+                  <div style={{ padding:'12px 16px', display:'flex', flexDirection:'column', gap:10 }}>
+                    <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                      <span style={{ fontSize:12, color:'var(--text-secondary)' }}>Today</span>
+                      <span style={{ fontSize:18, fontWeight:800, color:'#16A34A' }}>${dailyEarnings.toFixed(2)}</span>
+                    </div>
+                    <div style={{ height:1, background:'var(--border)' }} />
+                    <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                      <span style={{ fontSize:12, color:'var(--text-secondary)' }}>This week</span>
+                      <span style={{ fontSize:18, fontWeight:800, color:'var(--accent)' }}>${weeklyEarnings.toFixed(2)}</span>
+                    </div>
+                    <div style={{ fontSize:10, color:'var(--text-muted)', textAlign:'center', paddingTop:4 }}>Resets daily · Paid weekly</div>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
 
           {callStatus && (
@@ -686,6 +772,18 @@ export default function DialerPage() {
                             </select>
                           </div>
                         </div>
+                        {/* Membership add-on checkbox */}
+                        <label style={{ display:'flex', alignItems:'center', gap:10, padding:'10px 12px', background: alsoMembership ? '#EFF6FF' : 'var(--surface)', border:`1.5px solid ${alsoMembership ? '#3b82f6' : 'var(--border)'}`, borderRadius:'var(--radius)', cursor:'pointer', transition:'all .1s' }}>
+                          <div onClick={() => setAlsoMembership(p => !p)}
+                            style={{ width:20, height:20, borderRadius:5, border:`2px solid ${alsoMembership ? '#3b82f6' : 'var(--border)'}`, background: alsoMembership ? '#3b82f6' : 'transparent', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0, cursor:'pointer', transition:'all .1s' }}>
+                            {alsoMembership && <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+                          </div>
+                          <div onClick={() => setAlsoMembership(p => !p)}>
+                            <div style={{ fontSize:12, fontWeight:600, color: alsoMembership ? '#1d4ed8' : 'var(--text-primary)' }}>⭐ Also sold a membership</div>
+                            <div style={{ fontSize:10, color:'var(--text-muted)', marginTop:1 }}>+${(commissionRates.membership || 2).toFixed(2)} commission</div>
+                          </div>
+                        </label>
+
                         <button onClick={checkAvailability} disabled={!selectedJobType || !selectedBU || availLoading}
                           style={{ width:'100%', padding:'9px 0', border:'1px solid #16A34A', borderRadius:'var(--radius)', background:'#fff', color:'#16A34A', fontSize:12, fontWeight:600, cursor: selectedJobType && selectedBU ? 'pointer' : 'not-allowed', opacity: selectedJobType && selectedBU ? 1 : .5, display:'flex', alignItems:'center', justifyContent:'center', gap:6 }}>
                           {availLoading ? <><div className="spinner" style={{width:13,height:13,borderWidth:2}}></div> Loading availability...</> : '📅 Check Availability'}
