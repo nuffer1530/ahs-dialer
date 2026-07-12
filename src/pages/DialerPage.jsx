@@ -322,8 +322,11 @@ export default function DialerPage() {
       const res = await fetch(`/api/st/availability?${params}`)
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Failed to load availability')
-      setAvailability(data?.availabilities || data?.data || [])
+      const slots = data?.availabilities || data?.data || []
+      setAvailability(slots)
       setSelectedSlot(null)
+      if (slots.length > 0) { setShowAvailModal(true); setAvailWeekOffset(0) }
+      else setAvailError('No availability found for the selected criteria.')
     } catch (e) {
       setAvailError(e.message)
     } finally { setAvailLoading(false) }
