@@ -143,7 +143,7 @@ export default function AdminPage() {
       sb.from('commission_settings').upsert({ event_type: 'membership', amount: commissionRates.membership, updated_at: new Date().toISOString() }, { onConflict: 'event_type' }),
     ])
     setSavingRates(false)
-    setMsg('✓ Commission rates saved!')
+    setMsg('Rates saved')
     setTimeout(() => setMsg(''), 3000)
   }
 
@@ -174,7 +174,7 @@ export default function AdminPage() {
     setSavingProfile(true)
     await sb.from('profiles').update({ name: myName, avatar: myAvatar }).eq('id', profile.id)
     await refreshProfile()
-    setProfileMsg('✓ Profile saved!')
+    setProfileMsg('Profile saved')
     setTimeout(() => setProfileMsg(''), 3000)
     setSavingProfile(false)
   }
@@ -247,8 +247,8 @@ export default function AdminPage() {
   }
 
   const TABS = isAdmin
-    ? [{ id:'users', label:'Users' }, { id:'campaigns', label:'Campaigns' }, { id:'commission', label:'💰 Commission' }, { id:'statuses', label:'🟢 Statuses' }]
-    : [{ id:'users', label:'My Profile' }, { id:'commission', label:'💰 My Earnings' }]
+    ? [{ id:'users', label:'Users' }, { id:'campaigns', label:'Campaigns' }, { id:'commission', label:'Commission' }, { id:'statuses', label:'Statuses' }]
+    : [{ id:'users', label:'My Profile' }, { id:'commission', label:'My Earnings' }]
 
   return (
     <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden' }}>
@@ -310,14 +310,14 @@ export default function AdminPage() {
               </button>
 
               <div style={{ padding:'10px 14px', background:'var(--warning-bg)', border:'1px solid #C87800', borderRadius:'var(--radius)', fontSize:12, color:'var(--warning)' }}>
-                ⚠ Status changes affect all reps on next page load. Removing a status doesn't affect historical adherence data.
+                Status changes affect all reps on next page load. Removing a status doesn't affect historical adherence data.
               </div>
 
               <button className="btn primary" onClick={async () => {
                 setSavingStatuses(true)
                 await sb.from('app_settings').upsert({ key:'custom_statuses', value: JSON.stringify(customStatuses) }, { onConflict:'key' })
                 setSavingStatuses(false)
-                setMsg('✓ Statuses saved!')
+                setMsg('Statuses saved')
                 setTimeout(() => setMsg(''), 3000)
               }} disabled={savingStatuses} style={{ alignSelf:'flex-start' }}>
                 {savingStatuses ? 'Saving...' : 'Save statuses'}
@@ -402,7 +402,7 @@ export default function AdminPage() {
               <div className="card">
                 <div className="card-header"><div className="card-title">Commission History — This Week</div></div>
                 {commissionHistory.length === 0 ? (
-                  <div className="empty-state"><div className="empty-icon">💰</div><div>No commissions earned yet this week</div></div>
+                  <div className="empty-state"><div className="empty-icon">—</div><div>No commissions earned yet this week</div></div>
                 ) : (
                   <table className="data-table">
                     <thead><tr>{isAdmin && <th>Rep</th>}<th>Event</th><th>Contact</th><th style={{textAlign:'right'}}>Amount</th><th>When</th></tr></thead>
@@ -412,7 +412,7 @@ export default function AdminPage() {
                           {isAdmin && <td style={{padding:'10px 12px', fontWeight:500}}>{c.profiles?.name || c.rep_name}</td>}
                           <td style={{padding:'10px 12px'}}>
                             <span style={{ padding:'2px 8px', borderRadius:99, fontSize:11, fontWeight:600, background: c.event_type==='booking' ? '#DCFCE7' : '#EFF6FF', color: c.event_type==='booking' ? '#16A34A' : '#3b82f6' }}>
-                              {c.event_type === 'booking' ? '📋 Booking' : '⭐ Membership'}
+                              {c.event_type === 'booking' ? 'Booking' : 'Membership'}
                             </span>
                           </td>
                           <td style={{padding:'10px 12px', color:'var(--text-secondary)'}}>{c.contact_name}</td>
@@ -466,7 +466,7 @@ export default function AdminPage() {
                   {savingProfile ? 'Saving...' : 'Save profile'}
                 </button>
                 <button className="btn" onClick={() => { setPwModal('me'); setNewPw(''); setPwMsg('') }}>
-                  🔑 Change my password
+                  Change my password
                 </button>
               </div>
             </div>
@@ -555,8 +555,8 @@ export default function AdminPage() {
                             <td style={{ padding:'10px 12px' }}>
                               <div style={{ display:'flex', gap:6 }}>
                                 <button className="btn sm" onClick={() => openEdit(p)}>Edit</button>
-                                <button className="btn sm" onClick={() => { setPwModal({ profileId: p.id, name: p.name || p.email }); setNewPw(''); setPwMsg('') }}>🔑 Password</button>
-                                <button className="btn sm" onClick={() => { setCommAdjModal({ profileId: p.id, name: p.name || p.email }); setCommAdjAmount(''); setCommAdjNote('') }}>💰 Adjust</button>
+                                <button className="btn sm" onClick={() => { setPwModal({ profileId: p.id, name: p.name || p.email }); setNewPw(''); setPwMsg('') }}>Password</button>
+                                <button className="btn sm" onClick={() => { setCommAdjModal({ profileId: p.id, name: p.name || p.email }); setCommAdjAmount(''); setCommAdjNote('') }}>Adjust</button>
                                 <button className="btn sm danger" onClick={() => deleteUser(p.id)}>Remove</button>
                               </div>
                             </td>
@@ -622,7 +622,7 @@ export default function AdminPage() {
                   )}
                 </div>
                 <div style={{ background:'var(--warning-bg)', border:'1px solid #C87800', borderRadius:'var(--radius)', padding:'10px 14px', fontSize:12, color:'var(--warning)' }}>
-                  ⚠ Changes take effect immediately on next page load.
+                  Changes take effect on next page load.
                 </div>
               </div>
               <div className="modal-actions">
