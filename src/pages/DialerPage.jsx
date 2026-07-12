@@ -1029,7 +1029,7 @@ export default function DialerPage() {
         )
       })()}
 
-      {/* ── CALLBACK MODAL ── */}}
+      {/* ── CALLBACK MODAL ── */}
       {showCallbackModal && (
         <Modal title="Schedule Callback" onClose={() => setShowCallbackModal(false)} width={360}>
           <div className="form-field"><label className="form-label">Date</label><input className="form-input" type="date" value={cbDate} onChange={e => setCbDate(e.target.value)} /></div>
