@@ -248,8 +248,8 @@ export default function AdminPage() {
                       {allRepEarnings.map(([name, d]) => (
                         <tr key={name}>
                           <td style={{padding:'10px 12px', fontWeight:600}}>{name}</td>
-                          <td style={{padding:'10px 12px', textAlign:'center', fontWeight:700, color:'#16A34A'}}>${d.daily.toFixed(2)}</td>
-                          <td style={{padding:'10px 12px', textAlign:'center', fontWeight:700, color:'var(--accent)'}}>${d.weekly.toFixed(2)}</td>
+                          <td style={{padding:'10px 12px', textAlign:'center', fontWeight:700, color:'#16A34A'}}>{'$'}{d.daily.toFixed(2)}</td>
+                          <td style={{padding:'10px 12px', textAlign:'center', fontWeight:700, color:'var(--accent)'}}>{'$'}{d.weekly.toFixed(2)}</td>
                           <td style={{padding:'10px 12px', textAlign:'center'}}>{d.bookings}</td>
                           <td style={{padding:'10px 12px', textAlign:'center'}}>{d.memberships}</td>
                         </tr>
@@ -268,7 +268,7 @@ export default function AdminPage() {
                   ].map(({ label, value, accent, note }) => (
                     <div key={label} style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:16, padding:'24px', textAlign:'center' }}>
                       <div style={{ fontSize:12, fontWeight:600, textTransform:'uppercase', letterSpacing:.8, color:'var(--text-muted)', marginBottom:8 }}>{label}</div>
-                      <div style={{ fontSize:42, fontWeight:900, color:accent, letterSpacing:-1 }}>${value.toFixed(2)}</div>
+                      <div style={{ fontSize:42, fontWeight:900, color:accent, letterSpacing:-1 }}>{'$'}{value.toFixed(2)}</div>
                       <div style={{ fontSize:11, color:'var(--text-muted)', marginTop:6 }}>{note}</div>
                     </div>
                   ))}
@@ -293,7 +293,7 @@ export default function AdminPage() {
                             </span>
                           </td>
                           <td style={{padding:'10px 12px', color:'var(--text-secondary)'}}>{c.contact_name}</td>
-                          <td style={{padding:'10px 12px', textAlign:'right', fontWeight:700, color:'#16A34A'}}>${parseFloat(c.amount).toFixed(2)}</td>
+                          <td style={{padding:'10px 12px', textAlign:'right', fontWeight:700, color:'#16A34A'}}>{'$'}{parseFloat(c.amount).toFixed(2)}</td>
                           <td style={{padding:'10px 12px', color:'var(--text-muted)', fontSize:11}}>{new Date(c.earned_at).toLocaleString('en-US', { month:'short', day:'numeric', hour:'numeric', minute:'2-digit' })}</td>
                         </tr>
                       ))}
