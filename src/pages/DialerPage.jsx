@@ -694,22 +694,13 @@ export default function DialerPage() {
                             <button onClick={() => { setSelectedSlot(null); setShowAvailModal(true) }} style={{ fontSize:10, padding:'2px 8px', background:'#16A34A', color:'#fff', border:'none', borderRadius:4, cursor:'pointer' }}>Change</button>
                           </div>
                         )}
-                        {availability.length > 0 && !selectedSlot && (
-                          <button onClick={() => setShowAvailModal(true)}
-                            style={{ width:'100%', padding:'7px 0', border:'1px dashed #16A34A', borderRadius:'var(--radius)', background:'transparent', color:'#16A34A', fontSize:11, fontWeight:500, cursor:'pointer' }}>
-                            View {availability.length} available slots →
-                          </button>
-                        )}
-                        {availability.length > 0 && !selectedSlot && (
-                          <div style={{ fontSize:11, color:'#92400E', background:'#FFFBEB', border:'1px solid #FCD34D', borderRadius:'var(--radius)', padding:'7px 10px', textAlign:'center' }}>
-                            👆 Select an available slot above to book it
-                          </div>
-                        )}
-                        <button onClick={bookInST} disabled={!c.external_id || !selectedJobType || !selectedBU || booking || (availability.length > 0 && !selectedSlot)}
+
+
+                        <button onClick={bookInST} disabled={!c.external_id || !selectedJobType || !selectedBU || booking}
                           style={{ width:'100%', padding:'11px 0', border:'none', borderRadius:'var(--radius)',
-                            background: c.external_id && selectedJobType && selectedBU && (availability.length === 0 || selectedSlot) ? '#16A34A' : 'var(--border)',
+                            background: c.external_id && selectedJobType && selectedBU ? '#16A34A' : 'var(--border)',
                             color:'#fff', fontSize:13, fontWeight:700,
-                            cursor: c.external_id && selectedJobType && selectedBU && (availability.length === 0 || selectedSlot) ? 'pointer' : 'not-allowed',
+                            cursor: c.external_id && selectedJobType && selectedBU ? 'pointer' : 'not-allowed',
                             display:'flex', alignItems:'center', justifyContent:'center', gap:8 }}>
                           {booking ? <><div className="spinner" style={{width:14,height:14,borderWidth:2,borderTopColor:'#fff'}}></div> Booking...</> :
                             selectedSlot ? `✅ Book ${new Date(selectedSlot.start).toLocaleDateString('en-US', { weekday:'short', month:'short', day:'numeric' })} ${new Date(selectedSlot.start).toLocaleTimeString('en-US', { hour:'numeric', minute:'2-digit' })}` :
