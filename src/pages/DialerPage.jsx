@@ -593,7 +593,7 @@ export default function DialerPage() {
             <div style={{ position:'relative' }}>
               <button onClick={() => setShowEarningsDetail(p => !p)}
                 style={{ display:'flex', alignItems:'center', gap:6, padding:'4px 12px', background: dailyEarnings > 0 ? '#16A34A' : 'var(--surface-2)', border:`1px solid ${dailyEarnings > 0 ? '#16A34A' : 'var(--border)'}`, borderRadius:99, cursor:'pointer', color: dailyEarnings > 0 ? '#fff' : 'var(--text-muted)', fontSize:12, fontWeight:700 }}>
-                💰 ${dailyEarnings.toFixed(2)}
+                💰 {'$'}{dailyEarnings.toFixed(2)}
               </button>
               {showEarningsDetail && (
                 <div style={{ position:'fixed', right:16, top:52, background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius)', boxShadow:'0 4px 20px rgba(0,0,0,.15)', zIndex:300, minWidth:200, overflow:'hidden' }}
@@ -602,12 +602,12 @@ export default function DialerPage() {
                   <div style={{ padding:'12px 16px', display:'flex', flexDirection:'column', gap:10 }}>
                     <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
                       <span style={{ fontSize:12, color:'var(--text-secondary)' }}>Today</span>
-                      <span style={{ fontSize:18, fontWeight:800, color:'#16A34A' }}>${dailyEarnings.toFixed(2)}</span>
+                      <span style={{ fontSize:18, fontWeight:800, color:'#16A34A' }}>{'$'}{dailyEarnings.toFixed(2)}</span>
                     </div>
                     <div style={{ height:1, background:'var(--border)' }} />
                     <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
                       <span style={{ fontSize:12, color:'var(--text-secondary)' }}>This week</span>
-                      <span style={{ fontSize:18, fontWeight:800, color:'var(--accent)' }}>${weeklyEarnings.toFixed(2)}</span>
+                      <span style={{ fontSize:18, fontWeight:800, color:'var(--accent)' }}>{'$'}{weeklyEarnings.toFixed(2)}</span>
                     </div>
                     <div style={{ fontSize:10, color:'var(--text-muted)', textAlign:'center', paddingTop:4 }}>Resets daily · Paid weekly</div>
                   </div>
