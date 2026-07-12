@@ -136,6 +136,17 @@ export default function AdminPage() {
     } finally { setSavingPw(false) }
   }
 
+  const saveCommissionRates = async () => {
+    setSavingRates(true)
+    await Promise.all([
+      sb.from('commission_settings').upsert({ event_type: 'booking', amount: commissionRates.booking, updated_at: new Date().toISOString() }, { onConflict: 'event_type' }),
+      sb.from('commission_settings').upsert({ event_type: 'membership', amount: commissionRates.membership, updated_at: new Date().toISOString() }, { onConflict: 'event_type' }),
+    ])
+    setSavingRates(false)
+    setMsg('✓ Commission rates saved!')
+    setTimeout(() => setMsg(''), 3000)
+  }
+
   const addCommissionAdjustment = async () => {
     if (!commAdjAmount || isNaN(parseFloat(commAdjAmount))) { return }
     setSavingAdj(true)
