@@ -220,7 +220,7 @@ app.post('/api/st/book', async (req, res) => {
     const location = locData?.data?.[0]
     if (!location) throw new Error(`No location found for customer ${customerId}`)
 
-    // Step 2: Create the job (unscheduled = no start/end time = lands at bottom of dispatch board)
+    // Step 2: Create the job — scheduled if slot selected, unscheduled falls to bottom of dispatch board
     const jobBody = {
       customerId: parseInt(customerId),
       locationId: location.id,
@@ -229,6 +229,15 @@ app.post('/api/st/book', async (req, res) => {
       priority: 'Normal',
       summary: notes || `Outbound booking via Andi — ${repName || 'CSR'}`,
       tagTypeIds: [],
+    }
+    // If a specific slot was selected, schedule it
+    if (start && end) {
+      jobBody.appointments = [{
+        start,
+        end,
+        arrivalWindowStart: start,
+        arrivalWindowEnd: end,
+      }]
     }
 
     const jobData = await stPost(`/jpm/v2/tenant/${ST_TENANT_ID}/jobs`, jobBody)
