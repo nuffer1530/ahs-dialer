@@ -25,11 +25,6 @@ export default function AdminPage() {
   const [editProfile, setEditProfile] = useState(null)
   const [csrCampaigns, setCsrCampaigns] = useState([])
   const [saving, setSaving] = useState(false)
-  const [commissionRates, setCommissionRates] = useState({ booking: 2.00, membership: 2.00 })
-  const [commissionHistory, setCommissionHistory] = useState([])
-  const [allRepEarnings, setAllRepEarnings] = useState([])
-  const [commLoading, setCommLoading] = useState(false)
-  const [savingRates, setSavingRates] = useState(false)
   // Password change
   const [pwModal, setPwModal] = useState(null) // { profileId, name } or 'me'
   const [newPw, setNewPw] = useState('')
@@ -117,16 +112,6 @@ export default function AdminPage() {
     })
   }, [settingsTab])
 
-  const saveCommissionRates = async () => {
-    setSavingRates(true)
-    await Promise.all([
-      sb.from('commission_settings').upsert({ event_type: 'booking', amount: commissionRates.booking, updated_at: new Date().toISOString() }, { onConflict: 'event_type' }),
-      sb.from('commission_settings').upsert({ event_type: 'membership', amount: commissionRates.membership, updated_at: new Date().toISOString() }, { onConflict: 'event_type' }),
-    ])
-    setSavingRates(false)
-    setMsg('✓ Commission rates saved!')
-    setTimeout(() => setMsg(''), 3000)
-  }
 
   const changePassword = async () => {
     if (!newPw || newPw.length < 6) { setPwMsg('Password must be at least 6 characters'); return }
