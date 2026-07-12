@@ -152,6 +152,7 @@ app.get('/api/st/availability', async (req, res) => {
     }
 
     const data = await stPost(`/dispatch/v2/tenant/${ST_TENANT_ID}/capacity`, body)
+    console.log('ST capacity response:', JSON.stringify(data).slice(0, 500))
     res.json(data)
   } catch (err) {
     console.error('ST availability error:', err.message)
