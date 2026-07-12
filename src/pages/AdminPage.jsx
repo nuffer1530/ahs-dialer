@@ -30,6 +30,31 @@ export default function AdminPage() {
   const [allRepEarnings, setAllRepEarnings] = useState([])
   const [commLoading, setCommLoading] = useState(false)
   const [savingRates, setSavingRates] = useState(false)
+  // Password change
+  const [pwModal, setPwModal] = useState(null) // { profileId, name } or 'me'
+  const [newPw, setNewPw] = useState('')
+  const [pwMsg, setPwMsg] = useState('')
+  const [savingPw, setSavingPw] = useState(false)
+  // Manual commission adjustment
+  const [commAdjModal, setCommAdjModal] = useState(null) // { profileId, name }
+  const [commAdjAmount, setCommAdjAmount] = useState('')
+  const [commAdjNote, setCommAdjNote] = useState('')
+  const [savingAdj, setSavingAdj] = useState(false)
+  // Status customization
+  const [customStatuses, setCustomStatuses] = useState([
+    { id:'Available', label:'Available', color:'#22c55e', locked:true },
+    { id:'On Call', label:'On Call', color:'#3b82f6', locked:true },
+    { id:'Wrap Up', label:'Wrap Up', color:'#f59e0b', locked:true },
+    { id:'Break', label:'Break', color:'#a855f7', locked:false },
+    { id:'Lunch', label:'Lunch', color:'#f97316', locked:false },
+    { id:'Offline', label:'Offline', color:'#6b7280', locked:true },
+  ])
+  const [savingStatuses, setSavingStatuses] = useState(false)
+  const [commissionRates, setCommissionRates] = useState({ booking: 2.00, membership: 2.00 })
+  const [commissionHistory, setCommissionHistory] = useState([])
+  const [allRepEarnings, setAllRepEarnings] = useState([])
+  const [commLoading, setCommLoading] = useState(false)
+  const [savingRates, setSavingRates] = useState(false)
   const [msg, setMsg] = useState('')
   const [myName, setMyName] = useState(profile?.name || '')
   const [myAvatar, setMyAvatar] = useState(profile?.avatar || null)
@@ -101,6 +126,52 @@ export default function AdminPage() {
     setSavingRates(false)
     setMsg('✓ Commission rates saved!')
     setTimeout(() => setMsg(''), 3000)
+  }
+
+  const changePassword = async () => {
+    if (!newPw || newPw.length < 6) { setPwMsg('Password must be at least 6 characters'); return }
+    setSavingPw(true); setPwMsg('')
+    try {
+      if (pwModal === 'me' || pwModal?.profileId === profile?.id) {
+        // Change own password via Supabase auth
+        const { error } = await sb.auth.updateUser({ password: newPw })
+        if (error) throw error
+      } else {
+        // Admin changing someone else's password via admin API
+        const { error } = await sb.functions.invoke('admin-change-password', {
+          body: { userId: pwModal.profileId, newPassword: newPw }
+        })
+        if (error) throw error
+      }
+      setPwMsg('✓ Password changed successfully!')
+      setNewPw('')
+      setTimeout(() => { setPwModal(null); setPwMsg('') }, 2000)
+    } catch (e) {
+      setPwMsg('Error: ' + e.message)
+    } finally { setSavingPw(false) }
+  }
+
+  const addCommissionAdjustment = async () => {
+    if (!commAdjAmount || isNaN(parseFloat(commAdjAmount))) { return }
+    setSavingAdj(true)
+    try {
+      await sb.from('commissions').insert({
+        profile_id: commAdjModal.profileId,
+        event_type: 'adjustment',
+        amount: parseFloat(commAdjAmount),
+        rep_name: commAdjModal.name,
+        contact_name: 'Manual adjustment',
+        also_membership: false,
+        membership_amount: 0,
+        notes: commAdjNote || 'Admin manual adjustment',
+        earned_at: new Date().toISOString(),
+      })
+      setCommAdjModal(null); setCommAdjAmount(''); setCommAdjNote('')
+      setMsg('✓ Commission adjustment added!')
+      setTimeout(() => setMsg(''), 3000)
+    } catch (e) {
+      setMsg('Error: ' + e.message)
+    } finally { setSavingAdj(false) }
   }
 
   const saveMyProfile = async () => {
@@ -180,7 +251,7 @@ export default function AdminPage() {
   }
 
   const TABS = isAdmin
-    ? [{ id:'users', label:'Users' }, { id:'campaigns', label:'Campaigns' }, { id:'commission', label:'💰 Commission' }]
+    ? [{ id:'users', label:'Users' }, { id:'campaigns', label:'Campaigns' }, { id:'commission', label:'💰 Commission' }, { id:'statuses', label:'🟢 Statuses' }]
     : [{ id:'users', label:'My Profile' }, { id:'commission', label:'💰 My Earnings' }]
 
   return (
@@ -203,6 +274,62 @@ export default function AdminPage() {
 
       {/* Campaigns tab — full CampaignsPage */}
       {settingsTab === 'campaigns' && <CampaignsPage />}
+
+
+      {/* Statuses tab — admin only */}
+      {settingsTab === 'statuses' && isAdmin && (
+        <div style={{ flex:1, overflowY:'auto', padding:24, display:'flex', flexDirection:'column', gap:20 }}>
+          <div className="card">
+            <div className="card-header">
+              <div className="card-title">Status Customization</div>
+              <span style={{ fontSize:11, color:'var(--text-muted)' }}>Customize the statuses reps can set. Locked statuses cannot be removed.</span>
+            </div>
+            <div className="card-body" style={{ display:'flex', flexDirection:'column', gap:12 }}>
+              {customStatuses.map((status, idx) => (
+                <div key={status.id} style={{ display:'flex', alignItems:'center', gap:12, padding:'10px 14px', background:'var(--surface-2)', borderRadius:'var(--radius)', border:'1px solid var(--border)' }}>
+                  {/* Color picker */}
+                  <div style={{ position:'relative', flexShrink:0 }}>
+                    <input type="color" value={status.color}
+                      onChange={e => setCustomStatuses(prev => prev.map((s,i) => i===idx ? {...s, color:e.target.value} : s))}
+                      style={{ width:32, height:32, borderRadius:'50%', border:'2px solid var(--border)', cursor:'pointer', padding:2 }} />
+                  </div>
+                  {/* Color dot preview */}
+                  <div style={{ width:12, height:12, borderRadius:'50%', background:status.color, flexShrink:0 }} />
+                  {/* Label */}
+                  <input value={status.label} disabled={status.locked}
+                    onChange={e => setCustomStatuses(prev => prev.map((s,i) => i===idx ? {...s, label:e.target.value} : s))}
+                    style={{ flex:1, border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'6px 10px', fontSize:13, background: status.locked ? 'var(--surface)' : 'var(--surface)', color:'var(--text-primary)', fontFamily:'inherit' }} />
+                  {status.locked
+                    ? <span style={{ fontSize:10, color:'var(--text-muted)', padding:'2px 8px', background:'var(--surface)', borderRadius:99, border:'1px solid var(--border)' }}>Locked</span>
+                    : <button onClick={() => setCustomStatuses(prev => prev.filter((_,i) => i !== idx))}
+                        style={{ padding:'4px 10px', background:'var(--danger-bg)', border:'1px solid var(--danger)', borderRadius:'var(--radius)', color:'var(--danger)', fontSize:11, cursor:'pointer', fontWeight:500 }}>Remove</button>
+                  }
+                </div>
+              ))}
+
+              {/* Add new status */}
+              <button onClick={() => setCustomStatuses(prev => [...prev, { id:`custom_${Date.now()}`, label:'New Status', color:'#6b7280', locked:false }])}
+                style={{ padding:'8px 16px', border:'1px dashed var(--border)', borderRadius:'var(--radius)', background:'transparent', color:'var(--text-muted)', fontSize:12, cursor:'pointer', display:'flex', alignItems:'center', gap:6 }}>
+                + Add status
+              </button>
+
+              <div style={{ padding:'10px 14px', background:'var(--warning-bg)', border:'1px solid #C87800', borderRadius:'var(--radius)', fontSize:12, color:'var(--warning)' }}>
+                ⚠ Status changes affect all reps on next page load. Removing a status doesn't affect historical adherence data.
+              </div>
+
+              <button className="btn primary" onClick={async () => {
+                setSavingStatuses(true)
+                await sb.from('app_settings').upsert({ key:'custom_statuses', value: JSON.stringify(customStatuses) }, { onConflict:'key' })
+                setSavingStatuses(false)
+                setMsg('✓ Statuses saved!')
+                setTimeout(() => setMsg(''), 3000)
+              }} disabled={savingStatuses} style={{ alignSelf:'flex-start' }}>
+                {savingStatuses ? 'Saving...' : 'Save statuses'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Commission tab */}
       {settingsTab === 'commission' && (
@@ -338,9 +465,14 @@ export default function AdminPage() {
                 <label className="form-label">Display name</label>
                 <input className="form-input" value={myName} onChange={e => setMyName(e.target.value)} placeholder="Your name" />
               </div>
-              <button className="btn primary" onClick={saveMyProfile} disabled={savingProfile} style={{ alignSelf:'flex-start' }}>
-                {savingProfile ? 'Saving...' : 'Save profile'}
-              </button>
+              <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
+                <button className="btn primary" onClick={saveMyProfile} disabled={savingProfile}>
+                  {savingProfile ? 'Saving...' : 'Save profile'}
+                </button>
+                <button className="btn" onClick={() => { setPwModal('me'); setNewPw(''); setPwMsg('') }}>
+                  🔑 Change my password
+                </button>
+              </div>
             </div>
           </div>
 
@@ -427,6 +559,8 @@ export default function AdminPage() {
                             <td style={{ padding:'10px 12px' }}>
                               <div style={{ display:'flex', gap:6 }}>
                                 <button className="btn sm" onClick={() => openEdit(p)}>Edit</button>
+                                <button className="btn sm" onClick={() => { setPwModal({ profileId: p.id, name: p.name || p.email }); setNewPw(''); setPwMsg('') }}>🔑 Password</button>
+                                <button className="btn sm" onClick={() => { setCommAdjModal({ profileId: p.id, name: p.name || p.email }); setCommAdjAmount(''); setCommAdjNote('') }}>💰 Adjust</button>
                                 <button className="btn sm danger" onClick={() => deleteUser(p.id)}>Remove</button>
                               </div>
                             </td>
@@ -502,6 +636,59 @@ export default function AdminPage() {
             </Modal>
           )}
         </div>
+      )}
+    </div>
+
+      {/* ── PASSWORD CHANGE MODAL ── */}
+      {pwModal && (
+        <Modal title={pwModal === 'me' ? 'Change My Password' : `Change Password — ${pwModal.name}`} onClose={() => { setPwModal(null); setNewPw(''); setPwMsg('') }} width={380}>
+          <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
+            {!isAdmin || pwModal === 'me' ? (
+              <div style={{ fontSize:13, color:'var(--text-secondary)' }}>Enter a new password for your account.</div>
+            ) : (
+              <div style={{ fontSize:13, color:'var(--text-secondary)' }}>Set a new password for <strong>{pwModal.name}</strong>. They will need to use this to log in next time.</div>
+            )}
+            <div className="form-field">
+              <label className="form-label">New Password</label>
+              <input className="form-input" type="password" value={newPw} onChange={e => setNewPw(e.target.value)}
+                placeholder="Min 6 characters" onKeyDown={e => e.key === 'Enter' && changePassword()} />
+            </div>
+            {pwMsg && <div style={{ fontSize:12, color: pwMsg.startsWith('✓') ? 'var(--success)' : 'var(--danger)', padding:'8px 12px', background: pwMsg.startsWith('✓') ? 'var(--success-bg)' : 'var(--danger-bg)', borderRadius:'var(--radius)' }}>{pwMsg}</div>}
+          </div>
+          <div className="modal-actions">
+            <button className="btn" onClick={() => { setPwModal(null); setNewPw(''); setPwMsg('') }}>Cancel</button>
+            <button className="btn primary" onClick={changePassword} disabled={savingPw || newPw.length < 6}>
+              {savingPw ? 'Saving...' : 'Change password'}
+            </button>
+          </div>
+        </Modal>
+      )}
+
+      {/* ── COMMISSION ADJUSTMENT MODAL ── */}
+      {commAdjModal && (
+        <Modal title={`Adjust Commission — ${commAdjModal.name}`} onClose={() => { setCommAdjModal(null); setCommAdjAmount(''); setCommAdjNote('') }} width={380}>
+          <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
+            <div style={{ fontSize:13, color:'var(--text-secondary)' }}>
+              Add or subtract from <strong>{commAdjModal.name}</strong>'s commission. Use negative numbers to deduct (e.g. -2.00).
+            </div>
+            <div className="form-field">
+              <label className="form-label">Amount ($)</label>
+              <input className="form-input" type="number" step="0.50" value={commAdjAmount}
+                onChange={e => setCommAdjAmount(e.target.value)} placeholder="e.g. 5.00 or -2.00" />
+            </div>
+            <div className="form-field">
+              <label className="form-label">Note (optional)</label>
+              <input className="form-input" value={commAdjNote} onChange={e => setCommAdjNote(e.target.value)}
+                placeholder="e.g. Bonus for membership upsell" />
+            </div>
+          </div>
+          <div className="modal-actions">
+            <button className="btn" onClick={() => { setCommAdjModal(null); setCommAdjAmount(''); setCommAdjNote('') }}>Cancel</button>
+            <button className="btn primary" onClick={addCommissionAdjustment} disabled={savingAdj || !commAdjAmount}>
+              {savingAdj ? 'Saving...' : 'Add adjustment'}
+            </button>
+          </div>
+        </Modal>
       )}
     </div>
   )
