@@ -98,6 +98,16 @@ export default function AdminPage() {
       })
   }, [])
 
+  // Load saved scorecard weights
+  useEffect(() => {
+    sb.from('app_settings').select('value').eq('key', 'scorecard_weights').maybeSingle()
+      .then(({ data }) => {
+        if (data?.value) {
+          try { setScWeights(JSON.parse(data.value)) } catch (e) {}
+        }
+      })
+  }, [])
+
   // Load commission data
   useEffect(() => {
     if (settingsTab !== 'commission') return
@@ -343,15 +353,22 @@ export default function AdminPage() {
     if (!scSelectedProfile) return
     setScSaving(true)
     const monthStart = `${scMonth.year}-${String(scMonth.month+1).padStart(2,'0')}-01`
-    await sb.from('scorecard_actuals').upsert({
-      profile_id: scSelectedProfile,
-      month: monthStart,
-      booking_pct: scActuals.booking_pct !== '' ? parseFloat(scActuals.booking_pct) : null,
-      booked_calls: scActuals.booked_calls !== '' ? parseInt(scActuals.booked_calls) : null,
-      memberships: scActuals.memberships !== '' ? parseInt(scActuals.memberships) : null,
-      updated_by: profile.id,
-      updated_at: new Date().toISOString(),
-    }, { onConflict: 'profile_id,month' })
+    await Promise.all([
+      sb.from('scorecard_actuals').upsert({
+        profile_id: scSelectedProfile,
+        month: monthStart,
+        booking_pct: scActuals.booking_pct !== '' ? parseFloat(scActuals.booking_pct) : null,
+        booked_calls: scActuals.booked_calls !== '' ? parseInt(scActuals.booked_calls) : null,
+        memberships: scActuals.memberships !== '' ? parseInt(scActuals.memberships) : null,
+        weights: scWeights,
+        updated_by: profile.id,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'profile_id,month' }),
+      sb.from('app_settings').upsert(
+        { key: 'scorecard_weights', value: JSON.stringify(scWeights), updated_at: new Date().toISOString() },
+        { onConflict: 'key' }
+      ),
+    ])
     setScSaving(false)
     setScSaved(true)
     setTimeout(() => setScSaved(false), 2000)
