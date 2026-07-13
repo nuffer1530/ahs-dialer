@@ -55,6 +55,7 @@ export default function AdminPage() {
   const [scMonth, setScMonth] = useState({ year: _now.getFullYear(), month: _now.getMonth() })
   const [scActuals, setScActuals] = useState({ booking_pct: '', booked_calls: '', call_quality: '', memberships: '' })
   const [scWeights, setScWeights] = useState({ attendance: 25, booking_pct: 20, booked_calls: 20, call_quality: 15, memberships: 20 })
+  const [scNotes, setScNotes] = useState('')
   const [scAttendancePoints, setScAttendancePoints] = useState(null)
   const [scLoading, setScLoading] = useState(false)
   const [scSaving, setScSaving] = useState(false)
@@ -347,6 +348,7 @@ export default function AdminPage() {
         call_quality: saved?.call_quality ?? '',
         memberships: saved?.memberships ?? '',
       })
+      setScNotes(saved?.notes ?? '')
       setScLoading(false)
     })
   }, [settingsTab, scSelectedProfile, scMonth])
@@ -363,6 +365,7 @@ export default function AdminPage() {
         booked_calls: scActuals.booked_calls !== '' ? parseInt(scActuals.booked_calls) : null,
         call_quality: scActuals.call_quality !== '' ? parseFloat(scActuals.call_quality) : null,
         memberships: scActuals.memberships !== '' ? parseInt(scActuals.memberships) : null,
+        notes: scNotes,
         weights: scWeights,
         updated_by: profile.id,
         updated_at: new Date().toISOString(),
@@ -887,7 +890,7 @@ export default function AdminPage() {
                   const ratingLabels = { 4:'Exceeds', 3:'Meets', 2:'Needs Improvement', 1:'Poor Performance' }
                   const scoreColor = overallScore ? (parseFloat(overallScore) >= 3.5 ? '#2E7D52' : parseFloat(overallScore) >= 2.5 ? '#8A5A00' : '#B5341A') : '#1C1B19'
                   const notesEl = document.querySelector('#scorecard-print textarea')
-                  const notes = notesEl?.value || ''
+                  const notes = scNotes || notesEl?.value || ''
 
                   const rows = SC_KPIS.map(kpi => {
                     const w = parseFloat(scWeights[kpi.id]) || 0
@@ -1146,6 +1149,8 @@ export default function AdminPage() {
                 <div style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius-lg)', padding:16 }}>
                   <div style={{ fontSize:11, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color:'var(--text-muted)', marginBottom:8 }}>Manager Notes</div>
                   <textarea
+                    value={scNotes}
+                    onChange={e => setScNotes(e.target.value)}
                     placeholder="Add notes for this review period..."
                     rows={4}
                     style={{ width:'100%', padding:'10px 12px', fontSize:13, border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface-2)', color:'var(--text-primary)', resize:'vertical', fontFamily:'inherit' }}
