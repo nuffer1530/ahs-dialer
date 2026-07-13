@@ -443,7 +443,7 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
                 onMouseLeave={() => setTooltip(null)}>
 
                 {/* Agent label */}
-                <div style={{ width:LABEL_WIDTH, flexShrink:0, display:'flex', alignItems:'center', gap:10, padding:'10px 16px', borderRight:'1px solid var(--border)', background:'var(--surface-2)', position:'sticky', left:0, zIndex:5 }}>
+                <div style={{ width:LABEL_WIDTH, flexShrink:0, display:'flex', alignItems:'center', gap:10, padding:'10px 16px', borderRight:'1px solid var(--border)', background:'var(--surface-2)', position:'sticky', left:0, zIndex:15 }}>
                   <div style={{ width:30, height:30, borderRadius:'50%', background:'var(--accent-bg)', color:'var(--accent)', display:'flex', alignItems:'center', justifyContent:'center', fontSize: p.avatar ? 18 : 11, fontWeight:600, flexShrink:0 }}>
                     {p.avatar || (p.name||p.email||'?')[0].toUpperCase()}
                   </div>
@@ -464,7 +464,7 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
                 </div>
 
                 {/* Track area */}
-                <div style={{ flex:1, position:'relative', overflow:'visible', minWidth:0 }}>
+                <div style={{ flex:1, position:'relative', overflow:'hidden', minWidth: TOTAL_INTERVALS * CELL_WIDTH + 120 }}>
                   {/* Grid lines */}
                   {Array.from({ length: END_HOUR - START_HOUR + 1 }, (_, i) => i).map(i => (
                     <div key={i} style={{ position:'absolute', left:i*4*CELL_WIDTH, top:0, bottom:0, width:'1px', background: i%4===0 ? 'var(--border)' : 'transparent', pointerEvents:'none' }} />
@@ -535,7 +535,7 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
                 </div>
 
                 {/* Stats column */}
-                <div style={{ width:80, flexShrink:0, borderLeft:'1px solid var(--border)', background:'var(--surface-2)', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:2, padding:'6px 8px', position:'sticky', right:0, zIndex:5 }}>
+                <div style={{ width:80, flexShrink:0, borderLeft:'1px solid var(--border)', background:'var(--surface-2)', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:2, padding:'6px 8px', position:'sticky', right:0, zIndex:15 }}>
                   {sched?.shift_start && (
                     <>
                       <div style={{ fontSize:10, color:'var(--text-muted)' }}>shift</div>
@@ -557,7 +557,7 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
 
           {/* Coverage bar */}
           <div style={{ display:'flex', borderTop:'2px solid var(--border)', background:'var(--surface-2)' }}>
-            <div style={{ width:LABEL_WIDTH, flexShrink:0, padding:'8px 16px', borderRight:'1px solid var(--border)', fontSize:10, fontWeight:600, textTransform:'uppercase', letterSpacing:.5, color:'var(--text-muted)', position:'sticky', left:0, zIndex:5, background:'var(--surface-2)' }}>Coverage</div>
+            <div style={{ width:LABEL_WIDTH, flexShrink:0, padding:'8px 16px', borderRight:'1px solid var(--border)', fontSize:10, fontWeight:600, textTransform:'uppercase', letterSpacing:.5, color:'var(--text-muted)', position:'sticky', left:0, zIndex:15, background:'var(--surface-2)' }}>Coverage</div>
             <div style={{ flex:1, position:'relative', height:32 }}>
               {Array.from({ length: TOTAL_INTERVALS }, (_, i) => i).map(i => {
                 const count = getCoverage(i)
@@ -570,7 +570,7 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
                 )
               })}
             </div>
-            <div style={{ width:80, flexShrink:0, borderLeft:'1px solid var(--border)' }} />
+            <div style={{ width:80, flexShrink:0, borderLeft:'1px solid var(--border)', position:'sticky', right:0, background:'var(--surface-2)', zIndex:15 }} />
           </div>
         </div>
       </div>
