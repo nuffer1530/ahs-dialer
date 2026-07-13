@@ -81,18 +81,19 @@ const SCORECARD_KPIS = [
   },
 ]
 
-function getRating(kpi, value) {
+function getRating(kpi, value, thresholds) {
   if (value == null) return null
-  const { thresholds, lowerIsBetter } = kpi
+  const thr = thresholds || kpi.thresholds
+  const { lowerIsBetter } = kpi
   if (lowerIsBetter) {
-    if (value <= thresholds.exceeds)    return 4
-    if (value <= thresholds.meets)      return 3
-    if (value <= thresholds.improvement) return 2
+    if (value <= thr.exceeds)    return 4
+    if (value <= thr.meets)      return 3
+    if (value <= thr.improvement) return 2
     return 1
   } else {
-    if (value >= thresholds.exceeds)    return 4
-    if (value >= thresholds.meets)      return 3
-    if (value >= thresholds.improvement) return 2
+    if (value >= thr.exceeds)    return 4
+    if (value >= thr.meets)      return 3
+    if (value >= thr.improvement) return 2
     return 1
   }
 }
@@ -119,6 +120,13 @@ export default function MyPage() {
   const [scorecardMonth, setScorecardMonth] = useState({ year: now.getFullYear(), month: now.getMonth() })
   const [scWeights, setScWeights] = useState({ attendance: 25, booking_pct: 20, booked_calls: 20, call_quality: 15, memberships: 20 })
   const [scActuals, setScActuals] = useState({ booking_pct: null, booked_calls: null, call_quality: null, memberships: null })
+  const [scThresholds, setScThresholds] = useState({
+    attendance:   { exceeds: 0,   meets: 1,   improvement: 2  },
+    booking_pct:  { exceeds: 90,  meets: 80,  improvement: 75 },
+    booked_calls: { exceeds: 140, meets: 110, improvement: 85 },
+    call_quality: { exceeds: 95,  meets: 90,  improvement: 85 },
+    memberships:  { exceeds: 5,   meets: 3,   improvement: 2  },
+  })
   const [commissions, setCommissions] = useState([])
   const [commWeekBase, setCommWeekBase] = useState(getTodayMonday)
   const [commLoading, setCommLoading] = useState(false)
@@ -135,18 +143,20 @@ export default function MyPage() {
       const to = new Date(); to.setDate(to.getDate() + 30)
       const fromStr = toYMD(from), toStr = toYMD(to)
 
-      const [{ data: profs }, { data: scheds }, { data: events }, { data: pts }, { data: wts }] = await Promise.all([
+      const [{ data: profs }, { data: scheds }, { data: events }, { data: pts }, { data: wts }, { data: thr }] = await Promise.all([
         sb.from('profiles').select('id, name, email, avatar, role').order('name'),
         sb.from('schedules').select('*').gte('date', fromStr).lte('date', toStr),
         sb.from('status_events').select('*').eq('profile_id', profile.id).gte('started_at', fromStr + 'T00:00:00').order('started_at', { ascending: false }),
         sb.from('attendance_points').select('*').eq('profile_id', profile.id).gte('date', fromStr),
         sb.from('app_settings').select('value').eq('key', 'scorecard_weights').maybeSingle(),
+        sb.from('app_settings').select('value').eq('key', 'scorecard_thresholds').maybeSingle(),
       ])
       setProfiles(profs || [])
       setSchedules(scheds || [])
       setStatusEvents(events || [])
       setAttendancePoints(pts || [])
       if (wts?.value) { try { setScWeights(JSON.parse(wts.value)) } catch (e) {} }
+      if (thr?.value) { try { setScThresholds(JSON.parse(thr.value)) } catch (e) {} }
       setLoading(false)
     }
     load()
@@ -631,7 +641,7 @@ export default function MyPage() {
                     const actual = kpi.id === 'attendance'
                       ? scTotalPoints
                       : (scActuals[kpi.id] != null ? parseFloat(scActuals[kpi.id]) : null)
-                    const rating = getRating(kpi, actual)
+                    const rating = getRating(kpi, actual, scThresholds[kpi.id])
                     const ratingStyle = rating ? RATING_COLORS[rating] : null
                     const { thresholds, lowerIsBetter, unit } = kpi
 
