@@ -108,7 +108,9 @@ export default function MyPage() {
   const [loading, setLoading] = useState(true)
   const [hoveredTab, setHoveredTab] = useState(null)
   const now = new Date()
-  const [scorecardMonth, setScorecardMonth] = useState({ year: now.getFullYear(), month: now.getMonth() }) // 0-indexed month
+  const [scorecardMonth, setScorecardMonth] = useState({ year: now.getFullYear(), month: now.getMonth() })
+  const [scWeights, setScWeights] = useState({ attendance: 30, booking_pct: 25, booked_calls: 25, memberships: 20 })
+  const [scActuals, setScActuals] = useState({ booking_pct: null, booked_calls: null, memberships: null })
 
   const today = toYMD(new Date())
   const weekDates = getWeekDates(weekBase)
@@ -122,20 +124,37 @@ export default function MyPage() {
       const to = new Date(); to.setDate(to.getDate() + 30)
       const fromStr = toYMD(from), toStr = toYMD(to)
 
-      const [{ data: profs }, { data: scheds }, { data: events }, { data: pts }] = await Promise.all([
+      const [{ data: profs }, { data: scheds }, { data: events }, { data: pts }, { data: wts }] = await Promise.all([
         sb.from('profiles').select('id, name, email, avatar, role').order('name'),
         sb.from('schedules').select('*').gte('date', fromStr).lte('date', toStr),
         sb.from('status_events').select('*').eq('profile_id', profile.id).gte('started_at', fromStr + 'T00:00:00').order('started_at', { ascending: false }),
         sb.from('attendance_points').select('*').eq('profile_id', profile.id).gte('date', fromStr),
+        sb.from('app_settings').select('value').eq('key', 'scorecard_weights').maybeSingle(),
       ])
       setProfiles(profs || [])
       setSchedules(scheds || [])
       setStatusEvents(events || [])
       setAttendancePoints(pts || [])
+      if (wts?.value) { try { setScWeights(JSON.parse(wts.value)) } catch (e) {} }
       setLoading(false)
     }
     load()
   }, [profile?.id])
+
+  // Reload scorecard actuals when month changes
+  useEffect(() => {
+    if (!profile?.id) return
+    const monthStart = `${scorecardMonth.year}-${String(scorecardMonth.month+1).padStart(2,'0')}-01`
+    sb.from('scorecard_actuals').select('*').eq('profile_id', profile.id).eq('month', monthStart).maybeSingle()
+      .then(({ data }) => {
+        setScActuals({
+          booking_pct: data?.booking_pct ?? null,
+          booked_calls: data?.booked_calls ?? null,
+          memberships: data?.memberships ?? null,
+        })
+        if (data?.weights) { try { setScWeights(data.weights) } catch (e) {} }
+      })
+  }, [profile?.id, scorecardMonth])
 
   const getSched = (profileId, date) => schedules.find(s => s.profile_id === profileId && s.date === date)
 
@@ -425,20 +444,22 @@ export default function MyPage() {
             {tab === 'scorecard' && (
               <div>
                 <div style={{ fontSize:11, color:'var(--text-muted)', marginBottom:20 }}>
-                  {scorecardLabel} . scores and actuals will be pulled in automatically once connected
+                  {scorecardLabel} . scores entered by your manager
                 </div>
 
                 <div style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius-lg)', overflow:'hidden' }}>
                   {/* Header row */}
-                  <div style={{ display:'grid', gridTemplateColumns:'1fr 80px 1fr 1fr 1fr 1fr', background:'var(--surface-2)', borderBottom:'2px solid var(--border)' }}>
-                    {['KPI','Weight','Exceeds (4)','Meets (3)','Needs Improvement (2)','Poor Performance (1)'].map((h,i) => (
+                  <div style={{ display:'grid', gridTemplateColumns:'1fr 80px 110px 1fr 1fr 1fr 1fr', background:'var(--surface-2)', borderBottom:'2px solid var(--border)' }}>
+                    {['KPI','Weight','Actual','Exceeds (4)','Meets (3)','Needs Improvement (2)','Poor Performance (1)'].map((h,i) => (
                       <div key={h} style={{ padding:'10px 14px', fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color:'var(--text-muted)', textAlign: i === 0 ? 'left' : 'center' }}>{h}</div>
                     ))}
                   </div>
 
                   {SCORECARD_KPIS.map((kpi, idx) => {
-                    // In future: wire actual values from data
-                    const actual = kpi.id === 'attendance' ? scTotalPoints : null
+                    const w = parseFloat(scWeights[kpi.id]) || kpi.weight * 100
+                    const actual = kpi.id === 'attendance'
+                      ? scTotalPoints
+                      : (scActuals[kpi.id] != null ? parseFloat(scActuals[kpi.id]) : null)
                     const rating = getRating(kpi, actual)
                     const ratingStyle = rating ? RATING_COLORS[rating] : null
                     const { thresholds, lowerIsBetter, unit } = kpi
@@ -450,27 +471,37 @@ export default function MyPage() {
                     const col1 = lowerIsBetter ? `${fmt(thresholds.improvement+1)}+` : `${fmt(thresholds.improvement-1)} or less`
 
                     return (
-                      <div key={kpi.id} style={{ display:'grid', gridTemplateColumns:'1fr 80px 1fr 1fr 1fr 1fr', borderBottom: idx < SCORECARD_KPIS.length-1 ? '1px solid var(--border)' : 'none', background: idx % 2 === 0 ? 'var(--surface)' : 'var(--surface-2)' }}>
-                        <div style={{ padding:'14px 14px', display:'flex', flexDirection:'column', gap:4 }}>
+                      <div key={kpi.id} style={{ display:'grid', gridTemplateColumns:'1fr 80px 110px 1fr 1fr 1fr 1fr', borderBottom: idx < SCORECARD_KPIS.length-1 ? '1px solid var(--border)' : 'none', background: idx % 2 === 0 ? 'var(--surface)' : 'var(--surface-2)' }}>
+                        <div style={{ padding:'14px', display:'flex', flexDirection:'column', gap:4 }}>
                           <div style={{ fontSize:13, fontWeight:600, color:'var(--text-primary)' }}>{kpi.label}</div>
-                          {actual != null && ratingStyle && (
+                          {rating && ratingStyle && (
                             <div style={{ fontSize:10, fontWeight:700, padding:'2px 6px', borderRadius:4, background: ratingStyle.bg, color: ratingStyle.text, display:'inline-block', width:'fit-content' }}>
-                              {RATING_LABELS[rating]} . {actual}{unit}
+                              {RATING_LABELS[rating]}
                             </div>
                           )}
-                          {actual == null && (
-                            <div style={{ fontSize:10, color:'var(--text-muted)' }}>Not yet connected</div>
+                          {actual == null && kpi.id !== 'attendance' && (
+                            <div style={{ fontSize:10, color:'var(--text-muted)' }}>Pending</div>
                           )}
                         </div>
-                        <div style={{ padding:'14px 8px', textAlign:'center', fontSize:12, color:'var(--text-secondary)', fontWeight:500 }}>
-                          {Math.round(kpi.weight * 100)}%
+                        <div style={{ padding:'14px 8px', textAlign:'center', fontSize:12, color:'var(--text-secondary)', fontWeight:500, display:'flex', alignItems:'center', justifyContent:'center' }}>
+                          {w}%
+                        </div>
+                        <div style={{ padding:'14px 8px', textAlign:'center', display:'flex', alignItems:'center', justifyContent:'center' }}>
+                          {actual != null ? (
+                            <span style={{ fontSize:14, fontWeight:700, color: ratingStyle ? ratingStyle.text : 'var(--text-primary)' }}>
+                              {actual}{unit === 'points' ? ' pts' : unit}
+                            </span>
+                          ) : (
+                            <span style={{ fontSize:12, color:'var(--text-muted)' }}>--</span>
+                          )}
                         </div>
                         {[col4, col3, col2, col1].map((val, ci) => {
                           const colRating = 4 - ci
                           const cs = RATING_COLORS[colRating]
+                          const isMyRating = rating === colRating
                           return (
-                            <div key={ci} style={{ padding:'14px 8px', textAlign:'center', fontSize:12, fontWeight:500, background: cs.bg + '55', color: cs.text, borderLeft:'1px solid var(--border)' }}>
-                              {val}
+                            <div key={ci} style={{ padding:'14px 8px', textAlign:'center', fontSize:12, fontWeight: isMyRating ? 700 : 400, background: isMyRating ? cs.bg : cs.bg + '44', color: cs.text, borderLeft:'1px solid var(--border)', display:'flex', alignItems:'center', justifyContent:'center' }}>
+                              {val}{isMyRating && ' *'}
                             </div>
                           )
                         })}
@@ -480,9 +511,9 @@ export default function MyPage() {
                 </div>
 
                 <div style={{ marginTop:16, fontSize:11, color:'var(--text-muted)', display:'flex', gap:16, flexWrap:'wrap' }}>
-                  <span>Total weight: {SCORECARD_KPIS.reduce((s,k) => s + k.weight * 100, 0)}%</span>
-                  <span>Attendance score auto-populated from your points log</span>
-                  <span>Booking %, Booked Calls, and Memberships will connect to ServiceTitan</span>
+                  <span>Total weight: {SCORECARD_KPIS.reduce((s,k) => s + (parseFloat(scWeights[k.id]) || 0), 0)}%</span>
+                  <span>Attendance auto-populated from your points log</span>
+                  <span>Other scores entered by your manager each month</span>
                 </div>
               </div>
             )}
