@@ -155,40 +155,70 @@ export default function MyPage() {
   ]
 
   return (
-    <div style={{ height:'100%', display:'flex', flexDirection:'column', overflow:'hidden', background:'var(--bg)' }}>
+    <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden' }}>
 
-      {/* Page header */}
-      <div style={{ padding:'20px 24px 0', background:'var(--surface)', borderBottom:'1px solid var(--border)', flexShrink:0 }}>
-        <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:16 }}>
-          <div style={{ width:36, height:36, borderRadius:'50%', background:'var(--accent-bg)', color:'var(--accent)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:16, fontWeight:700 }}>
-            {profile?.avatar || (profile?.name || profile?.email || '?')[0].toUpperCase()}
+      {/* ── HEADER BAR ── */}
+      <div style={{ background:'var(--surface)', borderBottom:'1px solid var(--border)', flexShrink:0 }}>
+        {/* Title row */}
+        <div style={{ padding:'16px 24px 0', display:'flex', alignItems:'flex-start', justifyContent:'space-between', gap:16 }}>
+          <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+            <div style={{ width:32, height:32, borderRadius:'50%', background:'var(--accent-bg)', color:'var(--accent)', display:'flex', alignItems:'center', justifyContent:'center', fontSize: profile?.avatar ? 16 : 12, fontWeight:700, flexShrink:0 }}>
+              {profile?.avatar || (profile?.name || profile?.email || '?')[0].toUpperCase()}
+            </div>
+            <div>
+              <div style={{ fontSize:18, fontWeight:600, color:'var(--text-primary)' }}>{profile?.name || profile?.email}</div>
+              <div style={{ fontSize:12, color:'var(--text-muted)', marginTop:2 }}>My Page</div>
+            </div>
           </div>
-          <div>
-            <div style={{ fontSize:16, fontWeight:700, color:'var(--text-primary)' }}>{profile?.name || profile?.email}</div>
-            <div style={{ fontSize:11, color:'var(--text-muted)' }}>My Page</div>
-          </div>
+          {(tab === 'my-schedule' || tab === 'team-schedule') && (
+            <div style={{ display:'flex', alignItems:'center', gap:10, marginTop:2 }}>
+              <button onClick={() => { const d = new Date(weekBase + 'T00:00:00'); d.setDate(d.getDate()-7); setWeekBase(toYMD(d)) }}
+                style={{ width:32, height:32, border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface-2)', cursor:'pointer', fontSize:16, color:'var(--text-secondary)', display:'flex', alignItems:'center', justifyContent:'center' }}
+                onMouseEnter={e => e.currentTarget.style.background='var(--surface)'}
+                onMouseLeave={e => e.currentTarget.style.background='var(--surface-2)'}>‹</button>
+              <span style={{ fontSize:13, fontWeight:500, color:'var(--text-primary)', minWidth:200, textAlign:'center' }}>{weekLabel}</span>
+              <button onClick={() => { const d = new Date(weekBase + 'T00:00:00'); d.setDate(d.getDate()+7); setWeekBase(toYMD(d)) }}
+                style={{ width:32, height:32, border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface-2)', cursor:'pointer', fontSize:16, color:'var(--text-secondary)', display:'flex', alignItems:'center', justifyContent:'center' }}
+                onMouseEnter={e => e.currentTarget.style.background='var(--surface)'}
+                onMouseLeave={e => e.currentTarget.style.background='var(--surface-2)'}>›</button>
+              <button onClick={() => setWeekBase(getTodayMonday())}
+                style={{ padding:'5px 10px', fontSize:12, fontWeight:500, border:'1px solid var(--accent)', borderRadius:'var(--radius)', background:'none', color:'var(--accent)', cursor:'pointer' }}>
+                Today
+              </button>
+            </div>
+          )}
         </div>
 
-        {/* Sub-tabs */}
-        <div style={{ display:'flex', gap:2 }}>
-          {TABS.map(t => (
-            <button key={t.id} onClick={() => setTab(t.id)}
-              onMouseEnter={() => setHoveredTab(t.id)}
-              onMouseLeave={() => setHoveredTab(null)}
-              style={{
-                padding:'8px 14px', fontSize:12, fontWeight:500, background:'none', border:'none', cursor:'pointer',
-                color: tab === t.id ? 'var(--accent)' : hoveredTab === t.id ? 'var(--text-primary)' : 'var(--text-muted)',
-                borderBottom: tab === t.id ? '2px solid var(--accent)' : '2px solid transparent',
-                transition:'all .1s', whiteSpace:'nowrap',
-              }}>
-              {t.label}
-            </button>
-          ))}
+        {/* Tab bar */}
+        <div style={{ display:'flex', alignItems:'center', padding:'0 24px', marginTop:10 }}>
+          <div style={{ display:'flex', gap:0 }}>
+            {TABS.map(t => {
+              const isActive = tab === t.id
+              const isHov = hoveredTab === t.id && !isActive
+              return (
+                <button key={t.id}
+                  onClick={() => setTab(t.id)}
+                  onMouseEnter={() => setHoveredTab(t.id)}
+                  onMouseLeave={() => setHoveredTab(null)}
+                  style={{
+                    padding:'10px 16px', fontSize:13, fontWeight: isActive ? 600 : 400,
+                    border:'none', cursor:'pointer',
+                    borderRadius:'var(--radius) var(--radius) 0 0',
+                    background: isHov ? 'var(--surface-2)' : 'transparent',
+                    color: isActive ? 'var(--accent)' : isHov ? 'var(--text-primary)' : 'var(--text-muted)',
+                    borderBottom: isActive ? '2px solid var(--accent)' : '2px solid transparent',
+                    transition:'color .1s, background .1s',
+                  }}>
+                  {t.label}
+                </button>
+              )
+            })}
+          </div>
         </div>
       </div>
 
       {/* Content */}
-      <div style={{ flex:1, overflow:'auto', padding:24 }}>
+      <div style={{ flex:1, overflow:'auto', padding:24, background:'var(--bg)' }}>
         {loading ? (
           <div style={{ display:'flex', alignItems:'center', justifyContent:'center', height:200 }}>
             <div className="spinner" />
@@ -198,8 +228,7 @@ export default function MyPage() {
             {/* MY SCHEDULE */}
             {tab === 'my-schedule' && (
               <div>
-                <WeekNav weekBase={weekBase} setWeekBase={setWeekBase} weekLabel={weekLabel} />
-                <div style={{ display:'grid', gridTemplateColumns:'repeat(7, 1fr)', gap:8, marginTop:16 }}>
+                <div style={{ display:'grid', gridTemplateColumns:'repeat(7, 1fr)', gap:8 }}>
                   {weekDates.map(date => {
                     const sched = getSched(profile?.id, date)
                     const isToday = date === today
@@ -264,8 +293,7 @@ export default function MyPage() {
             {/* TEAM SCHEDULE */}
             {tab === 'team-schedule' && (
               <div>
-                <WeekNav weekBase={weekBase} setWeekBase={setWeekBase} weekLabel={weekLabel} />
-                <div style={{ overflowX:'auto', marginTop:16 }}>
+                <div style={{ overflowX:'auto' }}>
                   <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
                     <thead>
                       <tr style={{ background:'var(--surface-2)' }}>
