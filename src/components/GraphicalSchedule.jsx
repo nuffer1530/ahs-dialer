@@ -444,29 +444,33 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
                 onMouseLeave={() => setTooltip(null)}>
 
                 {/* Agent label */}
-                <div style={{ width:LABEL_WIDTH, flexShrink:0, display:'flex', alignItems:'center', gap:10, padding:'10px 16px', borderRight:'1px solid var(--border)', background:'var(--surface-2)', position:'sticky', left:0, zIndex:15 }}>
-                  <div style={{ width:30, height:30, borderRadius:'50%', background:'var(--accent-bg)', color:'var(--accent)', display:'flex', alignItems:'center', justifyContent:'center', fontSize: p.avatar ? 18 : 11, fontWeight:600, flexShrink:0 }}>
-                    {p.avatar || (p.name||p.email||'?')[0].toUpperCase()}
+                <div style={{ width:LABEL_WIDTH, flexShrink:0, display:'flex', flexDirection:'column', justifyContent:'center', gap:3, padding:'10px 16px', borderRight:'1px solid var(--border)', background:'var(--surface-2)', position:'sticky', left:0, zIndex:15 }}>
+                  {/* Top row: avatar + name + + button */}
+                  <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                    <div style={{ width:30, height:30, borderRadius:'50%', background:'var(--accent-bg)', color:'var(--accent)', display:'flex', alignItems:'center', justifyContent:'center', fontSize: p.avatar ? 18 : 11, fontWeight:600, flexShrink:0 }}>
+                      {p.avatar || (p.name||p.email||'?')[0].toUpperCase()}
+                    </div>
+                    <div style={{ fontSize:11, fontWeight:600, color:'var(--text-primary)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', flex:1, minWidth:0 }}>{p.name||p.email}</div>
+                    {isAdmin && (
+                      <button onClick={() => { setAddBlockMenu({ profileId:p.id }) }}
+                        style={{ width:22, height:22, borderRadius:'50%', border:'1px solid var(--border)', background:'var(--surface)', cursor:'pointer', fontSize:14, display:'flex', alignItems:'center', justifyContent:'center', color:'var(--text-muted)', flexShrink:0 }}
+                        onMouseEnter={e => { e.currentTarget.style.background='var(--accent-bg)'; e.currentTarget.style.color='var(--accent)' }}
+                        onMouseLeave={e => { e.currentTarget.style.background='var(--surface)'; e.currentTarget.style.color='var(--text-muted)' }}
+                        title="Add block">+</button>
+                    )}
                   </div>
-                  <div style={{ minWidth:0 }}>
-                    <div style={{ fontSize:11, fontWeight:600, color:'var(--text-primary)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{p.name||p.email}</div>
+                  {/* Shift time + adherence below */}
+                  <div style={{ paddingLeft:38 }}>
                     {sched?.shift_start && sched?.shift_end && (
-                      <div style={{ fontSize:9, color:'var(--text-muted)', marginTop:1, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
+                      <div style={{ fontSize:9, color:'var(--text-muted)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
                         {fmtTime(sched.shift_start)}–{fmtTime(sched.shift_end)}
                       </div>
                     )}
                     {totalAdh != null && (
-                      <div style={{ fontSize:9, color:adhColor, marginTop:1, fontWeight:600 }}>{totalAdh}%</div>
+                      <div style={{ fontSize:9, color:adhColor, fontWeight:600 }}>{totalAdh}%</div>
                     )}
-                    {!sched && <div style={{ fontSize:9, color:'var(--text-muted)', marginTop:1 }}>No shift</div>}
+                    {!sched && <div style={{ fontSize:9, color:'var(--text-muted)' }}>No shift</div>}
                   </div>
-                  {isAdmin && (
-                    <button onClick={() => { setAddBlockMenu({ profileId:p.id }) }}
-                      style={{ position:'absolute', right:8, top:'50%', transform:'translateY(-50%)', width:22, height:22, borderRadius:'50%', border:'1px solid var(--border)', background:'var(--surface)', cursor:'pointer', fontSize:14, display:'flex', alignItems:'center', justifyContent:'center', color:'var(--text-muted)', flexShrink:0 }}
-                      onMouseEnter={e => { e.currentTarget.style.background='var(--accent-bg)'; e.currentTarget.style.color='var(--accent)' }}
-                      onMouseLeave={e => { e.currentTarget.style.background='var(--surface)'; e.currentTarget.style.color='var(--text-muted)' }}
-                      title="Add block">+</button>
-                  )}
                 </div>
 
                 {/* Track area */}
