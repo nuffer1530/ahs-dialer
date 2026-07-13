@@ -912,10 +912,11 @@ export default function AdminPage() {
                   const html = `<!DOCTYPE html><html><head>
                     <title>Scorecard - ${selectedRep?.name || ''} - ${MONTH_NAMES[scMonth.month]} ${scMonth.year}</title>
                     <style>
-                      @page { margin: 0.65in; size: letter portrait; }
+                      @page { margin: 0.5in 0.65in; size: letter landscape; }
                       * { box-sizing: border-box; margin: 0; padding: 0; -webkit-print-color-adjust: exact; print-color-adjust: exact; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
-                      body { background: white; color: #1C1B19; font-size: 13px; line-height: 1.5; }
-                      .header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; padding-bottom: 16px; border-bottom: 2px solid #E2DED6; }
+                      body { background: white; color: #1C1B19; font-size: 13px; line-height: 1.5; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 0; }
+                      .page { width: 100%; max-width: 960px; }
+                      .header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; padding-bottom: 14px; border-bottom: 2px solid #E2DED6; }
                       .rep-info { display: flex; align-items: center; gap: 12px; }
                       .avatar { width: 42px; height: 42px; border-radius: 50%; background: #EAF3FB; color: #1A5C8A; display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: 700; }
                       .rep-name { font-size: 18px; font-weight: 700; }
@@ -943,7 +944,7 @@ export default function AdminPage() {
                       .sig-line { border-top: 1px solid #C8C3BA; padding-top: 6px; font-size: 11px; color: #6B6760; }
                       .footer { display: flex; justify-content: space-between; font-size: 10px; color: #9E9B96; margin-top: 16px; padding-top: 10px; border-top: 1px solid #E2DED6; }
                     </style>
-                  </head><body>
+                  </head><body><div class="page">
                     <div class="header">
                       <div class="rep-info">
                         <div class="avatar">${selectedRep?.avatar || (selectedRep?.name || '?')[0].toUpperCase()}</div>
@@ -977,9 +978,9 @@ export default function AdminPage() {
                       <span>Attendance auto-populated from points log. Other scores entered by manager.</span>
                       <span>Awesome Home Services &mdash; Andi</span>
                     </div>
-                  </body></html>`
+                  </div></body></html>`
 
-                  const win = window.open('', '_blank', 'width=900,height=1100')
+                  const win = window.open('', '_blank', 'width=1100,height=850')
                   win.document.write(html)
                   win.document.close()
                   win.focus()
