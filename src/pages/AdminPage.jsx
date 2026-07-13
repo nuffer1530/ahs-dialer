@@ -20,6 +20,7 @@ export default function AdminPage() {
   const { profile, isAdmin, refreshProfile } = useAuth()
   const { campaigns } = useData()
   const [settingsTab, setSettingsTab] = useState('users')
+  const [hoveredTab, setHoveredTab] = useState(null)
   const [profiles, setProfiles] = useState([])
   const [loading, setLoading] = useState(true)
   const [editProfile, setEditProfile] = useState(null)
@@ -281,18 +282,33 @@ export default function AdminPage() {
     <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden' }}>
 
       {/* Tab bar header */}
-      <div style={{ background:'var(--surface)', borderBottom:'1px solid var(--border)', padding:'0 24px', display:'flex', alignItems:'center', gap:2, flexShrink:0 }}>
-        <span style={{ fontSize:16, fontWeight:600, marginRight:16, color:'var(--text-primary)' }}>Settings</span>
-        {TABS.map(t => (
-          <button key={t.id} onClick={() => setSettingsTab(t.id)}
-            style={{ padding:'12px 16px', fontSize:12, fontWeight: settingsTab===t.id ? 600 : 400,
-              color: settingsTab===t.id ? 'var(--accent)' : 'var(--text-muted)',
-              borderBottom: settingsTab===t.id ? '2px solid var(--accent)' : '2px solid transparent',
-              background:'none', border:'none', borderBottom: settingsTab===t.id ? '2px solid var(--accent)' : '2px solid transparent',
-              cursor:'pointer', transition:'all .1s' }}>
-            {t.label}
-          </button>
-        ))}
+      <div style={{ background:'var(--surface)', borderBottom:'1px solid var(--border)', flexShrink:0 }}>
+        <div style={{ padding:'16px 24px 0' }}>
+          <div style={{ fontSize:18, fontWeight:600, color:'var(--text-primary)' }}>Settings</div>
+          <div style={{ fontSize:12, color:'var(--text-muted)', marginTop:2 }}>Manage users, campaigns, commission, and statuses</div>
+        </div>
+        <div style={{ display:'flex', padding:'0 24px', marginTop:10 }}>
+          {TABS.map(t => {
+            const isActive = settingsTab === t.id
+            const isHov = hoveredTab === t.id && !isActive
+            return (
+              <button key={t.id} onClick={() => setSettingsTab(t.id)}
+                onMouseEnter={() => setHoveredTab(t.id)}
+                onMouseLeave={() => setHoveredTab(null)}
+                style={{
+                  padding:'10px 16px', fontSize:13, fontWeight: isActive ? 600 : 400,
+                  border:'none', cursor:'pointer',
+                  borderRadius:'var(--radius) var(--radius) 0 0',
+                  background: isHov ? 'var(--surface-2)' : 'transparent',
+                  color: isActive ? 'var(--accent)' : isHov ? 'var(--text-primary)' : 'var(--text-muted)',
+                  borderBottom: isActive ? '2px solid var(--accent)' : '2px solid transparent',
+                  transition:'color .1s, background .1s',
+                }}>
+                {t.label}
+              </button>
+            )
+          })}
+        </div>
       </div>
 
       {/* Campaigns tab — full CampaignsPage */}
