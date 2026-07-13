@@ -134,7 +134,7 @@ export default function AdminPage() {
 
     Promise.all([
       sb.from('commission_settings').select('*'),
-      sb.from('commissions').select('*, profiles(name)').gte('earned_at', monday.toISOString()).order('earned_at', { ascending: false }),
+      sb.from('commissions').select('*, profiles!profile_id(name)').gte('earned_at', monday.toISOString()).order('earned_at', { ascending: false }),
     ]).then(([{ data: rates }, { data: history }]) => {
       if (rates?.length) {
         const r = {}
@@ -266,9 +266,9 @@ export default function AdminPage() {
       }
       // Try with updated_by first; if column doesn't exist yet, retry without
       let data, error
-      const r1 = await sb.from('commissions').insert({ ...payload, updated_by: profile.id }).select('*, profiles(name)').single()
+      const r1 = await sb.from('commissions').insert({ ...payload, updated_by: profile.id }).select('*, profiles!profile_id(name)').single()
       if (r1.error && r1.error.message?.includes('updated_by')) {
-        const r2 = await sb.from('commissions').insert(payload).select('*, profiles(name)').single()
+        const r2 = await sb.from('commissions').insert(payload).select('*, profiles!profile_id(name)').single()
         data = r2.data; error = r2.error
       } else {
         data = r1.data; error = r1.error
