@@ -256,7 +256,7 @@ app.get('/api/st/businessunits', async (req, res) => {
 // ── ST: Create booking (direct to dispatch board, unscheduled)
 app.post('/api/st/book', async (req, res) => {
   try {
-    const { customerId, jobTypeId, businessUnitId, notes, repName, contactName, phone, zip } = req.body
+    const { customerId, jobTypeId, businessUnitId, notes, repName, contactName, phone, zip, start, end } = req.body
     if (!customerId || !jobTypeId || !businessUnitId) {
       return res.status(400).json({ error: 'customerId, jobTypeId, and businessUnitId required' })
     }
@@ -276,15 +276,24 @@ app.post('/api/st/book', async (req, res) => {
       summary: notes || `Outbound booking via Andi — ${repName || 'CSR'}`,
       tagTypeIds: [],
     }
-    // If a specific slot was selected, schedule it
+
+    // If a specific slot was selected, schedule it with an appointment
+    // The slot times from our availability endpoint are in MT local ISO format
+    // Convert back to UTC for ST API
     if (start && end) {
+      // Parse the local ISO string and convert to UTC
+      const toUTC = (localISO) => {
+        // localISO looks like "2026-07-17T08:00:00-06:00"
+        return new Date(localISO).toISOString()
+      }
       jobBody.appointments = [{
-        start,
-        end,
-        arrivalWindowStart: start,
-        arrivalWindowEnd: end,
+        start: toUTC(start),
+        end: toUTC(end),
+        arrivalWindowStart: toUTC(start),
+        arrivalWindowEnd: toUTC(end),
       }]
     }
+    // No slot selected = unscheduled, drops to bottom of dispatch board automatically
 
     const jobData = await stPost(`/jpm/v2/tenant/${ST_TENANT_ID}/jobs`, jobBody)
     const jobId = jobData?.id
