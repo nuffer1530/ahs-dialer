@@ -36,6 +36,11 @@ export default function AdminPage() {
   const [commAdjAmount, setCommAdjAmount] = useState('')
   const [commAdjNote, setCommAdjNote] = useState('')
   const [savingAdj, setSavingAdj] = useState(false)
+  // Inline adjustment on commission tab
+  const [adjProfileId, setAdjProfileId] = useState('')
+  const [adjAmount, setAdjAmount] = useState('')
+  const [adjNote, setAdjNote] = useState('')
+  const [adjSaving, setAdjSaving] = useState(false)
   // Status customization
   const [customStatuses, setCustomStatuses] = useState([
     { id:'Available', label:'Available', color:'#22c55e', locked:true },
@@ -221,6 +226,39 @@ export default function AdminPage() {
     } finally { setSavingAdj(false) }
   }
 
+  const addInlineAdjustment = async () => {
+    if (!adjProfileId || !adjAmount || isNaN(parseFloat(adjAmount))) return
+    setAdjSaving(true)
+    const rep = profiles.find(p => p.id === adjProfileId)
+    const amount = parseFloat(adjAmount)
+    try {
+      const { data } = await sb.from('commissions').insert({
+        profile_id: adjProfileId,
+        event_type: 'adjustment',
+        amount,
+        rep_name: rep?.name || rep?.email || 'Unknown',
+        contact_name: 'Manual adjustment',
+        also_membership: false,
+        membership_amount: 0,
+        notes: adjNote || 'Admin manual adjustment',
+        earned_at: new Date().toISOString(),
+      }).select('*, profiles(name)').single()
+      if (data) {
+        setCommissionHistory(prev => [data, ...prev])
+        // Update allRepEarnings too
+        setAllRepEarnings(prev => {
+          const name = rep?.name || rep?.email || 'Unknown'
+          return prev.map(([n, d]) => n === name ? [n, { ...d, weekly: d.weekly + amount, daily: d.daily + amount }] : [n, d])
+        })
+      }
+      setAdjAmount(''); setAdjNote('')
+      setMsg('Adjustment added!')
+      setTimeout(() => setMsg(''), 3000)
+    } catch (e) {
+      setMsg('Error: ' + e.message)
+    } finally { setAdjSaving(false) }
+  }
+
   const saveMyProfile = async () => {
     setSavingProfile(true)
     await sb.from('profiles').update({ name: myName, avatar: myAvatar }).eq('id', profile.id)
@@ -357,7 +395,7 @@ export default function AdminPage() {
     if (!scSelectedProfile) return
     setScSaving(true)
     const monthStart = `${scMonth.year}-${String(scMonth.month+1).padStart(2,'0')}-01`
-    await Promise.all([
+    const [{ error: saveError }] = await Promise.all([
       sb.from('scorecard_actuals').upsert({
         profile_id: scSelectedProfile,
         month: monthStart,
@@ -375,6 +413,23 @@ export default function AdminPage() {
         { onConflict: 'key' }
       ),
     ])
+    if (saveError) {
+      console.error('Scorecard save error:', saveError.message)
+      setMsg('Error saving: ' + saveError.message)
+      setScSaving(false)
+      return
+    }
+    // Re-fetch to confirm what was actually saved
+    const { data: confirmed } = await sb.from('scorecard_actuals').select('*').eq('profile_id', scSelectedProfile).eq('month', monthStart).maybeSingle()
+    if (confirmed) {
+      setScNotes(confirmed.notes ?? '')
+      setScActuals({
+        booking_pct: confirmed.booking_pct ?? '',
+        booked_calls: confirmed.booked_calls ?? '',
+        call_quality: confirmed.call_quality ?? '',
+        memberships: confirmed.memberships ?? '',
+      })
+    }
     setScSaving(false)
     setScSaved(true)
     setTimeout(() => setScSaved(false), 2000)
@@ -537,7 +592,7 @@ export default function AdminPage() {
               {/* Admin: All rep earnings this week */}
               {isAdmin && allRepEarnings.length > 0 && (
                 <div className="card">
-                  <div className="card-header"><div className="card-title">Team Earnings — This Week</div></div>
+                  <div className="card-header"><div className="card-title">Team Earnings - This Week</div></div>
                   <table className="data-table">
                     <thead><tr><th>Rep</th><th style={{textAlign:'center'}}>Today</th><th style={{textAlign:'center'}}>This Week</th><th style={{textAlign:'center'}}>Bookings</th><th style={{textAlign:'center'}}>Memberships</th></tr></thead>
                     <tbody>
@@ -571,28 +626,82 @@ export default function AdminPage() {
                 </div>
               )}
 
+              {/* Admin: Manual adjustment panel */}
+              {isAdmin && (
+                <div className="card">
+                  <div className="card-header">
+                    <div className="card-title">Manual Adjustment</div>
+                    <span style={{ fontSize:11, color:'var(--text-muted)' }}>Add or deduct from a rep's commission balance</span>
+                  </div>
+                  <div className="card-body">
+                    <div style={{ display:'grid', gridTemplateColumns:'1fr 140px 1fr auto', gap:12, alignItems:'flex-end' }}>
+                      <div className="form-field" style={{ margin:0 }}>
+                        <label className="form-label">Rep</label>
+                        <select className="form-input" value={adjProfileId} onChange={e => setAdjProfileId(e.target.value)}>
+                          <option value=''>Select rep...</option>
+                          {profiles.map(p => <option key={p.id} value={p.id}>{p.name || p.email}</option>)}
+                        </select>
+                      </div>
+                      <div className="form-field" style={{ margin:0 }}>
+                        <label className="form-label">Amount ($)</label>
+                        <input className="form-input" type="number" step="0.50" value={adjAmount}
+                          onChange={e => setAdjAmount(e.target.value)}
+                          placeholder="e.g. 5.00 or -2.00"
+                          style={{ color: adjAmount && parseFloat(adjAmount) < 0 ? 'var(--danger)' : parseFloat(adjAmount) > 0 ? 'var(--success)' : 'var(--text-primary)' }} />
+                      </div>
+                      <div className="form-field" style={{ margin:0 }}>
+                        <label className="form-label">Reason</label>
+                        <input className="form-input" value={adjNote} onChange={e => setAdjNote(e.target.value)}
+                          placeholder="e.g. Bonus for membership upsell" />
+                      </div>
+                      <button className="btn primary" onClick={addInlineAdjustment}
+                        disabled={adjSaving || !adjProfileId || !adjAmount}
+                        style={{ whiteSpace:'nowrap', height:36 }}>
+                        {adjSaving ? 'Adding...' : 'Add'}
+                      </button>
+                    </div>
+                    <div style={{ fontSize:11, color:'var(--text-muted)', marginTop:8 }}>
+                      Use a negative amount to deduct (e.g. -5.00). Adjustments appear immediately in the history below.
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* Commission history */}
               <div className="card">
                 <div className="card-header"><div className="card-title">Commission History — This Week</div></div>
                 {commissionHistory.length === 0 ? (
-                  <div className="empty-state"><div className="empty-icon">—</div><div>No commissions earned yet this week</div></div>
+                  <div className="empty-state"><div className="empty-icon">--</div><div>No commissions earned yet this week</div></div>
                 ) : (
                   <table className="data-table">
-                    <thead><tr>{isAdmin && <th>Rep</th>}<th>Event</th><th>Contact</th><th style={{textAlign:'right'}}>Amount</th><th>When</th></tr></thead>
+                    <thead><tr>{isAdmin && <th>Rep</th>}<th>Type</th><th>Detail</th><th style={{textAlign:'right'}}>Amount</th><th>When</th></tr></thead>
                     <tbody>
-                      {commissionHistory.filter(c => !isAdmin ? c.profile_id === profile?.id : true).map(c => (
-                        <tr key={c.id}>
-                          {isAdmin && <td style={{padding:'10px 12px', fontWeight:500}}>{c.profiles?.name || c.rep_name}</td>}
-                          <td style={{padding:'10px 12px'}}>
-                            <span style={{ padding:'2px 8px', borderRadius:99, fontSize:11, fontWeight:600, background: c.event_type==='booking' ? '#DCFCE7' : '#EFF6FF', color: c.event_type==='booking' ? '#16A34A' : '#3b82f6' }}>
-                              {c.event_type === 'booking' ? 'Booking' : 'Membership'}
-                            </span>
-                          </td>
-                          <td style={{padding:'10px 12px', color:'var(--text-secondary)'}}>{c.contact_name}</td>
-                          <td style={{padding:'10px 12px', textAlign:'right', fontWeight:700, color:'#16A34A'}}>{'$'}{parseFloat(c.amount).toFixed(2)}</td>
-                          <td style={{padding:'10px 12px', color:'var(--text-muted)', fontSize:11}}>{new Date(c.earned_at).toLocaleString('en-US', { month:'short', day:'numeric', hour:'numeric', minute:'2-digit' })}</td>
-                        </tr>
-                      ))}
+                      {commissionHistory.filter(c => !isAdmin ? c.profile_id === profile?.id : true).map(c => {
+                        const isAdj = c.event_type === 'adjustment'
+                        const isMem = c.event_type === 'membership'
+                        const amt = parseFloat(c.amount)
+                        return (
+                          <tr key={c.id}>
+                            {isAdmin && <td style={{padding:'10px 12px', fontWeight:500}}>{c.profiles?.name || c.rep_name}</td>}
+                            <td style={{padding:'10px 12px'}}>
+                              <span style={{ padding:'2px 8px', borderRadius:99, fontSize:11, fontWeight:600,
+                                background: isAdj ? (amt < 0 ? 'var(--danger-bg)' : 'var(--warning-bg)') : isMem ? '#EFF6FF' : '#DCFCE7',
+                                color: isAdj ? (amt < 0 ? 'var(--danger)' : 'var(--warning)') : isMem ? '#3b82f6' : '#16A34A' }}>
+                                {isAdj ? 'Adjustment' : isMem ? 'Membership' : 'Booking'}
+                              </span>
+                            </td>
+                            <td style={{padding:'10px 12px', color:'var(--text-secondary)', fontSize:12}}>
+                              {isAdj ? (c.notes || 'Manual adjustment') : c.contact_name}
+                            </td>
+                            <td style={{padding:'10px 12px', textAlign:'right', fontWeight:700, color: amt < 0 ? 'var(--danger)' : '#16A34A'}}>
+                              {amt >= 0 ? '+' : ''}{'$'}{amt.toFixed(2)}
+                            </td>
+                            <td style={{padding:'10px 12px', color:'var(--text-muted)', fontSize:11}}>
+                              {new Date(c.earned_at).toLocaleString('en-US', { month:'short', day:'numeric', hour:'numeric', minute:'2-digit' })}
+                            </td>
+                          </tr>
+                        )
+                      })}
                     </tbody>
                   </table>
                 )}
