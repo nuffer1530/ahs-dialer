@@ -132,17 +132,24 @@ export default function DialerPage() {
           fetch('/api/st/businessunits'),
           fetch('/api/st/campaigns'),
         ])
-        const jtData = await jtRes.json()
-        const buData = await buRes.json()
-        const campData = await campRes.json()
+        const [jtData, buData, campData] = await Promise.all([
+          jtRes.json(),
+          buRes.json(),
+          campRes.json(),
+        ])
+        console.log('ST jobtypes:', jtData?.data?.length, jtRes.status)
+        console.log('ST businessunits:', buData?.data?.length, buRes.status)
+        console.log('ST campaigns:', campData?.data?.length, campRes.status)
+        if (jtData?.error) console.error('ST jobtypes error:', jtData.error)
+        if (buData?.error) console.error('ST businessunits error:', buData.error)
+        if (campData?.error) console.error('ST campaigns error:', campData.error)
         setStJobTypes(jtData?.data || [])
         setStBusinessUnits(buData?.data || [])
         const camps = campData?.data || []
         setStCampaigns(camps)
-        // Default to first campaign but CSR can change it
         if (camps[0]?.id) setStCampaignId(camps[0].id)
       } catch (e) {
-        console.warn('ST load error:', e.message)
+        console.error('ST load error:', e.message)
       } finally {
         setStLoading(false)
       }
