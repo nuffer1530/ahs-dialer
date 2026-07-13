@@ -60,6 +60,13 @@ export default function AdminPage() {
   const [scMonth, setScMonth] = useState({ year: _now.getFullYear(), month: _now.getMonth() })
   const [scActuals, setScActuals] = useState({ booking_pct: '', booked_calls: '', call_quality: '', memberships: '' })
   const [scWeights, setScWeights] = useState({ attendance: 25, booking_pct: 20, booked_calls: 20, call_quality: 15, memberships: 20 })
+  const [scThresholds, setScThresholds] = useState({
+    attendance:   { exceeds: 0,   meets: 1,   improvement: 2  },
+    booking_pct:  { exceeds: 90,  meets: 80,  improvement: 75 },
+    booked_calls: { exceeds: 140, meets: 110, improvement: 85 },
+    call_quality: { exceeds: 95,  meets: 90,  improvement: 85 },
+    memberships:  { exceeds: 5,   meets: 3,   improvement: 2  },
+  })
   const [scNotes, setScNotes] = useState('')
   const [scAttendancePoints, setScAttendancePoints] = useState(null)
   const [scLoading, setScLoading] = useState(false)
@@ -104,14 +111,15 @@ export default function AdminPage() {
       })
   }, [])
 
-  // Load saved scorecard weights
+  // Load saved scorecard weights + thresholds
   useEffect(() => {
-    sb.from('app_settings').select('value').eq('key', 'scorecard_weights').maybeSingle()
-      .then(({ data }) => {
-        if (data?.value) {
-          try { setScWeights(JSON.parse(data.value)) } catch (e) {}
-        }
-      })
+    Promise.all([
+      sb.from('app_settings').select('value').eq('key', 'scorecard_weights').maybeSingle(),
+      sb.from('app_settings').select('value').eq('key', 'scorecard_thresholds').maybeSingle(),
+    ]).then(([{ data: wts }, { data: thr }]) => {
+      if (wts?.value) { try { setScWeights(JSON.parse(wts.value)) } catch (e) {} }
+      if (thr?.value) { try { setScThresholds(JSON.parse(thr.value)) } catch (e) {} }
+    })
   }, [])
 
   // Load commission data
@@ -360,15 +368,16 @@ export default function AdminPage() {
   const scGetRating = (kpi, value) => {
     if (value === '' || value == null) return null
     const v = parseFloat(value)
-    const { thresholds, lowerIsBetter } = kpi
+    const { lowerIsBetter } = kpi
+    const thresholds = scThresholds[kpi.id] || kpi.thresholds
     if (lowerIsBetter) {
-      if (v <= thresholds.exceeds)    return 4
-      if (v <= thresholds.meets)      return 3
+      if (v <= thresholds.exceeds)     return 4
+      if (v <= thresholds.meets)       return 3
       if (v <= thresholds.improvement) return 2
       return 1
     } else {
-      if (v >= thresholds.exceeds)    return 4
-      if (v >= thresholds.meets)      return 3
+      if (v >= thresholds.exceeds)     return 4
+      if (v >= thresholds.meets)       return 3
       if (v >= thresholds.improvement) return 2
       return 1
     }
@@ -423,6 +432,10 @@ export default function AdminPage() {
       }, { onConflict: 'profile_id,month' }),
       sb.from('app_settings').upsert(
         { key: 'scorecard_weights', value: JSON.stringify(scWeights), updated_at: new Date().toISOString() },
+        { onConflict: 'key' }
+      ),
+      sb.from('app_settings').upsert(
+        { key: 'scorecard_thresholds', value: JSON.stringify(scThresholds), updated_at: new Date().toISOString() },
         { onConflict: 'key' }
       ),
     ])
@@ -1204,15 +1217,12 @@ export default function AdminPage() {
 
                   {SC_KPIS.map((kpi, idx) => {
                     const actual = actuals[kpi.id]
+                    const thr = scThresholds[kpi.id] || kpi.thresholds
                     const rating = scGetRating(kpi, actual)
                     const ratingStyle = rating ? SC_RATING_COLORS[rating] : null
-                    const { thresholds, lowerIsBetter, unit } = kpi
-                    const fmt = (n) => unit === '%' ? `${n}${unit}` : `${n}${unit}`
-                    const col4 = lowerIsBetter ? fmt(thresholds.exceeds) : `${fmt(thresholds.exceeds)}+`
-                    const col3 = lowerIsBetter ? `${fmt(thresholds.meets+1)}-${fmt(thresholds.exceeds+1)}` : `${fmt(thresholds.meets)}-${fmt(thresholds.exceeds-1)}`
-                    const col2 = lowerIsBetter ? `${fmt(thresholds.improvement+1)}-${fmt(thresholds.meets+1)}` : `${fmt(thresholds.improvement)}-${fmt(thresholds.meets-1)}`
-                    const col1 = lowerIsBetter ? `${fmt(thresholds.improvement+1)}+` : `${fmt(thresholds.improvement-1)} or less`
+                    const { lowerIsBetter, unit } = kpi
                     const isEditable = kpi.id !== 'attendance'
+                    const thrColors = { exceeds: SC_RATING_COLORS[4], meets: SC_RATING_COLORS[3], improvement: SC_RATING_COLORS[2], poor: SC_RATING_COLORS[1] }
 
                     return (
                       <div key={kpi.id} style={{ display:'grid', gridTemplateColumns:'1.5fr 90px 100px 1fr 1fr 1fr 1fr', borderBottom: idx < SC_KPIS.length-1 ? '1px solid var(--border)' : 'none', background: idx % 2 === 0 ? 'var(--surface)' : 'var(--surface-2)' }}>
@@ -1228,8 +1238,7 @@ export default function AdminPage() {
                         {/* Weight — editable */}
                         <div style={{ padding:'8px', display:'flex', alignItems:'center' }}>
                           <div style={{ position:'relative', width:'100%' }}>
-                            <input
-                              type="number" min="0" max="100"
+                            <input type="number" min="0" max="100"
                               value={scWeights[kpi.id]}
                               onChange={e => setScWeights(prev => ({ ...prev, [kpi.id]: e.target.value }))}
                               style={{ width:'100%', padding:'5px 22px 5px 8px', fontSize:13, fontWeight:600, border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface)', color:'var(--text-primary)', textAlign:'center' }}
@@ -1240,8 +1249,7 @@ export default function AdminPage() {
                         {/* Actual — editable or auto */}
                         <div style={{ padding:'8px', display:'flex', alignItems:'center' }}>
                           {isEditable ? (
-                            <input
-                              type="number"
+                            <input type="number"
                               value={scActuals[kpi.id]}
                               onChange={e => setScActuals(prev => ({ ...prev, [kpi.id]: e.target.value }))}
                               placeholder="Enter"
@@ -1254,17 +1262,42 @@ export default function AdminPage() {
                             </div>
                           )}
                         </div>
-                        {/* Threshold columns */}
-                        {[{ val:col4, r:4 }, { val:col3, r:3 }, { val:col2, r:2 }, { val:col1, r:1 }].map(({ val, r }) => {
+                        {/* Threshold columns — editable */}
+                        {[
+                          { key:'exceeds', r:4, label:'Exceeds' },
+                          { key:'meets', r:3, label:'Meets' },
+                          { key:'improvement', r:2, label:'Needs Impr.' },
+                        ].map(({ key, r, label }) => {
                           const cs = SC_RATING_COLORS[r]
                           const isMyRating = rating === r
+                          const val = thr[key]
                           return (
-                            <div key={r} style={{ padding:'12px 8px', textAlign:'center', fontSize:12, fontWeight: isMyRating ? 700 : 400, background: isMyRating ? cs.bg : cs.bg + '33', color: cs.text, borderLeft:'1px solid var(--border)', display:'flex', alignItems:'center', justifyContent:'center', transition:'all .15s' }}>
-                              {val}
-                              {isMyRating && <span style={{ marginLeft:4, fontSize:10 }}>*</span>}
+                            <div key={key} style={{ padding:'8px', background: isMyRating ? cs.bg : cs.bg + '33', borderLeft:'1px solid var(--border)', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:4 }}>
+                              <div style={{ fontSize:9, fontWeight:700, textTransform:'uppercase', letterSpacing:.4, color: cs.text, opacity:.7 }}>{label}</div>
+                              <input type="number"
+                                value={val}
+                                onChange={e => setScThresholds(prev => ({ ...prev, [kpi.id]: { ...prev[kpi.id], [key]: parseFloat(e.target.value) || 0 } }))}
+                                style={{ width:'100%', padding:'4px 6px', fontSize:13, fontWeight: isMyRating ? 700 : 500, border:'1px solid ' + cs.text + '44', borderRadius:'var(--radius)', background: isMyRating ? '#fff' : 'transparent', color: cs.text, textAlign:'center', maxWidth:80 }}
+                              />
+                              {unit && <span style={{ fontSize:9, color: cs.text, opacity:.6 }}>{unit}</span>}
                             </div>
                           )
                         })}
+                        {/* Poor Performance — auto-derived, show as read-only */}
+                        {(() => {
+                          const cs = SC_RATING_COLORS[1]
+                          const isMyRating = rating === 1
+                          const poorVal = lowerIsBetter
+                            ? `>${thr.improvement}${unit || ''}`
+                            : `<${thr.improvement}${unit || ''}`
+                          return (
+                            <div style={{ padding:'8px', background: isMyRating ? cs.bg : cs.bg + '33', borderLeft:'1px solid var(--border)', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:4 }}>
+                              <div style={{ fontSize:9, fontWeight:700, textTransform:'uppercase', letterSpacing:.4, color: cs.text, opacity:.7 }}>Poor</div>
+                              <div style={{ fontSize:12, fontWeight: isMyRating ? 700 : 500, color: cs.text }}>{poorVal}</div>
+                              <div style={{ fontSize:9, color: cs.text, opacity:.6 }}>auto</div>
+                            </div>
+                          )
+                        })()}
                       </div>
                     )
                   })}
