@@ -148,8 +148,12 @@ export default function DialerLayout() {
         if (data?.value) {
           try {
             const saved = JSON.parse(data.value)
-            setStatusOptions(saved.map(s => ({ value: s.label, color: s.color })))
-          } catch (e) {}
+            // Map saved statuses {id, label, color} to picker format {value, color}
+            const mapped = saved.map(s => ({ value: s.label || s.value || s.id, color: s.color }))
+            if (mapped.length > 0) setStatusOptions(mapped)
+          } catch (e) {
+            console.warn('Failed to parse custom statuses:', e)
+          }
         }
       })
   }, [])
