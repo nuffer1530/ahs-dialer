@@ -14,7 +14,7 @@ import LeaderboardPage from './LeaderboardPage'
 import AttendancePage from './AttendancePage'
 import WinCelebration from '../components/WinCelebration'
 
-const STATUS_OPTIONS = [
+const DEFAULT_STATUS_OPTIONS = [
   { value: 'Available', color: '#22c55e' },
   { value: 'On Call',   color: '#3b82f6' },
   { value: 'Wrap Up',   color: '#f59e0b' },
@@ -139,6 +139,20 @@ export default function DialerLayout() {
   const menuRef = useRef(null)
   const currentEventRef = useRef(null)
   const [navCollapsed, setNavCollapsed] = useState(false)
+  const [statusOptions, setStatusOptions] = useState(DEFAULT_STATUS_OPTIONS)
+
+  // Load custom statuses from app_settings
+  useEffect(() => {
+    sb.from('app_settings').select('value').eq('key', 'custom_statuses').maybeSingle()
+      .then(({ data }) => {
+        if (data?.value) {
+          try {
+            const saved = JSON.parse(data.value)
+            setStatusOptions(saved.map(s => ({ value: s.label, color: s.color })))
+          } catch (e) {}
+        }
+      })
+  }, [])
   const [darkMode, setDarkMode] = useState(() => {
     const saved = localStorage.getItem('andi-theme')
     if (saved) { document.documentElement.setAttribute('data-theme', saved); return saved === 'dark' }
@@ -259,7 +273,7 @@ export default function DialerLayout() {
     navigate('/login')
   }
 
-  const currentStatusObj = STATUS_OPTIONS.find(s => s.value === agentStatus) || STATUS_OPTIONS[STATUS_OPTIONS.length - 1]
+  const currentStatusObj = statusOptions.find(s => s.value === agentStatus) || STATUS_OPTIONS[statusOptions.length - 1]
   const NAV_WIDTH = navCollapsed ? 56 : 200
 
   const navLinkStyle = ({ isActive }) => ({
@@ -395,7 +409,7 @@ export default function DialerLayout() {
             </button>
             {showStatusMenu && (
               <div style={{ position:'fixed', bottom: navCollapsed ? 'auto' : 80, top: navCollapsed ? 'auto' : undefined, left: navCollapsed ? NAV_WIDTH + 8 : 8, right: navCollapsed ? 'auto' : undefined, minWidth:175, background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius)', boxShadow:'0 4px 24px rgba(0,0,0,.2)', zIndex:999, overflow:'hidden' }}>
-                {STATUS_OPTIONS.map(s => (
+                {statusOptions.map(s => (
                   <button key={s.value} onClick={() => updateStatus(s.value)}
                     onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
                     onMouseLeave={e => e.currentTarget.style.background = agentStatus === s.value ? 'var(--accent-bg)' : 'transparent'}
