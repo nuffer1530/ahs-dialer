@@ -12,6 +12,7 @@ import AdminPage from './AdminPage'
 import WarRoomPage from './WarRoomPage'
 import LeaderboardPage from './LeaderboardPage'
 import AttendancePage from './AttendancePage'
+import MyPage from './MyPage'
 import WinCelebration from '../components/WinCelebration'
 
 const DEFAULT_STATUS_OPTIONS = [
@@ -101,6 +102,15 @@ const NAV_ICONS = {
       </svg>
     )
   },
+  mypage: (active) => {
+    const c = active ? ICON_COLOR : ICON_MUTED
+    return (
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="12" cy="8" r="3.5" stroke={c} strokeWidth="1.8" fill="none"/>
+        <path d="M5 20c0-3.314 3.134-6 7-6s7 2.686 7 6" stroke={c} strokeWidth="1.8" strokeLinecap="round" fill="none"/>
+      </svg>
+    )
+  },
   settings: (active) => {
     const c = active ? ICON_COLOR : ICON_MUTED
     return (
@@ -121,6 +131,8 @@ const NAV_ITEMS = [
   { to:'/notes', label:'Notes', iconKey:'notes' },
   { to:'/warroom', label:'Call Center TV', iconKey:'tv' },
 ]
+
+const MY_PAGE_ITEM = { to:'/mypage', label:'My Page', iconKey:'mypage' }
 
 const SETTINGS_ITEMS = [
   { to:'/settings', label:'Settings', icon:'⚙️' },
@@ -364,6 +376,19 @@ export default function DialerLayout() {
             </NavLink>
           ))}
 
+          {/* My Page — above settings */}
+          <div style={{ height:1, background:'var(--border)', margin:'8px 0' }} />
+          <NavLink to={MY_PAGE_ITEM.to} style={navLinkStyle} title={navCollapsed ? MY_PAGE_ITEM.label : undefined}
+            onMouseEnter={e => { const isActive = e.currentTarget.style.fontWeight === '600'; handleNavHover(e, isActive) }}
+            onMouseLeave={e => { const isActive = e.currentTarget.style.fontWeight === '600'; handleNavLeave(e, isActive) }}>
+            {({ isActive }) => (
+              <>
+                <span style={{ flexShrink:0, display:'flex', alignItems:'center' }}>{NAV_ICONS[MY_PAGE_ITEM.iconKey]?.(isActive)}</span>
+                {!navCollapsed && <span>{MY_PAGE_ITEM.label}</span>}
+              </>
+            )}
+          </NavLink>
+
           {/* Settings — admin only */}
           {isAdmin && (
             <>
@@ -470,6 +495,7 @@ export default function DialerLayout() {
           <Route path="/attendance" element={<AttendancePage />} />
           <Route path="/notes" element={<NotesPage />} />
           <Route path="/warroom" element={<WarRoomPage />} />
+          <Route path="/mypage" element={<MyPage />} />
           {isAdmin && <Route path="/settings" element={<AdminPage />} />}
         </Routes>
       </div>
