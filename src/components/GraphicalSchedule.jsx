@@ -139,8 +139,8 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
       }
       if (sched.shift_start && sched.shift_end) {
         const s = timeToInterval(sched.shift_start)
-        const e = Math.min(timeToInterval(sched.shift_end), TOTAL_INTERVALS)
-        if (s !== null && s >= 0 && e > s) newBlocks[p.id].push({ id:'shift-'+p.id, type:'shift', start:Math.max(0,s), duration:Math.min(e-s, TOTAL_INTERVALS-Math.max(0,s)) })
+        const e = timeToInterval(sched.shift_end)
+        if (s !== null && e > s) newBlocks[p.id].push({ id:'shift-'+p.id, type:'shift', start:Math.max(0,s), duration:e-s })
       }
       if (sched.break1_start) {
         const s = timeToInterval(sched.break1_start)
@@ -164,33 +164,37 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
   // Drag handling
   useEffect(() => {
     if (!dragging) return
+    const cellW = CELL_WIDTH
     const onMove = (e) => {
       const dx = e.clientX - dragging.startX
-      const dIntervals = Math.round(dx / CELL_WIDTH)
+      const dIntervals = Math.round(dx / cellW)
       if (dIntervals === 0) return
+      setDragging(prev => ({ ...prev, startX: e.clientX }))
       setBlocks(prev => {
         const pBlocks = [...(prev[dragging.profileId] || [])]
         const idx = pBlocks.findIndex(b => b.id === dragging.blockId)
         if (idx === -1) return prev
         const block = { ...pBlocks[idx] }
         if (dragging.mode === 'move') {
-          block.start = Math.max(0, Math.min(TOTAL_INTERVALS - block.duration, block.start + dIntervals))
+          block.start = Math.max(0, block.start + dIntervals)
         } else {
-          block.duration = Math.max(1, Math.min(TOTAL_INTERVALS - block.start, block.duration + dIntervals))
+          block.duration = Math.max(1, block.duration + dIntervals)
         }
         pBlocks[idx] = block
         return { ...prev, [dragging.profileId]: pBlocks }
       })
-      setDragging(prev => ({ ...prev, startX: e.clientX }))
     }
     const onUp = () => {
-      saveBlocksToDb(dragging.profileId, blocks)
+      setBlocks(curr => {
+        saveBlocksToDb(dragging.profileId, curr)
+        return curr
+      })
       setDragging(null)
     }
     window.addEventListener('mousemove', onMove)
     window.addEventListener('mouseup', onUp)
     return () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp) }
-  }, [dragging, blocks, CELL_WIDTH])
+  }, [dragging, CELL_WIDTH])
 
   const saveBlocksToDb = async (profileId, currentBlocks) => {
     const pBlocks = currentBlocks[profileId] || []
@@ -382,7 +386,7 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
 
       {/* Timeline */}
       <div style={{ flex:1, overflowY:'auto', overflowX:'auto' }} ref={containerRef}>
-        <div style={{ minWidth: LABEL_WIDTH + TOTAL_INTERVALS * MIN_CELL_WIDTH }}>
+        <div style={{ minWidth: LABEL_WIDTH + TOTAL_INTERVALS * CELL_WIDTH + 200 }}>
 
           {/* Hour header */}
           <div style={{ display:'flex', position:'sticky', top:0, zIndex:20, background:'var(--surface)', borderBottom:'1px solid var(--border)', minHeight:48 }}>
@@ -491,8 +495,8 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
                           })
                         }}
                         onMouseLeave={() => setTooltip(null)}
-                        style={{ position:'absolute', left:Math.max(0, Math.min(l, TOTAL_INTERVALS * CELL_WIDTH - 4)), top: isShift ? 8 : 12, height: isShift ? ROW_HEIGHT - 24 : ROW_HEIGHT - 32,
-                          width:Math.max(0, Math.min(w, TOTAL_INTERVALS * CELL_WIDTH - Math.max(0, l) - 2)), background:bt.bg, border:`1.5px solid ${bt.color}`, borderRadius:5,
+                        style={{ position:'absolute', left:Math.max(0, l), top: isShift ? 8 : 12, height: isShift ? ROW_HEIGHT - 24 : ROW_HEIGHT - 32,
+                          width:Math.max(0, w), background:bt.bg, border:`1.5px solid ${bt.color}`, borderRadius:5,
                           display:'flex', alignItems:'center', overflow:'hidden',
                           cursor: isAdmin ? 'grab' : 'default', zIndex: isShift ? 2 : 4, userSelect:'none' }}>
                         <span style={{ fontSize:9, fontWeight:700, color:bt.text, paddingLeft:6, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', flex:1 }}>
