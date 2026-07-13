@@ -438,13 +438,13 @@ export default function DialerLayout() {
             </button>
             {showStatusMenu && (
               <div style={{
-                position: 'absolute',
-                bottom: 0,
-                left: navCollapsed ? 'calc(100% + 8px)' : 0,
-                right: navCollapsed ? 'auto' : 0,
-                minWidth: 200,
+                position: 'fixed',
+                bottom: 10,
+                left: navCollapsed ? NAV_WIDTH + 8 : 8,
+                right: navCollapsed ? 'auto' : NAV_WIDTH - 8,
+                minWidth: 210,
                 background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius)',
-                boxShadow:'0 4px 24px rgba(0,0,0,.2)', zIndex:999, overflow:'hidden',
+                boxShadow:'0 4px 24px rgba(0,0,0,.2)', zIndex:9999, overflow:'hidden',
               }}>
                 {statusOptions.map(s => (
                   <button key={s.value} onClick={() => updateStatus(s.value)}
