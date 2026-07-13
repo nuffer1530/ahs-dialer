@@ -397,11 +397,11 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
                     {/* Tick mark */}
                     <div style={{
                       position:'absolute', left:0,
+                      top: isHour ? 0 : isHalf ? '40%' : '60%',
                       bottom:0,
-                      width: isHour ? '1px' : '0.5px',
-                      height: isHour ? '100%' : isHalf ? '50%' : '30%',
+                      width: isHour ? '1px' : '1px',
                       background:'var(--border)',
-                      opacity: isHour ? 1 : isHalf ? 0.6 : 0.3
+                      opacity: isHour ? 1 : isHalf ? 0.5 : 0.25
                     }} />
                     {/* Hour label */}
                     {isHour && h <= END_HOUR && (
@@ -459,10 +459,10 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
                 </div>
 
                 {/* Track area */}
-                <div style={{ flex:1, position:'relative', overflow:'hidden', minWidth:0 }}>
+                <div style={{ flex:1, position:'relative', overflow:'visible', minWidth:0 }}>
                   {/* Grid lines */}
                   {Array.from({ length: END_HOUR - START_HOUR + 1 }, (_, i) => i).map(i => (
-                    <div key={i} style={{ position:'absolute', left:i*4*CELL_WIDTH, top:0, bottom:0, width:'1px', background: i%4===0 ? 'var(--border)' : 'rgba(0,0,0,.04)', pointerEvents:'none' }} />
+                    <div key={i} style={{ position:'absolute', left:i*4*CELL_WIDTH, top:0, bottom:0, width:'1px', background: i%4===0 ? 'var(--border)' : 'transparent', pointerEvents:'none' }} />
                   ))}
 
                   {/* Now line */}
