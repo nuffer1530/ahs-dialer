@@ -650,6 +650,7 @@ export default function MyPage() {
                     const thr = scThresholds[kpi.id] || kpi.thresholds
 
                     const fmt = (n) => unit === '%' ? `${n}%` : unit === 'points' ? `${n} pts` : `${n}${unit}`
+                    const range = (lo, hi) => lo === hi ? fmt(lo) : `${fmt(lo)}-${fmt(hi)}`
                     let col4, col3, col2, col1
                     if (kpi.id === 'attendance') {
                       // Exact values for attendance (lower is better, discrete points)
@@ -659,13 +660,13 @@ export default function MyPage() {
                       col1 = `${thr.improvement + 1}+ pts`
                     } else if (lowerIsBetter) {
                       col4 = `${fmt(thr.exceeds)} or less`
-                      col3 = `${fmt(thr.exceeds + 1)}-${fmt(thr.meets)}`
-                      col2 = `${fmt(thr.meets + 1)}-${fmt(thr.improvement)}`
+                      col3 = range(thr.exceeds + 1, thr.meets)
+                      col2 = range(thr.meets + 1, thr.improvement)
                       col1 = `${fmt(thr.improvement + 1)}+`
                     } else {
                       col4 = `${fmt(thr.exceeds)}+`
-                      col3 = `${fmt(thr.meets)}-${fmt(thr.exceeds - 1)}`
-                      col2 = `${fmt(thr.improvement)}-${fmt(thr.meets - 1)}`
+                      col3 = range(thr.meets, thr.exceeds - 1)
+                      col2 = range(thr.improvement, thr.meets - 1)
                       col1 = `Below ${fmt(thr.improvement)}`
                     }
 
