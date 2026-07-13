@@ -134,7 +134,7 @@ export default function AdminPage() {
 
     Promise.all([
       sb.from('commission_settings').select('*'),
-      sb.from('commissions').select('*, profiles(name)').gte('earned_at', monday.toISOString()).order('earned_at', { ascending: false }),
+      sb.from('commissions').select('*, profiles!commissions_profile_id_fkey(name), updater:profiles!commissions_updated_by_fkey(name)').gte('earned_at', monday.toISOString()).order('earned_at', { ascending: false }),
     ]).then(([{ data: rates }, { data: history }]) => {
       if (rates?.length) {
         const r = {}
@@ -262,8 +262,9 @@ export default function AdminPage() {
         also_membership: false,
         membership_amount: 0,
         notes: adjNote || 'Admin manual adjustment',
+        updated_by: profile.id,
         earned_at: new Date().toISOString(),
-      }).select('*, profiles(name)').single()
+      }).select('*, profiles!commissions_profile_id_fkey(name), updater:profiles!commissions_updated_by_fkey(name)').single()
       if (data) {
         setCommissionHistory(prev => [data, ...prev])
         // Update allRepEarnings too
@@ -703,12 +704,13 @@ export default function AdminPage() {
                   <div className="empty-state"><div className="empty-icon">--</div><div>No commissions earned yet this week</div></div>
                 ) : (
                   <table className="data-table">
-                    <thead><tr>{isAdmin && <th>Rep</th>}<th>Type</th><th>Detail</th><th style={{textAlign:'right'}}>Amount</th><th>When</th></tr></thead>
+                    <thead><tr>{isAdmin && <th>Rep</th>}<th>Type</th><th>Detail</th><th style={{textAlign:'right'}}>Amount</th><th>When</th>{isAdmin && <th>By</th>}</tr></thead>
                     <tbody>
                       {commissionHistory.filter(c => !isAdmin ? c.profile_id === profile?.id : true).map(c => {
                         const isAdj = c.event_type === 'adjustment'
                         const isMem = c.event_type === 'membership'
                         const amt = parseFloat(c.amount)
+                        const madeBy = c.updater?.name || (isAdj ? 'Admin' : null)
                         return (
                           <tr key={c.id}>
                             {isAdmin && <td style={{padding:'10px 12px', fontWeight:500}}>{c.profiles?.name || c.rep_name}</td>}
@@ -728,6 +730,11 @@ export default function AdminPage() {
                             <td style={{padding:'10px 12px', color:'var(--text-muted)', fontSize:11}}>
                               {new Date(c.earned_at).toLocaleString('en-US', { month:'short', day:'numeric', hour:'numeric', minute:'2-digit' })}
                             </td>
+                            {isAdmin && (
+                              <td style={{padding:'10px 12px', fontSize:11, color: madeBy ? 'var(--text-secondary)' : 'var(--text-muted)'}}>
+                                {madeBy || '--'}
+                              </td>
+                            )}
                           </tr>
                         )
                       })}
