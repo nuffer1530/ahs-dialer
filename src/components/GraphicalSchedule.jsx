@@ -446,16 +446,16 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
                     {p.avatar || (p.name||p.email||'?')[0].toUpperCase()}
                   </div>
                   <div style={{ minWidth:0 }}>
-                    <div style={{ fontSize:12, fontWeight:500, color:'var(--text-primary)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{p.name||p.email}</div>
+                    <div style={{ fontSize:11, fontWeight:600, color:'var(--text-primary)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{p.name||p.email}</div>
                     {sched?.shift_start && sched?.shift_end && (
-                      <div style={{ fontSize:10, color:'var(--text-muted)', marginTop:1 }}>
-                        {fmtTime(sched.shift_start)} – {fmtTime(sched.shift_end)} · {(timeToInterval(sched.shift_end) - timeToInterval(sched.shift_start)) / 4}h
+                      <div style={{ fontSize:9, color:'var(--text-muted)', marginTop:1, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
+                        {fmtTime(sched.shift_start)}–{fmtTime(sched.shift_end)} · {(timeToInterval(sched.shift_end) - timeToInterval(sched.shift_start)) / 4}h
                       </div>
                     )}
                     {totalAdh != null && (
-                      <div style={{ fontSize:10, color:adhColor, marginTop:1, fontWeight:600 }}>{totalAdh}% adherent</div>
+                      <div style={{ fontSize:9, color:adhColor, marginTop:1, fontWeight:600 }}>{totalAdh}%</div>
                     )}
-                    {!sched && <div style={{ fontSize:10, color:'var(--text-muted)', marginTop:1 }}>No shift</div>}
+                    {!sched && <div style={{ fontSize:9, color:'var(--text-muted)', marginTop:1 }}>No shift</div>}
                   </div>
                   {isAdmin && (
                     <button onClick={() => { setAddBlockMenu({ profileId:p.id }) }}
@@ -467,7 +467,7 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
                 </div>
 
                 {/* Track area */}
-                <div style={{ flex:1, position:'relative', overflow:'hidden', minWidth: TOTAL_INTERVALS * CELL_WIDTH + 120 }}>
+                <div style={{ flex:1, position:'relative', overflow:'visible', minWidth: TOTAL_INTERVALS * CELL_WIDTH + 120 }}>
                   {/* Grid lines */}
                   {Array.from({ length: END_HOUR - START_HOUR + 1 }, (_, i) => i).map(i => (
                     <div key={i} style={{ position:'absolute', left:i*4*CELL_WIDTH, top:0, bottom:0, width:'1px', background: i%4===0 ? 'var(--border)' : 'transparent', pointerEvents:'none' }} />
