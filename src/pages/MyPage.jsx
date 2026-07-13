@@ -42,15 +42,15 @@ const SCORECARD_KPIS = [
   {
     id: 'attendance',
     label: 'Attendance',
-    weight: 0.30,
+    weight: 0.25,
     unit: 'points',
-    thresholds: { exceeds: 0, meets: 1, improvement: 2 }, // points: lower is better
+    thresholds: { exceeds: 0, meets: 1, improvement: 2 },
     lowerIsBetter: true,
   },
   {
     id: 'booking_pct',
     label: 'Inbound Booking %',
-    weight: 0.25,
+    weight: 0.20,
     unit: '%',
     thresholds: { exceeds: 90, meets: 80, improvement: 75 },
     lowerIsBetter: false,
@@ -58,9 +58,17 @@ const SCORECARD_KPIS = [
   {
     id: 'booked_calls',
     label: 'Booked Calls',
-    weight: 0.25,
+    weight: 0.20,
     unit: '',
     thresholds: { exceeds: 140, meets: 110, improvement: 85 },
+    lowerIsBetter: false,
+  },
+  {
+    id: 'call_quality',
+    label: 'Call Quality Evaluation(s)',
+    weight: 0.15,
+    unit: '%',
+    thresholds: { exceeds: 95, meets: 90, improvement: 85 },
     lowerIsBetter: false,
   },
   {
@@ -109,8 +117,8 @@ export default function MyPage() {
   const [hoveredTab, setHoveredTab] = useState(null)
   const now = new Date()
   const [scorecardMonth, setScorecardMonth] = useState({ year: now.getFullYear(), month: now.getMonth() })
-  const [scWeights, setScWeights] = useState({ attendance: 30, booking_pct: 25, booked_calls: 25, memberships: 20 })
-  const [scActuals, setScActuals] = useState({ booking_pct: null, booked_calls: null, memberships: null })
+  const [scWeights, setScWeights] = useState({ attendance: 25, booking_pct: 20, booked_calls: 20, call_quality: 15, memberships: 20 })
+  const [scActuals, setScActuals] = useState({ booking_pct: null, booked_calls: null, call_quality: null, memberships: null })
 
   const today = toYMD(new Date())
   const weekDates = getWeekDates(weekBase)
@@ -150,6 +158,7 @@ export default function MyPage() {
         setScActuals({
           booking_pct: data?.booking_pct ?? null,
           booked_calls: data?.booked_calls ?? null,
+          call_quality: data?.call_quality ?? null,
           memberships: data?.memberships ?? null,
         })
         if (data?.weights) { try { setScWeights(data.weights) } catch (e) {} }
@@ -459,8 +468,7 @@ export default function MyPage() {
                     const w = parseFloat(scWeights[kpi.id]) || kpi.weight * 100
                     const actual = kpi.id === 'attendance'
                       ? scTotalPoints
-                      : (scActuals[kpi.id] != null ? parseFloat(scActuals[kpi.id]) : null)
-                    const rating = getRating(kpi, actual)
+                      : (scActuals[kpi.id] != null ? parseFloat(scActuals[kpi.id]) : null)                    const rating = getRating(kpi, actual)
                     const ratingStyle = rating ? RATING_COLORS[rating] : null
                     const { thresholds, lowerIsBetter, unit } = kpi
 
