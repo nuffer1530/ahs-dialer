@@ -958,14 +958,14 @@ export default function DialerPage() {
                           const end = new Date(slot.end)
                           const open = slot.openAvailability || 0
                           const total = slot.totalAvailability || open
-                          const pct = total ? Math.round((open/total)*100) : 0
+                          const pctOpen = total ? Math.round((open/total)*100) : 0
                           const isSelected = selectedSlot?.start === slot.start
                           const hasOpen = open > 0
 
                           let bg, border, textColor, barColor
                           if (isSelected) { bg='#16A34A'; border='2px solid #16A34A'; textColor='#fff'; barColor='rgba(255,255,255,.4)' }
                           else if (!hasOpen) { bg='var(--surface-2)'; border='1px solid var(--border)'; textColor='var(--text-muted)'; barColor='var(--border)' }
-                          else if (pct >= 70) { bg='#FEF3C7'; border='1px solid #F59E0B'; textColor='#92400E'; barColor='#F59E0B' }
+                          else if (pctOpen < 50) { bg='#FEF3C7'; border='1px solid #F59E0B'; textColor='#92400E'; barColor='#F59E0B' }
                           else { bg='#DCFCE7'; border='1px solid #16A34A'; textColor='#15803D'; barColor='#16A34A' }
 
                           return (
@@ -981,10 +981,10 @@ export default function DialerPage() {
                               </div>
                               {/* Availability bar */}
                               <div style={{ marginTop:6, height:3, background:'rgba(0,0,0,.1)', borderRadius:99, overflow:'hidden' }}>
-                                <div style={{ height:'100%', width:`${pct}%`, background:barColor, borderRadius:99 }} />
+                                <div style={{ height:'100%', width:`${pctOpen}%`, background:barColor, borderRadius:99 }} />
                               </div>
                               <div style={{ fontSize:9, color:textColor, marginTop:3, opacity:.9 }}>
-                                {isSelected ? '✓ Selected' : hasOpen ? `${open}h open` : 'Full'}
+                                {isSelected ? 'Selected' : hasOpen ? `${open} open` : 'Full'}
                               </div>
                             </div>
                           )
