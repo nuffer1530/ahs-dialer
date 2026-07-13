@@ -103,6 +103,8 @@ export default function AttendancePage() {
 
   useEffect(() => {
     if (tab !== 'schedule') return
+    // Jump the week grid to today's week whenever returning to schedule tab
+    setWeekBase(getTodayMonday())
     const from = new Date(); from.setDate(from.getDate() - 30)
     const to = new Date(); to.setDate(to.getDate() + 30)
     sb.from('schedules').select('*')
@@ -134,7 +136,7 @@ export default function AttendancePage() {
     const load = async () => {
       const [{ data: p }, { data: s }, { data: ev }, { data: t }, { data: ap }] = await Promise.all([
         sb.from('profiles').select('id, name, email, avatar').order('name'),
-        sb.from('schedules').select('*').gte('date', weekDates[0]).lte('date', weekDates[6]),
+        sb.from('schedules').select('*').gte('date', (() => { const d = new Date(); d.setDate(d.getDate()-30); return d.toISOString().split('T')[0] })()).lte('date', (() => { const d = new Date(); d.setDate(d.getDate()+30); return d.toISOString().split('T')[0] })()),
         sb.from('status_events').select('*').gte('started_at', weekDates[0] + 'T00:00:00').lte('started_at', weekDates[6] + 'T23:59:59'),
         sb.from('shift_templates').select('*').order('name'),
         sb.from('attendance_points').select('*').gte('date', new Date().getFullYear() + '-01-01').order('date', { ascending: false }),
@@ -205,6 +207,10 @@ export default function AttendancePage() {
       result = data
     }
     if (result) setSchedules(prev => existing ? prev.map(s => s.id === existing.id ? result : s) : [...prev, result])
+    // Also refresh wide window so Graphical tab stays in sync
+    const from = new Date(); from.setDate(from.getDate() - 30)
+    const to = new Date(); to.setDate(to.getDate() + 30)
+    sb.from('schedules').select('*').gte('date', from.toISOString().split('T')[0]).lte('date', to.toISOString().split('T')[0]).then(({ data }) => setSchedules(data || []))
     setSaving(false); setEditCell(null)
   }
 
