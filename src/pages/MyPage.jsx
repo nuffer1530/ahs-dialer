@@ -468,7 +468,8 @@ export default function MyPage() {
                     const w = parseFloat(scWeights[kpi.id]) || kpi.weight * 100
                     const actual = kpi.id === 'attendance'
                       ? scTotalPoints
-                      : (scActuals[kpi.id] != null ? parseFloat(scActuals[kpi.id]) : null)                    const rating = getRating(kpi, actual)
+                      : (scActuals[kpi.id] != null ? parseFloat(scActuals[kpi.id]) : null)
+                    const rating = getRating(kpi, actual)
                     const ratingStyle = rating ? RATING_COLORS[rating] : null
                     const { thresholds, lowerIsBetter, unit } = kpi
 
