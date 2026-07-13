@@ -318,8 +318,8 @@ export default function AttendancePage() {
           <div style={{ display:'flex', gap:0 }}>
             {TABS.map(t => (
               <button key={t.id} onClick={() => setTab(t.id)}
-                onMouseEnter={e => { if (tab !== t.id) e.currentTarget.style.color = 'var(--text-primary)'; if (tab !== t.id) e.currentTarget.style.background = 'var(--surface-2)' }}
-                onMouseLeave={e => { if (tab !== t.id) e.currentTarget.style.color = 'var(--text-muted)'; if (tab !== t.id) e.currentTarget.style.background = 'transparent' }}
+                onMouseEnter={e => { if (tab !== t.id) { e.currentTarget.style.color = 'var(--text-primary)'; e.currentTarget.style.background = 'var(--surface-2)' } }}
+                onMouseLeave={e => { e.currentTarget.style.color = ''; e.currentTarget.style.background = '' }}
                 style={{ padding:'10px 16px', fontSize:13, fontWeight: tab===t.id ? 600 : 400, border:'none', cursor:'pointer',
                   borderRadius:'var(--radius) var(--radius) 0 0',
                   background:'transparent', color: tab===t.id ? 'var(--accent)' : 'var(--text-muted)',
