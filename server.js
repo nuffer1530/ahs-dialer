@@ -253,10 +253,21 @@ app.get('/api/st/businessunits', async (req, res) => {
   }
 })
 
+// ── ST: Get campaigns (for booking)
+app.get('/api/st/campaigns', async (req, res) => {
+  try {
+    const data = await stGet(`/marketing/v2/tenant/${ST_TENANT_ID}/campaigns?active=true&pageSize=200`)
+    res.json(data)
+  } catch (err) {
+    console.error('ST campaigns error:', err.message)
+    res.status(500).json({ error: err.message })
+  }
+})
+
 // ── ST: Create booking (direct to dispatch board, unscheduled)
 app.post('/api/st/book', async (req, res) => {
   try {
-    const { customerId, jobTypeId, businessUnitId, notes, repName, contactName, phone, zip, start, end } = req.body
+    const { customerId, jobTypeId, businessUnitId, notes, repName, contactName, phone, zip, start, end, campaignId } = req.body
     if (!customerId || !jobTypeId || !businessUnitId) {
       return res.status(400).json({ error: 'customerId, jobTypeId, and businessUnitId required' })
     }
@@ -267,13 +278,26 @@ app.post('/api/st/book', async (req, res) => {
     if (!location) throw new Error(`No location found for customer ${customerId}`)
 
     // Step 2: Create the job — scheduled if slot selected, unscheduled falls to bottom of dispatch board
+    // Get a valid ST campaign ID — required by ST API
+    let stCampaignId = campaignId ? parseInt(campaignId) : null
+    if (!stCampaignId) {
+      try {
+        const campData = await stGet(`/marketing/v2/tenant/${ST_TENANT_ID}/campaigns?active=true&pageSize=1`)
+        stCampaignId = campData?.data?.[0]?.id || null
+      } catch (e) {
+        console.warn('Could not fetch ST campaigns:', e.message)
+      }
+    }
+
     const jobBody = {
       customerId: parseInt(customerId),
       locationId: location.id,
       jobTypeId: parseInt(jobTypeId),
       businessUnitId: parseInt(businessUnitId),
+      campaignId: stCampaignId,
       priority: 'Normal',
       summary: notes || `Outbound booking via Andi — ${repName || 'CSR'}`,
+      body: notes || `Outbound booking via Andi — ${repName || 'CSR'}`,
       tagTypeIds: [],
     }
 
