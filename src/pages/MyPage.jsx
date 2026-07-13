@@ -649,11 +649,25 @@ export default function MyPage() {
                     const { lowerIsBetter, unit } = kpi
                     const thr = scThresholds[kpi.id] || kpi.thresholds
 
-                    const fmt = (n) => unit === '%' ? `${n}%` : `${n}${unit}`
-                    const col4 = lowerIsBetter ? fmt(thr.exceeds) : `${fmt(thr.exceeds)}+`
-                    const col3 = lowerIsBetter ? `${fmt(thr.meets+1)}-${fmt(thr.exceeds+1)}` : `${fmt(thr.meets)}-${fmt(thr.exceeds-1)}`
-                    const col2 = lowerIsBetter ? `${fmt(thr.improvement+1)}-${fmt(thr.meets+1)}` : `${fmt(thr.improvement)}-${fmt(thr.meets-1)}`
-                    const col1 = lowerIsBetter ? `${fmt(thr.improvement+1)}+` : `${fmt(thr.improvement-1)} or less`
+                    const fmt = (n) => unit === '%' ? `${n}%` : unit === 'points' ? `${n} pts` : `${n}${unit}`
+                    let col4, col3, col2, col1
+                    if (kpi.id === 'attendance') {
+                      // Exact values for attendance (lower is better, discrete points)
+                      col4 = fmt(thr.exceeds)
+                      col3 = fmt(thr.meets)
+                      col2 = fmt(thr.improvement)
+                      col1 = `${thr.improvement + 1}+ pts`
+                    } else if (lowerIsBetter) {
+                      col4 = `${fmt(thr.exceeds)} or less`
+                      col3 = `${fmt(thr.exceeds + 1)}-${fmt(thr.meets)}`
+                      col2 = `${fmt(thr.meets + 1)}-${fmt(thr.improvement)}`
+                      col1 = `${fmt(thr.improvement + 1)}+`
+                    } else {
+                      col4 = `${fmt(thr.exceeds)}+`
+                      col3 = `${fmt(thr.meets)}-${fmt(thr.exceeds - 1)}`
+                      col2 = `${fmt(thr.improvement)}-${fmt(thr.meets - 1)}`
+                      col1 = `Below ${fmt(thr.improvement)}`
+                    }
 
                     return (
                       <div key={kpi.id} style={{ display:'grid', gridTemplateColumns:'1fr 80px 110px 1fr 1fr 1fr 1fr', borderBottom: idx < SCORECARD_KPIS.length-1 ? '1px solid var(--border)' : 'none', background: idx % 2 === 0 ? 'var(--surface)' : 'var(--surface-2)' }}>
