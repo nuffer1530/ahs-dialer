@@ -37,7 +37,7 @@ const DAY_TYPE_STYLES = {
   work:    { label: null,      bg: null,       color: null,      border: null      },
 }
 
-// Scorecard KPIs — Brandyn can adjust thresholds here
+// Scorecard KPIs -- Brandyn can adjust thresholds here
 const SCORECARD_KPIS = [
   {
     id: 'attendance',
@@ -112,7 +112,7 @@ export default function MyPage() {
 
   const today = toYMD(new Date())
   const weekDates = getWeekDates(weekBase)
-  const weekLabel = `${fmtDate(weekDates[0])} – ${fmtDate(weekDates[6])}`
+  const weekLabel = `${fmtDate(weekDates[0])} - ${fmtDate(weekDates[6])}`
 
   useEffect(() => {
     if (!profile?.id) return
@@ -139,7 +139,7 @@ export default function MyPage() {
 
   const getSched = (profileId, date) => schedules.find(s => s.profile_id === profileId && s.date === date)
 
-  // Scorecard month data — filtered by selected scorecardMonth
+  // Scorecard month data -- filtered by selected scorecardMonth
   const scMonthStart = toYMD(new Date(scorecardMonth.year, scorecardMonth.month, 1))
   const scMonthEnd = toYMD(new Date(scorecardMonth.year, scorecardMonth.month + 1, 0))
   const scPoints = attendancePoints.filter(p => p.date >= scMonthStart && p.date <= scMonthEnd)
@@ -153,7 +153,7 @@ export default function MyPage() {
   const myEvents = statusEvents.filter(e => e.started_at?.slice(0,10) >= monthStart)
   const callEvents = myEvents.filter(e => e.status === 'On Call')
   const totalCallMins = callEvents.reduce((s, e) => s + (e.duration_seconds || 0) / 60, 0)
-  const avgCallMins = callEvents.length ? (totalCallMins / callEvents.length).toFixed(1) : '—'
+  const avgCallMins = callEvents.length ? (totalCallMins / callEvents.length).toFixed(1) : '--'
 
   const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December']
   const scorecardLabel = `${MONTH_NAMES[scorecardMonth.month]} ${scorecardMonth.year}`
@@ -175,7 +175,7 @@ export default function MyPage() {
   return (
     <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden' }}>
 
-      {/* ── HEADER BAR ── */}
+      {/* -- HEADER BAR -- */}
       <div style={{ background:'var(--surface)', borderBottom:'1px solid var(--border)', flexShrink:0 }}>
         {/* Title row */}
         <div style={{ padding:'16px 24px 0', display:'flex', alignItems:'flex-start', justifyContent:'space-between', gap:16 }}>
@@ -193,12 +193,12 @@ export default function MyPage() {
               <button onClick={() => { const d = new Date(weekBase + 'T00:00:00'); d.setDate(d.getDate()-7); setWeekBase(toYMD(d)) }}
                 style={{ width:32, height:32, border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface-2)', cursor:'pointer', fontSize:16, color:'var(--text-secondary)', display:'flex', alignItems:'center', justifyContent:'center' }}
                 onMouseEnter={e => e.currentTarget.style.background='var(--surface)'}
-                onMouseLeave={e => e.currentTarget.style.background='var(--surface-2)'}>‹</button>
+                onMouseLeave={e => e.currentTarget.style.background='var(--surface-2)'}>{'<'}</button>
               <span style={{ fontSize:13, fontWeight:500, color:'var(--text-primary)', minWidth:200, textAlign:'center' }}>{weekLabel}</span>
               <button onClick={() => { const d = new Date(weekBase + 'T00:00:00'); d.setDate(d.getDate()+7); setWeekBase(toYMD(d)) }}
                 style={{ width:32, height:32, border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface-2)', cursor:'pointer', fontSize:16, color:'var(--text-secondary)', display:'flex', alignItems:'center', justifyContent:'center' }}
                 onMouseEnter={e => e.currentTarget.style.background='var(--surface)'}
-                onMouseLeave={e => e.currentTarget.style.background='var(--surface-2)'}>›</button>
+                onMouseLeave={e => e.currentTarget.style.background='var(--surface-2)'}>{'>'}</button>
               <button onClick={() => setWeekBase(getTodayMonday())}
                 style={{ padding:'5px 10px', fontSize:12, fontWeight:500, border:'1px solid var(--accent)', borderRadius:'var(--radius)', background:'none', color:'var(--accent)', cursor:'pointer' }}>
                 Today
@@ -210,12 +210,12 @@ export default function MyPage() {
               <button onClick={() => navMonth(-1)}
                 style={{ width:32, height:32, border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface-2)', cursor:'pointer', fontSize:16, color:'var(--text-secondary)', display:'flex', alignItems:'center', justifyContent:'center' }}
                 onMouseEnter={e => e.currentTarget.style.background='var(--surface)'}
-                onMouseLeave={e => e.currentTarget.style.background='var(--surface-2)'}>‹</button>
+                onMouseLeave={e => e.currentTarget.style.background='var(--surface-2)'}>{'<'}</button>
               <span style={{ fontSize:13, fontWeight:500, color:'var(--text-primary)', minWidth:180, textAlign:'center' }}>{scorecardLabel}</span>
               <button onClick={() => navMonth(1)}
                 style={{ width:32, height:32, border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface-2)', cursor:'pointer', fontSize:16, color:'var(--text-secondary)', display:'flex', alignItems:'center', justifyContent:'center' }}
                 onMouseEnter={e => e.currentTarget.style.background='var(--surface)'}
-                onMouseLeave={e => e.currentTarget.style.background='var(--surface-2)'}>›</button>
+                onMouseLeave={e => e.currentTarget.style.background='var(--surface-2)'}>{'>'}</button>
               {!isCurrentMonth && (
                 <button onClick={() => setScorecardMonth({ year: now.getFullYear(), month: now.getMonth() })}
                   style={{ padding:'5px 10px', fontSize:12, fontWeight:500, border:'1px solid var(--accent)', borderRadius:'var(--radius)', background:'none', color:'var(--accent)', cursor:'pointer' }}>
@@ -299,7 +299,7 @@ export default function MyPage() {
                         {sched && dt === 'work' && (
                           <div style={{ marginTop:6 }}>
                             <div style={{ fontSize:12, fontWeight:600, color:'var(--text-primary)' }}>
-                              {fmt12(sched.shift_start)} – {fmt12(sched.shift_end)}
+                              {fmt12(sched.shift_start)} - {fmt12(sched.shift_end)}
                             </div>
                             <div style={{ marginTop:8, display:'flex', flexDirection:'column', gap:4 }}>
                               {sched.break1_start && (
@@ -357,7 +357,7 @@ export default function MyPage() {
                             const isToday = date === today
                             return (
                               <td key={date} style={{ padding:'8px', textAlign:'center', background: isToday ? 'var(--accent-bg)' : undefined, verticalAlign:'middle' }}>
-                                {!sched && <span style={{ fontSize:10, color:'var(--border-strong)' }}>—</span>}
+                                {!sched && <span style={{ fontSize:10, color:'var(--border-strong)' }}>--</span>}
                                 {sched && dt !== 'work' && (
                                   <span style={{ fontSize:10, fontWeight:600, color: style.color, background: style.bg, padding:'2px 6px', borderRadius:4 }}>{style.label}</span>
                                 )}
@@ -381,12 +381,12 @@ export default function MyPage() {
             {/* MY STATS */}
             {tab === 'stats' && (
               <div>
-                <div style={{ fontSize:11, color:'var(--text-muted)', marginBottom:20 }}>Month to date · {new Date().toLocaleDateString('en-US', { month:'long', year:'numeric' })}</div>
+                <div style={{ fontSize:11, color:'var(--text-muted)', marginBottom:20 }}>Month to date . {new Date().toLocaleDateString('en-US', { month:'long', year:'numeric' })}</div>
 
                 <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(180px,1fr))', gap:12, marginBottom:32 }}>
                   <StatCard label="Attendance Points" value={totalPoints.toFixed(1)} sub="Lower is better" valueColor={totalPoints === 0 ? 'var(--success)' : totalPoints <= 1 ? 'var(--warning)' : 'var(--danger)'} />
                   <StatCard label="Calls Handled" value={callEvents.length} sub="This month" />
-                  <StatCard label="Avg Call Duration" value={avgCallMins === '—' ? '—' : `${avgCallMins}m`} sub="Per call" />
+                  <StatCard label="Avg Call Duration" value={avgCallMins === '--' ? '--' : `${avgCallMins}m`} sub="Per call" />
                   <StatCard label="Status Events" value={myEvents.length} sub="All statuses" />
                 </div>
 
@@ -409,7 +409,7 @@ export default function MyPage() {
                             <td style={{ padding:'9px 14px', color:'var(--text-secondary)' }}>{fmtDate(pt.date)}</td>
                             <td style={{ padding:'9px 14px', textTransform:'capitalize' }}>{pt.reason?.replace(/_/g,' ')}</td>
                             <td style={{ padding:'9px 14px', fontWeight:700, color:'var(--danger)' }}>+{pt.points}</td>
-                            <td style={{ padding:'9px 14px', color:'var(--text-muted)' }}>{pt.notes || '—'}</td>
+                            <td style={{ padding:'9px 14px', color:'var(--text-muted)' }}>{pt.notes || '--'}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -423,7 +423,7 @@ export default function MyPage() {
             {tab === 'scorecard' && (
               <div>
                 <div style={{ fontSize:11, color:'var(--text-muted)', marginBottom:20 }}>
-                  {scorecardLabel} · scores and actuals will be pulled in automatically once connected
+                  {scorecardLabel} . scores and actuals will be pulled in automatically once connected
                 </div>
 
                 <div style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius-lg)', overflow:'hidden' }}>
@@ -443,8 +443,8 @@ export default function MyPage() {
 
                     const fmt = (n) => unit === '%' ? `${n}%` : `${n}${unit}`
                     const col4 = lowerIsBetter ? fmt(thresholds.exceeds) : `${fmt(thresholds.exceeds)}+`
-                    const col3 = lowerIsBetter ? `${fmt(thresholds.meets+1)}–${fmt(thresholds.exceeds+1)}` : `${fmt(thresholds.meets)}–${fmt(thresholds.exceeds-1)}`
-                    const col2 = lowerIsBetter ? `${fmt(thresholds.improvement+1)}–${fmt(thresholds.meets+1)}` : `${fmt(thresholds.improvement)}–${fmt(thresholds.meets-1)}`
+                    const col3 = lowerIsBetter ? `${fmt(thresholds.meets+1)}-${fmt(thresholds.exceeds+1)}` : `${fmt(thresholds.meets)}-${fmt(thresholds.exceeds-1)}`
+                    const col2 = lowerIsBetter ? `${fmt(thresholds.improvement+1)}-${fmt(thresholds.meets+1)}` : `${fmt(thresholds.improvement)}-${fmt(thresholds.meets-1)}`
                     const col1 = lowerIsBetter ? `${fmt(thresholds.improvement+1)}+` : `${fmt(thresholds.improvement-1)} or less`
 
                     return (
@@ -453,7 +453,7 @@ export default function MyPage() {
                           <div style={{ fontSize:13, fontWeight:600, color:'var(--text-primary)' }}>{kpi.label}</div>
                           {actual != null && ratingStyle && (
                             <div style={{ fontSize:10, fontWeight:700, padding:'2px 6px', borderRadius:4, background: ratingStyle.bg, color: ratingStyle.text, display:'inline-block', width:'fit-content' }}>
-                              {RATING_LABELS[rating]} · {actual}{unit}
+                              {RATING_LABELS[rating]} . {actual}{unit}
                             </div>
                           )}
                           {actual == null && (
@@ -499,9 +499,9 @@ function WeekNav({ weekBase, setWeekBase, weekLabel }) {
   }
   return (
     <div style={{ display:'flex', alignItems:'center', gap:12 }}>
-      <button onClick={() => nav(-1)} style={{ width:28, height:28, borderRadius:'50%', border:'1px solid var(--border)', background:'var(--surface)', cursor:'pointer', fontSize:14, display:'flex', alignItems:'center', justifyContent:'center', color:'var(--text-muted)' }}>‹</button>
+      <button onClick={() => nav(-1)} style={{ width:28, height:28, borderRadius:'50%', border:'1px solid var(--border)', background:'var(--surface)', cursor:'pointer', fontSize:14, display:'flex', alignItems:'center', justifyContent:'center', color:'var(--text-muted)' }}>{'<'}</button>
       <span style={{ fontSize:13, fontWeight:600, color:'var(--text-primary)' }}>{weekLabel}</span>
-      <button onClick={() => nav(1)} style={{ width:28, height:28, borderRadius:'50%', border:'1px solid var(--border)', background:'var(--surface)', cursor:'pointer', fontSize:14, display:'flex', alignItems:'center', justifyContent:'center', color:'var(--text-muted)' }}>›</button>
+      <button onClick={() => nav(1)} style={{ width:28, height:28, borderRadius:'50%', border:'1px solid var(--border)', background:'var(--surface)', cursor:'pointer', fontSize:14, display:'flex', alignItems:'center', justifyContent:'center', color:'var(--text-muted)' }}>{'>'}</button>
       <button onClick={() => setWeekBase(getTodayMonday())} style={{ fontSize:11, padding:'3px 8px', borderRadius:6, border:'1px solid var(--accent)', background:'none', color:'var(--accent)', cursor:'pointer', fontWeight:600 }}>Today</button>
     </div>
   )
