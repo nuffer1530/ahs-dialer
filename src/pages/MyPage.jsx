@@ -119,6 +119,9 @@ export default function MyPage() {
   const [scorecardMonth, setScorecardMonth] = useState({ year: now.getFullYear(), month: now.getMonth() })
   const [scWeights, setScWeights] = useState({ attendance: 25, booking_pct: 20, booked_calls: 20, call_quality: 15, memberships: 20 })
   const [scActuals, setScActuals] = useState({ booking_pct: null, booked_calls: null, call_quality: null, memberships: null })
+  const [commissions, setCommissions] = useState([])
+  const [commWeekBase, setCommWeekBase] = useState(getTodayMonday)
+  const [commLoading, setCommLoading] = useState(false)
 
   const today = toYMD(new Date())
   const weekDates = getWeekDates(weekBase)
@@ -148,6 +151,21 @@ export default function MyPage() {
     }
     load()
   }, [profile?.id])
+
+  // Load commissions for selected week
+  useEffect(() => {
+    if (!profile?.id) return
+    const commWeekDates = getWeekDates(commWeekBase)
+    const from = commWeekDates[0] + 'T00:00:00'
+    const to = commWeekDates[6] + 'T23:59:59'
+    setCommLoading(true)
+    sb.from('commissions').select('*')
+      .eq('profile_id', profile.id)
+      .gte('earned_at', from)
+      .lte('earned_at', to)
+      .order('earned_at', { ascending: false })
+      .then(({ data }) => { setCommissions(data || []); setCommLoading(false) })
+  }, [profile?.id, commWeekBase])
 
   // Reload scorecard actuals when month changes
   useEffect(() => {
@@ -195,10 +213,30 @@ export default function MyPage() {
   }
   const isCurrentMonth = scorecardMonth.year === now.getFullYear() && scorecardMonth.month === now.getMonth()
 
+  // Commission week helpers
+  const commWeekDates = getWeekDates(commWeekBase)
+  const commWeekLabel = `${fmtDate(commWeekDates[0])} - ${fmtDate(commWeekDates[6])}`
+  const isCurrentCommWeek = commWeekBase === getTodayMonday()
+  const navCommWeek = (dir) => {
+    const d = new Date(commWeekBase + 'T00:00:00')
+    d.setDate(d.getDate() + dir * 7)
+    setCommWeekBase(toYMD(d))
+  }
+
+  // Commission totals
+  const commTotal = commissions.reduce((s, c) => s + parseFloat(c.amount || 0), 0)
+  const commToday = commissions.filter(c => c.earned_at?.slice(0,10) === today).reduce((s, c) => s + parseFloat(c.amount || 0), 0)
+  const commByDay = commWeekDates.map(date => ({
+    date,
+    entries: commissions.filter(c => c.earned_at?.slice(0,10) === date),
+    total: commissions.filter(c => c.earned_at?.slice(0,10) === date).reduce((s, c) => s + parseFloat(c.amount || 0), 0),
+  }))
+
   const TABS = [
     { id: 'my-schedule',   label: 'My Schedule' },
     { id: 'team-schedule', label: 'Team Schedule' },
     { id: 'stats',         label: 'My Stats' },
+    { id: 'commissions',   label: 'Commissions' },
     { id: 'scorecard',     label: 'Scorecard' },
   ]
 
@@ -218,20 +256,22 @@ export default function MyPage() {
               <div style={{ fontSize:12, color:'var(--text-muted)', marginTop:2 }}>My Page</div>
             </div>
           </div>
-          {(tab === 'my-schedule' || tab === 'team-schedule') && (
+          {(tab === 'my-schedule' || tab === 'team-schedule' || tab === 'commissions') && (
             <div style={{ display:'flex', alignItems:'center', gap:10, marginTop:2 }}>
-              <button onClick={() => { const d = new Date(weekBase + 'T00:00:00'); d.setDate(d.getDate()-7); setWeekBase(toYMD(d)) }}
+              <button onClick={() => tab === 'commissions' ? navCommWeek(-1) : (() => { const d = new Date(weekBase + 'T00:00:00'); d.setDate(d.getDate()-7); setWeekBase(toYMD(d)) })()}
                 style={{ width:32, height:32, border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface-2)', cursor:'pointer', fontSize:16, color:'var(--text-secondary)', display:'flex', alignItems:'center', justifyContent:'center' }}
                 onMouseEnter={e => e.currentTarget.style.background='var(--surface)'}
                 onMouseLeave={e => e.currentTarget.style.background='var(--surface-2)'}>{'<'}</button>
-              <span style={{ fontSize:13, fontWeight:500, color:'var(--text-primary)', minWidth:200, textAlign:'center' }}>{weekLabel}</span>
-              <button onClick={() => { const d = new Date(weekBase + 'T00:00:00'); d.setDate(d.getDate()+7); setWeekBase(toYMD(d)) }}
+              <span style={{ fontSize:13, fontWeight:500, color:'var(--text-primary)', minWidth:200, textAlign:'center' }}>
+                {tab === 'commissions' ? commWeekLabel : weekLabel}
+              </span>
+              <button onClick={() => tab === 'commissions' ? navCommWeek(1) : (() => { const d = new Date(weekBase + 'T00:00:00'); d.setDate(d.getDate()+7); setWeekBase(toYMD(d)) })()}
                 style={{ width:32, height:32, border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface-2)', cursor:'pointer', fontSize:16, color:'var(--text-secondary)', display:'flex', alignItems:'center', justifyContent:'center' }}
                 onMouseEnter={e => e.currentTarget.style.background='var(--surface)'}
                 onMouseLeave={e => e.currentTarget.style.background='var(--surface-2)'}>{'>'}</button>
-              <button onClick={() => setWeekBase(getTodayMonday())}
+              <button onClick={() => tab === 'commissions' ? setCommWeekBase(getTodayMonday()) : setWeekBase(getTodayMonday())}
                 style={{ padding:'5px 10px', fontSize:12, fontWeight:500, border:'1px solid var(--accent)', borderRadius:'var(--radius)', background:'none', color:'var(--accent)', cursor:'pointer' }}>
-                Today
+                This Week
               </button>
             </div>
           )}
@@ -445,6 +485,128 @@ export default function MyPage() {
                       </tbody>
                     </table>
                   </div>
+                )}
+              </div>
+            )}
+
+            {/* COMMISSIONS */}
+            {tab === 'commissions' && (
+              <div>
+                {commLoading ? (
+                  <div style={{ display:'flex', alignItems:'center', justifyContent:'center', height:120 }}><div className="spinner" /></div>
+                ) : (
+                  <>
+                    {/* Summary cards */}
+                    <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:12, marginBottom:24 }}>
+                      <StatCard label="Today" value={`$${commToday.toFixed(2)}`} sub="Resets at midnight" valueColor={commToday > 0 ? 'var(--success)' : 'var(--text-primary)'} />
+                      <StatCard label="This Week" value={`$${commTotal.toFixed(2)}`} sub={commWeekLabel} valueColor={commTotal > 0 ? 'var(--accent)' : 'var(--text-primary)'} />
+                      <StatCard label="Transactions" value={commissions.length} sub="This week" />
+                    </div>
+
+                    {/* Daily breakdown */}
+                    <div style={{ display:'flex', flexDirection:'column', gap:12, marginBottom:24 }}>
+                      {commByDay.filter(d => d.entries.length > 0 || d.date === today).map(({ date, entries, total }) => {
+                        const isToday = date === today
+                        return (
+                          <div key={date} style={{ background:'var(--surface)', border:`1px solid ${isToday ? 'var(--accent)' : 'var(--border)'}`, borderRadius:'var(--radius-lg)', overflow:'hidden' }}>
+                            {/* Day header */}
+                            <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'10px 16px', background: isToday ? 'var(--accent-bg)' : 'var(--surface-2)', borderBottom: entries.length > 0 ? '1px solid var(--border)' : 'none' }}>
+                              <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                                <span style={{ fontSize:13, fontWeight:600, color: isToday ? 'var(--accent)' : 'var(--text-primary)' }}>
+                                  {DAYS[commWeekDates.indexOf(date)]} {fmtDate(date).split(' ')[1]}
+                                </span>
+                                {isToday && <span style={{ fontSize:10, fontWeight:700, color:'var(--accent)', background:'var(--accent-bg)', border:'1px solid var(--accent)', padding:'1px 6px', borderRadius:99, textTransform:'uppercase', letterSpacing:.5 }}>Today</span>}
+                              </div>
+                              <span style={{ fontSize:13, fontWeight:700, color: total > 0 ? 'var(--success)' : total < 0 ? 'var(--danger)' : 'var(--text-muted)' }}>
+                                {entries.length > 0 ? `$${total.toFixed(2)}` : '--'}
+                              </span>
+                            </div>
+                            {/* Entries */}
+                            {entries.length > 0 && entries.map(c => {
+                              const amt = parseFloat(c.amount || 0)
+                              const isAdj = c.event_type === 'adjustment'
+                              const isMem = c.event_type === 'membership'
+                              return (
+                                <div key={c.id} style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'10px 16px', borderBottom:'1px solid var(--border)', gap:12 }}>
+                                  <div style={{ display:'flex', alignItems:'center', gap:10, minWidth:0 }}>
+                                    <span style={{ padding:'2px 8px', borderRadius:99, fontSize:10, fontWeight:700, flexShrink:0,
+                                      background: isAdj ? (amt < 0 ? 'var(--danger-bg)' : 'var(--warning-bg)') : isMem ? '#EFF6FF' : 'var(--success-bg)',
+                                      color: isAdj ? (amt < 0 ? 'var(--danger)' : 'var(--warning)') : isMem ? '#3b82f6' : 'var(--success)' }}>
+                                      {isAdj ? 'Adjustment' : isMem ? 'Membership' : 'Booking'}
+                                    </span>
+                                    <div style={{ minWidth:0 }}>
+                                      <div style={{ fontSize:12, fontWeight:500, color:'var(--text-primary)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                                        {isAdj ? (c.notes || 'Manual adjustment') : c.contact_name}
+                                      </div>
+                                      <div style={{ fontSize:10, color:'var(--text-muted)' }}>
+                                        {new Date(c.earned_at).toLocaleTimeString('en-US', { hour:'numeric', minute:'2-digit' })}
+                                      </div>
+                                    </div>
+                                  </div>
+                                  <span style={{ fontSize:14, fontWeight:700, flexShrink:0, color: amt < 0 ? 'var(--danger)' : 'var(--success)' }}>
+                                    {amt >= 0 ? '+' : ''}${amt.toFixed(2)}
+                                  </span>
+                                </div>
+                              )
+                            })}
+                            {entries.length === 0 && (
+                              <div style={{ padding:'10px 16px', fontSize:12, color:'var(--text-muted)' }}>No earnings yet</div>
+                            )}
+                          </div>
+                        )
+                      })}
+                      {commByDay.every(d => d.entries.length === 0) && (
+                        <div style={{ textAlign:'center', padding:'40px 0', color:'var(--text-muted)', fontSize:13 }}>
+                          No commissions recorded for this week.
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Full log table */}
+                    {commissions.length > 0 && (
+                      <div style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius-lg)', overflow:'hidden' }}>
+                        <div style={{ padding:'12px 16px', borderBottom:'1px solid var(--border)', fontSize:11, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color:'var(--text-muted)' }}>
+                          Full breakdown
+                        </div>
+                        <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
+                          <thead>
+                            <tr style={{ background:'var(--surface-2)' }}>
+                              {['Type','Detail','Date / Time','Amount'].map((h,i) => (
+                                <th key={h} style={{ padding:'8px 14px', textAlign: i === 3 ? 'right' : 'left', fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color:'var(--text-muted)', borderBottom:'1px solid var(--border)' }}>{h}</th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {commissions.map(c => {
+                              const amt = parseFloat(c.amount || 0)
+                              const isAdj = c.event_type === 'adjustment'
+                              const isMem = c.event_type === 'membership'
+                              return (
+                                <tr key={c.id} style={{ borderBottom:'1px solid var(--border)' }}>
+                                  <td style={{ padding:'9px 14px' }}>
+                                    <span style={{ padding:'2px 7px', borderRadius:99, fontSize:10, fontWeight:700,
+                                      background: isAdj ? (amt < 0 ? 'var(--danger-bg)' : 'var(--warning-bg)') : isMem ? '#EFF6FF' : 'var(--success-bg)',
+                                      color: isAdj ? (amt < 0 ? 'var(--danger)' : 'var(--warning)') : isMem ? '#3b82f6' : 'var(--success)' }}>
+                                      {isAdj ? 'Adjustment' : isMem ? 'Membership' : 'Booking'}
+                                    </span>
+                                  </td>
+                                  <td style={{ padding:'9px 14px', color:'var(--text-secondary)' }}>
+                                    {isAdj ? (c.notes || 'Manual adjustment') : c.contact_name}
+                                  </td>
+                                  <td style={{ padding:'9px 14px', color:'var(--text-muted)', fontSize:11 }}>
+                                    {new Date(c.earned_at).toLocaleString('en-US', { month:'short', day:'numeric', hour:'numeric', minute:'2-digit' })}
+                                  </td>
+                                  <td style={{ padding:'9px 14px', textAlign:'right', fontWeight:700, color: amt < 0 ? 'var(--danger)' : 'var(--success)' }}>
+                                    {amt >= 0 ? '+' : ''}${amt.toFixed(2)}
+                                  </td>
+                                </tr>
+                              )
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
             )}
