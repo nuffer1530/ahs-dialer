@@ -406,12 +406,9 @@ export default function DialerPage() {
   const getSlotsByDay = (weekDates) => {
     const byDay = {}
     weekDates.forEach((date, i) => {
-      const dayStart = new Date(date); dayStart.setHours(0,0,0,0)
-      const dayEnd = new Date(date); dayEnd.setHours(23,59,59,999)
-      byDay[i] = availability.filter(s => {
-        const d = new Date(s.start)
-        return d >= dayStart && d <= dayEnd
-      })
+      // Compare date portion only (YYYY-MM-DD) since slot.start is now a local ISO string
+      const dayStr = `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`
+      byDay[i] = availability.filter(s => s.start && s.start.slice(0,10) === dayStr)
     })
     return byDay
   }
