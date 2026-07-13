@@ -862,7 +862,129 @@ export default function AdminPage() {
                   style={{ padding:'7px 16px', fontSize:13, fontWeight:600, background:'var(--accent)', color:'#fff', border:'none', borderRadius:'var(--radius)', cursor:'pointer', opacity: scSaving ? .6 : 1 }}>
                   {scSaving ? 'Saving...' : scSaved ? 'Saved!' : 'Save'}
                 </button>
-                <button onClick={() => window.print()}
+                <button onClick={() => {
+                  const selectedRep = profiles.find(p => p.id === scSelectedProfile)
+                  const overallScore = scWeightedScore()
+                  const actuals = {
+                    attendance: scAttendancePoints,
+                    booking_pct: scActuals.booking_pct !== '' ? parseFloat(scActuals.booking_pct) : null,
+                    booked_calls: scActuals.booked_calls !== '' ? parseFloat(scActuals.booked_calls) : null,
+                    memberships: scActuals.memberships !== '' ? parseFloat(scActuals.memberships) : null,
+                  }
+                  const ratingColors = {
+                    4: { bg:'#d4edda', text:'#2E7D52' },
+                    3: { bg:'#d4edda', text:'#2E7D52' },
+                    2: { bg:'#FBF3E0', text:'#8A5A00' },
+                    1: { bg:'#FBEEEA', text:'#B5341A' },
+                  }
+                  const ratingLabels = { 4:'Exceeds', 3:'Meets', 2:'Needs Improvement', 1:'Poor Performance' }
+                  const scoreColor = overallScore ? (parseFloat(overallScore) >= 3.5 ? '#2E7D52' : parseFloat(overallScore) >= 2.5 ? '#8A5A00' : '#B5341A') : '#1C1B19'
+                  const notesEl = document.querySelector('#scorecard-print textarea')
+                  const notes = notesEl?.value || ''
+
+                  const rows = SC_KPIS.map(kpi => {
+                    const w = parseFloat(scWeights[kpi.id]) || 0
+                    const actual = actuals[kpi.id]
+                    const rating = scGetRating(kpi, actual)
+                    const rc = rating ? ratingColors[rating] : null
+                    const { thresholds, lowerIsBetter, unit } = kpi
+                    const fmt = (n) => unit === '%' ? `${n}%` : `${n}${unit || ''}`
+                    const col4 = lowerIsBetter ? fmt(thresholds.exceeds) : `${fmt(thresholds.exceeds)}+`
+                    const col3 = lowerIsBetter ? `${fmt(thresholds.meets+1)}-${fmt(thresholds.exceeds+1)}` : `${fmt(thresholds.meets)}-${fmt(thresholds.exceeds-1)}`
+                    const col2 = lowerIsBetter ? `${fmt(thresholds.improvement+1)}-${fmt(thresholds.meets+1)}` : `${fmt(thresholds.improvement)}-${fmt(thresholds.meets-1)}`
+                    const col1 = lowerIsBetter ? `${fmt(thresholds.improvement+1)}+` : `${fmt(thresholds.improvement-1)} or less`
+                    const cols = [{ v:col4, r:4 }, { v:col3, r:3 }, { v:col2, r:2 }, { v:col1, r:1 }]
+                    const actualDisplay = actual != null ? `${actual}${unit === 'pts' ? ' pts' : unit || ''}` : '--'
+                    const badgeHtml = rating && rc ? `<div class="badge" style="background:${rc.bg};color:${rc.text}">${ratingLabels[rating]}</div>` : ''
+                    const threshCells = cols.map(({ v, r }) => {
+                      const c = ratingColors[r]
+                      const highlight = rating === r ? `font-weight:700;` : `opacity:0.6;`
+                      return `<td style="background:${c.bg};color:${c.text};${highlight}">${v}${rating === r ? ' *' : ''}</td>`
+                    }).join('')
+                    return `<tr>
+                      <td><div class="kpi-name">${kpi.label}</div>${badgeHtml}</td>
+                      <td>${w}%</td>
+                      <td><span class="actual-val" style="color:${rc ? rc.text : '#1C1B19'}">${actualDisplay}</span>${kpi.id==='attendance' ? '<br><span style="font-size:10px;color:#9E9B96">auto</span>' : ''}</td>
+                      ${threshCells}
+                    </tr>`
+                  }).join('')
+
+                  const html = `<!DOCTYPE html><html><head>
+                    <title>Scorecard - ${selectedRep?.name || ''} - ${MONTH_NAMES[scMonth.month]} ${scMonth.year}</title>
+                    <style>
+                      @page { margin: 0.65in; size: letter portrait; }
+                      * { box-sizing: border-box; margin: 0; padding: 0; -webkit-print-color-adjust: exact; print-color-adjust: exact; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+                      body { background: white; color: #1C1B19; font-size: 13px; line-height: 1.5; }
+                      .header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; padding-bottom: 16px; border-bottom: 2px solid #E2DED6; }
+                      .rep-info { display: flex; align-items: center; gap: 12px; }
+                      .avatar { width: 42px; height: 42px; border-radius: 50%; background: #EAF3FB; color: #1A5C8A; display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: 700; }
+                      .rep-name { font-size: 18px; font-weight: 700; }
+                      .rep-sub { font-size: 12px; color: #6B6760; margin-top: 2px; }
+                      .overall { text-align: right; }
+                      .overall-label { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.8px; color: #9E9B96; margin-bottom: 2px; }
+                      .overall-score { font-size: 32px; font-weight: 800; letter-spacing: -1px; color: ${scoreColor}; }
+                      .overall-sub { font-size: 11px; color: #9E9B96; }
+                      table { width: 100%; border-collapse: collapse; margin-bottom: 20px; border: 1px solid #E2DED6; overflow: hidden; }
+                      thead tr { background: #F0EEE9; }
+                      th { padding: 8px 10px; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px; color: #9E9B96; text-align: center; border-bottom: 2px solid #C8C3BA; }
+                      th:first-child { text-align: left; }
+                      td { padding: 10px; border-bottom: 1px solid #E2DED6; font-size: 12px; text-align: center; vertical-align: middle; }
+                      td:first-child { text-align: left; }
+                      tr:last-child td { border-bottom: none; }
+                      tr:nth-child(even) td { background: #F7F6F3; }
+                      .kpi-name { font-weight: 600; font-size: 13px; }
+                      .badge { display: inline-block; padding: 2px 7px; border-radius: 4px; font-size: 10px; font-weight: 700; margin-top: 3px; }
+                      .actual-val { font-size: 14px; font-weight: 700; }
+                      .notes-box { border: 1px solid #E2DED6; border-radius: 8px; padding: 14px; margin-bottom: 20px; }
+                      .notes-label { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px; color: #9E9B96; margin-bottom: 10px; }
+                      .notes-content { font-size: 13px; color: #1C1B19; min-height: 72px; white-space: pre-wrap; }
+                      .sig-row { display: flex; gap: 48px; margin-top: 32px; }
+                      .sig { flex: 1; }
+                      .sig-line { border-top: 1px solid #C8C3BA; padding-top: 6px; font-size: 11px; color: #6B6760; }
+                      .footer { display: flex; justify-content: space-between; font-size: 10px; color: #9E9B96; margin-top: 16px; padding-top: 10px; border-top: 1px solid #E2DED6; }
+                    </style>
+                  </head><body>
+                    <div class="header">
+                      <div class="rep-info">
+                        <div class="avatar">${selectedRep?.avatar || (selectedRep?.name || '?')[0].toUpperCase()}</div>
+                        <div>
+                          <div class="rep-name">${selectedRep?.name || selectedRep?.email || ''}</div>
+                          <div class="rep-sub">Performance Review &mdash; ${MONTH_NAMES[scMonth.month]} ${scMonth.year}</div>
+                        </div>
+                      </div>
+                      ${overallScore ? `<div class="overall">
+                        <div class="overall-label">Overall Score</div>
+                        <div class="overall-score">${overallScore}</div>
+                        <div class="overall-sub">out of 4.00</div>
+                      </div>` : ''}
+                    </div>
+                    <table>
+                      <thead><tr>
+                        <th>KPI</th><th>Weight</th><th>Actual</th>
+                        <th>Exceeds (4)</th><th>Meets (3)</th><th>Needs Improvement (2)</th><th>Poor Performance (1)</th>
+                      </tr></thead>
+                      <tbody>${rows}</tbody>
+                    </table>
+                    <div class="notes-box">
+                      <div class="notes-label">Manager Notes</div>
+                      <div class="notes-content">${notes || ''}</div>
+                    </div>
+                    <div class="sig-row">
+                      <div class="sig"><div class="sig-line">Employee Signature &amp; Date</div></div>
+                      <div class="sig"><div class="sig-line">Manager Signature &amp; Date</div></div>
+                    </div>
+                    <div class="footer">
+                      <span>Attendance auto-populated from points log. Other scores entered by manager.</span>
+                      <span>Awesome Home Services &mdash; Andi</span>
+                    </div>
+                  </body></html>`
+
+                  const win = window.open('', '_blank', 'width=900,height=1100')
+                  win.document.write(html)
+                  win.document.close()
+                  win.focus()
+                  setTimeout(() => { win.print(); win.close() }, 500)
+                }}
                   style={{ padding:'7px 14px', fontSize:13, fontWeight:500, background:'var(--surface)', color:'var(--text-secondary)', border:'1px solid var(--border)', borderRadius:'var(--radius)', cursor:'pointer' }}>
                   Print
                 </button>
@@ -895,7 +1017,16 @@ export default function AdminPage() {
             return (
               <div id="scorecard-print">
                 {/* Print header — hidden on screen */}
-                <style>{`@media print { .no-print { display:none!important; } #scorecard-print { padding:24px; } }`}</style>
+                <style>{`
+                  @media print {
+                    @page { margin: 0.6in; size: letter portrait; }
+                    body > * { display: none !important; }
+                    #scorecard-print { display: block !important; position: fixed !important; top: 0 !important; left: 0 !important; width: 100% !important; background: white !important; z-index: 99999 !important; padding: 0 !important; }
+                    #scorecard-print * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+                    .no-print { display: none !important; }
+                    input, textarea { border: 1px solid #ccc !important; background: white !important; }
+                  }
+                `}</style>
 
                 {/* Scorecard header */}
                 <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:20 }}>
