@@ -1,3 +1,4 @@
+// GraphicalSchedule v2 — 15min ticks + overflow scroll
 import { useState, useEffect, useRef } from 'react'
 import { sb } from '../lib/supabase'
 import { useAuth } from '../lib/AuthContext'
@@ -383,16 +384,16 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
         <div style={{ minWidth: LABEL_WIDTH + TOTAL_INTERVALS * MIN_CELL_WIDTH }}>
 
           {/* Hour header */}
-          <div style={{ display:'flex', position:'sticky', top:0, zIndex:20, background:'var(--surface)', borderBottom:'1px solid var(--border)' }}>
+          <div style={{ display:'flex', position:'sticky', top:0, zIndex:20, background:'var(--surface)', borderBottom:'1px solid var(--border)', minHeight:48 }}>
             <div style={{ width:LABEL_WIDTH, flexShrink:0, padding:'8px 16px', borderRight:'1px solid var(--border)', fontSize:10, fontWeight:600, textTransform:'uppercase', letterSpacing:.5, color:'var(--text-muted)', background:'var(--surface-2)' }}>Agent</div>
-            <div style={{ flex:1, position:'relative', height:36 }}>
+            <div style={{ flex:1, position:'relative', height:48 }}>
               {Array.from({ length: TOTAL_INTERVALS + 1 }, (_, i) => i).map(i => {
                 const isHour = i % 4 === 0
                 const isHalf = i % 4 === 2
                 const isQuarter = i % 4 === 1 || i % 4 === 3
                 const h = Math.floor(i / 4) + START_HOUR
                 return (
-                  <div key={i} style={{ position:'absolute', left:i*CELL_WIDTH, top:0, bottom:0, pointerEvents:'none' }}>
+                  <div key={i} style={{ position:'absolute', left:i*CELL_WIDTH, top:0, bottom:0, pointerEvents:'none', zIndex:1 }}>
                     {/* Tick mark */}
                     <div style={{
                       position:'absolute', left:0,
