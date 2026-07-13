@@ -54,6 +54,7 @@ export default function AdminPage() {
   const [scSelectedProfile, setScSelectedProfile] = useState(null)
   const [scMonth, setScMonth] = useState({ year: _now.getFullYear(), month: _now.getMonth() })
   const [scActuals, setScActuals] = useState({ booking_pct: '', booked_calls: '', memberships: '' })
+  const [scWeights, setScWeights] = useState({ attendance: 30, booking_pct: 25, booked_calls: 25, memberships: 20 })
   const [scAttendancePoints, setScAttendancePoints] = useState(null)
   const [scLoading, setScLoading] = useState(false)
   const [scSaving, setScSaving] = useState(false)
@@ -374,10 +375,11 @@ export default function AdminPage() {
     }
     let totalWeight = 0, weightedScore = 0
     SC_KPIS.forEach(kpi => {
+      const w = parseFloat(scWeights[kpi.id]) || 0
       const rating = scGetRating(kpi, actuals[kpi.id])
       if (rating != null) {
-        totalWeight += kpi.weight
-        weightedScore += rating * kpi.weight
+        totalWeight += w
+        weightedScore += rating * w
       }
     })
     if (totalWeight === 0) return null
@@ -901,9 +903,16 @@ export default function AdminPage() {
                 {/* Scorecard table */}
                 <div style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius-lg)', overflow:'hidden', marginBottom:20 }}>
                   {/* Header */}
-                  <div style={{ display:'grid', gridTemplateColumns:'1.5fr 70px 100px 1fr 1fr 1fr 1fr', background:'var(--surface-2)', borderBottom:'2px solid var(--border)' }}>
+                  <div style={{ display:'grid', gridTemplateColumns:'1.5fr 90px 100px 1fr 1fr 1fr 1fr', background:'var(--surface-2)', borderBottom:'2px solid var(--border)' }}>
                     {['KPI','Weight','Actual','Exceeds (4)','Meets (3)','Needs Improvement (2)','Poor Performance (1)'].map((h,i) => (
-                      <div key={h} style={{ padding:'10px 12px', fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color:'var(--text-muted)', textAlign: i <= 2 ? 'left' : 'center' }}>{h}</div>
+                      <div key={h} style={{ padding:'10px 12px', fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color:'var(--text-muted)', textAlign: i <= 2 ? 'left' : 'center' }}>
+                        {h}
+                        {i === 1 && (() => {
+                          const total = SC_KPIS.reduce((s, k) => s + (parseFloat(scWeights[k.id]) || 0), 0)
+                          const ok = total === 100
+                          return <span style={{ marginLeft:4, fontSize:9, fontWeight:700, color: ok ? 'var(--success)' : 'var(--danger)' }}>= {total}%</span>
+                        })()}
+                      </div>
                     ))}
                   </div>
 
@@ -920,7 +929,7 @@ export default function AdminPage() {
                     const isEditable = kpi.id !== 'attendance'
 
                     return (
-                      <div key={kpi.id} style={{ display:'grid', gridTemplateColumns:'1.5fr 70px 100px 1fr 1fr 1fr 1fr', borderBottom: idx < SC_KPIS.length-1 ? '1px solid var(--border)' : 'none', background: idx % 2 === 0 ? 'var(--surface)' : 'var(--surface-2)' }}>
+                      <div key={kpi.id} style={{ display:'grid', gridTemplateColumns:'1.5fr 90px 100px 1fr 1fr 1fr 1fr', borderBottom: idx < SC_KPIS.length-1 ? '1px solid var(--border)' : 'none', background: idx % 2 === 0 ? 'var(--surface)' : 'var(--surface-2)' }}>
                         {/* KPI name + rating badge */}
                         <div style={{ padding:'12px', display:'flex', flexDirection:'column', gap:4, justifyContent:'center' }}>
                           <div style={{ fontSize:13, fontWeight:600, color:'var(--text-primary)' }}>{kpi.label}</div>
@@ -930,8 +939,18 @@ export default function AdminPage() {
                             </div>
                           )}
                         </div>
-                        {/* Weight */}
-                        <div style={{ padding:'12px 8px', textAlign:'left', fontSize:12, color:'var(--text-secondary)', display:'flex', alignItems:'center' }}>{kpi.weight}%</div>
+                        {/* Weight — editable */}
+                        <div style={{ padding:'8px', display:'flex', alignItems:'center' }}>
+                          <div style={{ position:'relative', width:'100%' }}>
+                            <input
+                              type="number" min="0" max="100"
+                              value={scWeights[kpi.id]}
+                              onChange={e => setScWeights(prev => ({ ...prev, [kpi.id]: e.target.value }))}
+                              style={{ width:'100%', padding:'5px 22px 5px 8px', fontSize:13, fontWeight:600, border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface)', color:'var(--text-primary)', textAlign:'center' }}
+                            />
+                            <span style={{ position:'absolute', right:6, top:'50%', transform:'translateY(-50%)', fontSize:11, color:'var(--text-muted)', pointerEvents:'none' }}>%</span>
+                          </div>
+                        </div>
                         {/* Actual — editable or auto */}
                         <div style={{ padding:'8px', display:'flex', alignItems:'center' }}>
                           {isEditable ? (
