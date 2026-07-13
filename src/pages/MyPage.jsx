@@ -107,6 +107,8 @@ export default function MyPage() {
   const [attendancePoints, setAttendancePoints] = useState([])
   const [loading, setLoading] = useState(true)
   const [hoveredTab, setHoveredTab] = useState(null)
+  const now = new Date()
+  const [scorecardMonth, setScorecardMonth] = useState({ year: now.getFullYear(), month: now.getMonth() }) // 0-indexed month
 
   const today = toYMD(new Date())
   const weekDates = getWeekDates(weekBase)
@@ -137,8 +139,14 @@ export default function MyPage() {
 
   const getSched = (profileId, date) => schedules.find(s => s.profile_id === profileId && s.date === date)
 
-  // Stats for this month
-  const monthStart = toYMD(new Date(new Date().getFullYear(), new Date().getMonth(), 1))
+  // Scorecard month data — filtered by selected scorecardMonth
+  const scMonthStart = toYMD(new Date(scorecardMonth.year, scorecardMonth.month, 1))
+  const scMonthEnd = toYMD(new Date(scorecardMonth.year, scorecardMonth.month + 1, 0))
+  const scPoints = attendancePoints.filter(p => p.date >= scMonthStart && p.date <= scMonthEnd)
+  const scTotalPoints = scPoints.reduce((s, p) => s + parseFloat(p.points || 0), 0)
+
+  // Stats tab always uses current month
+  const monthStart = toYMD(new Date(now.getFullYear(), now.getMonth(), 1))
   const myPoints = attendancePoints.filter(p => p.date >= monthStart)
   const totalPoints = myPoints.reduce((s, p) => s + parseFloat(p.points || 0), 0)
 
@@ -147,7 +155,17 @@ export default function MyPage() {
   const totalCallMins = callEvents.reduce((s, e) => s + (e.duration_seconds || 0) / 60, 0)
   const avgCallMins = callEvents.length ? (totalCallMins / callEvents.length).toFixed(1) : '—'
 
-  const TABS = [
+  const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December']
+  const scorecardLabel = `${MONTH_NAMES[scorecardMonth.month]} ${scorecardMonth.year}`
+  const navMonth = (dir) => {
+    setScorecardMonth(prev => {
+      let m = prev.month + dir, y = prev.year
+      if (m > 11) { m = 0; y++ }
+      if (m < 0)  { m = 11; y-- }
+      return { year: y, month: m }
+    })
+  }
+  const isCurrentMonth = scorecardMonth.year === now.getFullYear() && scorecardMonth.month === now.getMonth()
     { id: 'my-schedule',   label: 'My Schedule' },
     { id: 'team-schedule', label: 'Team Schedule' },
     { id: 'stats',         label: 'My Stats' },
@@ -185,6 +203,25 @@ export default function MyPage() {
                 style={{ padding:'5px 10px', fontSize:12, fontWeight:500, border:'1px solid var(--accent)', borderRadius:'var(--radius)', background:'none', color:'var(--accent)', cursor:'pointer' }}>
                 Today
               </button>
+            </div>
+          )}
+          {tab === 'scorecard' && (
+            <div style={{ display:'flex', alignItems:'center', gap:10, marginTop:2 }}>
+              <button onClick={() => navMonth(-1)}
+                style={{ width:32, height:32, border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface-2)', cursor:'pointer', fontSize:16, color:'var(--text-secondary)', display:'flex', alignItems:'center', justifyContent:'center' }}
+                onMouseEnter={e => e.currentTarget.style.background='var(--surface)'}
+                onMouseLeave={e => e.currentTarget.style.background='var(--surface-2)'}>‹</button>
+              <span style={{ fontSize:13, fontWeight:500, color:'var(--text-primary)', minWidth:180, textAlign:'center' }}>{scorecardLabel}</span>
+              <button onClick={() => navMonth(1)}
+                style={{ width:32, height:32, border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface-2)', cursor:'pointer', fontSize:16, color:'var(--text-secondary)', display:'flex', alignItems:'center', justifyContent:'center' }}
+                onMouseEnter={e => e.currentTarget.style.background='var(--surface)'}
+                onMouseLeave={e => e.currentTarget.style.background='var(--surface-2)'}>›</button>
+              {!isCurrentMonth && (
+                <button onClick={() => setScorecardMonth({ year: now.getFullYear(), month: now.getMonth() })}
+                  style={{ padding:'5px 10px', fontSize:12, fontWeight:500, border:'1px solid var(--accent)', borderRadius:'var(--radius)', background:'none', color:'var(--accent)', cursor:'pointer' }}>
+                  This Month
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -386,7 +423,7 @@ export default function MyPage() {
             {tab === 'scorecard' && (
               <div>
                 <div style={{ fontSize:11, color:'var(--text-muted)', marginBottom:20 }}>
-                  Performance scorecard · scores and actuals will be pulled in automatically once connected
+                  {scorecardLabel} · scores and actuals will be pulled in automatically once connected
                 </div>
 
                 <div style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius-lg)', overflow:'hidden' }}>
@@ -399,7 +436,7 @@ export default function MyPage() {
 
                   {SCORECARD_KPIS.map((kpi, idx) => {
                     // In future: wire actual values from data
-                    const actual = kpi.id === 'attendance' ? totalPoints : null
+                    const actual = kpi.id === 'attendance' ? scTotalPoints : null
                     const rating = getRating(kpi, actual)
                     const ratingStyle = rating ? RATING_COLORS[rating] : null
                     const { thresholds, lowerIsBetter, unit } = kpi
