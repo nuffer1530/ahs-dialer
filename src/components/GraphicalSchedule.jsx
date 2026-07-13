@@ -138,8 +138,9 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
         return
       }
       if (sched.shift_start && sched.shift_end) {
-        const s = timeToInterval(sched.shift_start), e = timeToInterval(sched.shift_end)
-        if (s !== null && e > s) newBlocks[p.id].push({ id:'shift-'+p.id, type:'shift', start:s, duration:e-s })
+        const s = timeToInterval(sched.shift_start)
+        const e = Math.min(timeToInterval(sched.shift_end), TOTAL_INTERVALS)
+        if (s !== null && s >= 0 && e > s) newBlocks[p.id].push({ id:'shift-'+p.id, type:'shift', start:Math.max(0,s), duration:Math.min(e-s, TOTAL_INTERVALS-Math.max(0,s)) })
       }
       if (sched.break1_start) {
         const s = timeToInterval(sched.break1_start)
@@ -397,11 +398,11 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
                     {/* Tick mark */}
                     <div style={{
                       position:'absolute', left:0,
-                      top: isHour ? 0 : isHalf ? '40%' : '60%',
+                      top: isHour ? 0 : isHalf ? '30%' : '55%',
                       bottom:0,
-                      width: isHour ? '1px' : '1px',
-                      background:'var(--border)',
-                      opacity: isHour ? 1 : isHalf ? 0.5 : 0.25
+                      width: isHour ? '1.5px' : '1px',
+                      background: isHour ? 'var(--border-strong)' : 'var(--border)',
+                      opacity: isHour ? 1 : isHalf ? 0.7 : 0.45
                     }} />
                     {/* Hour label */}
                     {isHour && h <= END_HOUR && (
@@ -490,8 +491,8 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
                           })
                         }}
                         onMouseLeave={() => setTooltip(null)}
-                        style={{ position:'absolute', left:Math.max(0,l), top: isShift ? 8 : 12, height: isShift ? ROW_HEIGHT - 24 : ROW_HEIGHT - 32,
-                          width:Math.max(0, Math.min(w, Math.max(0, TOTAL_INTERVALS*CELL_WIDTH - Math.max(0,l) - 2))), background:bt.bg, border:`1.5px solid ${bt.color}`, borderRadius:5,
+                        style={{ position:'absolute', left:Math.max(0, Math.min(l, TOTAL_INTERVALS * CELL_WIDTH - 4)), top: isShift ? 8 : 12, height: isShift ? ROW_HEIGHT - 24 : ROW_HEIGHT - 32,
+                          width:Math.max(0, Math.min(w, TOTAL_INTERVALS * CELL_WIDTH - Math.max(0, l) - 2)), background:bt.bg, border:`1.5px solid ${bt.color}`, borderRadius:5,
                           display:'flex', alignItems:'center', overflow:'hidden',
                           cursor: isAdmin ? 'grab' : 'default', zIndex: isShift ? 2 : 4, userSelect:'none' }}>
                         <span style={{ fontSize:9, fontWeight:700, color:bt.text, paddingLeft:6, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', flex:1 }}>
