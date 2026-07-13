@@ -5,7 +5,7 @@ import { sb } from '../lib/supabase'
 import Badge from '../components/Badge'
 import { isDone, fmtShort } from '../lib/utils'
 
-const STATUS_OPTIONS = [
+const DEFAULT_STATUS_OPTIONS = [
   { value: 'Available', color: '#22c55e' },
   { value: 'On Call',   color: '#3b82f6' },
   { value: 'Wrap Up',   color: '#f59e0b' },
@@ -18,7 +18,7 @@ function timeSince(isoString) {
   if (!isoString) return '—'
   const secs = Math.floor((Date.now() - new Date(isoString)) / 1000)
   if (secs < 60) return `${secs}s`
-  if (secs < 3600) return `${Math.floor(secs/60)}m`
+  if (secs < 3600) return `${Math.floor(secs/60)}m ${Math.floor(secs%60/60)}s`
   return `${Math.floor(secs/3600)}h ${Math.floor((secs%3600)/60)}m`
 }
 
@@ -29,7 +29,22 @@ export default function LivePage() {
   const [profiles, setProfiles] = useState([])
   const [loading, setLoading] = useState(true)
   const [tick, setTick] = useState(0)
-  const [overrideTarget, setOverrideTarget] = useState(null) // { id, name, status }
+  const [overrideTarget, setOverrideTarget] = useState(null)
+  const [statusOptions, setStatusOptions] = useState(DEFAULT_STATUS_OPTIONS)
+
+  // Load custom statuses from app_settings
+  useEffect(() => {
+    sb.from('app_settings').select('value').eq('key', 'custom_statuses').maybeSingle()
+      .then(({ data }) => {
+        if (data?.value) {
+          try {
+            const saved = JSON.parse(data.value)
+            const mapped = saved.map(s => ({ value: s.label || s.value || s.id, color: s.color }))
+            if (mapped.length > 0) setStatusOptions(mapped)
+          } catch (e) {}
+        }
+      })
+  }, [])
 
   const adminSetStatus = async (profileId, val) => {
     setOverrideTarget(null)
@@ -76,53 +91,50 @@ export default function LivePage() {
     </div>
   )
 
-  const statusOrder = ['Available', 'On Call', 'Wrap Up', 'Break', 'Lunch', 'Offline']
+  // Sort: active statuses first, then by name
+  const statusPriority = (status) => {
+    const idx = statusOptions.findIndex(s => s.value === status)
+    return idx === -1 ? statusOptions.length : idx
+  }
   const sortedProfiles = [...profiles].sort((a, b) => {
-    const ai = statusOrder.indexOf(a.status || 'Offline')
-    const bi = statusOrder.indexOf(b.status || 'Offline')
+    const ai = statusPriority(a.status || 'Offline')
+    const bi = statusPriority(b.status || 'Offline')
     if (ai !== bi) return ai - bi
     return (a.name || '').localeCompare(b.name || '')
   })
+
+  // Get color for any status, including custom ones
+  const getStatusColor = (status) => {
+    const found = statusOptions.find(s => s.value === status)
+    return found ? found.color : '#6b7280'
+  }
 
   return (
     <div style={{ flex:1, overflowY:'auto', padding:24, display:'flex', flexDirection:'column', gap:20 }}>
 
       {/* Admin status override modal */}
       {isAdmin && overrideTarget && (
-        <div
-          onClick={() => setOverrideTarget(null)}
-          style={{ position:'fixed', inset:0, background:'rgba(0,0,0,.45)', zIndex:1000, display:'flex', alignItems:'center', justifyContent:'center' }}
-        >
-          <div
-            onClick={e => e.stopPropagation()}
-            style={{ background:'var(--surface)', borderRadius:'var(--radius-lg)', padding:24, minWidth:260, boxShadow:'0 8px 32px rgba(0,0,0,.25)' }}
-          >
+        <div onClick={() => setOverrideTarget(null)}
+          style={{ position:'fixed', inset:0, background:'rgba(0,0,0,.45)', zIndex:1000, display:'flex', alignItems:'center', justifyContent:'center' }}>
+          <div onClick={e => e.stopPropagation()}
+            style={{ background:'var(--surface)', borderRadius:'var(--radius-lg)', padding:24, minWidth:260, boxShadow:'0 8px 32px rgba(0,0,0,.25)' }}>
             <div style={{ fontSize:13, fontWeight:600, marginBottom:4 }}>Change Status</div>
             <div style={{ fontSize:12, color:'var(--text-muted)', marginBottom:16 }}>{overrideTarget.name}</div>
             <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
-              {STATUS_OPTIONS.map(s => (
-                <button
-                  key={s.value}
-                  onClick={() => adminSetStatus(overrideTarget.id, s.value)}
-                  style={{
-                    display:'flex', alignItems:'center', gap:10, padding:'10px 14px',
-                    borderRadius:'var(--radius)', border: overrideTarget.status === s.value ? `2px solid ${s.color}` : '2px solid transparent',
+              {statusOptions.map(s => (
+                <button key={s.value} onClick={() => adminSetStatus(overrideTarget.id, s.value)}
+                  style={{ display:'flex', alignItems:'center', gap:10, padding:'10px 14px', borderRadius:'var(--radius)',
+                    border: overrideTarget.status === s.value ? `2px solid ${s.color}` : '2px solid transparent',
                     background: overrideTarget.status === s.value ? s.color + '18' : 'var(--surface-2)',
                     cursor:'pointer', fontSize:13, fontWeight: overrideTarget.status === s.value ? 600 : 400,
-                    color:'var(--text-primary)', textAlign:'left'
-                  }}
-                >
+                    color:'var(--text-primary)', textAlign:'left' }}>
                   <div style={{ width:10, height:10, borderRadius:'50%', background:s.color, flexShrink:0 }}></div>
                   {s.value}
                   {overrideTarget.status === s.value && <span style={{ marginLeft:'auto', fontSize:11, color:s.color }}>✓ Current</span>}
                 </button>
               ))}
             </div>
-            <button
-              onClick={() => setOverrideTarget(null)}
-              className="btn sm"
-              style={{ marginTop:16, width:'100%' }}
-            >Cancel</button>
+            <button onClick={() => setOverrideTarget(null)} className="btn sm" style={{ marginTop:16, width:'100%' }}>Cancel</button>
           </div>
         </div>
       )}
@@ -138,8 +150,8 @@ export default function LivePage() {
       <div className="card">
         <div className="card-header">
           <div className="card-title">Agent Status Board</div>
-          <div style={{ display:'flex', gap:12 }}>
-            {STATUS_OPTIONS.map(s => {
+          <div style={{ display:'flex', gap:12, flexWrap:'wrap' }}>
+            {statusOptions.map(s => {
               const count = profiles.filter(p => (p.status || 'Offline') === s.value).length
               if (count === 0) return null
               return (
@@ -149,6 +161,16 @@ export default function LivePage() {
                 </span>
               )
             })}
+            {/* Also show any statuses not in statusOptions (edge case) */}
+            {profiles.filter(p => p.status && !statusOptions.find(s => s.value === p.status)).map(p => p.status)
+              .filter((v, i, arr) => arr.indexOf(v) === i)
+              .map(status => (
+                <span key={status} style={{ fontSize:11, display:'flex', alignItems:'center', gap:4, color:'var(--text-muted)' }}>
+                  <div style={{ width:6, height:6, borderRadius:'50%', background:'#6b7280' }}></div>
+                  {profiles.filter(p => p.status === status).length} {status}
+                </span>
+              ))
+            }
           </div>
         </div>
         <div style={{ overflowX:'auto' }}>
@@ -167,7 +189,7 @@ export default function LivePage() {
             <tbody>
               {sortedProfiles.map(p => {
                 const status = p.status || 'Offline'
-                const statusObj = STATUS_OPTIONS.find(s => s.value === status) || STATUS_OPTIONS[5]
+                const statusColor = getStatusColor(status)
                 const repLogs = logs.filter(l => l.rep === (p.name || p.email))
                 const todayLogs = repLogs.filter(l => new Date(l.created_at).toDateString() === todayStr)
                 const lastLog = repLogs[0]
@@ -177,7 +199,7 @@ export default function LivePage() {
                   <tr key={p.id}>
                     <td style={{ padding:'10px 12px', fontWeight:500 }}>
                       <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-                        <div style={{ width:28, height:28, borderRadius:'50%', background:'var(--accent-bg)', color:'var(--accent-text)', display:'flex', alignItems:'center', justifyContent:'center', fontSize: p.avatar ? 18 : 11, fontWeight:600, flexShrink:0 }}>
+                        <div style={{ width:28, height:28, borderRadius:'50%', background:'var(--accent-bg)', color:'var(--accent)', display:'flex', alignItems:'center', justifyContent:'center', fontSize: p.avatar ? 18 : 11, fontWeight:600, flexShrink:0 }}>
                           {p.avatar || (p.name || p.email || '?')[0].toUpperCase()}
                         </div>
                         <div style={{ fontSize:13 }}>{p.name || p.email}</div>
@@ -185,11 +207,10 @@ export default function LivePage() {
                     </td>
                     <td style={{ padding:'10px 12px' }}>
                       <span
-                        onClick={() => isAdmin && setOverrideTarget({ id: p.id, name: p.name || p.email, status })}
-                        style={{ display:'inline-flex', alignItems:'center', gap:6, padding:'3px 10px', borderRadius:99, fontSize:11, fontWeight:600, background: statusObj.color + '20', color: statusObj.color, cursor: isAdmin ? 'pointer' : 'default' }}
-                        title={isAdmin ? 'Click to change status' : ''}
-                      >
-                        <div style={{ width:6, height:6, borderRadius:'50%', background:statusObj.color }}></div>
+                        onClick={() => isAdmin && setOverrideTarget({ id:p.id, name:p.name || p.email, status })}
+                        style={{ display:'inline-flex', alignItems:'center', gap:6, padding:'3px 10px', borderRadius:99, fontSize:11, fontWeight:600, background:statusColor + '20', color:statusColor, cursor: isAdmin ? 'pointer' : 'default' }}
+                        title={isAdmin ? 'Click to change status' : ''}>
+                        <div style={{ width:6, height:6, borderRadius:'50%', background:statusColor }}></div>
                         {status}
                         {isAdmin && <span style={{ fontSize:9, opacity:.5 }}>▾</span>}
                       </span>
@@ -209,8 +230,8 @@ export default function LivePage() {
                     <td style={{ padding:'10px 12px', fontSize:11, color:'var(--text-muted)' }}>
                       {lastLog ? (
                         <div>
-                          <div>{fmtShort(lastLog.created_at)}</div>
-                          {lastContact && <div style={{ color:'var(--text-secondary)' }}>{lastContact.name}</div>}
+                          <div style={{ fontWeight:500, color:'var(--text-secondary)' }}>{lastContact?.name || '—'}</div>
+                          <div>{fmtShort(lastLog.created_at)} · {lastLog.outcome}</div>
                         </div>
                       ) : '—'}
                     </td>
@@ -222,37 +243,51 @@ export default function LivePage() {
         </div>
       </div>
 
-      {/* Recent Calls Feed — last 5 */}
+      {/* Recent Calls Live Feed */}
       <div className="card">
         <div className="card-header">
           <div className="card-title">Recent Calls — Live Feed</div>
           <span style={{ fontSize:11, color:'var(--text-muted)' }}>{logs.length} calls in last 24h</span>
         </div>
         {logs.length === 0 ? (
-          <div className="card-body" style={{ color:'var(--text-muted)', fontSize:12 }}>No calls in the last 24 hours.</div>
+          <div className="empty-state"><div>No calls in the last 24 hours.</div></div>
         ) : (
-          <div style={{ overflowX:'auto' }}>
-            <table className="data-table">
-              <thead>
-                <tr><th>Time</th><th>Rep</th><th>Contact</th><th>Phone</th><th>Outcome</th><th>Notes</th></tr>
-              </thead>
-              <tbody>
-                {logs.slice(0, 5).map(l => {
-                  const c = contacts.find(x => x.id === l.contact_id)
-                  return (
-                    <tr key={l.id}>
-                      <td style={{ padding:'7px 12px', whiteSpace:'nowrap', fontSize:11 }}>{fmtShort(l.created_at)}</td>
-                      <td style={{ padding:'7px 12px', fontWeight:500, fontSize:12 }}>{l.rep || '—'}</td>
-                      <td style={{ padding:'7px 12px', fontSize:12 }}>{c?.name || '—'}</td>
-                      <td style={{ padding:'7px 12px', fontSize:11, color:'var(--text-muted)' }}>{c?.phone || '—'}</td>
-                      <td style={{ padding:'7px 12px' }}><Badge status={l.outcome} /></td>
-                      <td style={{ padding:'7px 12px', fontSize:11, color:'var(--text-muted)', maxWidth:200, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{l.notes || '—'}</td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Rep</th>
+                <th>Contact</th>
+                <th>Outcome</th>
+                <th>Notes</th>
+                <th>Time</th>
+              </tr>
+            </thead>
+            <tbody>
+              {logs.slice(0, 50).map(l => {
+                const contact = contacts.find(c => c.id === l.contact_id)
+                const color = getStatusColor(l.outcome) || '#6b7280'
+                return (
+                  <tr key={l.id}>
+                    <td style={{ padding:'8px 12px', fontWeight:500, fontSize:12 }}>{l.rep}</td>
+                    <td style={{ padding:'8px 12px', fontSize:12 }}>{contact?.name || '—'}</td>
+                    <td style={{ padding:'8px 12px' }}>
+                      <span style={{ padding:'2px 8px', borderRadius:99, fontSize:10, fontWeight:600,
+                        background: l.outcome === 'Booked' ? '#DCFCE7' : l.outcome === 'DNC' ? '#FEF2F2' : 'var(--surface-2)',
+                        color: l.outcome === 'Booked' ? '#16A34A' : l.outcome === 'DNC' ? '#7F1D1D' : 'var(--text-secondary)' }}>
+                        {l.outcome}
+                      </span>
+                    </td>
+                    <td style={{ padding:'8px 12px', fontSize:11, color:'var(--text-muted)', maxWidth:200, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                      {l.notes || '—'}
+                    </td>
+                    <td style={{ padding:'8px 12px', fontSize:11, color:'var(--text-muted)' }}>
+                      {fmtShort(l.created_at)}
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
         )}
       </div>
     </div>
