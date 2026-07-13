@@ -379,24 +379,39 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
       </div>
 
       {/* Timeline */}
-      <div style={{ flex:1, overflowY:'auto', overflowX:'hidden' }} ref={containerRef}>
+      <div style={{ flex:1, overflowY:'auto', overflowX:'auto' }} ref={containerRef}>
         <div style={{ minWidth: LABEL_WIDTH + TOTAL_INTERVALS * MIN_CELL_WIDTH }}>
 
           {/* Hour header */}
           <div style={{ display:'flex', position:'sticky', top:0, zIndex:20, background:'var(--surface)', borderBottom:'1px solid var(--border)' }}>
             <div style={{ width:LABEL_WIDTH, flexShrink:0, padding:'8px 16px', borderRight:'1px solid var(--border)', fontSize:10, fontWeight:600, textTransform:'uppercase', letterSpacing:.5, color:'var(--text-muted)', background:'var(--surface-2)' }}>Agent</div>
             <div style={{ flex:1, position:'relative', height:36 }}>
-              {Array.from({ length: TOTAL_INTERVALS }, (_, i) => i).map(i => {
+              {Array.from({ length: TOTAL_INTERVALS + 1 }, (_, i) => i).map(i => {
                 const isHour = i % 4 === 0
-                const isHalf = i % 2 === 0 && !isHour
+                const isHalf = i % 4 === 2
+                const isQuarter = i % 4 === 1 || i % 4 === 3
                 const h = Math.floor(i / 4) + START_HOUR
-                const m = (i % 4) * 15
-                if (!isHour && !isHalf && i % 4 !== 2) return null // only show :00 and :30
                 return (
-                  <div key={i} style={{ position:'absolute', left:i*CELL_WIDTH, top:0, bottom:0 }}>
-                    <div style={{ position:'absolute', top: isHour ? 0 : isHalf ? 16 : 20, bottom:0, left:0, width: isHour ? '1px' : '0.5px', background: isHour ? 'var(--border)' : 'var(--border)', opacity: isHour ? 1 : 0.4 }} />
-                    {isHour && <span style={{ position:'absolute', top:6, left:4, fontSize:10, color:'var(--text-muted)', fontWeight:500, whiteSpace:'nowrap' }}>{fmtHour(h)}</span>}
-                    {isHalf && <span style={{ position:'absolute', top:16, left:3, fontSize:9, color:'var(--text-muted)', opacity:.6, whiteSpace:'nowrap' }}>:30</span>}
+                  <div key={i} style={{ position:'absolute', left:i*CELL_WIDTH, top:0, bottom:0, pointerEvents:'none' }}>
+                    {/* Tick mark */}
+                    <div style={{
+                      position:'absolute', left:0,
+                      bottom:0,
+                      width: isHour ? '1px' : '0.5px',
+                      height: isHour ? '100%' : isHalf ? '50%' : '30%',
+                      background:'var(--border)',
+                      opacity: isHour ? 1 : isHalf ? 0.6 : 0.3
+                    }} />
+                    {/* Hour label */}
+                    {isHour && h <= END_HOUR && (
+                      <span style={{ position:'absolute', top:4, left:3, fontSize:10, color:'var(--text-muted)', fontWeight:500, whiteSpace:'nowrap', userSelect:'none' }}>
+                        {fmtHour(h)}
+                      </span>
+                    )}
+                    {/* :15/:30/:45 labels — only show :30 */}
+                    {isHalf && (
+                      <span style={{ position:'absolute', bottom:4, left:3, fontSize:9, color:'var(--text-muted)', opacity:.5, whiteSpace:'nowrap', userSelect:'none' }}>:30</span>
+                    )}
                   </div>
                 )
               })}
@@ -443,7 +458,7 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
                 </div>
 
                 {/* Track area */}
-                <div style={{ flex:1, position:'relative', overflow:'hidden' }}>
+                <div style={{ flex:1, position:'relative', overflow:'hidden', minWidth:0 }}>
                   {/* Grid lines */}
                   {Array.from({ length: END_HOUR - START_HOUR + 1 }, (_, i) => i).map(i => (
                     <div key={i} style={{ position:'absolute', left:i*4*CELL_WIDTH, top:0, bottom:0, width:'1px', background: i%4===0 ? 'var(--border)' : 'rgba(0,0,0,.04)', pointerEvents:'none' }} />
@@ -475,7 +490,7 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
                         }}
                         onMouseLeave={() => setTooltip(null)}
                         style={{ position:'absolute', left:Math.max(0,l), top: isShift ? 8 : 12, height: isShift ? ROW_HEIGHT - 24 : ROW_HEIGHT - 32,
-                          width:Math.max(0, Math.min(w, TOTAL_INTERVALS*CELL_WIDTH - Math.max(0,l))), background:bt.bg, border:`1.5px solid ${bt.color}`, borderRadius:5,
+                          width:Math.max(0, Math.min(w, Math.max(0, TOTAL_INTERVALS*CELL_WIDTH - Math.max(0,l) - 2))), background:bt.bg, border:`1.5px solid ${bt.color}`, borderRadius:5,
                           display:'flex', alignItems:'center', overflow:'hidden',
                           cursor: isAdmin ? 'grab' : 'default', zIndex: isShift ? 2 : 4, userSelect:'none' }}>
                         <span style={{ fontSize:9, fontWeight:700, color:bt.text, paddingLeft:6, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', flex:1 }}>
