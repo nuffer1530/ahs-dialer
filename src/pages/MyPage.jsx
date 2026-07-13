@@ -177,9 +177,12 @@ export default function MyPage() {
       .then(({ data }) => { setCommissions(data || []); setCommLoading(false) })
   }, [profile?.id, commWeekBase])
 
-  // Reload scorecard actuals when month changes
+  // Reload scorecard actuals + thresholds when month changes or scorecard tab opens
   useEffect(() => {
-    if (!profile?.id) return
+    if (!profile?.id || tab !== 'scorecard') return
+    // Re-fetch global thresholds so any admin changes are immediately visible
+    sb.from('app_settings').select('value').eq('key', 'scorecard_thresholds').maybeSingle()
+      .then(({ data }) => { if (data?.value) { try { setScThresholds(JSON.parse(data.value)) } catch (e) {} } })
     const monthStart = `${scorecardMonth.year}-${String(scorecardMonth.month+1).padStart(2,'0')}-01`
     sb.from('scorecard_actuals').select('*').eq('profile_id', profile.id).eq('month', monthStart).maybeSingle()
       .then(({ data }) => {
@@ -191,7 +194,7 @@ export default function MyPage() {
         })
         if (data?.weights) { try { setScWeights(data.weights) } catch (e) {} }
       })
-  }, [profile?.id, scorecardMonth])
+  }, [profile?.id, scorecardMonth, tab])
 
   const getSched = (profileId, date) => schedules.find(s => s.profile_id === profileId && s.date === date)
 
@@ -643,13 +646,14 @@ export default function MyPage() {
                       : (scActuals[kpi.id] != null ? parseFloat(scActuals[kpi.id]) : null)
                     const rating = getRating(kpi, actual, scThresholds[kpi.id])
                     const ratingStyle = rating ? RATING_COLORS[rating] : null
-                    const { thresholds, lowerIsBetter, unit } = kpi
+                    const { lowerIsBetter, unit } = kpi
+                    const thr = scThresholds[kpi.id] || kpi.thresholds
 
                     const fmt = (n) => unit === '%' ? `${n}%` : `${n}${unit}`
-                    const col4 = lowerIsBetter ? fmt(thresholds.exceeds) : `${fmt(thresholds.exceeds)}+`
-                    const col3 = lowerIsBetter ? `${fmt(thresholds.meets+1)}-${fmt(thresholds.exceeds+1)}` : `${fmt(thresholds.meets)}-${fmt(thresholds.exceeds-1)}`
-                    const col2 = lowerIsBetter ? `${fmt(thresholds.improvement+1)}-${fmt(thresholds.meets+1)}` : `${fmt(thresholds.improvement)}-${fmt(thresholds.meets-1)}`
-                    const col1 = lowerIsBetter ? `${fmt(thresholds.improvement+1)}+` : `${fmt(thresholds.improvement-1)} or less`
+                    const col4 = lowerIsBetter ? fmt(thr.exceeds) : `${fmt(thr.exceeds)}+`
+                    const col3 = lowerIsBetter ? `${fmt(thr.meets+1)}-${fmt(thr.exceeds+1)}` : `${fmt(thr.meets)}-${fmt(thr.exceeds-1)}`
+                    const col2 = lowerIsBetter ? `${fmt(thr.improvement+1)}-${fmt(thr.meets+1)}` : `${fmt(thr.improvement)}-${fmt(thr.meets-1)}`
+                    const col1 = lowerIsBetter ? `${fmt(thr.improvement+1)}+` : `${fmt(thr.improvement-1)} or less`
 
                     return (
                       <div key={kpi.id} style={{ display:'grid', gridTemplateColumns:'1fr 80px 110px 1fr 1fr 1fr 1fr', borderBottom: idx < SCORECARD_KPIS.length-1 ? '1px solid var(--border)' : 'none', background: idx % 2 === 0 ? 'var(--surface)' : 'var(--surface-2)' }}>
