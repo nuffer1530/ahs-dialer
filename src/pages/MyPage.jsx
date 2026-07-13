@@ -166,6 +166,8 @@ export default function MyPage() {
     })
   }
   const isCurrentMonth = scorecardMonth.year === now.getFullYear() && scorecardMonth.month === now.getMonth()
+
+  const TABS = [
     { id: 'my-schedule',   label: 'My Schedule' },
     { id: 'team-schedule', label: 'Team Schedule' },
     { id: 'stats',         label: 'My Stats' },
