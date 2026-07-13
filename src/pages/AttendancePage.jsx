@@ -292,40 +292,73 @@ export default function AttendancePage() {
 
       {/* ── HEADER BAR ── */}
       <div style={{ background:'var(--surface)', borderBottom:'1px solid var(--border)', flexShrink:0 }}>
-        {/* Title row */}
-        <div style={{ padding:'14px 24px 0', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+        {/* Title + week nav row */}
+        <div style={{ padding:'16px 24px 0', display:'flex', alignItems:'flex-start', justifyContent:'space-between', gap:16 }}>
           <div>
             <div style={{ fontSize:18, fontWeight:600, color:'var(--text-primary)' }}>Workforce Management</div>
             <div style={{ fontSize:12, color:'var(--text-muted)', marginTop:2 }}>Schedule, track adherence, and manage your team</div>
           </div>
           {(tab === 'schedule' || tab === 'adherence') && (
-            <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-              <button className="btn sm" onClick={prevWeek}>← Prev</button>
-              <span style={{ fontSize:13, fontWeight:500, color:'var(--text-primary)', minWidth:220, textAlign:'center' }}>{weekLabel}</span>
-              <button className="btn sm" onClick={nextWeek}>Next →</button>
-            </div>
-          )}
-          {tab === 'schedule' && isAdmin && (
-            <div style={{ display:'flex', gap:6 }}>
-              <button className="btn sm" onClick={() => setBulkModal(true)}>Bulk Schedule</button>
-              <button className="btn sm" onClick={() => setTemplateModal(true)}>Templates</button>
-              <button className="btn sm" onClick={() => setCopyModal(true)}>Copy Week</button>
-              <button className="btn sm primary" onClick={() => setPublishModal(true)}>Publish + Email</button>
+            <div style={{ display:'flex', alignItems:'center', gap:10, marginTop:2 }}>
+              <button onClick={prevWeek}
+                style={{ width:32, height:32, border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface-2)', cursor:'pointer', fontSize:16, color:'var(--text-secondary)', display:'flex', alignItems:'center', justifyContent:'center' }}
+                onMouseEnter={e => e.currentTarget.style.background='var(--surface)'}
+                onMouseLeave={e => e.currentTarget.style.background='var(--surface-2)'}>‹</button>
+              <span style={{ fontSize:13, fontWeight:500, color:'var(--text-primary)', minWidth:200, textAlign:'center' }}>{weekLabel}</span>
+              <button onClick={nextWeek}
+                style={{ width:32, height:32, border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface-2)', cursor:'pointer', fontSize:16, color:'var(--text-secondary)', display:'flex', alignItems:'center', justifyContent:'center' }}
+                onMouseEnter={e => e.currentTarget.style.background='var(--surface)'}
+                onMouseLeave={e => e.currentTarget.style.background='var(--surface-2)'}>›</button>
             </div>
           )}
         </div>
 
-        {/* Tab bar */}
-        <div style={{ display:'flex', padding:'0 24px', gap:2, marginTop:12 }}>
-          {TABS.map(t => (
-            <button key={t.id} onClick={() => setTab(t.id)}
-              style={{ padding:'10px 18px', fontSize:13, fontWeight: tab===t.id ? 600 : 400, border:'none', cursor:'pointer',
-                background:'transparent', color: tab===t.id ? 'var(--accent)' : 'var(--text-muted)',
-                borderBottom: tab===t.id ? '2px solid var(--accent)' : '2px solid transparent',
-                transition:'all .1s' }}>
-              {t.label}
-            </button>
-          ))}
+        {/* Tab bar + schedule actions */}
+        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'0 24px', marginTop:10 }}>
+          <div style={{ display:'flex', gap:0 }}>
+            {TABS.map(t => (
+              <button key={t.id} onClick={() => setTab(t.id)}
+                onMouseEnter={e => { if (tab !== t.id) e.currentTarget.style.color = 'var(--text-primary)'; if (tab !== t.id) e.currentTarget.style.background = 'var(--surface-2)' }}
+                onMouseLeave={e => { if (tab !== t.id) e.currentTarget.style.color = 'var(--text-muted)'; if (tab !== t.id) e.currentTarget.style.background = 'transparent' }}
+                style={{ padding:'10px 16px', fontSize:13, fontWeight: tab===t.id ? 600 : 400, border:'none', cursor:'pointer',
+                  borderRadius:'var(--radius) var(--radius) 0 0',
+                  background:'transparent', color: tab===t.id ? 'var(--accent)' : 'var(--text-muted)',
+                  borderBottom: tab===t.id ? '2px solid var(--accent)' : '2px solid transparent',
+                  transition:'color .1s, background .1s' }}>
+                {t.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Action buttons — only on schedule tab */}
+          {tab === 'schedule' && isAdmin && (
+            <div style={{ display:'flex', gap:8, alignItems:'center' }}>
+              <button onClick={() => setBulkModal(true)}
+                style={{ padding:'6px 14px', fontSize:12, fontWeight:500, border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface)', color:'var(--text-secondary)', cursor:'pointer', transition:'all .1s' }}
+                onMouseEnter={e => { e.currentTarget.style.background='var(--surface-2)'; e.currentTarget.style.color='var(--text-primary)' }}
+                onMouseLeave={e => { e.currentTarget.style.background='var(--surface)'; e.currentTarget.style.color='var(--text-secondary)' }}>
+                Bulk Schedule
+              </button>
+              <button onClick={() => setTemplateModal(true)}
+                style={{ padding:'6px 14px', fontSize:12, fontWeight:500, border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface)', color:'var(--text-secondary)', cursor:'pointer', transition:'all .1s' }}
+                onMouseEnter={e => { e.currentTarget.style.background='var(--surface-2)'; e.currentTarget.style.color='var(--text-primary)' }}
+                onMouseLeave={e => { e.currentTarget.style.background='var(--surface)'; e.currentTarget.style.color='var(--text-secondary)' }}>
+                Templates
+              </button>
+              <button onClick={() => setCopyModal(true)}
+                style={{ padding:'6px 14px', fontSize:12, fontWeight:500, border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface)', color:'var(--text-secondary)', cursor:'pointer', transition:'all .1s' }}
+                onMouseEnter={e => { e.currentTarget.style.background='var(--surface-2)'; e.currentTarget.style.color='var(--text-primary)' }}
+                onMouseLeave={e => { e.currentTarget.style.background='var(--surface)'; e.currentTarget.style.color='var(--text-secondary)' }}>
+                Copy Week
+              </button>
+              <button onClick={() => setPublishModal(true)}
+                style={{ padding:'6px 16px', fontSize:12, fontWeight:600, border:'none', borderRadius:'var(--radius)', background:'var(--accent)', color:'#fff', cursor:'pointer', transition:'opacity .1s' }}
+                onMouseEnter={e => e.currentTarget.style.opacity='.9'}
+                onMouseLeave={e => e.currentTarget.style.opacity='1'}>
+                Publish + Email
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
