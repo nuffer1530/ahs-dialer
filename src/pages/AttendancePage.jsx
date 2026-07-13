@@ -31,7 +31,7 @@ function fmtDate(dateStr) {
 }
 
 function adherencePct(sched, nonAdherentSeconds) {
-  if (!sched) return null
+  if (!sched || !sched.shift_start || !sched.shift_end) return null
   const [sh, sm] = sched.shift_start.split(':').map(Number)
   const [eh, em] = sched.shift_end.split(':').map(Number)
   const totalMins = (eh * 60 + em) - (sh * 60 + sm)
