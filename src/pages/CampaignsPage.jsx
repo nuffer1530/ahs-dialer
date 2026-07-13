@@ -187,14 +187,7 @@ export default function CampaignsPage() {
           const pct = total ? Math.round((done/total)*100) : 0
           const hasScript = !!(camp.script || camp.tips)
           return (
-            <div key={camp.id} className="card" style={{ display:'flex', flexDirection:'column', gap:10, padding:'16px 18px' }}>
-              {isAdmin && (
-                <button
-                  onClick={() => setShowDeleteConfirm(camp.id)}
-                  style={{ position:'absolute', top:10, right:10, width:22, height:22, borderRadius:'50%', border:'none', background:'var(--danger-bg)', color:'var(--danger)', cursor:'pointer', fontSize:16, fontWeight:700, display:'flex', alignItems:'center', justifyContent:'center', lineHeight:1, zIndex:1 }}
-                  title="Delete campaign"
-                >×</button>
-              )}
+            <div key={camp.id} className="card" style={{ display:'flex', flexDirection:'column', gap:10, padding:'16px 18px', position:'relative' }}>
               <div style={{ display:'flex', alignItems:'flex-start', justifyContent:'space-between', gap:8 }}>
                 <div>
                   <div style={{ fontSize:15, fontWeight:600 }}>{camp.name}</div>
