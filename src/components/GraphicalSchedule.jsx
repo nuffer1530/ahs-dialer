@@ -6,7 +6,7 @@ import { useAuth } from '../lib/AuthContext'
 const START_HOUR = 6
 const END_HOUR = 21
 const TOTAL_INTERVALS = (END_HOUR - START_HOUR) * 4 // 15-min slots
-const LABEL_WIDTH = 180
+const LABEL_WIDTH = 160
 const ROW_HEIGHT = 72
 const ADHERENCE_HEIGHT = 12
 const MIN_CELL_WIDTH = 12
@@ -76,8 +76,11 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
   const [tooltip, setTooltip] = useState(null)
   const tooltipRef = useRef(null)
 
+  // Always use a fixed cell width so timeline is consistent regardless of screen size
+  // Minimum timeline = 900px wide, scrolls on smaller screens
+  const MIN_TIMELINE_WIDTH = 900
   const CELL_WIDTH = containerWidth > 0
-    ? Math.max(MIN_CELL_WIDTH, Math.floor((containerWidth - LABEL_WIDTH) / TOTAL_INTERVALS))
+    ? Math.max(MIN_CELL_WIDTH, Math.floor(Math.max(containerWidth - LABEL_WIDTH, MIN_TIMELINE_WIDTH) / TOTAL_INTERVALS))
     : MIN_CELL_WIDTH
 
   const today = new Date().toISOString().split('T')[0]
@@ -385,7 +388,7 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
       </div>
 
       {/* Timeline */}
-      <div style={{ flex:1, overflow:'auto' }} ref={containerRef}>
+      <div style={{ flex:1, overflow:'auto', WebkitOverflowScrolling:'touch' }} ref={containerRef}>
         <div style={{ minWidth: LABEL_WIDTH + TOTAL_INTERVALS * CELL_WIDTH + 120 }}>
 
           {/* Hour header */}
@@ -449,7 +452,7 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
                     <div style={{ fontSize:11, fontWeight:600, color:'var(--text-primary)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{p.name||p.email}</div>
                     {sched?.shift_start && sched?.shift_end && (
                       <div style={{ fontSize:9, color:'var(--text-muted)', marginTop:1, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
-                        {fmtTime(sched.shift_start)}–{fmtTime(sched.shift_end)} · {(timeToInterval(sched.shift_end) - timeToInterval(sched.shift_start)) / 4}h
+                        {fmtTime(sched.shift_start)}–{fmtTime(sched.shift_end)}
                       </div>
                     )}
                     {totalAdh != null && (
