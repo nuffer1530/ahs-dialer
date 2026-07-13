@@ -134,7 +134,7 @@ export default function AdminPage() {
 
     Promise.all([
       sb.from('commission_settings').select('*'),
-      sb.from('commissions').select('*, profiles!commissions_profile_id_fkey(name), updater:profiles!commissions_updated_by_fkey(name)').gte('earned_at', monday.toISOString()).order('earned_at', { ascending: false }),
+      sb.from('commissions').select('*, profiles(name)').gte('earned_at', monday.toISOString()).order('earned_at', { ascending: false }),
     ]).then(([{ data: rates }, { data: history }]) => {
       if (rates?.length) {
         const r = {}
@@ -264,7 +264,7 @@ export default function AdminPage() {
         notes: adjNote || 'Admin manual adjustment',
         updated_by: profile.id,
         earned_at: new Date().toISOString(),
-      }).select('*, profiles!commissions_profile_id_fkey(name), updater:profiles!commissions_updated_by_fkey(name)').single()
+      }).select('*, profiles(name)').single()
       if (data) {
         setCommissionHistory(prev => [data, ...prev])
         // Update allRepEarnings too
@@ -710,7 +710,8 @@ export default function AdminPage() {
                         const isAdj = c.event_type === 'adjustment'
                         const isMem = c.event_type === 'membership'
                         const amt = parseFloat(c.amount)
-                        const madeBy = c.updater?.name || (isAdj ? 'Admin' : null)
+                        const updaterProfile = c.updated_by ? profiles.find(p => p.id === c.updated_by) : null
+                        const madeBy = updaterProfile?.name || updaterProfile?.email || (isAdj ? 'Admin' : null)
                         return (
                           <tr key={c.id}>
                             {isAdmin && <td style={{padding:'10px 12px', fontWeight:500}}>{c.profiles?.name || c.rep_name}</td>}
