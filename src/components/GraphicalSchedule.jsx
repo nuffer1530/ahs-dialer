@@ -66,6 +66,7 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
   const [blocks, setBlocks] = useState({})
   const [extraBlocks, setExtraBlocks] = useState([])
   const [dragging, setDragging] = useState(null)
+  const dragStartX = useRef(0)
   const [currentInterval, setCurrentInterval] = useState(null)
   const [saving, setSaving] = useState(false)
   const [shiftModal, setShiftModal] = useState(null)
@@ -169,10 +170,10 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
     if (!dragging) return
     const cellW = CELL_WIDTH
     const onMove = (e) => {
-      const dx = e.clientX - dragging.startX
+      const dx = e.clientX - dragStartX.current
       const dIntervals = Math.round(dx / cellW)
       if (dIntervals === 0) return
-      setDragging(prev => ({ ...prev, startX: e.clientX }))
+      dragStartX.current = dragStartX.current + dIntervals * cellW
       setBlocks(prev => {
         const pBlocks = [...(prev[dragging.profileId] || [])]
         const idx = pBlocks.findIndex(b => b.id === dragging.blockId)
@@ -503,7 +504,7 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
                     const isShift = block.type === 'shift'
                     return (
                       <div key={block.id}
-                        onMouseDown={e => { if (!isAdmin) return; e.preventDefault(); e.stopPropagation(); setDragging({ profileId:p.id, blockId:block.id, mode:'move', startX:e.clientX }) }}
+                        onMouseDown={e => { if (!isAdmin) return; e.preventDefault(); e.stopPropagation(); dragStartX.current = e.clientX; setDragging({ profileId:p.id, blockId:block.id, mode:'move' }) }}
                         onContextMenu={e => { if (!isAdmin) return; e.preventDefault(); e.stopPropagation(); setContextMenu({ x:e.clientX, y:e.clientY, profileId:p.id, block }) }}
                         onMouseEnter={e => {
                           const rect = e.currentTarget.getBoundingClientRect()
@@ -521,7 +522,7 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
                           {block.duration * 15 >= 30 ? bt.label : ''}
                         </span>
                         {isAdmin && (
-                          <div onMouseDown={e => { e.preventDefault(); e.stopPropagation(); setDragging({ profileId:p.id, blockId:block.id, mode:'resize', startX:e.clientX }) }}
+                          <div onMouseDown={e => { e.preventDefault(); e.stopPropagation(); dragStartX.current = e.clientX; setDragging({ profileId:p.id, blockId:block.id, mode:'resize' }) }}
                             style={{ width:5, height:'100%', background:bt.color, cursor:'ew-resize', flexShrink:0, opacity:.4 }} />
                         )}
                       </div>
