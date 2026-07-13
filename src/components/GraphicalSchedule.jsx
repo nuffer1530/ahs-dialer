@@ -592,6 +592,7 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
         const { x, y, profileId, block } = contextMenu
         const bt = BLOCK_TYPES.find(t => t.id === block.type)
         const isShift = block.type === 'shift'
+        const isScheduleRow = ['shift','pto','sick','holiday'].includes(block.type)
         return (
           <div style={{ position:'fixed', left:x, top:y, background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius)', boxShadow:'0 4px 20px rgba(0,0,0,.18)', zIndex:300, minWidth:180, overflow:'hidden' }}>
             <div style={{ padding:'8px 14px', borderBottom:'1px solid var(--border)', display:'flex', alignItems:'center', gap:8 }}>
@@ -600,7 +601,7 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
             </div>
             {[
               { label: isShift ? 'Edit shift' : 'Edit block', action: () => { setContextMenu(null); openShiftModal(profileId) }, danger: false },
-              { label: isShift ? 'Delete shift' : `Remove ${bt?.label||'block'}`, action: () => { setContextMenu(null); if (isShift) { if(confirm('Delete shift?')) deleteSchedule(profileId) } else removeBlock(profileId, block.id) }, danger: true },
+              { label: isShift ? 'Delete shift' : `Remove ${bt?.label||'block'}`, action: () => { setContextMenu(null); if (isScheduleRow) { if(confirm(`Remove ${bt?.label || block.type}?`)) deleteSchedule(profileId) } else removeBlock(profileId, block.id) }, danger: true },
             ].map(item => (
               <button key={item.label} onMouseDown={item.action}
                 style={{ display:'flex', alignItems:'center', width:'100%', padding:'10px 14px', background:'transparent', border:'none', cursor:'pointer', fontSize:12, color: item.danger ? '#e24b4a' : 'var(--text-primary)', textAlign:'left' }}
