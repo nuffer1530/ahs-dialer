@@ -92,6 +92,7 @@ export default function AttendancePage() {
   }
 
   const [tab, setTab] = useState('schedule')
+  const [hoveredTab, setHoveredTab] = useState(null)
   const [profiles, setProfiles] = useState([])
   const [schedules, setSchedules] = useState([])
   const [statusEvents, setStatusEvents] = useState([])
@@ -316,18 +317,24 @@ export default function AttendancePage() {
         {/* Tab bar + schedule actions */}
         <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'0 24px', marginTop:10 }}>
           <div style={{ display:'flex', gap:0 }}>
-            {TABS.map(t => (
-              <button key={t.id} onClick={() => setTab(t.id)}
-                onMouseEnter={e => { if (tab !== t.id) { e.currentTarget.style.color = 'var(--text-primary)'; e.currentTarget.style.background = 'var(--surface-2)' } }}
-                onMouseLeave={e => { e.currentTarget.style.color = ''; e.currentTarget.style.background = '' }}
-                style={{ padding:'10px 16px', fontSize:13, fontWeight: tab===t.id ? 600 : 400, border:'none', cursor:'pointer',
-                  borderRadius:'var(--radius) var(--radius) 0 0',
-                  background:'transparent', color: tab===t.id ? 'var(--accent)' : 'var(--text-muted)',
-                  borderBottom: tab===t.id ? '2px solid var(--accent)' : '2px solid transparent',
-                  transition:'color .1s, background .1s' }}>
-                {t.label}
-              </button>
-            ))}
+            {TABS.map(t => {
+              const isActive = tab === t.id
+              const isHovered = hoveredTab === t.id && !isActive
+              return (
+                <button key={t.id}
+                  onClick={() => setTab(t.id)}
+                  onMouseEnter={() => setHoveredTab(t.id)}
+                  onMouseLeave={() => setHoveredTab(null)}
+                  style={{ padding:'10px 16px', fontSize:13, fontWeight: isActive ? 600 : 400, border:'none', cursor:'pointer',
+                    borderRadius:'var(--radius) var(--radius) 0 0',
+                    background: isHovered ? 'var(--surface-2)' : 'transparent',
+                    color: isActive ? 'var(--accent)' : isHovered ? 'var(--text-primary)' : 'var(--text-muted)',
+                    borderBottom: isActive ? '2px solid var(--accent)' : '2px solid transparent',
+                    transition:'color .1s, background .1s' }}>
+                  {t.label}
+                </button>
+              )
+            })}
           </div>
 
           {/* Action buttons — only on schedule tab */}
