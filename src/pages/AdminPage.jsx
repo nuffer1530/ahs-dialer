@@ -1035,12 +1035,17 @@ export default function AdminPage() {
                     const actual = actuals[kpi.id]
                     const rating = scGetRating(kpi, actual)
                     const rc = rating ? ratingColors[rating] : null
-                    const { thresholds, lowerIsBetter, unit } = kpi
-                    const fmt = (n) => unit === '%' ? `${n}%` : `${n}${unit || ''}`
-                    const col4 = lowerIsBetter ? fmt(thresholds.exceeds) : `${fmt(thresholds.exceeds)}+`
-                    const col3 = lowerIsBetter ? `${fmt(thresholds.meets+1)}-${fmt(thresholds.exceeds+1)}` : `${fmt(thresholds.meets)}-${fmt(thresholds.exceeds-1)}`
-                    const col2 = lowerIsBetter ? `${fmt(thresholds.improvement+1)}-${fmt(thresholds.meets+1)}` : `${fmt(thresholds.improvement)}-${fmt(thresholds.meets-1)}`
-                    const col1 = lowerIsBetter ? `${fmt(thresholds.improvement+1)}+` : `${fmt(thresholds.improvement-1)} or less`
+                    const { lowerIsBetter, unit } = kpi
+                    const thr = scThresholds[kpi.id] || kpi.thresholds
+                    const fmt = (n) => unit === '%' ? `${n}%` : unit === 'pts' ? `${n} pts` : `${n}${unit || ''}`
+                    let col4, col3, col2, col1
+                    if (kpi.id === 'attendance') {
+                      col4 = fmt(thr.exceeds); col3 = fmt(thr.meets); col2 = fmt(thr.improvement); col1 = `${thr.improvement + 1}+ pts`
+                    } else if (lowerIsBetter) {
+                      col4 = `${fmt(thr.exceeds)} or less`; col3 = `${fmt(thr.exceeds+1)}-${fmt(thr.meets)}`; col2 = `${fmt(thr.meets+1)}-${fmt(thr.improvement)}`; col1 = `${fmt(thr.improvement+1)}+`
+                    } else {
+                      col4 = `${fmt(thr.exceeds)}+`; col3 = `${fmt(thr.meets)}-${fmt(thr.exceeds-1)}`; col2 = `${fmt(thr.improvement)}-${fmt(thr.meets-1)}`; col1 = `Below ${fmt(thr.improvement)}`
+                    }
                     const cols = [{ v:col4, r:4 }, { v:col3, r:3 }, { v:col2, r:2 }, { v:col1, r:1 }]
                     const actualDisplay = actual != null ? `${actual}${unit === 'pts' ? ' pts' : unit || ''}` : '--'
                     const badgeHtml = rating && rc ? `<div class="badge" style="background:${rc.bg};color:${rc.text}">${ratingLabels[rating]}</div>` : ''
