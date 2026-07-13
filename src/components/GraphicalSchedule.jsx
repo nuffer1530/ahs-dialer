@@ -385,12 +385,12 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
       </div>
 
       {/* Timeline */}
-      <div style={{ flex:1, overflowY:'auto', overflowX:'auto' }} ref={containerRef}>
-        <div style={{ minWidth: LABEL_WIDTH + TOTAL_INTERVALS * CELL_WIDTH + 200 }}>
+      <div style={{ flex:1, overflow:'auto' }} ref={containerRef}>
+        <div style={{ minWidth: LABEL_WIDTH + TOTAL_INTERVALS * CELL_WIDTH + 120 }}>
 
           {/* Hour header */}
-          <div style={{ display:'flex', position:'sticky', top:0, zIndex:20, background:'var(--surface)', borderBottom:'1px solid var(--border)', minHeight:48 }}>
-            <div style={{ width:LABEL_WIDTH, flexShrink:0, padding:'8px 16px', borderRight:'1px solid var(--border)', fontSize:10, fontWeight:600, textTransform:'uppercase', letterSpacing:.5, color:'var(--text-muted)', background:'var(--surface-2)' }}>Agent</div>
+          <div style={{ display:'flex', position:'sticky', top:0, zIndex:20, background:'var(--surface)', borderBottom:'1px solid var(--border)', minHeight:48, boxShadow:'0 1px 4px rgba(0,0,0,.06)' }}>
+            <div style={{ width:LABEL_WIDTH, flexShrink:0, padding:'8px 16px', borderRight:'1px solid var(--border)', fontSize:10, fontWeight:600, textTransform:'uppercase', letterSpacing:.5, color:'var(--text-muted)', background:'var(--surface-2)', position:'sticky', left:0, zIndex:15 }}>Agent</div>
             <div style={{ flex:1, position:'relative', height:48 }}>
               {Array.from({ length: TOTAL_INTERVALS + 1 }, (_, i) => i).map(i => {
                 const isHour = i % 4 === 0
@@ -422,7 +422,7 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
                 )
               })}
             </div>
-            <div style={{ width:80, flexShrink:0, borderLeft:'1px solid var(--border)', background:'var(--surface-2)', display:'flex', alignItems:'center', justifyContent:'center' }}>
+            <div style={{ width:80, flexShrink:0, borderLeft:'1px solid var(--border)', background:'var(--surface-2)', display:'flex', alignItems:'center', justifyContent:'center', position:'sticky', right:0, zIndex:15 }}>
               <span style={{ fontSize:10, fontWeight:600, textTransform:'uppercase', letterSpacing:.5, color:'var(--text-muted)' }}>Stats</span>
             </div>
           </div>
@@ -443,7 +443,7 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
                 onMouseLeave={() => setTooltip(null)}>
 
                 {/* Agent label */}
-                <div style={{ width:LABEL_WIDTH, flexShrink:0, display:'flex', alignItems:'center', gap:10, padding:'10px 16px', borderRight:'1px solid var(--border)', background:'var(--surface-2)', position:'relative' }}>
+                <div style={{ width:LABEL_WIDTH, flexShrink:0, display:'flex', alignItems:'center', gap:10, padding:'10px 16px', borderRight:'1px solid var(--border)', background:'var(--surface-2)', position:'sticky', left:0, zIndex:5 }}>
                   <div style={{ width:30, height:30, borderRadius:'50%', background:'var(--accent-bg)', color:'var(--accent)', display:'flex', alignItems:'center', justifyContent:'center', fontSize: p.avatar ? 18 : 11, fontWeight:600, flexShrink:0 }}>
                     {p.avatar || (p.name||p.email||'?')[0].toUpperCase()}
                   </div>
@@ -535,7 +535,7 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
                 </div>
 
                 {/* Stats column */}
-                <div style={{ width:80, flexShrink:0, borderLeft:'1px solid var(--border)', background:'var(--surface-2)', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:2, padding:'6px 8px' }}>
+                <div style={{ width:80, flexShrink:0, borderLeft:'1px solid var(--border)', background:'var(--surface-2)', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:2, padding:'6px 8px', position:'sticky', right:0, zIndex:5 }}>
                   {sched?.shift_start && (
                     <>
                       <div style={{ fontSize:10, color:'var(--text-muted)' }}>shift</div>
@@ -557,7 +557,7 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
 
           {/* Coverage bar */}
           <div style={{ display:'flex', borderTop:'2px solid var(--border)', background:'var(--surface-2)' }}>
-            <div style={{ width:LABEL_WIDTH, flexShrink:0, padding:'8px 16px', borderRight:'1px solid var(--border)', fontSize:10, fontWeight:600, textTransform:'uppercase', letterSpacing:.5, color:'var(--text-muted)' }}>Coverage</div>
+            <div style={{ width:LABEL_WIDTH, flexShrink:0, padding:'8px 16px', borderRight:'1px solid var(--border)', fontSize:10, fontWeight:600, textTransform:'uppercase', letterSpacing:.5, color:'var(--text-muted)', position:'sticky', left:0, zIndex:5, background:'var(--surface-2)' }}>Coverage</div>
             <div style={{ flex:1, position:'relative', height:32 }}>
               {Array.from({ length: TOTAL_INTERVALS }, (_, i) => i).map(i => {
                 const count = getCoverage(i)
