@@ -153,7 +153,53 @@ app.get('/api/st/availability', async (req, res) => {
 
     const data = await stPost(`/dispatch/v2/tenant/${ST_TENANT_ID}/capacity`, body)
     console.log('ST capacity response:', JSON.stringify(data).slice(0, 500))
-    res.json(data)
+
+    // ST returns times in UTC — convert to Mountain Time (MDT = UTC-6, MST = UTC-7)
+    // Use dynamic offset based on whether DST is active
+    const getMDTOffset = (date) => {
+      // MDT (UTC-6) runs approx March second Sunday to November first Sunday
+      const d = new Date(date)
+      const year = d.getUTCFullYear()
+      const marchSecondSun = new Date(Date.UTC(year, 2, 1))
+      marchSecondSun.setUTCDate(1 + (7 - marchSecondSun.getUTCDay() + 0) % 7 + 7)
+      const novFirstSun = new Date(Date.UTC(year, 10, 1))
+      novFirstSun.setUTCDate(1 + (7 - novFirstSun.getUTCDay()) % 7)
+      return d >= marchSecondSun && d < novFirstSun ? -6 : -7
+    }
+
+    const toMT = (isoString) => {
+      if (!isoString) return isoString
+      const d = new Date(isoString)
+      const offset = getMDTOffset(d)
+      return new Date(d.getTime() + offset * 60 * 60 * 1000).toISOString().replace('Z', offset === -6 ? '-06:00' : '-07:00')
+    }
+
+    // Known AHS arrival windows (local MT times): filter to only these
+    const VALID_WINDOWS = [
+      { start: '07:59', end: '20:00' },
+      { start: '08:00', end: '12:00' },
+      { start: '10:00', end: '14:00' },
+      { start: '12:00', end: '16:00' },
+      { start: '14:00', end: '18:00' },
+      { start: '16:00', end: '20:00' },
+      { start: '18:00', end: '22:00' },
+    ]
+
+    const toHHMM = (isoLocal) => isoLocal.slice(11, 16) // extract HH:MM from local ISO
+
+    const availabilities = (data?.availabilities || data?.data || [])
+      .map(slot => ({
+        ...slot,
+        start: toMT(slot.start),
+        end: toMT(slot.end),
+      }))
+      .filter(slot => {
+        const startHHMM = toHHMM(slot.start)
+        const endHHMM = toHHMM(slot.end)
+        return VALID_WINDOWS.some(w => w.start === startHHMM && w.end === endHHMM)
+      })
+
+    res.json({ availabilities })
   } catch (err) {
     console.error('ST availability error:', err.message)
     res.status(500).json({ error: err.message })
