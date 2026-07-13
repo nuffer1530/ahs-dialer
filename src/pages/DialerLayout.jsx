@@ -277,7 +277,7 @@ export default function DialerLayout() {
     navigate('/login')
   }
 
-  const currentStatusObj = statusOptions.find(s => s.value === agentStatus) || STATUS_OPTIONS[statusOptions.length - 1]
+  const currentStatusObj = statusOptions.find(s => s.value === agentStatus) || statusOptions[statusOptions.length - 1]
   const NAV_WIDTH = navCollapsed ? 56 : 200
 
   const navLinkStyle = ({ isActive }) => ({
