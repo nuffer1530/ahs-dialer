@@ -1,42 +1,46 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { sb } from '../lib/supabase'
 import { useAuth } from '../lib/AuthContext'
-import Modal from './Modal'
-
-const BLOCK_TYPES = [
-  { id: 'shift',     label: 'On Shift',        color: '#3b82f6', bg: '#dbeafe', text: '#1d4ed8' },
-  { id: 'break',     label: 'Break',            color: '#f97316', bg: '#ffedd5', text: '#c2410c' },
-  { id: 'lunch',     label: 'Lunch',            color: '#22c55e', bg: '#dcfce7', text: '#15803d' },
-  { id: 'outbound',  label: 'Outbounding',      color: '#a855f7', bg: '#f3e8ff', text: '#7e22ce' },
-  { id: 'meeting',   label: 'Meeting/Training', color: '#ef4444', bg: '#fee2e2', text: '#b91c1c' },
-  { id: 'pto',       label: 'PTO',              color: '#eab308', bg: '#fef9c3', text: '#a16207' },
-  { id: 'sick',      label: 'Sick',             color: '#6b7280', bg: '#f3f4f6', text: '#374151' },
-  { id: 'holiday',   label: 'Holiday',          color: '#7c3aed', bg: '#ede9fe', text: '#5b21b6' },
-]
 
 const START_HOUR = 6
-const END_HOUR = 22
-const TOTAL_INTERVALS = (END_HOUR - START_HOUR) * 4
-const MIN_CELL_WIDTH = 14  // minimum so labels still readable
-const ROW_HEIGHT = 44
-const LABEL_WIDTH = 150
+const END_HOUR = 21
+const TOTAL_INTERVALS = (END_HOUR - START_HOUR) * 4 // 15-min slots
+const LABEL_WIDTH = 180
+const ROW_HEIGHT = 72
+const ADHERENCE_HEIGHT = 12
+const MIN_CELL_WIDTH = 12
 
-function intervalToTimeStr(interval) {
-  const totalMins = START_HOUR * 60 + interval * 15
+const BLOCK_TYPES = [
+  { id:'shift',    label:'On Shift',       color:'#2a78d6', bg:'#2a78d618', text:'#2a78d6' },
+  { id:'break',    label:'Break',          color:'#eda100', bg:'#eda10020', text:'#854f0b' },
+  { id:'lunch',    label:'Lunch',          color:'#1baf7a', bg:'#1baf7a18', text:'#0f6e56' },
+  { id:'outbound', label:'Outbound',       color:'#4a3aa7', bg:'#4a3aa718', text:'#4a3aa7' },
+  { id:'meeting',  label:'Meeting',        color:'#e34948', bg:'#e3494818', text:'#a32d2d' },
+  { id:'pto',      label:'PTO',            color:'#3b82f6', bg:'#3b82f615', text:'#185fa5' },
+  { id:'sick',     label:'Sick',           color:'#f59e0b', bg:'#f59e0b15', text:'#854f0b' },
+  { id:'holiday',  label:'Holiday',        color:'#8b5cf6', bg:'#8b5cf615', text:'#4a3aa7' },
+]
+
+function timeToInterval(t) {
+  if (!t) return null
+  const [h, m] = t.split(':').map(Number)
+  return Math.round(((h - START_HOUR) * 60 + m) / 15)
+}
+
+function intervalToTime(i) {
+  const totalMins = START_HOUR * 60 + i * 15
   return `${String(Math.floor(totalMins/60)).padStart(2,'0')}:${String(totalMins%60).padStart(2,'0')}`
 }
 
-function timeToInterval(timeStr) {
-  if (!timeStr) return null
-  const [h, m] = timeStr.split(':').map(Number)
-  return Math.round(((h * 60 + m) - START_HOUR * 60) / 15)
+function fmtTime(t) {
+  if (!t) return '--'
+  const [h, m] = t.split(':')
+  const hour = parseInt(h)
+  return `${hour%12||12}:${m} ${hour>=12?'PM':'AM'}`
 }
 
-function fmt12(timeStr) {
-  if (!timeStr) return '--'
-  const [h, m] = timeStr.split(':').map(Number)
-  const ampm = h >= 12 ? 'PM' : 'AM'
-  return `${h % 12 || 12}:${m.toString().padStart(2,'0')} ${ampm}`
+function fmtHour(h) {
+  return h === 12 ? '12PM' : h > 12 ? `${h-12}PM` : `${h}AM`
 }
 
 function addMins(timeStr, mins) {
@@ -45,20 +49,11 @@ function addMins(timeStr, mins) {
   return `${String(Math.floor(t/60)).padStart(2,'0')}:${String(t%60).padStart(2,'0')}`
 }
 
-function formatDate(dateStr) {
-  return new Date(dateStr + 'T12:00:00').toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric', year:'numeric' })
-}
-
-function prevDate(dateStr) {
-  const d = new Date(dateStr + 'T12:00:00')
-  d.setDate(d.getDate() - 1)
-  return d.toISOString().split('T')[0]
-}
-
-function nextDate(dateStr) {
-  const d = new Date(dateStr + 'T12:00:00')
-  d.setDate(d.getDate() + 1)
-  return d.toISOString().split('T')[0]
+function isoToInterval(iso) {
+  if (!iso) return null
+  const d = new Date(iso)
+  const mins = d.getHours() * 60 + d.getMinutes()
+  return (mins - START_HOUR * 60) / 15
 }
 
 export default function GraphicalSchedule({ profiles, onUpdate }) {
@@ -66,35 +61,43 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
   const containerRef = useRef(null)
   const [date, setDate] = useState(new Date().toISOString().split('T')[0])
   const [schedules, setSchedules] = useState([])
+  const [statusEvents, setStatusEvents] = useState([])
   const [blocks, setBlocks] = useState({})
+  const [extraBlocks, setExtraBlocks] = useState([])
   const [dragging, setDragging] = useState(null)
   const [currentInterval, setCurrentInterval] = useState(null)
   const [saving, setSaving] = useState(false)
   const [shiftModal, setShiftModal] = useState(null)
   const [shiftForm, setShiftForm] = useState({ shift_start:'08:00', shift_end:'17:00', break1_start:'10:00', break1_duration:15, lunch_start:'12:00', lunch_duration:30, break2_start:'14:30', break2_duration:15, day_type:'work' })
+  const [contextMenu, setContextMenu] = useState(null)
   const [addBlockMenu, setAddBlockMenu] = useState(null)
-  const [contextMenu, setContextMenu] = useState(null) // { x, y, profileId, block }
   const [containerWidth, setContainerWidth] = useState(0)
-  const [extraBlocks, setExtraBlocks] = useState([]) // outbound/meeting from schedule_blocks table
-  const today = new Date().toISOString().split('T')[0]
+  const [tooltip, setTooltip] = useState(null)
+  const tooltipRef = useRef(null)
 
-  // Dynamic cell width — fills available space, minimum 14px
   const CELL_WIDTH = containerWidth > 0
     ? Math.max(MIN_CELL_WIDTH, Math.floor((containerWidth - LABEL_WIDTH) / TOTAL_INTERVALS))
     : MIN_CELL_WIDTH
 
-  // Load schedules + extra blocks for this date
+  const today = new Date().toISOString().split('T')[0]
+  const isToday = date === today
+
+  // Load data
   useEffect(() => {
     Promise.all([
       sb.from('schedules').select('*').eq('date', date),
       sb.from('schedule_blocks').select('*').eq('date', date),
-    ]).then(([{ data: scheds }, { data: extras }]) => {
+      sb.from('status_events').select('*')
+        .gte('started_at', date + 'T00:00:00')
+        .lte('started_at', date + 'T23:59:59'),
+    ]).then(([{ data: scheds }, { data: extras }, { data: events }]) => {
       setSchedules(scheds || [])
       setExtraBlocks(extras || [])
+      setStatusEvents(events || [])
     })
   }, [date])
 
-  // Current time indicator
+  // Current time
   useEffect(() => {
     const update = () => {
       const now = new Date()
@@ -102,38 +105,37 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
       setCurrentInterval((mins - START_HOUR * 60) / 15)
     }
     update()
-    const t = setInterval(update, 60000)
+    const t = setInterval(update, 30000)
     return () => clearInterval(t)
   }, [])
 
-  // Track container width for dynamic cell sizing
+  // Container width
   useEffect(() => {
     if (!containerRef.current) return
     const obs = new ResizeObserver(entries => {
-      for (const entry of entries) {
-        setContainerWidth(entry.contentRect.width)
-      }
+      for (const e of entries) setContainerWidth(e.contentRect.width)
     })
     obs.observe(containerRef.current)
     setContainerWidth(containerRef.current.offsetWidth)
     return () => obs.disconnect()
   }, [])
 
-  // Build blocks from schedules + extraBlocks
+  // Build blocks from schedules + extras
   useEffect(() => {
     const newBlocks = {}
     profiles.forEach(p => {
       const sched = schedules.find(s => s.profile_id === p.id)
       newBlocks[p.id] = []
       if (!sched) {
-        // Still load any extra blocks even if no shift set
-        const pExtras = extraBlocks.filter(b => b.profile_id === p.id)
-        pExtras.forEach(b => newBlocks[p.id].push({ id: b.id, type: b.type, start: b.start_interval, duration: b.duration_intervals, dbId: b.id }))
+        extraBlocks.filter(b => b.profile_id === p.id).forEach(b => {
+          newBlocks[p.id].push({ id: b.id, type: b.type, start: b.start_interval, duration: b.duration_intervals, dbId: b.id })
+        })
         return
       }
-      if (sched.day_type === 'pto') { newBlocks[p.id] = [{ id:'pto-'+p.id, type:'pto', start:0, duration:TOTAL_INTERVALS }]; return }
-      if (sched.day_type === 'sick') { newBlocks[p.id] = [{ id:'sick-'+p.id, type:'sick', start:0, duration:TOTAL_INTERVALS }]; return }
-      if (sched.day_type === 'holiday') { newBlocks[p.id] = [{ id:'holiday-'+p.id, type:'holiday', start:0, duration:TOTAL_INTERVALS }]; return }
+      if (['pto','sick','holiday','off'].includes(sched.day_type)) {
+        newBlocks[p.id] = [{ id: sched.day_type+'-'+p.id, type: sched.day_type, start: 0, duration: TOTAL_INTERVALS }]
+        return
+      }
       if (sched.shift_start && sched.shift_end) {
         const s = timeToInterval(sched.shift_start), e = timeToInterval(sched.shift_end)
         if (s !== null && e > s) newBlocks[p.id].push({ id:'shift-'+p.id, type:'shift', start:s, duration:e-s })
@@ -150,144 +152,100 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
         const s = timeToInterval(sched.break2_start)
         if (s !== null) newBlocks[p.id].push({ id:'b2-'+p.id, type:'break', start:s, duration:Math.round((sched.break2_duration||15)/15) })
       }
-      // Extra blocks (outbound, meeting) from schedule_blocks table
-      const pExtras = extraBlocks.filter(b => b.profile_id === p.id)
-      pExtras.forEach(b => newBlocks[p.id].push({ id: b.id, type: b.type, start: b.start_interval, duration: b.duration_intervals, dbId: b.id }))
+      extraBlocks.filter(b => b.profile_id === p.id).forEach(b => {
+        newBlocks[p.id].push({ id: b.id, type: b.type, start: b.start_interval, duration: b.duration_intervals, dbId: b.id })
+      })
     })
     setBlocks(newBlocks)
   }, [schedules, extraBlocks, profiles])
 
-  // FIX: saveBlocksToDb takes profileId + blocksSnapshot — no stale closure issues
-  const saveBlocksToDb = useCallback(async (profileId, blocksSnapshot) => {
-    setSaving(true)
-    const pBlocks = blocksSnapshot[profileId] || []
+  // Drag handling
+  useEffect(() => {
+    if (!dragging) return
+    const onMove = (e) => {
+      const dx = e.clientX - dragging.startX
+      const dIntervals = Math.round(dx / CELL_WIDTH)
+      if (dIntervals === 0) return
+      setBlocks(prev => {
+        const pBlocks = [...(prev[dragging.profileId] || [])]
+        const idx = pBlocks.findIndex(b => b.id === dragging.blockId)
+        if (idx === -1) return prev
+        const block = { ...pBlocks[idx] }
+        if (dragging.mode === 'move') {
+          block.start = Math.max(0, Math.min(TOTAL_INTERVALS - block.duration, block.start + dIntervals))
+        } else {
+          block.duration = Math.max(1, Math.min(TOTAL_INTERVALS - block.start, block.duration + dIntervals))
+        }
+        pBlocks[idx] = block
+        return { ...prev, [dragging.profileId]: pBlocks }
+      })
+      setDragging(prev => ({ ...prev, startX: e.clientX }))
+    }
+    const onUp = () => {
+      saveBlocksToDb(dragging.profileId, blocks)
+      setDragging(null)
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+    return () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp) }
+  }, [dragging, blocks, CELL_WIDTH])
+
+  const saveBlocksToDb = async (profileId, currentBlocks) => {
+    const pBlocks = currentBlocks[profileId] || []
     const shiftBlock = pBlocks.find(b => b.type === 'shift')
+    if (!shiftBlock) return
+    setSaving(true)
+    const payload = {
+      profile_id: profileId, date,
+      day_type: 'work',
+      shift_start: intervalToTime(shiftBlock.start),
+      shift_end: intervalToTime(shiftBlock.start + shiftBlock.duration),
+    }
     const breakBlocks = pBlocks.filter(b => b.type === 'break')
     const lunchBlock = pBlocks.find(b => b.type === 'lunch')
-    const ptoBlock = pBlocks.find(b => b.type === 'pto')
-    const sickBlock = pBlocks.find(b => b.type === 'sick')
-
-    const holidayBlock = pBlocks.find(b => b.type === 'holiday')
-    const dayType = ptoBlock ? 'pto' : sickBlock ? 'sick' : holidayBlock ? 'holiday' : 'work'
-    const isOff = ptoBlock || sickBlock || holidayBlock
-
-    const payload = {
-      profile_id: profileId,
-      date,
-      day_type: dayType,
-      shift_start: (!isOff && shiftBlock) ? intervalToTimeStr(shiftBlock.start) : null,
-      shift_end: (!isOff && shiftBlock) ? intervalToTimeStr(shiftBlock.start + shiftBlock.duration) : null,
-      break1_start: (!isOff && breakBlocks[0]) ? intervalToTimeStr(breakBlocks[0].start) : null,
-      break1_end: (!isOff && breakBlocks[0]) ? intervalToTimeStr(breakBlocks[0].start + breakBlocks[0].duration) : null,
-      break1_duration: breakBlocks[0] ? breakBlocks[0].duration * 15 : 15,
-      break2_start: (!isOff && breakBlocks[1]) ? intervalToTimeStr(breakBlocks[1].start) : null,
-      break2_end: (!isOff && breakBlocks[1]) ? intervalToTimeStr(breakBlocks[1].start + breakBlocks[1].duration) : null,
-      break2_duration: breakBlocks[1] ? breakBlocks[1].duration * 15 : 15,
-      lunch_start: (!isOff && lunchBlock) ? intervalToTimeStr(lunchBlock.start) : null,
-      lunch_end: (!isOff && lunchBlock) ? intervalToTimeStr(lunchBlock.start + lunchBlock.duration) : null,
-      lunch_duration: lunchBlock ? lunchBlock.duration * 15 : 30,
-      created_by: profile?.id,
+    if (breakBlocks[0]) { payload.break1_start = intervalToTime(breakBlocks[0].start); payload.break1_duration = breakBlocks[0].duration * 15 }
+    if (lunchBlock) { payload.lunch_start = intervalToTime(lunchBlock.start); payload.lunch_duration = lunchBlock.duration * 15 }
+    if (breakBlocks[1]) { payload.break2_start = intervalToTime(breakBlocks[1].start); payload.break2_duration = breakBlocks[1].duration * 15 }
+    await sb.from('schedules').upsert(payload, { onConflict: 'profile_id,date' })
+    for (const b of pBlocks.filter(b => ['outbound','meeting'].includes(b.type) && b.dbId)) {
+      await sb.from('schedule_blocks').update({ start_interval: b.start, duration_intervals: b.duration }).eq('id', b.dbId)
     }
-
-    const { error } = await sb.from('schedules').upsert(payload, { onConflict: 'profile_id,date' })
-    if (error) {
-      console.error('Schedule save error:', error.message, JSON.stringify(payload))
-      setSaving(false)
-      return
-    }
-    const { data } = await sb.from('schedules').select('*').eq('date', date)
-    setSchedules(data || [])
     if (onUpdate) onUpdate()
     setSaving(false)
-  }, [date, profile?.id, onUpdate])
-
-  const handleMouseMove = useCallback((e) => {
-    if (!dragging) return
-    const deltaX = e.clientX - dragging.startX
-    const deltaIntervals = Math.round(deltaX / CELL_WIDTH)
-    if (deltaIntervals === 0) return
-    setBlocks(prev => {
-      const pBlocks = [...(prev[dragging.profileId] || [])]
-      const idx = pBlocks.findIndex(b => b.id === dragging.blockId)
-      if (idx === -1) return prev
-      const block = { ...pBlocks[idx] }
-      if (dragging.mode === 'move') block.start = Math.max(0, Math.min(TOTAL_INTERVALS - block.duration, block.start + deltaIntervals))
-      if (dragging.mode === 'resize') block.duration = Math.max(1, Math.min(TOTAL_INTERVALS - block.start, block.duration + deltaIntervals))
-      pBlocks[idx] = block
-      return { ...prev, [dragging.profileId]: pBlocks }
-    })
-    setDragging(prev => ({ ...prev, startX: prev.startX + deltaIntervals * CELL_WIDTH }))
-  }, [dragging])
-
-  const handleMouseUp = useCallback(() => {
-    if (!dragging) return
-    const { profileId, blockId } = dragging
-    setDragging(null)
-    setBlocks(prev => {
-      const movedBlock = (prev[profileId] || []).find(b => b.id === blockId)
-      if (movedBlock?.dbId) {
-        // Extra block — update schedule_blocks table
-        sb.from('schedule_blocks').update({
-          start_interval: movedBlock.start,
-          duration_intervals: movedBlock.duration,
-        }).eq('id', movedBlock.dbId).then(({ error }) => {
-          if (error) console.error('Extra block drag save error:', error.message)
-        })
-      } else {
-        saveBlocksToDb(profileId, prev)
-      }
-      return prev
-    })
-  }, [dragging, saveBlocksToDb])
-
-  useEffect(() => {
-    window.addEventListener('mousemove', handleMouseMove)
-    window.addEventListener('mouseup', handleMouseUp)
-    return () => { window.removeEventListener('mousemove', handleMouseMove); window.removeEventListener('mouseup', handleMouseUp) }
-  }, [handleMouseMove, handleMouseUp])
+  }
 
   const openShiftModal = (profileId) => {
     const sched = schedules.find(s => s.profile_id === profileId)
-    if (sched) {
-      setShiftForm({
-        shift_start: sched.shift_start || '08:00',
-        shift_end: sched.shift_end || '17:00',
-        break1_start: sched.break1_start || '10:00',
-        break1_duration: sched.break1_duration || 15,
-        lunch_start: sched.lunch_start || '12:00',
-        lunch_duration: sched.lunch_duration || 30,
-        break2_start: sched.break2_start || '14:30',
-        break2_duration: sched.break2_duration || 15,
-        day_type: sched.day_type || 'work',
-      })
-    } else {
-      setShiftForm({ shift_start:'08:00', shift_end:'17:00', break1_start:'10:00', break1_duration:15, lunch_start:'12:00', lunch_duration:30, break2_start:'14:30', break2_duration:15, day_type:'work' })
-    }
+    setShiftForm(sched ? {
+      shift_start: sched.shift_start || '08:00', shift_end: sched.shift_end || '17:00',
+      break1_start: sched.break1_start || '10:00', break1_duration: sched.break1_duration || 15,
+      lunch_start: sched.lunch_start || '12:00', lunch_duration: sched.lunch_duration || 30,
+      break2_start: sched.break2_start || '14:30', break2_duration: sched.break2_duration || 15,
+      day_type: sched.day_type || 'work',
+    } : { shift_start:'08:00', shift_end:'17:00', break1_start:'10:00', break1_duration:15, lunch_start:'12:00', lunch_duration:30, break2_start:'14:30', break2_duration:15, day_type:'work' })
     setShiftModal(profileId)
   }
 
   const saveShiftModal = async () => {
     if (!shiftModal) return
     setSaving(true)
-    const isOff = shiftForm.day_type !== 'work'  // covers pto, sick, holiday, off
+    const isOff = ['pto','sick','holiday','off'].includes(shiftForm.day_type)
     const payload = {
-      profile_id: shiftModal, date,
-      day_type: shiftForm.day_type,
+      profile_id: shiftModal, date, day_type: shiftForm.day_type,
       shift_start: isOff ? null : shiftForm.shift_start,
       shift_end: isOff ? null : shiftForm.shift_end,
-      break1_start: isOff ? null : shiftForm.break1_start,
+      break1_start: isOff ? null : shiftForm.break1_start || null,
       break1_end: isOff ? null : shiftForm.break1_start ? addMins(shiftForm.break1_start, shiftForm.break1_duration) : null,
       break1_duration: shiftForm.break1_duration,
-      break2_start: isOff ? null : shiftForm.break2_start,
+      break2_start: isOff ? null : shiftForm.break2_start || null,
       break2_end: isOff ? null : shiftForm.break2_start ? addMins(shiftForm.break2_start, shiftForm.break2_duration) : null,
       break2_duration: shiftForm.break2_duration,
-      lunch_start: isOff ? null : shiftForm.lunch_start,
+      lunch_start: isOff ? null : shiftForm.lunch_start || null,
       lunch_end: isOff ? null : shiftForm.lunch_start ? addMins(shiftForm.lunch_start, shiftForm.lunch_duration) : null,
       lunch_duration: shiftForm.lunch_duration,
       created_by: profile?.id,
     }
-    const { error } = await sb.from('schedules').upsert(payload, { onConflict: 'profile_id,date' })
-    if (error) console.error('Shift modal save error:', error.message)
+    await sb.from('schedules').upsert(payload, { onConflict: 'profile_id,date' })
     const { data } = await sb.from('schedules').select('*').eq('date', date)
     setSchedules(data || [])
     if (onUpdate) onUpdate()
@@ -306,50 +264,9 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
     setShiftModal(null)
   }
 
-  const addExtraBlock = async (profileId, type) => {
-    setAddBlockMenu(null)
-
-    // Shift: open the shift modal
-    if (type === 'shift') { openShiftModal(profileId); return }
-
-    const existing = blocks[profileId] || []
-    const shiftBlock = existing.find(b => b.type === 'shift')
-    const start = shiftBlock ? shiftBlock.start + 4 : 8
-    let duration = 2
-    if (type === 'outbound') duration = 8
-    if (type === 'meeting') duration = 4
-    if (type === 'break') duration = 1
-    if (type === 'lunch') duration = 2
-    if (type === 'pto' || type === 'sick' || type === 'holiday') duration = TOTAL_INTERVALS
-
-    // Outbound and meeting go to schedule_blocks table (not schedules)
-    if (type === 'outbound' || type === 'meeting') {
-      setSaving(true)
-      const { data: inserted, error } = await sb.from('schedule_blocks').insert({
-        profile_id: profileId, date, type,
-        start_interval: start, duration_intervals: duration,
-        created_by: profile?.id,
-      }).select().single()
-      if (error) { console.error('Extra block save error:', error.message); setSaving(false); return }
-      const newBlock = { id: inserted.id, type, start, duration, dbId: inserted.id }
-      setBlocks(prev => ({ ...prev, [profileId]: [...(prev[profileId] || []), newBlock] }))
-      setExtraBlocks(prev => [...prev, inserted])
-      setSaving(false)
-      return
-    }
-
-    // PTO/Sick/Holiday/Break/Lunch go through schedules table as before
-    const newBlock = { id: type + '-' + Date.now(), type, start: (type === 'pto' || type === 'sick' || type === 'holiday') ? 0 : start, duration }
-    const base = (type === 'pto' || type === 'sick' || type === 'holiday') ? [] : existing
-    const newBlocks = { ...blocks, [profileId]: [...base, newBlock] }
-    setBlocks(newBlocks)
-    saveBlocksToDb(profileId, newBlocks)
-  }
-
   const removeBlock = async (profileId, blockId) => {
     const block = (blocks[profileId] || []).find(b => b.id === blockId)
     if (block?.dbId) {
-      // Extra block from schedule_blocks table — delete by DB id
       await sb.from('schedule_blocks').delete().eq('id', block.dbId)
       setExtraBlocks(prev => prev.filter(b => b.id !== block.dbId))
     }
@@ -358,177 +275,283 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
     if (!block?.dbId) saveBlocksToDb(profileId, newBlocks)
   }
 
+  const addExtraBlock = async (profileId, type) => {
+    setAddBlockMenu(null)
+    if (type === 'shift') { openShiftModal(profileId); return }
+    const existing = blocks[profileId] || []
+    const shiftBlock = existing.find(b => b.type === 'shift')
+    const start = shiftBlock ? shiftBlock.start + 4 : 8
+    const durations = { outbound:8, meeting:4, break:1, lunch:2, pto:TOTAL_INTERVALS, sick:TOTAL_INTERVALS, holiday:TOTAL_INTERVALS }
+    const duration = durations[type] || 2
+    if (['outbound','meeting'].includes(type)) {
+      setSaving(true)
+      const { data: inserted } = await sb.from('schedule_blocks').insert({
+        profile_id: profileId, date, type,
+        start_interval: start, duration_intervals: duration, created_by: profile?.id,
+      }).select().single()
+      if (inserted) {
+        setExtraBlocks(prev => [...prev, inserted])
+        setBlocks(prev => ({ ...prev, [profileId]: [...(prev[profileId]||[]), { id:inserted.id, type, start, duration, dbId:inserted.id }] }))
+      }
+      setSaving(false)
+      return
+    }
+    const newBlock = { id: type+'-'+Date.now(), type, start, duration }
+    const newBlocks = { ...blocks, [profileId]: [...existing, newBlock] }
+    setBlocks(newBlocks)
+    saveBlocksToDb(profileId, newBlocks)
+  }
+
+  // Build adherence segments for a profile
+  const getAdherenceSegments = (profileId) => {
+    const sched = schedules.find(s => s.profile_id === profileId)
+    if (!sched || !sched.shift_start || !sched.shift_end) return []
+    const events = statusEvents.filter(e => e.profile_id === profileId && e.started_at)
+    if (events.length === 0) return []
+
+    const shiftStart = timeToInterval(sched.shift_start)
+    const shiftEnd = timeToInterval(sched.shift_end)
+    const segments = []
+
+    events.forEach(ev => {
+      if (!ev.started_at) return
+      const start = isoToInterval(ev.started_at)
+      const end = ev.ended_at ? isoToInterval(ev.ended_at) : (isToday ? currentInterval : shiftEnd)
+      if (start === null || end === null || start >= shiftEnd || end <= shiftStart) return
+      const clampedStart = Math.max(start, shiftStart)
+      const clampedEnd = Math.min(end, shiftEnd)
+      if (clampedEnd <= clampedStart) return
+      const adherent = ['Available','On Call','Wrap Up'].includes(ev.status)
+      const offSchedule = ['Break','Lunch'].includes(ev.status)
+      segments.push({ start: clampedStart, end: clampedEnd, status: ev.status, adherent, offSchedule })
+    })
+    return segments
+  }
+
+  const formatDate = (d) => new Date(d + 'T12:00:00').toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric', year:'numeric' })
+  const prevDay = () => { const d = new Date(date + 'T12:00:00'); d.setDate(d.getDate()-1); setDate(d.toISOString().split('T')[0]) }
+  const nextDay = () => { const d = new Date(date + 'T12:00:00'); d.setDate(d.getDate()+1); setDate(d.toISOString().split('T')[0]) }
+
+  // Coverage calculation
   const getCoverage = (interval) => profiles.filter(p => {
     const pBlocks = blocks[p.id] || []
     const shift = pBlocks.find(b => b.type === 'shift')
     if (!shift) return false
-    const inShift = interval >= shift.start && interval < shift.start + shift.duration
-    const busy = pBlocks.some(b => ['break','lunch','meeting'].includes(b.type) && interval >= b.start && interval < b.start + b.duration)
-    const away = pBlocks.some(b => ['pto','sick'].includes(b.type))
-    return inShift && !busy && !away
+    return interval >= shift.start && interval < shift.start + shift.duration &&
+      !pBlocks.some(b => ['break','lunch'].includes(b.type) && interval >= b.start && interval < b.start + b.duration)
   }).length
 
-
   return (
-    <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
+    <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden' }}>
 
-      {/* Date nav */}
-      <div style={{ display:'flex', alignItems:'center', gap:12 }}>
-        <button className="btn sm" onClick={() => setDate(prevDate(date))}>Prev</button>
-        <span style={{ fontSize:14, fontWeight:600 }}>{formatDate(date)}</span>
-        <button className="btn sm" onClick={() => setDate(nextDate(date))}>Next</button>
-        {date !== today && <button className="btn sm" onClick={() => setDate(today)}>Today</button>}
-        {saving && <span style={{ fontSize:11, color:'var(--text-muted)', marginLeft:8 }}>Saving...</span>}
-      </div>
-
-      {/* Legend */}
-      <div style={{ display:'flex', gap:12, flexWrap:'wrap', alignItems:'center' }}>
-        {BLOCK_TYPES.map(bt => (
-          <span key={bt.id} style={{ display:'flex', alignItems:'center', gap:4, fontSize:11 }}>
-            <span style={{ width:10, height:10, borderRadius:2, background:bt.color, display:'inline-block' }}></span>
-            {bt.label}
-          </span>
-        ))}
-        {isAdmin && <span style={{ fontSize:11, color:'var(--text-muted)', marginLeft:'auto' }}>Click name to set shift | Drag to move | Drag right edge to resize | Right-click to delete</span>}
-      </div>
-
-      {/* Grid */}
-      <div ref={containerRef} style={{ border:'1px solid var(--border)', borderRadius:'var(--radius)', userSelect:'none', position:'relative', width:'100%' }}>
-        <div style={{ width:'100%' }}>
-
-          {/* Time header */}
-          <div style={{ display:'flex', height:48, borderBottom:'2px solid var(--border)', background:'var(--surface-2)' }}>
-            <div style={{ width:LABEL_WIDTH, flexShrink:0, borderRight:'1px solid var(--border)', display:'flex', alignItems:'center', paddingLeft:12, fontSize:11, fontWeight:600, color:'var(--text-muted)', position:'sticky', left:0, zIndex:10, background:'var(--surface-2)' }}>Agent</div>
-            <div style={{ display:'flex', flex:1 }}>
-              {Array.from({ length: TOTAL_INTERVALS }, (_, i) => {
-                const totalMins = START_HOUR * 60 + i * 15
-                const h = Math.floor(totalMins / 60)
-                const m = totalMins % 60
-                const isHour = m === 0
-                const label = isHour ? `${h % 12 || 12}${h >= 12 ? 'PM' : 'AM'}` : `:${m.toString().padStart(2,'0')}`
-                return (
-                  <div key={i} style={{ width:CELL_WIDTH, flexShrink:0, borderRight: isHour && i > 0 ? '1px solid var(--border)' : '1px solid rgba(0,0,0,.05)', display:'flex', flexDirection:'column', alignItems:'flex-start', justifyContent:'flex-end', paddingBottom:3, paddingLeft:2 }}>
-                    <span style={{ fontSize: isHour ? 9 : 8, color: isHour ? 'var(--text-secondary)' : 'var(--text-muted)', whiteSpace:'nowrap', fontWeight: isHour ? 600 : 400 }}>{label}</span>
-                  </div>
-                )
-              })}
-            </div>
+      {/* Date nav bar */}
+      <div style={{ padding:'12px 24px', borderBottom:'1px solid var(--border)', display:'flex', alignItems:'center', justifyContent:'space-between', background:'var(--surface)', flexShrink:0 }}>
+        <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+          <button onClick={prevDay} style={{ width:32, height:32, border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface-2)', cursor:'pointer', fontSize:16, color:'var(--text-secondary)', display:'flex', alignItems:'center', justifyContent:'center' }}
+            onMouseEnter={e => e.currentTarget.style.background='var(--border)'}
+            onMouseLeave={e => e.currentTarget.style.background='var(--surface-2)'}>‹</button>
+          <div style={{ fontSize:14, fontWeight:500, color:'var(--text-primary)', minWidth:260, textAlign:'center' }}>
+            {formatDate(date)}
+            {isToday && <span style={{ marginLeft:8, fontSize:11, fontWeight:600, color:'#2a78d6', background:'#2a78d618', padding:'2px 8px', borderRadius:99 }}>Today</span>}
           </div>
+          <button onClick={nextDay} style={{ width:32, height:32, border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface-2)', cursor:'pointer', fontSize:16, color:'var(--text-secondary)', display:'flex', alignItems:'center', justifyContent:'center' }}
+            onMouseEnter={e => e.currentTarget.style.background='var(--border)'}
+            onMouseLeave={e => e.currentTarget.style.background='var(--surface-2)'}>›</button>
+        </div>
 
-          {/* Coverage row */}
-          <div style={{ display:'flex', height:26, borderBottom:'2px solid var(--border)', background:'var(--surface)' }}>
-            <div style={{ width:LABEL_WIDTH, flexShrink:0, borderRight:'1px solid var(--border)', display:'flex', alignItems:'center', paddingLeft:12, fontSize:10, fontWeight:600, color:'var(--text-muted)', position:'sticky', left:0, zIndex:10, background:'var(--surface)' }}>Available</div>
-            <div style={{ display:'flex', flex:1 }}>
-              {Array.from({ length: TOTAL_INTERVALS }, (_, i) => {
-                const count = getCoverage(i)
-                const color = count >= 3 ? '#22c55e' : count === 2 ? '#f59e0b' : count === 1 ? '#ef4444' : 'transparent'
-                return (
-                  <div key={i} style={{ width:CELL_WIDTH, flexShrink:0, borderRight: i % 4 === 3 ? '1px solid var(--border)' : '1px solid rgba(0,0,0,.04)', display:'flex', alignItems:'center', justifyContent:'center' }}>
-                    {count > 0 && <span style={{ fontSize:9, fontWeight:700, color }}>{count}</span>}
-                  </div>
-                )
-              })}
+        {/* Legend */}
+        <div style={{ display:'flex', gap:14, alignItems:'center', flexWrap:'wrap' }}>
+          {BLOCK_TYPES.slice(0,5).map(bt => (
+            <div key={bt.id} style={{ display:'flex', alignItems:'center', gap:5, fontSize:11, color:'var(--text-secondary)' }}>
+              <div style={{ width:10, height:10, borderRadius:2, background:bt.color, opacity:.8 }} />
+              {bt.label}
+            </div>
+          ))}
+          <div style={{ width:1, height:14, background:'var(--border)' }} />
+          <div style={{ display:'flex', alignItems:'center', gap:5, fontSize:11, color:'var(--text-secondary)' }}>
+            <div style={{ width:10, height:4, borderRadius:2, background:'#0ca30c' }} />Adherent
+          </div>
+          <div style={{ display:'flex', alignItems:'center', gap:5, fontSize:11, color:'var(--text-secondary)' }}>
+            <div style={{ width:10, height:4, borderRadius:2, background:'#d03b3b' }} />Deviation
+          </div>
+          {saving && <span style={{ fontSize:11, color:'var(--text-muted)' }}>Saving...</span>}
+        </div>
+      </div>
+
+      {/* Timeline */}
+      <div style={{ flex:1, overflowY:'auto', overflowX:'hidden' }} ref={containerRef}>
+        <div style={{ minWidth: LABEL_WIDTH + TOTAL_INTERVALS * MIN_CELL_WIDTH }}>
+
+          {/* Hour header */}
+          <div style={{ display:'flex', position:'sticky', top:0, zIndex:20, background:'var(--surface)', borderBottom:'1px solid var(--border)' }}>
+            <div style={{ width:LABEL_WIDTH, flexShrink:0, padding:'8px 16px', borderRight:'1px solid var(--border)', fontSize:10, fontWeight:600, textTransform:'uppercase', letterSpacing:.5, color:'var(--text-muted)', background:'var(--surface-2)' }}>Agent</div>
+            <div style={{ flex:1, position:'relative', height:36 }}>
+              {Array.from({ length: END_HOUR - START_HOUR + 1 }, (_, i) => START_HOUR + i).map(h => (
+                <div key={h} style={{ position:'absolute', left:(h-START_HOUR)*4*CELL_WIDTH, top:0, bottom:0, display:'flex', alignItems:'center' }}>
+                  <div style={{ position:'absolute', top:0, bottom:0, left:0, width:'1px', background:'var(--border)' }} />
+                  <span style={{ fontSize:10, color:'var(--text-muted)', paddingLeft:4, fontWeight:500 }}>{fmtHour(h)}</span>
+                </div>
+              ))}
+            </div>
+            <div style={{ width:80, flexShrink:0, borderLeft:'1px solid var(--border)', background:'var(--surface-2)', display:'flex', alignItems:'center', justifyContent:'center' }}>
+              <span style={{ fontSize:10, fontWeight:600, textTransform:'uppercase', letterSpacing:.5, color:'var(--text-muted)' }}>Stats</span>
             </div>
           </div>
 
           {/* Agent rows */}
-          {profiles.map((p, rowIdx) => {
+          {profiles.map(p => {
             const pBlocks = blocks[p.id] || []
+            const adherenceSegs = getAdherenceSegments(p.id)
             const sched = schedules.find(s => s.profile_id === p.id)
-            const isPto = pBlocks.some(b => b.type === 'pto')
-            const isSick = pBlocks.some(b => b.type === 'sick')
+            const repLogs = statusEvents.filter(e => e.profile_id === p.id)
+            const totalAdh = adherenceSegs.length > 0
+              ? Math.round(adherenceSegs.filter(s => s.adherent).reduce((sum, s) => sum + (s.end - s.start), 0) / adherenceSegs.reduce((sum, s) => sum + (s.end - s.start), 0) * 100)
+              : null
+            const adhColor = totalAdh == null ? 'var(--text-muted)' : totalAdh >= 90 ? '#0ca30c' : totalAdh >= 75 ? '#eda100' : '#d03b3b'
 
             return (
-              <div key={p.id} style={{ display:'flex', height:ROW_HEIGHT, borderBottom:'1px solid var(--border)', background: rowIdx % 2 === 0 ? 'var(--surface)' : 'var(--surface-2)' }}>
-                {/* Agent label - sticky */}
-                <div style={{ width:LABEL_WIDTH, flexShrink:0, borderRight:'1px solid var(--border)', display:'flex', alignItems:'center', gap:6, paddingLeft:8, background: rowIdx % 2 === 0 ? 'var(--surface)' : 'var(--surface-2)', position:'sticky', left:0, zIndex:5 }}>
-                  <div style={{ width:22, height:22, borderRadius:'50%', background:'var(--accent-bg)', display:'flex', alignItems:'center', justifyContent:'center', fontSize: p.avatar ? 13 : 9, fontWeight:600, flexShrink:0 }}>
-                    {p.avatar || (p.name || p.email || '?')[0].toUpperCase()}
+              <div key={p.id} style={{ display:'flex', borderBottom:'1px solid var(--border)', minHeight:ROW_HEIGHT + ADHERENCE_HEIGHT + 8 }}
+                onMouseLeave={() => setTooltip(null)}>
+
+                {/* Agent label */}
+                <div style={{ width:LABEL_WIDTH, flexShrink:0, display:'flex', alignItems:'center', gap:10, padding:'10px 16px', borderRight:'1px solid var(--border)', background:'var(--surface-2)', position:'relative' }}>
+                  <div style={{ width:30, height:30, borderRadius:'50%', background:'var(--accent-bg)', color:'var(--accent)', display:'flex', alignItems:'center', justifyContent:'center', fontSize: p.avatar ? 18 : 11, fontWeight:600, flexShrink:0 }}>
+                    {p.avatar || (p.name||p.email||'?')[0].toUpperCase()}
                   </div>
-                  <div style={{ flex:1, minWidth:0 }}>
-                    <div
-                      onClick={() => isAdmin && openShiftModal(p.id)}
-                      style={{ fontSize:11, fontWeight:500, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', cursor: isAdmin ? 'pointer' : 'default', color: isAdmin ? 'var(--accent)' : 'var(--text-primary)' }}
-                      title={isAdmin ? 'Click to set shift' : ''}
-                    >
-                      {p.name || p.email}
-                    </div>
-                    {sched && (
-                      <div style={{ fontSize:9, color:'var(--text-muted)' }}>
-                        {isPto ? 'PTO' : isSick ? 'Sick' : pBlocks.some(b=>b.type==='holiday') ? 'Holiday' : sched.shift_start ? `${fmt12(sched.shift_start)}-${fmt12(sched.shift_end)}` : 'No shift'}
-                      </div>
+                  <div style={{ minWidth:0 }}>
+                    <div style={{ fontSize:12, fontWeight:500, color:'var(--text-primary)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{p.name||p.email}</div>
+                    {totalAdh != null && (
+                      <div style={{ fontSize:10, color:adhColor, marginTop:1, fontWeight:600 }}>{totalAdh}% adherent</div>
                     )}
+                    {!sched && <div style={{ fontSize:10, color:'var(--text-muted)', marginTop:1 }}>No shift</div>}
                   </div>
-                  {isAdmin && !isPto && !isSick && (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        const rect = e.currentTarget.getBoundingClientRect()
-                        setAddBlockMenu(addBlockMenu?.profileId === p.id ? null : { profileId: p.id, x: rect.left, y: rect.bottom + 4 })
-                      }}
-                      style={{ fontSize:16, background:'none', border:'none', cursor:'pointer', color:'var(--accent)', padding:'2px 4px', flexShrink:0, lineHeight:1 }}
-                      title="Add block"
-                    >+</button>
+                  {isAdmin && (
+                    <button onClick={() => { setAddBlockMenu({ profileId:p.id }) }}
+                      style={{ position:'absolute', right:8, top:'50%', transform:'translateY(-50%)', width:22, height:22, borderRadius:'50%', border:'1px solid var(--border)', background:'var(--surface)', cursor:'pointer', fontSize:14, display:'flex', alignItems:'center', justifyContent:'center', color:'var(--text-muted)', flexShrink:0 }}
+                      onMouseEnter={e => { e.currentTarget.style.background='var(--accent-bg)'; e.currentTarget.style.color='var(--accent)' }}
+                      onMouseLeave={e => { e.currentTarget.style.background='var(--surface)'; e.currentTarget.style.color='var(--text-muted)' }}
+                      title="Add block">+</button>
                   )}
                 </div>
 
-                {/* Timeline */}
-                <div style={{ position:'relative', flex:1 }}>
+                {/* Track area */}
+                <div style={{ flex:1, position:'relative', overflow:'hidden' }}>
                   {/* Grid lines */}
-                  {Array.from({ length: TOTAL_INTERVALS }, (_, i) => (
-                    <div key={i} style={{ position:'absolute', left: i * CELL_WIDTH, top:0, bottom:0, borderRight: i % 4 === 3 ? '1px solid var(--border)' : '1px solid rgba(0,0,0,.04)', pointerEvents:'none' }} />
+                  {Array.from({ length: END_HOUR - START_HOUR + 1 }, (_, i) => i).map(i => (
+                    <div key={i} style={{ position:'absolute', left:i*4*CELL_WIDTH, top:0, bottom:0, width:'1px', background: i%4===0 ? 'var(--border)' : 'rgba(0,0,0,.04)', pointerEvents:'none' }} />
                   ))}
 
-                  {/* Current time line */}
-                  {currentInterval !== null && currentInterval >= 0 && currentInterval <= TOTAL_INTERVALS && (
-                    <div style={{ position:'absolute', left: currentInterval * CELL_WIDTH, top:0, bottom:0, width:2, background:'#ef4444', zIndex:10, pointerEvents:'none' }}>
-                      <div style={{ position:'absolute', top:0, left:-3, width:8, height:8, borderRadius:'50%', background:'#ef4444' }} />
+                  {/* Now line */}
+                  {isToday && currentInterval !== null && currentInterval >= 0 && currentInterval <= TOTAL_INTERVALS && (
+                    <div style={{ position:'absolute', left:currentInterval*CELL_WIDTH, top:0, bottom:0, width:2, background:'#e24b4a', zIndex:10, pointerEvents:'none' }}>
+                      <div style={{ position:'absolute', top:0, left:-3, width:8, height:8, borderRadius:'50%', background:'#e24b4a' }} />
                     </div>
                   )}
 
-                  {/* Blocks */}
+                  {/* Schedule blocks */}
                   {pBlocks.map(block => {
                     const bt = BLOCK_TYPES.find(t => t.id === block.type) || BLOCK_TYPES[0]
-                    const width = block.duration * CELL_WIDTH - 2
-                    const left = block.start * CELL_WIDTH + 1
+                    const w = block.duration * CELL_WIDTH - 2
+                    const l = block.start * CELL_WIDTH + 1
                     const isShift = block.type === 'shift'
                     return (
-                      <div
-                        key={block.id}
-                        onMouseDown={(e) => { if (!isAdmin) return; e.preventDefault(); e.stopPropagation(); setDragging({ profileId: p.id, blockId: block.id, mode:'move', startX: e.clientX }) }}
-                        onContextMenu={(e) => {
-                          if (!isAdmin) return
-                          e.preventDefault()
-                          e.stopPropagation()
-                          setContextMenu({ x: e.clientX, y: e.clientY, profileId: p.id, block })
+                      <div key={block.id}
+                        onMouseDown={e => { if (!isAdmin) return; e.preventDefault(); e.stopPropagation(); setDragging({ profileId:p.id, blockId:block.id, mode:'move', startX:e.clientX }) }}
+                        onContextMenu={e => { if (!isAdmin) return; e.preventDefault(); e.stopPropagation(); setContextMenu({ x:e.clientX, y:e.clientY, profileId:p.id, block }) }}
+                        onMouseEnter={e => {
+                          const rect = e.currentTarget.getBoundingClientRect()
+                          setTooltip({
+                            x: rect.left + rect.width/2, y: rect.top - 8,
+                            content: `${bt.label}: ${fmtTime(intervalToTime(block.start))} – ${fmtTime(intervalToTime(block.start+block.duration))}`
+                          })
                         }}
-                        title={isAdmin ? 'Right-click for options' : ''}
-                        style={{
-                          position:'absolute', left, top: isShift ? 6 : 10, height: isShift ? ROW_HEIGHT - 12 : ROW_HEIGHT - 20, width,
-                          background: bt.bg, border:`1.5px solid ${bt.color}`, borderRadius:4,
+                        onMouseLeave={() => setTooltip(null)}
+                        style={{ position:'absolute', left:l, top: isShift ? 8 : 12, height: isShift ? ROW_HEIGHT - 24 : ROW_HEIGHT - 32,
+                          width:w, background:bt.bg, border:`1.5px solid ${bt.color}`, borderRadius:5,
                           display:'flex', alignItems:'center', overflow:'hidden',
-                          cursor: isAdmin ? 'grab' : 'default', zIndex: isShift ? 2 : 4,
-                          opacity: isShift ? 0.85 : 1,
-                        }}
-                      >
-                        <span style={{ fontSize:9, fontWeight:700, color: bt.text, paddingLeft:4, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', flex:1 }}>
-                          {bt.label}
+                          cursor: isAdmin ? 'grab' : 'default', zIndex: isShift ? 2 : 4, userSelect:'none' }}>
+                        <span style={{ fontSize:9, fontWeight:700, color:bt.text, paddingLeft:6, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', flex:1 }}>
+                          {block.duration * 15 >= 30 ? bt.label : ''}
                         </span>
                         {isAdmin && (
-                          <div
-                            onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); setDragging({ profileId: p.id, blockId: block.id, mode:'resize', startX: e.clientX }) }}
-                            style={{ width:5, height:'100%', background: bt.color, cursor:'ew-resize', flexShrink:0, opacity:.5 }}
-                          />
+                          <div onMouseDown={e => { e.preventDefault(); e.stopPropagation(); setDragging({ profileId:p.id, blockId:block.id, mode:'resize', startX:e.clientX }) }}
+                            style={{ width:5, height:'100%', background:bt.color, cursor:'ew-resize', flexShrink:0, opacity:.4 }} />
                         )}
                       </div>
                     )
                   })}
+
+                  {/* Adherence track */}
+                  {adherenceSegs.length > 0 && (
+                    <div style={{ position:'absolute', bottom:4, left:0, right:0, height:ADHERENCE_HEIGHT }}>
+                      {adherenceSegs.map((seg, i) => {
+                        const l = seg.start * CELL_WIDTH
+                        const w = (seg.end - seg.start) * CELL_WIDTH
+                        const color = seg.adherent ? '#0ca30c' : '#d03b3b'
+                        return (
+                          <div key={i}
+                            onMouseEnter={e => {
+                              const rect = e.currentTarget.getBoundingClientRect()
+                              setTooltip({
+                                x: rect.left + rect.width/2, y: rect.top - 8,
+                                content: `${seg.status}: ${Math.round((seg.end - seg.start) * 15)}min — ${seg.adherent ? 'On schedule' : 'Deviation'}`
+                              })
+                            }}
+                            onMouseLeave={() => setTooltip(null)}
+                            style={{ position:'absolute', left:l, bottom:2, width:Math.max(w-1,1), height:5, borderRadius:3, background:color, opacity: seg.adherent ? .75 : 1, cursor:'default' }} />
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                {/* Stats column */}
+                <div style={{ width:80, flexShrink:0, borderLeft:'1px solid var(--border)', background:'var(--surface-2)', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:2, padding:'6px 8px' }}>
+                  {sched?.shift_start && (
+                    <>
+                      <div style={{ fontSize:10, color:'var(--text-muted)' }}>shift</div>
+                      <div style={{ fontSize:11, fontWeight:500, color:'var(--text-secondary)' }}>
+                        {(timeToInterval(sched.shift_end) - timeToInterval(sched.shift_start)) / 4}h
+                      </div>
+                    </>
+                  )}
+                  {totalAdh != null && (
+                    <>
+                      <div style={{ fontSize:10, color:'var(--text-muted)', marginTop:3 }}>adh</div>
+                      <div style={{ fontSize:12, fontWeight:700, color:adhColor }}>{totalAdh}%</div>
+                    </>
+                  )}
                 </div>
               </div>
             )
           })}
+
+          {/* Coverage bar */}
+          <div style={{ display:'flex', borderTop:'2px solid var(--border)', background:'var(--surface-2)' }}>
+            <div style={{ width:LABEL_WIDTH, flexShrink:0, padding:'8px 16px', borderRight:'1px solid var(--border)', fontSize:10, fontWeight:600, textTransform:'uppercase', letterSpacing:.5, color:'var(--text-muted)' }}>Coverage</div>
+            <div style={{ flex:1, position:'relative', height:32 }}>
+              {Array.from({ length: TOTAL_INTERVALS }, (_, i) => i).map(i => {
+                const count = getCoverage(i)
+                const maxCount = profiles.length || 1
+                const pct = Math.min(count / maxCount, 1)
+                return (
+                  <div key={i} style={{ position:'absolute', left:i*CELL_WIDTH, bottom:4, width:Math.max(CELL_WIDTH-1,1), height: Math.max(pct * 20, pct > 0 ? 4 : 0),
+                    background: pct >= 0.8 ? '#0ca30c' : pct >= 0.5 ? '#eda100' : pct > 0 ? '#d03b3b' : 'transparent',
+                    borderRadius:2, transition:'height .1s' }} />
+                )
+              })}
+            </div>
+            <div style={{ width:80, flexShrink:0, borderLeft:'1px solid var(--border)' }} />
+          </div>
         </div>
       </div>
+
+      {/* Tooltip */}
+      {tooltip && (
+        <div style={{ position:'fixed', left:tooltip.x, top:tooltip.y, transform:'translate(-50%,-100%)', background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'6px 10px', fontSize:11, color:'var(--text-primary)', pointerEvents:'none', zIndex:999, whiteSpace:'nowrap', boxShadow:'0 4px 16px rgba(0,0,0,.12)' }}>
+          {tooltip.content}
+        </div>
+      )}
 
       {/* Context menu overlay */}
       {contextMenu && <div style={{ position:'fixed', inset:0, zIndex:299 }} onMouseDown={() => setContextMenu(null)} />}
@@ -536,147 +559,103 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
       {/* Context menu */}
       {contextMenu && (() => {
         const { x, y, profileId, block } = contextMenu
-        const isShift = block.type === 'shift'
         const bt = BLOCK_TYPES.find(t => t.id === block.type)
+        const isShift = block.type === 'shift'
         return (
-          <div style={{ position:'fixed', left: x, top: y, background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius)', boxShadow:'0 4px 20px rgba(0,0,0,.18)', zIndex:300, minWidth:200, overflow:'hidden' }}>
-            {/* Header */}
+          <div style={{ position:'fixed', left:x, top:y, background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius)', boxShadow:'0 4px 20px rgba(0,0,0,.18)', zIndex:300, minWidth:180, overflow:'hidden' }}>
             <div style={{ padding:'8px 14px', borderBottom:'1px solid var(--border)', display:'flex', alignItems:'center', gap:8 }}>
-              <span style={{ width:10, height:10, borderRadius:2, background: bt?.color, flexShrink:0 }}></span>
-              <span style={{ fontSize:11, fontWeight:700, color:'var(--text-primary)' }}>{bt?.label || block.type}</span>
+              <span style={{ width:10, height:10, borderRadius:2, background:bt?.color }} />
+              <span style={{ fontSize:11, fontWeight:600, color:'var(--text-primary)' }}>{bt?.label || block.type}</span>
             </div>
-
-            {/* Adjust shift / Edit block */}
-            <button
-              onMouseDown={() => { setContextMenu(null); openShiftModal(profileId) }}
-              style={{ display:'flex', alignItems:'center', gap:10, width:'100%', padding:'10px 14px', background:'transparent', border:'none', cursor:'pointer', fontSize:12, color:'var(--text-primary)', textAlign:'left' }}
-              onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
-              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-            >
-              <span style={{ fontSize:14 }}>✏️</span>
-              {isShift ? 'Adjust shift times' : 'Edit block'}
-            </button>
-
-            {/* Add event (only shown on shift right-click) */}
-            {isShift && (
-              <button
-                onMouseDown={() => {
-                  setContextMenu(null)
-                  const rect = document.getElementById('add-btn-' + profileId)?.getBoundingClientRect()
-                  setAddBlockMenu({ profileId, x: x, y: y + 10 })
-                }}
-                style={{ display:'flex', alignItems:'center', gap:10, width:'100%', padding:'10px 14px', background:'transparent', border:'none', cursor:'pointer', fontSize:12, color:'var(--text-primary)', textAlign:'left' }}
-                onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
-                onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-              >
-                <span style={{ fontSize:14 }}>➕</span>
-                Add event
+            {[
+              { label: isShift ? 'Edit shift' : 'Edit block', action: () => { setContextMenu(null); openShiftModal(profileId) }, danger: false },
+              { label: isShift ? 'Delete shift' : `Remove ${bt?.label||'block'}`, action: () => { setContextMenu(null); if (isShift) { if(confirm('Delete shift?')) deleteSchedule(profileId) } else removeBlock(profileId, block.id) }, danger: true },
+            ].map(item => (
+              <button key={item.label} onMouseDown={item.action}
+                style={{ display:'flex', alignItems:'center', width:'100%', padding:'10px 14px', background:'transparent', border:'none', cursor:'pointer', fontSize:12, color: item.danger ? '#e24b4a' : 'var(--text-primary)', textAlign:'left' }}
+                onMouseEnter={e => e.currentTarget.style.background = item.danger ? '#fee2e220' : 'var(--surface-2)'}
+                onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                {item.label}
               </button>
-            )}
-
-            {/* Divider */}
-            <div style={{ borderTop:'1px solid var(--border)', margin:'2px 0' }} />
-
-            {/* Delete */}
-            <button
-              onMouseDown={() => {
-                setContextMenu(null)
-                if (isShift) {
-                  if (confirm('Delete shift for this day?')) deleteSchedule(profileId)
-                } else {
-                  removeBlock(profileId, block.id)
-                }
-              }}
-              style={{ display:'flex', alignItems:'center', gap:10, width:'100%', padding:'10px 14px', background:'transparent', border:'none', cursor:'pointer', fontSize:12, color:'#ef4444', textAlign:'left' }}
-              onMouseEnter={e => e.currentTarget.style.background = '#fee2e2'}
-              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-            >
-              <span style={{ fontSize:14 }}>🗑️</span>
-              {isShift ? 'Delete shift' : `Remove ${bt?.label || 'block'}`}
-            </button>
+            ))}
           </div>
         )
       })()}
 
-      {/* Click outside add block menu */}
+      {/* Add block menu */}
       {addBlockMenu && <div style={{ position:'fixed', inset:0, zIndex:199 }} onMouseDown={() => setAddBlockMenu(null)} />}
-
-      {/* Add block dropdown */}
       {addBlockMenu && (
-        <div style={{ position:'fixed', left: addBlockMenu.x, top: addBlockMenu.y, background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius)', boxShadow:'0 4px 16px rgba(0,0,0,.2)', zIndex:300, minWidth:180, overflow:'hidden' }}>
+        <div style={{ position:'fixed', left:LABEL_WIDTH - 16, top:'30%', background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius)', boxShadow:'0 4px 20px rgba(0,0,0,.2)', zIndex:200, minWidth:180, overflow:'hidden' }}>
           <div style={{ padding:'6px 14px', fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:.5, color:'var(--text-muted)', borderBottom:'1px solid var(--border)' }}>Add Block</div>
           {['shift','break','lunch','outbound','meeting','pto','sick','holiday'].map(type => {
             const bt = BLOCK_TYPES.find(b => b.id === type)
-            const label = type === 'shift' ? 'Set Shift...' : bt.label
             return (
-              <button key={type}
-                onMouseDown={(e) => { e.stopPropagation(); addExtraBlock(addBlockMenu.profileId, type) }}
-                style={{ display:'flex', alignItems:'center', gap:8, width:'100%', padding:'9px 14px', background:'transparent', border:'none', cursor:'pointer', fontSize:12, color:'var(--text-primary)', textAlign:'left' }}
+              <button key={type} onMouseDown={() => addExtraBlock(addBlockMenu.profileId, type)}
+                style={{ display:'flex', alignItems:'center', gap:10, width:'100%', padding:'9px 14px', background:'transparent', border:'none', cursor:'pointer', fontSize:12, color:'var(--text-primary)', textAlign:'left' }}
                 onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
                 onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-                <span style={{ width:10, height:10, borderRadius:2, background:bt.color, flexShrink:0 }}></span>
-                {label}
+                <span style={{ width:10, height:10, borderRadius:2, background:bt?.color||'#ccc', flexShrink:0 }} />
+                {bt?.label||type}
               </button>
             )
           })}
-          <button onMouseDown={() => setAddBlockMenu(null)}
-            style={{ display:'block', width:'100%', padding:'7px 14px', background:'transparent', border:'none', borderTop:'1px solid var(--border)', cursor:'pointer', fontSize:11, color:'var(--text-muted)', textAlign:'left' }}>
-            Cancel
-          </button>
         </div>
       )}
 
       {/* Shift modal */}
       {shiftModal && (
-        <Modal
-          title={`Set Schedule - ${profiles.find(p => p.id === shiftModal)?.name || 'Agent'} - ${formatDate(date)}`}
-          onClose={() => setShiftModal(null)}
-          width={460}
-        >
-          <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
-            <div className="form-field">
-              <label className="form-label">Day type</label>
-              <select className="form-input" value={shiftForm.day_type} onChange={e => setShiftForm(p => ({ ...p, day_type: e.target.value }))}>
-                <option value="work">Working</option>
-                <option value="pto">PTO - Full Day</option>
-                <option value="sick">Sick - Full Day</option>
-                <option value="holiday">Holiday</option>
-                <option value="off">Off</option>
-              </select>
+        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,.45)', zIndex:500, display:'flex', alignItems:'center', justifyContent:'center' }}>
+          <div style={{ background:'var(--surface)', borderRadius:12, padding:24, width:460, boxShadow:'0 8px 32px rgba(0,0,0,.25)', maxHeight:'90vh', overflowY:'auto' }}>
+            <div style={{ fontSize:15, fontWeight:600, color:'var(--text-primary)', marginBottom:18 }}>
+              {profiles.find(p => p.id === shiftModal)?.name || 'Agent'} — {new Date(date+'T12:00:00').toLocaleDateString('en-US',{weekday:'long',month:'short',day:'numeric'})}
+            </div>
+
+            <div style={{ display:'flex', gap:6, marginBottom:16, flexWrap:'wrap' }}>
+              {['work','pto','sick','holiday','off'].map(dt => (
+                <button key={dt} onClick={() => setShiftForm(p => ({ ...p, day_type: dt }))}
+                  style={{ padding:'5px 12px', borderRadius:99, fontSize:11, fontWeight:500, border:'1px solid', cursor:'pointer',
+                    borderColor: shiftForm.day_type === dt ? 'var(--accent)' : 'var(--border)',
+                    background: shiftForm.day_type === dt ? 'var(--accent)' : 'var(--surface-2)',
+                    color: shiftForm.day_type === dt ? '#fff' : 'var(--text-secondary)' }}>
+                  {dt.charAt(0).toUpperCase()+dt.slice(1)}
+                </button>
+              ))}
             </div>
 
             {shiftForm.day_type === 'work' && (
-              <>
-                <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
-                  <div className="form-field"><label className="form-label">Shift start</label><input type="time" className="form-input" value={shiftForm.shift_start} onChange={e => setShiftForm(p => ({ ...p, shift_start: e.target.value }))} /></div>
-                  <div className="form-field"><label className="form-label">Shift end</label><input type="time" className="form-input" value={shiftForm.shift_end} onChange={e => setShiftForm(p => ({ ...p, shift_end: e.target.value }))} /></div>
+              <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
+                <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
+                  {[['Shift start','shift_start'],['Shift end','shift_end'],['Break 1','break1_start'],['Lunch','lunch_start'],['Break 2','break2_start']].map(([label, key]) => (
+                    <div key={key}>
+                      <label style={{ fontSize:10, fontWeight:600, textTransform:'uppercase', letterSpacing:.5, color:'var(--text-muted)', display:'block', marginBottom:4 }}>{label}</label>
+                      <input type="time" value={shiftForm[key]||''} onChange={e => setShiftForm(p => ({ ...p, [key]: e.target.value }))}
+                        style={{ width:'100%', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'7px 10px', fontSize:13, background:'var(--surface-2)', color:'var(--text-primary)', fontFamily:'inherit' }} />
+                    </div>
+                  ))}
                 </div>
-                <div style={{ fontSize:11, fontWeight:600, textTransform:'uppercase', letterSpacing:.5, color:'var(--text-muted)' }}>Break 1</div>
-                <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
-                  <div className="form-field"><label className="form-label">Start time</label><input type="time" className="form-input" value={shiftForm.break1_start} onChange={e => setShiftForm(p => ({ ...p, break1_start: e.target.value }))} /></div>
-                  <div className="form-field"><label className="form-label">Duration (min)</label><input type="number" className="form-input" value={shiftForm.break1_duration} min={5} max={30} onChange={e => setShiftForm(p => ({ ...p, break1_duration: parseInt(e.target.value) }))} /></div>
-                </div>
-                <div style={{ fontSize:11, fontWeight:600, textTransform:'uppercase', letterSpacing:.5, color:'var(--text-muted)' }}>Lunch</div>
-                <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
-                  <div className="form-field"><label className="form-label">Start time</label><input type="time" className="form-input" value={shiftForm.lunch_start} onChange={e => setShiftForm(p => ({ ...p, lunch_start: e.target.value }))} /></div>
-                  <div className="form-field"><label className="form-label">Duration</label><select className="form-input" value={shiftForm.lunch_duration} onChange={e => setShiftForm(p => ({ ...p, lunch_duration: parseInt(e.target.value) }))}><option value={30}>30 min</option><option value={60}>60 min</option></select></div>
-                </div>
-                <div style={{ fontSize:11, fontWeight:600, textTransform:'uppercase', letterSpacing:.5, color:'var(--text-muted)' }}>Break 2</div>
-                <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
-                  <div className="form-field"><label className="form-label">Start time</label><input type="time" className="form-input" value={shiftForm.break2_start} onChange={e => setShiftForm(p => ({ ...p, break2_start: e.target.value }))} /></div>
-                  <div className="form-field"><label className="form-label">Duration (min)</label><input type="number" className="form-input" value={shiftForm.break2_duration} min={5} max={30} onChange={e => setShiftForm(p => ({ ...p, break2_duration: parseInt(e.target.value) }))} /></div>
-                </div>
-              </>
+              </div>
             )}
+
+            <div style={{ display:'flex', justifyContent:'space-between', marginTop:20, gap:8 }}>
+              {schedules.find(s => s.profile_id === shiftModal) && (
+                <button onClick={() => { if(confirm('Delete this shift?')) deleteSchedule(shiftModal) }}
+                  style={{ padding:'7px 14px', fontSize:12, fontWeight:500, border:'1px solid #e24b4a', borderRadius:'var(--radius)', background:'transparent', color:'#e24b4a', cursor:'pointer' }}>
+                  Delete shift
+                </button>
+              )}
+              <div style={{ display:'flex', gap:8, marginLeft:'auto' }}>
+                <button onClick={() => setShiftModal(null)}
+                  style={{ padding:'7px 14px', fontSize:12, fontWeight:500, border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface)', color:'var(--text-secondary)', cursor:'pointer' }}>
+                  Cancel
+                </button>
+                <button onClick={saveShiftModal} disabled={saving}
+                  style={{ padding:'7px 20px', fontSize:12, fontWeight:600, border:'none', borderRadius:'var(--radius)', background:'var(--accent)', color:'#fff', cursor:'pointer' }}>
+                  {saving ? 'Saving...' : 'Save'}
+                </button>
+              </div>
+            </div>
           </div>
-          <div className="modal-actions">
-            {schedules.find(s => s.profile_id === shiftModal) && (
-              <button className="btn danger" onClick={() => deleteSchedule(shiftModal)}>Clear day</button>
-            )}
-            <button className="btn" onClick={() => setShiftModal(null)}>Cancel</button>
-            <button className="btn primary" onClick={saveShiftModal} disabled={saving}>{saving ? 'Saving...' : 'Save'}</button>
-          </div>
-        </Modal>
+        </div>
       )}
     </div>
   )
