@@ -100,6 +100,8 @@ export default function DialerPage() {
   // ST Booking panel
   const [stJobTypes, setStJobTypes] = useState([])
   const [stBusinessUnits, setStBusinessUnits] = useState([])
+  const [stCampaigns, setStCampaigns] = useState([])
+  const [stCampaignId, setStCampaignId] = useState(null)
   const [selectedJobType, setSelectedJobType] = useState('')
   const [selectedBU, setSelectedBU] = useState('')
   const [availability, setAvailability] = useState([])
@@ -120,19 +122,25 @@ export default function DialerPage() {
   const [callDuration, setCallDuration] = useState(0)
   const callTimerRef = useRef(null)
 
-  // Load ST job types + business units on mount
+  // Load ST job types + business units + campaigns on mount
   useEffect(() => {
     const loadST = async () => {
       setStLoading(true)
       try {
-        const [jtRes, buRes] = await Promise.all([
+        const [jtRes, buRes, campRes] = await Promise.all([
           fetch('/api/st/jobtypes'),
           fetch('/api/st/businessunits'),
+          fetch('/api/st/campaigns'),
         ])
         const jtData = await jtRes.json()
         const buData = await buRes.json()
+        const campData = await campRes.json()
         setStJobTypes(jtData?.data || [])
         setStBusinessUnits(buData?.data || [])
+        const camps = campData?.data || []
+        setStCampaigns(camps)
+        // Default to first campaign but CSR can change it
+        if (camps[0]?.id) setStCampaignId(camps[0].id)
       } catch (e) {
         console.warn('ST load error:', e.message)
       } finally {
@@ -425,6 +433,7 @@ export default function DialerPage() {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           customerId: c.external_id, jobTypeId: selectedJobType, businessUnitId: selectedBU,
+          campaignId: stCampaignId,
           notes: notes || `Outbound call booked by ${currentRep} via Andi`,
           repName: currentRep, contactName: c.name, phone: c.phone, zip: c.zip,
           start: selectedSlot?.start || null,
@@ -768,6 +777,15 @@ export default function DialerPage() {
                                 .map(jt => <option key={jt.id} value={jt.id}>{jt.name}</option>)}
                             </select>
                           </div>
+                        </div>
+                        {/* Marketing Campaign */}
+                        <div>
+                          <label style={{ fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color:'var(--text-muted)', display:'block', marginBottom:5 }}>Marketing Campaign</label>
+                          <select value={stCampaignId || ''} onChange={e => setStCampaignId(e.target.value ? parseInt(e.target.value) : null)}
+                            style={{ width:'100%', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'8px 10px', fontSize:12, background:'var(--surface)', color:'var(--text-primary)' }}>
+                            <option value="">Select campaign...</option>
+                            {[...stCampaigns].sort((a,b) => a.name.localeCompare(b.name)).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                          </select>
                         </div>
                         {/* Membership add-on checkbox */}
                         <label style={{ display:'flex', alignItems:'center', gap:10, padding:'10px 12px', background: alsoMembership ? '#EFF6FF' : 'var(--surface)', border:`1.5px solid ${alsoMembership ? '#3b82f6' : 'var(--border)'}`, borderRadius:'var(--radius)', cursor:'pointer', transition:'all .1s' }}>
