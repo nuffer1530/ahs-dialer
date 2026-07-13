@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { sb } from '../lib/supabase'
 import { useAuth } from '../lib/AuthContext'
 import { useData } from '../lib/DataContext'
@@ -175,21 +175,34 @@ export default function AdminPage() {
     } finally { setSavingPw(false) }
   }
 
-  const saveStatuses = async () => {
+  const statusDebounceRef = useRef(null)
+  const [statusSaveMsg, setStatusSaveMsg] = useState('')
+
+  const saveStatuses = async (statuses) => {
     setSavingStatuses(true)
     try {
       const { error } = await sb.from('app_settings').upsert(
-        { key: 'custom_statuses', value: JSON.stringify(customStatuses), updated_at: new Date().toISOString() },
+        { key: 'custom_statuses', value: JSON.stringify(statuses), updated_at: new Date().toISOString() },
         { onConflict: 'key' }
       )
       if (error) throw error
-      setMsg('Statuses saved')
-      setTimeout(() => setMsg(''), 3000)
+      setStatusSaveMsg('Saved')
+      setTimeout(() => setStatusSaveMsg(''), 2000)
     } catch (e) {
-      setMsg('Error saving statuses: ' + e.message)
+      setStatusSaveMsg('Error: ' + e.message)
     } finally {
       setSavingStatuses(false)
     }
+  }
+
+  const updateStatuses = (updater) => {
+    setCustomStatuses(prev => {
+      const next = typeof updater === 'function' ? updater(prev) : updater
+      // Debounced auto-save
+      if (statusDebounceRef.current) clearTimeout(statusDebounceRef.current)
+      statusDebounceRef.current = setTimeout(() => saveStatuses(next), 600)
+      return next
+    })
   }
 
   const saveCommissionRates = async () => {
@@ -512,44 +525,47 @@ export default function AdminPage() {
           <div className="card">
             <div className="card-header">
               <div className="card-title">Status Customization</div>
-              <span style={{ fontSize:11, color:'var(--text-muted)' }}>Customize the statuses reps can set. Locked statuses cannot be removed.</span>
+              <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+                {statusSaveMsg && <span style={{ fontSize:11, color: statusSaveMsg.startsWith('Error') ? 'var(--danger)' : 'var(--success)', fontWeight:600 }}>{statusSaveMsg}</span>}
+                {savingStatuses && <span style={{ fontSize:11, color:'var(--text-muted)' }}>Saving...</span>}
+                <span style={{ fontSize:11, color:'var(--text-muted)' }}>Changes save automatically. Locked statuses cannot be removed.</span>
+              </div>
             </div>
-            <div className="card-body" style={{ display:'flex', flexDirection:'column', gap:12 }}>
+            <div className="card-body" style={{ display:'flex', flexDirection:'column', gap:10 }}>
               {customStatuses.map((status, idx) => (
                 <div key={status.id} style={{ display:'flex', alignItems:'center', gap:12, padding:'10px 14px', background:'var(--surface-2)', borderRadius:'var(--radius)', border:'1px solid var(--border)' }}>
-                  {/* Color picker */}
-                  <div style={{ position:'relative', flexShrink:0 }}>
-                    <input type="color" value={status.color}
-                      onChange={e => setCustomStatuses(prev => prev.map((s,i) => i===idx ? {...s, color:e.target.value} : s))}
-                      style={{ width:32, height:32, borderRadius:'50%', border:'2px solid var(--border)', cursor:'pointer', padding:2 }} />
-                  </div>
-                  {/* Color dot preview */}
-                  <div style={{ width:12, height:12, borderRadius:'50%', background:status.color, flexShrink:0 }} />
+                  {/* Clickable color circle */}
+                  <label style={{ position:'relative', flexShrink:0, cursor: status.locked ? 'default' : 'pointer' }} title={status.locked ? '' : 'Click to change color'}>
+                    <div style={{ width:28, height:28, borderRadius:'50%', background:status.color, border:'2px solid rgba(0,0,0,.12)', transition:'transform .1s', boxShadow:'0 1px 4px rgba(0,0,0,.15)' }}
+                      onMouseEnter={e => { if (!status.locked) e.currentTarget.style.transform='scale(1.15)' }}
+                      onMouseLeave={e => e.currentTarget.style.transform='scale(1)'} />
+                    {!status.locked && (
+                      <input type="color" value={status.color}
+                        onChange={e => updateStatuses(prev => prev.map((s,i) => i===idx ? {...s, color:e.target.value} : s))}
+                        style={{ position:'absolute', opacity:0, width:0, height:0, pointerEvents:'none' }} />
+                    )}
+                  </label>
                   {/* Label */}
                   <input value={status.label} disabled={status.locked}
-                    onChange={e => setCustomStatuses(prev => prev.map((s,i) => i===idx ? {...s, label:e.target.value} : s))}
-                    style={{ flex:1, border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'6px 10px', fontSize:13, background: status.locked ? 'var(--surface)' : 'var(--surface)', color:'var(--text-primary)', fontFamily:'inherit' }} />
+                    onChange={e => updateStatuses(prev => prev.map((s,i) => i===idx ? {...s, label:e.target.value} : s))}
+                    style={{ flex:1, border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'6px 10px', fontSize:13, background: status.locked ? 'var(--surface)' : 'var(--surface)', color:'var(--text-primary)', fontFamily:'inherit', cursor: status.locked ? 'default' : 'text' }} />
                   {status.locked
-                    ? <span style={{ fontSize:10, color:'var(--text-muted)', padding:'2px 8px', background:'var(--surface)', borderRadius:99, border:'1px solid var(--border)' }}>Locked</span>
-                    : <button onClick={() => setCustomStatuses(prev => prev.filter((_,i) => i !== idx))}
-                        style={{ padding:'4px 10px', background:'var(--danger-bg)', border:'1px solid var(--danger)', borderRadius:'var(--radius)', color:'var(--danger)', fontSize:11, cursor:'pointer', fontWeight:500 }}>Remove</button>
+                    ? <span style={{ fontSize:10, color:'var(--text-muted)', padding:'2px 8px', background:'var(--surface)', borderRadius:99, border:'1px solid var(--border)', flexShrink:0 }}>Locked</span>
+                    : <button onClick={() => updateStatuses(prev => prev.filter((_,i) => i !== idx))}
+                        style={{ padding:'4px 10px', background:'var(--danger-bg)', border:'1px solid var(--danger)', borderRadius:'var(--radius)', color:'var(--danger)', fontSize:11, cursor:'pointer', fontWeight:500, flexShrink:0 }}>Remove</button>
                   }
                 </div>
               ))}
 
               {/* Add new status */}
-              <button onClick={() => setCustomStatuses(prev => [...prev, { id:`custom_${Date.now()}`, label:'New Status', color:'#6b7280', locked:false }])}
-                style={{ padding:'8px 16px', border:'1px dashed var(--border)', borderRadius:'var(--radius)', background:'transparent', color:'var(--text-muted)', fontSize:12, cursor:'pointer', display:'flex', alignItems:'center', gap:6 }}>
+              <button onClick={() => updateStatuses(prev => [...prev, { id:`custom_${Date.now()}`, label:'New Status', color:'#6b7280', locked:false }])}
+                style={{ padding:'8px 16px', border:'1px dashed var(--border)', borderRadius:'var(--radius)', background:'transparent', color:'var(--text-muted)', fontSize:12, cursor:'pointer', display:'flex', alignItems:'center', gap:6, marginTop:2 }}>
                 + Add status
               </button>
 
               <div style={{ padding:'10px 14px', background:'var(--warning-bg)', border:'1px solid #C87800', borderRadius:'var(--radius)', fontSize:12, color:'var(--warning)' }}>
-                Status changes affect all reps on next page load. Removing a status doesn't affect historical adherence data.
+                Status changes affect all reps on next page load. Removing a status does not affect historical adherence data.
               </div>
-
-              <button className="btn primary" onClick={saveStatuses} disabled={savingStatuses} style={{ alignSelf:'flex-start' }}>
-                {savingStatuses ? 'Saving...' : 'Save statuses'}
-              </button>
             </div>
           </div>
         </div>
