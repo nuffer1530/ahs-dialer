@@ -253,7 +253,7 @@ export default function AdminPage() {
     const rep = profiles.find(p => p.id === adjProfileId)
     const amount = parseFloat(adjAmount)
     try {
-      const { data } = await sb.from('commissions').insert({
+      const payload = {
         profile_id: adjProfileId,
         event_type: 'adjustment',
         amount,
@@ -262,10 +262,21 @@ export default function AdminPage() {
         also_membership: false,
         membership_amount: 0,
         notes: adjNote || 'Admin manual adjustment',
-        updated_by: profile.id,
         earned_at: new Date().toISOString(),
-      }).select('*, profiles(name)').single()
+      }
+      // Try with updated_by first; if column doesn't exist yet, retry without
+      let data, error
+      const r1 = await sb.from('commissions').insert({ ...payload, updated_by: profile.id }).select('*, profiles(name)').single()
+      if (r1.error && r1.error.message?.includes('updated_by')) {
+        const r2 = await sb.from('commissions').insert(payload).select('*, profiles(name)').single()
+        data = r2.data; error = r2.error
+      } else {
+        data = r1.data; error = r1.error
+      }
+      if (error) throw error
+      // Attach the current admin's name for immediate display
       if (data) {
+        data._updaterName = profile?.name || profile?.email || 'Admin'
         setCommissionHistory(prev => [data, ...prev])
         // Update allRepEarnings too
         setAllRepEarnings(prev => {
@@ -711,7 +722,7 @@ export default function AdminPage() {
                         const isMem = c.event_type === 'membership'
                         const amt = parseFloat(c.amount)
                         const updaterProfile = c.updated_by ? profiles.find(p => p.id === c.updated_by) : null
-                        const madeBy = updaterProfile?.name || updaterProfile?.email || (isAdj ? 'Admin' : null)
+                        const madeBy = c._updaterName || updaterProfile?.name || updaterProfile?.email || (isAdj ? 'Admin' : null)
                         return (
                           <tr key={c.id}>
                             {isAdmin && <td style={{padding:'10px 12px', fontWeight:500}}>{c.profiles?.name || c.rep_name}</td>}
