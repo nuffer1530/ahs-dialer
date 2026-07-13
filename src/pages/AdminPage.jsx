@@ -53,8 +53,8 @@ export default function AdminPage() {
   const _now = new Date()
   const [scSelectedProfile, setScSelectedProfile] = useState(null)
   const [scMonth, setScMonth] = useState({ year: _now.getFullYear(), month: _now.getMonth() })
-  const [scActuals, setScActuals] = useState({ booking_pct: '', booked_calls: '', memberships: '' })
-  const [scWeights, setScWeights] = useState({ attendance: 30, booking_pct: 25, booked_calls: 25, memberships: 20 })
+  const [scActuals, setScActuals] = useState({ booking_pct: '', booked_calls: '', call_quality: '', memberships: '' })
+  const [scWeights, setScWeights] = useState({ attendance: 25, booking_pct: 20, booked_calls: 20, call_quality: 15, memberships: 20 })
   const [scAttendancePoints, setScAttendancePoints] = useState(null)
   const [scLoading, setScLoading] = useState(false)
   const [scSaving, setScSaving] = useState(false)
@@ -298,10 +298,11 @@ export default function AdminPage() {
 
   // Scorecard KPIs — single source of truth
   const SC_KPIS = [
-    { id:'attendance',    label:'Attendance',          weight:30, unit:'pts', lowerIsBetter:true,  thresholds:{ exceeds:0, meets:1, improvement:2 } },
-    { id:'booking_pct',   label:'Inbound Booking %',   weight:25, unit:'%',   lowerIsBetter:false, thresholds:{ exceeds:90, meets:80, improvement:75 } },
-    { id:'booked_calls',  label:'Booked Calls',         weight:25, unit:'',   lowerIsBetter:false, thresholds:{ exceeds:140, meets:110, improvement:85 } },
-    { id:'memberships',   label:'Memberships Sold',     weight:20, unit:'',   lowerIsBetter:false, thresholds:{ exceeds:5, meets:3, improvement:2 } },
+    { id:'attendance',    label:'Attendance',                weight:25, unit:'pts', lowerIsBetter:true,  thresholds:{ exceeds:0, meets:1, improvement:2 } },
+    { id:'booking_pct',   label:'Inbound Booking %',         weight:20, unit:'%',   lowerIsBetter:false, thresholds:{ exceeds:90, meets:80, improvement:75 } },
+    { id:'booked_calls',  label:'Booked Calls',              weight:20, unit:'',    lowerIsBetter:false, thresholds:{ exceeds:140, meets:110, improvement:85 } },
+    { id:'call_quality',  label:'Call Quality Evaluation(s)', weight:15, unit:'%',  lowerIsBetter:false, thresholds:{ exceeds:95, meets:90, improvement:85 } },
+    { id:'memberships',   label:'Memberships Sold',          weight:20, unit:'',    lowerIsBetter:false, thresholds:{ exceeds:5, meets:3, improvement:2 } },
   ]
 
   const scGetRating = (kpi, value) => {
@@ -343,6 +344,7 @@ export default function AdminPage() {
       setScActuals({
         booking_pct: saved?.booking_pct ?? '',
         booked_calls: saved?.booked_calls ?? '',
+        call_quality: saved?.call_quality ?? '',
         memberships: saved?.memberships ?? '',
       })
       setScLoading(false)
@@ -359,6 +361,7 @@ export default function AdminPage() {
         month: monthStart,
         booking_pct: scActuals.booking_pct !== '' ? parseFloat(scActuals.booking_pct) : null,
         booked_calls: scActuals.booked_calls !== '' ? parseInt(scActuals.booked_calls) : null,
+        call_quality: scActuals.call_quality !== '' ? parseFloat(scActuals.call_quality) : null,
         memberships: scActuals.memberships !== '' ? parseInt(scActuals.memberships) : null,
         weights: scWeights,
         updated_by: profile.id,
@@ -388,6 +391,7 @@ export default function AdminPage() {
       attendance: scAttendancePoints,
       booking_pct: scActuals.booking_pct !== '' ? parseFloat(scActuals.booking_pct) : null,
       booked_calls: scActuals.booked_calls !== '' ? parseFloat(scActuals.booked_calls) : null,
+      call_quality: scActuals.call_quality !== '' ? parseFloat(scActuals.call_quality) : null,
       memberships: scActuals.memberships !== '' ? parseFloat(scActuals.memberships) : null,
     }
     let totalWeight = 0, weightedScore = 0
@@ -869,6 +873,7 @@ export default function AdminPage() {
                     attendance: scAttendancePoints,
                     booking_pct: scActuals.booking_pct !== '' ? parseFloat(scActuals.booking_pct) : null,
                     booked_calls: scActuals.booked_calls !== '' ? parseFloat(scActuals.booked_calls) : null,
+                    call_quality: scActuals.call_quality !== '' ? parseFloat(scActuals.call_quality) : null,
                     memberships: scActuals.memberships !== '' ? parseFloat(scActuals.memberships) : null,
                   }
                   const ratingColors = {
@@ -1012,6 +1017,7 @@ export default function AdminPage() {
               attendance: scAttendancePoints,
               booking_pct: scActuals.booking_pct !== '' ? parseFloat(scActuals.booking_pct) : null,
               booked_calls: scActuals.booked_calls !== '' ? parseFloat(scActuals.booked_calls) : null,
+              call_quality: scActuals.call_quality !== '' ? parseFloat(scActuals.call_quality) : null,
               memberships: scActuals.memberships !== '' ? parseFloat(scActuals.memberships) : null,
             }
 
