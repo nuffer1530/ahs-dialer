@@ -75,6 +75,16 @@ export default function AdminPage() {
     })
   }, [isAdmin])
 
+  // Load saved statuses
+  useEffect(() => {
+    sb.from('app_settings').select('value').eq('key', 'custom_statuses').maybeSingle()
+      .then(({ data }) => {
+        if (data?.value) {
+          try { setCustomStatuses(JSON.parse(data.value)) } catch (e) {}
+        }
+      })
+  }, [])
+
   // Load commission data
   useEffect(() => {
     if (settingsTab !== 'commission') return
@@ -134,6 +144,23 @@ export default function AdminPage() {
     } catch (e) {
       setPwMsg('Error: ' + e.message)
     } finally { setSavingPw(false) }
+  }
+
+  const saveStatuses = async () => {
+    setSavingStatuses(true)
+    try {
+      const { error } = await sb.from('app_settings').upsert(
+        { key: 'custom_statuses', value: JSON.stringify(customStatuses), updated_at: new Date().toISOString() },
+        { onConflict: 'key' }
+      )
+      if (error) throw error
+      setMsg('Statuses saved')
+      setTimeout(() => setMsg(''), 3000)
+    } catch (e) {
+      setMsg('Error saving statuses: ' + e.message)
+    } finally {
+      setSavingStatuses(false)
+    }
   }
 
   const saveCommissionRates = async () => {
@@ -313,13 +340,7 @@ export default function AdminPage() {
                 Status changes affect all reps on next page load. Removing a status doesn't affect historical adherence data.
               </div>
 
-              <button className="btn primary" onClick={async () => {
-                setSavingStatuses(true)
-                await sb.from('app_settings').upsert({ key:'custom_statuses', value: JSON.stringify(customStatuses) }, { onConflict:'key' })
-                setSavingStatuses(false)
-                setMsg('Statuses saved')
-                setTimeout(() => setMsg(''), 3000)
-              }} disabled={savingStatuses} style={{ alignSelf:'flex-start' }}>
+              <button className="btn primary" onClick={saveStatuses} disabled={savingStatuses} style={{ alignSelf:'flex-start' }}>
                 {savingStatuses ? 'Saving...' : 'Save statuses'}
               </button>
             </div>
