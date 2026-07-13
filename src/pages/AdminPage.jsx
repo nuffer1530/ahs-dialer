@@ -861,11 +861,13 @@ export default function AdminPage() {
 
             {/* Actions */}
             {scSelectedProfile && (
-              <div style={{ display:'flex', alignItems:'flex-end', gap:8, paddingBottom:1 }}>
-                <button onClick={saveScorecard} disabled={scSaving}
-                  style={{ padding:'7px 16px', fontSize:13, fontWeight:600, background:'var(--accent)', color:'#fff', border:'none', borderRadius:'var(--radius)', cursor:'pointer', opacity: scSaving ? .6 : 1 }}>
-                  {scSaving ? 'Saving...' : scSaved ? 'Saved!' : 'Save'}
-                </button>
+              <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
+                <div style={{ fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color:'transparent', userSelect:'none' }}>Actions</div>
+                <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                  <button onClick={saveScorecard} disabled={scSaving}
+                    style={{ padding:'7px 16px', fontSize:13, fontWeight:600, background:'var(--accent)', color:'#fff', border:'none', borderRadius:'var(--radius)', cursor:'pointer', opacity: scSaving ? .6 : 1, height:32 }}>
+                    {scSaving ? 'Saving...' : scSaved ? 'Saved!' : 'Save'}
+                  </button>
                 <button onClick={() => {
                   const selectedRep = profiles.find(p => p.id === scSelectedProfile)
                   const overallScore = scWeightedScore()
@@ -991,9 +993,10 @@ export default function AdminPage() {
                   win.focus()
                   setTimeout(() => { win.print(); win.close() }, 500)
                 }}
-                  style={{ padding:'7px 14px', fontSize:13, fontWeight:500, background:'var(--surface)', color:'var(--text-secondary)', border:'1px solid var(--border)', borderRadius:'var(--radius)', cursor:'pointer' }}>
+                  style={{ padding:'7px 14px', fontSize:13, fontWeight:500, background:'var(--surface)', color:'var(--text-secondary)', border:'1px solid var(--border)', borderRadius:'var(--radius)', cursor:'pointer', height:32 }}>
                   Print
                 </button>
+                </div>
               </div>
             )}
           </div>
