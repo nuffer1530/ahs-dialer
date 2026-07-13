@@ -422,9 +422,7 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
                 )
               })}
             </div>
-            <div style={{ width:80, flexShrink:0, borderLeft:'1px solid var(--border)', background:'var(--surface-2)', display:'flex', alignItems:'center', justifyContent:'center', position:'sticky', right:0, zIndex:15 }}>
-              <span style={{ fontSize:10, fontWeight:600, textTransform:'uppercase', letterSpacing:.5, color:'var(--text-muted)' }}>Stats</span>
-            </div>
+
           </div>
 
           {/* Agent rows */}
@@ -449,6 +447,11 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
                   </div>
                   <div style={{ minWidth:0 }}>
                     <div style={{ fontSize:12, fontWeight:500, color:'var(--text-primary)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{p.name||p.email}</div>
+                    {sched?.shift_start && sched?.shift_end && (
+                      <div style={{ fontSize:10, color:'var(--text-muted)', marginTop:1 }}>
+                        {fmtTime(sched.shift_start)} – {fmtTime(sched.shift_end)} · {(timeToInterval(sched.shift_end) - timeToInterval(sched.shift_start)) / 4}h
+                      </div>
+                    )}
                     {totalAdh != null && (
                       <div style={{ fontSize:10, color:adhColor, marginTop:1, fontWeight:600 }}>{totalAdh}% adherent</div>
                     )}
@@ -534,23 +537,7 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
                   )}
                 </div>
 
-                {/* Stats column */}
-                <div style={{ width:80, flexShrink:0, borderLeft:'1px solid var(--border)', background:'var(--surface-2)', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:2, padding:'6px 8px', position:'sticky', right:0, zIndex:15 }}>
-                  {sched?.shift_start && (
-                    <>
-                      <div style={{ fontSize:10, color:'var(--text-muted)' }}>shift</div>
-                      <div style={{ fontSize:11, fontWeight:500, color:'var(--text-secondary)' }}>
-                        {(timeToInterval(sched.shift_end) - timeToInterval(sched.shift_start)) / 4}h
-                      </div>
-                    </>
-                  )}
-                  {totalAdh != null && (
-                    <>
-                      <div style={{ fontSize:10, color:'var(--text-muted)', marginTop:3 }}>adh</div>
-                      <div style={{ fontSize:12, fontWeight:700, color:adhColor }}>{totalAdh}%</div>
-                    </>
-                  )}
-                </div>
+
               </div>
             )
           })}
@@ -570,7 +557,7 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
                 )
               })}
             </div>
-            <div style={{ width:80, flexShrink:0, borderLeft:'1px solid var(--border)', position:'sticky', right:0, background:'var(--surface-2)', zIndex:15 }} />
+
           </div>
         </div>
       </div>
