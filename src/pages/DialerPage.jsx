@@ -126,33 +126,38 @@ export default function DialerPage() {
   useEffect(() => {
     const loadST = async () => {
       setStLoading(true)
-      try {
-        const [jtRes, buRes, campRes] = await Promise.all([
-          fetch('/api/st/jobtypes'),
-          fetch('/api/st/businessunits'),
-          fetch('/api/st/campaigns'),
-        ])
-        const [jtData, buData, campData] = await Promise.all([
-          jtRes.json(),
-          buRes.json(),
-          campRes.json(),
-        ])
-        console.log('ST jobtypes:', jtData?.data?.length, jtRes.status)
-        console.log('ST businessunits:', buData?.data?.length, buRes.status)
-        console.log('ST campaigns:', campData?.data?.length, campRes.status)
-        if (jtData?.error) console.error('ST jobtypes error:', jtData.error)
-        if (buData?.error) console.error('ST businessunits error:', buData.error)
-        if (campData?.error) console.error('ST campaigns error:', campData.error)
-        setStJobTypes(jtData?.data || [])
-        setStBusinessUnits(buData?.data || [])
-        const camps = campData?.data || []
-        setStCampaigns(camps)
-        if (camps[0]?.id) setStCampaignId(camps[0].id)
-      } catch (e) {
-        console.error('ST load error:', e.message)
-      } finally {
-        setStLoading(false)
+
+      // Fetch each independently so one failure doesn't kill the others
+      const safeFetch = async (url) => {
+        try {
+          const res = await fetch(url)
+          if (!res.ok) { console.error(`ST fetch failed ${url}:`, res.status); return null }
+          const data = await res.json()
+          if (data?.error) { console.error(`ST error ${url}:`, data.error); return null }
+          return data
+        } catch (e) {
+          console.error(`ST fetch error ${url}:`, e.message)
+          return null
+        }
       }
+
+      const [jtData, buData, campData] = await Promise.all([
+        safeFetch('/api/st/jobtypes'),
+        safeFetch('/api/st/businessunits'),
+        safeFetch('/api/st/campaigns'),
+      ])
+
+      console.log('ST jobtypes:', jtData?.data?.length ?? 'failed')
+      console.log('ST businessunits:', buData?.data?.length ?? 'failed')
+      console.log('ST campaigns:', campData?.data?.length ?? 'failed')
+
+      setStJobTypes(jtData?.data || [])
+      setStBusinessUnits(buData?.data || [])
+      const camps = campData?.data || []
+      setStCampaigns(camps)
+      if (camps[0]?.id) setStCampaignId(camps[0].id)
+
+      setStLoading(false)
     }
     loadST()
   }, [])
