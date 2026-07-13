@@ -439,10 +439,9 @@ export default function DialerLayout() {
             {showStatusMenu && (
               <div style={{
                 position: 'fixed',
-                bottom: 10,
+                bottom: navCollapsed ? 10 : 90,
                 left: navCollapsed ? NAV_WIDTH + 8 : 8,
-                right: navCollapsed ? 'auto' : NAV_WIDTH - 8,
-                minWidth: 210,
+                width: navCollapsed ? 210 : NAV_WIDTH - 16,
                 background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius)',
                 boxShadow:'0 4px 24px rgba(0,0,0,.2)', zIndex:9999, overflow:'hidden',
               }}>
