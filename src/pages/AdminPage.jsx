@@ -48,6 +48,17 @@ export default function AdminPage() {
   const [savingStatuses, setSavingStatuses] = useState(false)
   const [commissionRates, setCommissionRates] = useState({ booking: 2.00, membership: 2.00 })
   const [commissionHistory, setCommissionHistory] = useState([])
+
+  // Scorecard state
+  const _now = new Date()
+  const [scSelectedProfile, setScSelectedProfile] = useState(null)
+  const [scMonth, setScMonth] = useState({ year: _now.getFullYear(), month: _now.getMonth() })
+  const [scActuals, setScActuals] = useState({ booking_pct: '', booked_calls: '', memberships: '' })
+  const [scAttendancePoints, setScAttendancePoints] = useState(null)
+  const [scLoading, setScLoading] = useState(false)
+  const [scSaving, setScSaving] = useState(false)
+  const [scSaved, setScSaved] = useState(false)
+  const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December']
   const [allRepEarnings, setAllRepEarnings] = useState([])
   const [commLoading, setCommLoading] = useState(false)
   const [savingRates, setSavingRates] = useState(false)
@@ -274,8 +285,107 @@ export default function AdminPage() {
     return csrCampaigns.filter(c => c.profile_id === profileId && c.active).sort((a, b) => a.priority - b.priority).map(c => campaigns.find(camp => camp.id === c.campaign_id)?.name).filter(Boolean)
   }
 
+  // Scorecard KPIs — single source of truth
+  const SC_KPIS = [
+    { id:'attendance',    label:'Attendance',          weight:30, unit:'pts', lowerIsBetter:true,  thresholds:{ exceeds:0, meets:1, improvement:2 } },
+    { id:'booking_pct',   label:'Inbound Booking %',   weight:25, unit:'%',   lowerIsBetter:false, thresholds:{ exceeds:90, meets:80, improvement:75 } },
+    { id:'booked_calls',  label:'Booked Calls',         weight:25, unit:'',   lowerIsBetter:false, thresholds:{ exceeds:140, meets:110, improvement:85 } },
+    { id:'memberships',   label:'Memberships Sold',     weight:20, unit:'',   lowerIsBetter:false, thresholds:{ exceeds:5, meets:3, improvement:2 } },
+  ]
+
+  const scGetRating = (kpi, value) => {
+    if (value === '' || value == null) return null
+    const v = parseFloat(value)
+    const { thresholds, lowerIsBetter } = kpi
+    if (lowerIsBetter) {
+      if (v <= thresholds.exceeds)    return 4
+      if (v <= thresholds.meets)      return 3
+      if (v <= thresholds.improvement) return 2
+      return 1
+    } else {
+      if (v >= thresholds.exceeds)    return 4
+      if (v >= thresholds.meets)      return 3
+      if (v >= thresholds.improvement) return 2
+      return 1
+    }
+  }
+  const SC_RATING_LABELS = { 4:'Exceeds', 3:'Meets', 2:'Needs Improvement', 1:'Poor Performance' }
+  const SC_RATING_COLORS = {
+    4: { bg:'#d4edda', text:'#2E7D52' },
+    3: { bg:'#d4edda', text:'#2E7D52' },
+    2: { bg:'#FBF3E0', text:'#8A5A00' },
+    1: { bg:'#FBEEEA', text:'#B5341A' },
+  }
+
+  // Load scorecard data when profile/month changes
+  useEffect(() => {
+    if (settingsTab !== 'scorecards' || !scSelectedProfile) return
+    const monthStart = `${scMonth.year}-${String(scMonth.month+1).padStart(2,'0')}-01`
+    const monthEnd = new Date(scMonth.year, scMonth.month+1, 0).toISOString().split('T')[0]
+    setScLoading(true)
+    Promise.all([
+      sb.from('attendance_points').select('points').eq('profile_id', scSelectedProfile).gte('date', monthStart).lte('date', monthEnd),
+      sb.from('scorecard_actuals').select('*').eq('profile_id', scSelectedProfile).eq('month', monthStart).maybeSingle(),
+    ]).then(([{ data: pts }, { data: saved }]) => {
+      const total = (pts || []).reduce((s, p) => s + parseFloat(p.points || 0), 0)
+      setScAttendancePoints(total)
+      setScActuals({
+        booking_pct: saved?.booking_pct ?? '',
+        booked_calls: saved?.booked_calls ?? '',
+        memberships: saved?.memberships ?? '',
+      })
+      setScLoading(false)
+    })
+  }, [settingsTab, scSelectedProfile, scMonth])
+
+  const saveScorecard = async () => {
+    if (!scSelectedProfile) return
+    setScSaving(true)
+    const monthStart = `${scMonth.year}-${String(scMonth.month+1).padStart(2,'0')}-01`
+    await sb.from('scorecard_actuals').upsert({
+      profile_id: scSelectedProfile,
+      month: monthStart,
+      booking_pct: scActuals.booking_pct !== '' ? parseFloat(scActuals.booking_pct) : null,
+      booked_calls: scActuals.booked_calls !== '' ? parseInt(scActuals.booked_calls) : null,
+      memberships: scActuals.memberships !== '' ? parseInt(scActuals.memberships) : null,
+      updated_by: profile.id,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'profile_id,month' })
+    setScSaving(false)
+    setScSaved(true)
+    setTimeout(() => setScSaved(false), 2000)
+  }
+
+  const scNavMonth = (dir) => {
+    setScMonth(prev => {
+      let m = prev.month + dir, y = prev.year
+      if (m > 11) { m = 0; y++ }
+      if (m < 0)  { m = 11; y-- }
+      return { year: y, month: m }
+    })
+  }
+
+  const scWeightedScore = () => {
+    const actuals = {
+      attendance: scAttendancePoints,
+      booking_pct: scActuals.booking_pct !== '' ? parseFloat(scActuals.booking_pct) : null,
+      booked_calls: scActuals.booked_calls !== '' ? parseFloat(scActuals.booked_calls) : null,
+      memberships: scActuals.memberships !== '' ? parseFloat(scActuals.memberships) : null,
+    }
+    let totalWeight = 0, weightedScore = 0
+    SC_KPIS.forEach(kpi => {
+      const rating = scGetRating(kpi, actuals[kpi.id])
+      if (rating != null) {
+        totalWeight += kpi.weight
+        weightedScore += rating * kpi.weight
+      }
+    })
+    if (totalWeight === 0) return null
+    return (weightedScore / totalWeight).toFixed(2)
+  }
+
   const TABS = isAdmin
-    ? [{ id:'users', label:'Users' }, { id:'campaigns', label:'Campaigns' }, { id:'commission', label:'Commission' }, { id:'statuses', label:'Statuses' }]
+    ? [{ id:'users', label:'Users' }, { id:'campaigns', label:'Campaigns' }, { id:'commission', label:'Commission' }, { id:'statuses', label:'Statuses' }, { id:'scorecards', label:'Scorecards' }]
     : [{ id:'users', label:'My Profile' }, { id:'commission', label:'My Earnings' }]
 
   return (
@@ -694,6 +804,186 @@ export default function AdminPage() {
             </button>
           </div>
         </Modal>
+      )}
+
+      {/* ── SCORECARDS TAB ── */}
+      {settingsTab === 'scorecards' && isAdmin && (
+        <div style={{ flex:1, overflowY:'auto', padding:24 }}>
+
+          {/* Filters row */}
+          <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:24, flexWrap:'wrap' }}>
+            {/* CSR selector */}
+            <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
+              <div style={{ fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color:'var(--text-muted)' }}>CSR</div>
+              <select value={scSelectedProfile || ''} onChange={e => setScSelectedProfile(e.target.value || null)}
+                style={{ padding:'7px 12px', fontSize:13, border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface)', color:'var(--text-primary)', cursor:'pointer', minWidth:180 }}>
+                <option value=''>Select a rep...</option>
+                {profiles.map(p => <option key={p.id} value={p.id}>{p.name || p.email}</option>)}
+              </select>
+            </div>
+
+            {/* Month nav */}
+            <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
+              <div style={{ fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color:'var(--text-muted)' }}>Month</div>
+              <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+                <button onClick={() => scNavMonth(-1)} style={{ width:32, height:32, border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface-2)', cursor:'pointer', fontSize:16, color:'var(--text-secondary)', display:'flex', alignItems:'center', justifyContent:'center' }}
+                  onMouseEnter={e => e.currentTarget.style.background='var(--surface)'}
+                  onMouseLeave={e => e.currentTarget.style.background='var(--surface-2)'}>{String.fromCharCode(8249)}</button>
+                <span style={{ fontSize:13, fontWeight:500, color:'var(--text-primary)', minWidth:130, textAlign:'center' }}>{MONTH_NAMES[scMonth.month]} {scMonth.year}</span>
+                <button onClick={() => scNavMonth(1)} style={{ width:32, height:32, border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface-2)', cursor:'pointer', fontSize:16, color:'var(--text-secondary)', display:'flex', alignItems:'center', justifyContent:'center' }}
+                  onMouseEnter={e => e.currentTarget.style.background='var(--surface)'}
+                  onMouseLeave={e => e.currentTarget.style.background='var(--surface-2)'}>{String.fromCharCode(8250)}</button>
+              </div>
+            </div>
+
+            {/* Actions */}
+            {scSelectedProfile && (
+              <div style={{ display:'flex', alignItems:'flex-end', gap:8, paddingBottom:1 }}>
+                <button onClick={saveScorecard} disabled={scSaving}
+                  style={{ padding:'7px 16px', fontSize:13, fontWeight:600, background:'var(--accent)', color:'#fff', border:'none', borderRadius:'var(--radius)', cursor:'pointer', opacity: scSaving ? .6 : 1 }}>
+                  {scSaving ? 'Saving...' : scSaved ? 'Saved!' : 'Save'}
+                </button>
+                <button onClick={() => window.print()}
+                  style={{ padding:'7px 14px', fontSize:13, fontWeight:500, background:'var(--surface)', color:'var(--text-secondary)', border:'1px solid var(--border)', borderRadius:'var(--radius)', cursor:'pointer' }}>
+                  Print
+                </button>
+              </div>
+            )}
+          </div>
+
+          {!scSelectedProfile && (
+            <div style={{ display:'flex', alignItems:'center', justifyContent:'center', height:200, color:'var(--text-muted)', fontSize:13 }}>
+              Select a rep to view their scorecard
+            </div>
+          )}
+
+          {scSelectedProfile && scLoading && (
+            <div style={{ display:'flex', alignItems:'center', justifyContent:'center', height:200 }}>
+              <div className="spinner" />
+            </div>
+          )}
+
+          {scSelectedProfile && !scLoading && (() => {
+            const selectedRep = profiles.find(p => p.id === scSelectedProfile)
+            const overallScore = scWeightedScore()
+            const actuals = {
+              attendance: scAttendancePoints,
+              booking_pct: scActuals.booking_pct !== '' ? parseFloat(scActuals.booking_pct) : null,
+              booked_calls: scActuals.booked_calls !== '' ? parseFloat(scActuals.booked_calls) : null,
+              memberships: scActuals.memberships !== '' ? parseFloat(scActuals.memberships) : null,
+            }
+
+            return (
+              <div id="scorecard-print">
+                {/* Print header — hidden on screen */}
+                <style>{`@media print { .no-print { display:none!important; } #scorecard-print { padding:24px; } }`}</style>
+
+                {/* Scorecard header */}
+                <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:20 }}>
+                  <div style={{ display:'flex', alignItems:'center', gap:12 }}>
+                    <div style={{ width:40, height:40, borderRadius:'50%', background:'var(--accent-bg)', color:'var(--accent)', display:'flex', alignItems:'center', justifyContent:'center', fontSize: selectedRep?.avatar ? 22 : 15, fontWeight:700 }}>
+                      {selectedRep?.avatar || (selectedRep?.name || selectedRep?.email || '?')[0].toUpperCase()}
+                    </div>
+                    <div>
+                      <div style={{ fontSize:16, fontWeight:700, color:'var(--text-primary)' }}>{selectedRep?.name || selectedRep?.email}</div>
+                      <div style={{ fontSize:12, color:'var(--text-muted)' }}>Performance Review - {MONTH_NAMES[scMonth.month]} {scMonth.year}</div>
+                    </div>
+                  </div>
+                  {overallScore && (
+                    <div style={{ textAlign:'right' }}>
+                      <div style={{ fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color:'var(--text-muted)', marginBottom:2 }}>Overall Score</div>
+                      <div style={{ fontSize:28, fontWeight:800, color: parseFloat(overallScore) >= 3.5 ? 'var(--success)' : parseFloat(overallScore) >= 2.5 ? '#8A5A00' : 'var(--danger)', letterSpacing:'-1px' }}>{overallScore}</div>
+                      <div style={{ fontSize:11, color:'var(--text-muted)' }}>out of 4.00</div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Scorecard table */}
+                <div style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius-lg)', overflow:'hidden', marginBottom:20 }}>
+                  {/* Header */}
+                  <div style={{ display:'grid', gridTemplateColumns:'1.5fr 70px 100px 1fr 1fr 1fr 1fr', background:'var(--surface-2)', borderBottom:'2px solid var(--border)' }}>
+                    {['KPI','Weight','Actual','Exceeds (4)','Meets (3)','Needs Improvement (2)','Poor Performance (1)'].map((h,i) => (
+                      <div key={h} style={{ padding:'10px 12px', fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color:'var(--text-muted)', textAlign: i <= 2 ? 'left' : 'center' }}>{h}</div>
+                    ))}
+                  </div>
+
+                  {SC_KPIS.map((kpi, idx) => {
+                    const actual = actuals[kpi.id]
+                    const rating = scGetRating(kpi, actual)
+                    const ratingStyle = rating ? SC_RATING_COLORS[rating] : null
+                    const { thresholds, lowerIsBetter, unit } = kpi
+                    const fmt = (n) => unit === '%' ? `${n}${unit}` : `${n}${unit}`
+                    const col4 = lowerIsBetter ? fmt(thresholds.exceeds) : `${fmt(thresholds.exceeds)}+`
+                    const col3 = lowerIsBetter ? `${fmt(thresholds.meets+1)}-${fmt(thresholds.exceeds+1)}` : `${fmt(thresholds.meets)}-${fmt(thresholds.exceeds-1)}`
+                    const col2 = lowerIsBetter ? `${fmt(thresholds.improvement+1)}-${fmt(thresholds.meets+1)}` : `${fmt(thresholds.improvement)}-${fmt(thresholds.meets-1)}`
+                    const col1 = lowerIsBetter ? `${fmt(thresholds.improvement+1)}+` : `${fmt(thresholds.improvement-1)} or less`
+                    const isEditable = kpi.id !== 'attendance'
+
+                    return (
+                      <div key={kpi.id} style={{ display:'grid', gridTemplateColumns:'1.5fr 70px 100px 1fr 1fr 1fr 1fr', borderBottom: idx < SC_KPIS.length-1 ? '1px solid var(--border)' : 'none', background: idx % 2 === 0 ? 'var(--surface)' : 'var(--surface-2)' }}>
+                        {/* KPI name + rating badge */}
+                        <div style={{ padding:'12px', display:'flex', flexDirection:'column', gap:4, justifyContent:'center' }}>
+                          <div style={{ fontSize:13, fontWeight:600, color:'var(--text-primary)' }}>{kpi.label}</div>
+                          {rating && ratingStyle && (
+                            <div style={{ fontSize:10, fontWeight:700, padding:'2px 6px', borderRadius:4, background: ratingStyle.bg, color: ratingStyle.text, display:'inline-block', width:'fit-content' }}>
+                              {SC_RATING_LABELS[rating]}
+                            </div>
+                          )}
+                        </div>
+                        {/* Weight */}
+                        <div style={{ padding:'12px 8px', textAlign:'left', fontSize:12, color:'var(--text-secondary)', display:'flex', alignItems:'center' }}>{kpi.weight}%</div>
+                        {/* Actual — editable or auto */}
+                        <div style={{ padding:'8px', display:'flex', alignItems:'center' }}>
+                          {isEditable ? (
+                            <input
+                              type="number"
+                              value={scActuals[kpi.id]}
+                              onChange={e => setScActuals(prev => ({ ...prev, [kpi.id]: e.target.value }))}
+                              placeholder="Enter"
+                              style={{ width:'100%', padding:'5px 8px', fontSize:13, fontWeight:600, border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface)', color:'var(--text-primary)', textAlign:'center' }}
+                            />
+                          ) : (
+                            <div style={{ fontSize:13, fontWeight:700, color: ratingStyle ? ratingStyle.text : 'var(--text-muted)', paddingLeft:4 }}>
+                              {actual != null ? `${actual.toFixed(1)}${unit}` : '--'}
+                              <div style={{ fontSize:9, color:'var(--text-muted)', fontWeight:400 }}>auto</div>
+                            </div>
+                          )}
+                        </div>
+                        {/* Threshold columns */}
+                        {[{ val:col4, r:4 }, { val:col3, r:3 }, { val:col2, r:2 }, { val:col1, r:1 }].map(({ val, r }) => {
+                          const cs = SC_RATING_COLORS[r]
+                          const isMyRating = rating === r
+                          return (
+                            <div key={r} style={{ padding:'12px 8px', textAlign:'center', fontSize:12, fontWeight: isMyRating ? 700 : 400, background: isMyRating ? cs.bg : cs.bg + '33', color: cs.text, borderLeft:'1px solid var(--border)', display:'flex', alignItems:'center', justifyContent:'center', transition:'all .15s' }}>
+                              {val}
+                              {isMyRating && <span style={{ marginLeft:4, fontSize:10 }}>*</span>}
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )
+                  })}
+                </div>
+
+                {/* Notes section */}
+                <div style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius-lg)', padding:16 }}>
+                  <div style={{ fontSize:11, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color:'var(--text-muted)', marginBottom:8 }}>Manager Notes</div>
+                  <textarea
+                    placeholder="Add notes for this review period..."
+                    rows={4}
+                    style={{ width:'100%', padding:'10px 12px', fontSize:13, border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface-2)', color:'var(--text-primary)', resize:'vertical', fontFamily:'inherit' }}
+                  />
+                </div>
+
+                {/* Footer */}
+                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginTop:12, fontSize:11, color:'var(--text-muted)' }}>
+                  <span>Attendance auto-populated from points log. Booking %, Booked Calls, and Memberships entered manually.</span>
+                  <span>Awesome Home Services - Andi</span>
+                </div>
+              </div>
+            )
+          })()}
+        </div>
       )}
 
       {/* ── COMMISSION ADJUSTMENT MODAL ── */}
