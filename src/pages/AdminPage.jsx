@@ -1038,13 +1038,14 @@ export default function AdminPage() {
                     const { lowerIsBetter, unit } = kpi
                     const thr = scThresholds[kpi.id] || kpi.thresholds
                     const fmt = (n) => unit === '%' ? `${n}%` : unit === 'pts' ? `${n} pts` : `${n}${unit || ''}`
+                    const range = (lo, hi) => lo === hi ? fmt(lo) : `${fmt(lo)}-${fmt(hi)}`
                     let col4, col3, col2, col1
                     if (kpi.id === 'attendance') {
                       col4 = fmt(thr.exceeds); col3 = fmt(thr.meets); col2 = fmt(thr.improvement); col1 = `${thr.improvement + 1}+ pts`
                     } else if (lowerIsBetter) {
-                      col4 = `${fmt(thr.exceeds)} or less`; col3 = `${fmt(thr.exceeds+1)}-${fmt(thr.meets)}`; col2 = `${fmt(thr.meets+1)}-${fmt(thr.improvement)}`; col1 = `${fmt(thr.improvement+1)}+`
+                      col4 = `${fmt(thr.exceeds)} or less`; col3 = range(thr.exceeds+1, thr.meets); col2 = range(thr.meets+1, thr.improvement); col1 = `${fmt(thr.improvement+1)}+`
                     } else {
-                      col4 = `${fmt(thr.exceeds)}+`; col3 = `${fmt(thr.meets)}-${fmt(thr.exceeds-1)}`; col2 = `${fmt(thr.improvement)}-${fmt(thr.meets-1)}`; col1 = `Below ${fmt(thr.improvement)}`
+                      col4 = `${fmt(thr.exceeds)}+`; col3 = range(thr.meets, thr.exceeds-1); col2 = range(thr.improvement, thr.meets-1); col1 = `Below ${fmt(thr.improvement)}`
                     }
                     const cols = [{ v:col4, r:4 }, { v:col3, r:3 }, { v:col2, r:2 }, { v:col1, r:1 }]
                     const actualDisplay = actual != null ? `${actual}${unit === 'pts' ? ' pts' : unit || ''}` : '--'
