@@ -119,18 +119,18 @@ export default function CampaignsPage() {
     }
     if (!rows.length) { alert('No valid rows.'); return }
     const campName = campaigns.find(c => c.id === campId)?.name || campId
-    if (!confirm(`Import ${rows.length} contacts to "${campName}"?${dncSkipped ? `\n\n⛔ ${dncSkipped} DNC matches skipped.` : ''}`)) return
-    setImporting(campId); setImportProgress(`Importing 0/${rows.length}…`)
+    if (!confirm(`Import ${rows.length} contacts to "${campName}"?${dncSkipped ? `\n\n ${dncSkipped} DNC matches skipped.` : ''}`)) return
+    setImporting(campId); setImportProgress(`Importing 0/${rows.length}...`)
     try {
       let created = 0
       for (let i = 0; i < rows.length; i += 1000) {
         const { data, error } = await sb.from('contacts').insert(rows.slice(i, i + 1000)).select()
         if (error) throw error
         created += data?.length || 0
-        setImportProgress(`Importing ${created}/${rows.length}…`)
+        setImportProgress(`Importing ${created}/${rows.length}...`)
         if (data) setContacts(prev => [...prev, ...data])
       }
-      setImportProgress(`✓ ${created} imported!`)
+      setImportProgress(`done ${created} imported!`)
       setTimeout(() => setImportProgress(''), 3000)
     } catch (e) {
       alert('Import error: ' + e.message)
@@ -168,8 +168,11 @@ export default function CampaignsPage() {
   return (
     <div style={{ flex:1, overflowY:'auto', padding:24 }}>
       <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:20 }}>
-        <h1 style={{ fontSize:20, fontWeight:600 }}>Campaigns</h1>
-        {isAdmin && <button className="btn primary" onClick={openNew}>+ New campaign</button>}
+        <div>
+          <div style={{ fontSize:18, fontWeight:600, color:'var(--text-primary)' }}>Campaigns</div>
+          <div style={{ fontSize:12, color:'var(--text-muted)', marginTop:2 }}>Manage contact lists and dialing campaigns</div>
+        </div>
+        {isAdmin && <button className="btn primary" onClick={openNew} style={{ fontSize:13 }}>+ New campaign</button>}
       </div>
 
       {importProgress && (
@@ -187,54 +190,65 @@ export default function CampaignsPage() {
           const pct = total ? Math.round((done/total)*100) : 0
           const hasScript = !!(camp.script || camp.tips)
           return (
-            <div key={camp.id} className="card" style={{ display:'flex', flexDirection:'column', gap:10, padding:'16px 18px', position:'relative' }}>
+            <div key={camp.id} className="card" style={{ display:'flex', flexDirection:'column', gap:12, padding:'16px 18px', position:'relative' }}>
+              {/* Header */}
               <div style={{ display:'flex', alignItems:'flex-start', justifyContent:'space-between', gap:8 }}>
-                <div>
-                  <div style={{ fontSize:15, fontWeight:600 }}>{camp.name}</div>
-                  {camp.description && <div style={{ fontSize:12, color:'var(--text-secondary)', marginTop:2 }}>{camp.description}</div>}
+                <div style={{ minWidth:0 }}>
+                  <div style={{ fontSize:14, fontWeight:600, color:'var(--text-primary)' }}>{camp.name}</div>
+                  {camp.description && <div style={{ fontSize:12, color:'var(--text-muted)', marginTop:2 }}>{camp.description}</div>}
                 </div>
                 <div style={{ display:'flex', alignItems:'center', gap:6, flexShrink:0 }}>
-                  {hasScript && <span style={{ fontSize:10, background:'var(--accent-bg)', color:'var(--accent)', padding:'1px 6px', borderRadius:99, fontWeight:600 }}>📜 Script</span>}
+                  {hasScript && (
+                    <span style={{ fontSize:10, background:'var(--accent-bg)', color:'var(--accent)', padding:'2px 7px', borderRadius:99, fontWeight:600, textTransform:'uppercase', letterSpacing:.4 }}>
+                      Script
+                    </span>
+                  )}
                   <Badge status={camp.status} />
                   {isAdmin && (
-                    <button
-                      onClick={() => setShowDeleteConfirm(camp.id)}
-                      style={{ width:20, height:20, borderRadius:'50%', border:'none', background:'var(--danger-bg)', color:'var(--danger)', cursor:'pointer', fontSize:14, fontWeight:700, display:'flex', alignItems:'center', justifyContent:'center', lineHeight:1, flexShrink:0 }}
-                      title="Delete campaign"
-                    >×</button>
+                    <button onClick={() => setShowDeleteConfirm(camp.id)}
+                      style={{ width:20, height:20, borderRadius:'50%', border:'1px solid var(--border)', background:'var(--surface-2)', color:'var(--text-muted)', cursor:'pointer', fontSize:13, fontWeight:700, display:'flex', alignItems:'center', justifyContent:'center', lineHeight:1, flexShrink:0 }}
+                      onMouseEnter={e => { e.currentTarget.style.background='var(--danger-bg)'; e.currentTarget.style.color='var(--danger)'; e.currentTarget.style.borderColor='var(--danger)' }}
+                      onMouseLeave={e => { e.currentTarget.style.background='var(--surface-2)'; e.currentTarget.style.color='var(--text-muted)'; e.currentTarget.style.borderColor='var(--border)' }}
+                      title="Delete campaign">x</button>
                   )}
                 </div>
               </div>
 
-              <div style={{ height:6, background:'var(--surface-2)', borderRadius:99, overflow:'hidden' }}>
-                <div style={{ height:'100%', width:`${pct}%`, background:'var(--success)', borderRadius:99 }}></div>
+              {/* Progress bar */}
+              <div style={{ height:4, background:'var(--surface-2)', borderRadius:99, overflow:'hidden' }}>
+                <div style={{ height:'100%', width:`${pct}%`, background:'var(--success)', borderRadius:99, transition:'width .3s' }} />
               </div>
 
-              <div style={{ display:'flex', gap:14 }}>
-                {[['Total',total],['Remaining',total-done,'warning'],['Booked',booked,'success'],['Done%',pct+'%']].map(([l,v,c])=>(
-                  <div key={l} style={{ textAlign:'center' }}>
-                    <div style={{ fontSize:18, fontWeight:600, color: c ? `var(--${c})` : 'var(--text-primary)' }}>{v}</div>
-                    <div style={{ fontSize:10, color:'var(--text-muted)', textTransform:'uppercase', letterSpacing:.4 }}>{l}</div>
+              {/* Stats */}
+              <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:8 }}>
+                {[['Total',total,null],['Remaining',total-done,'warning'],['Booked',booked,'success'],['Done',pct+'%',null]].map(([l,v,c]) => (
+                  <div key={l} style={{ textAlign:'center', padding:'8px 4px', background:'var(--surface-2)', borderRadius:'var(--radius)' }}>
+                    <div style={{ fontSize:17, fontWeight:700, color: c ? `var(--${c})` : 'var(--text-primary)', letterSpacing:'-.5px' }}>{v}</div>
+                    <div style={{ fontSize:9, color:'var(--text-muted)', textTransform:'uppercase', letterSpacing:.6, marginTop:2 }}>{l}</div>
                   </div>
                 ))}
               </div>
 
+              {/* Actions */}
               <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
-                <button className="btn sm primary" onClick={() => dialCampaign(camp.id)}>⚡ Power Dial</button>
-                <button className="btn sm" onClick={() => setShowScriptModal(camp)}>📜 {hasScript ? 'View Script' : 'Add Script'}</button>
+                <button className="btn sm primary" onClick={() => dialCampaign(camp.id)}>Power Dial</button>
+                <button className="btn sm" onClick={() => setShowScriptModal(camp)}>{hasScript ? 'View Script' : 'Add Script'}</button>
                 {isAdmin && (
                   <>
-                    <button className="btn sm" onClick={() => startUpload(camp.id)} disabled={importing === camp.id}>{importing === camp.id ? '⏳' : '+ Upload'}</button>
+                    <button className="btn sm" onClick={() => startUpload(camp.id)} disabled={importing === camp.id}>
+                      {importing === camp.id ? 'Uploading...' : '+ Upload'}
+                    </button>
                     <button className="btn sm" onClick={() => openEdit(camp)}>Edit</button>
-                    <button className="btn sm danger" onClick={() => { setShowClearConfirm(camp.id); setClearConfirmText('') }}>🗑 Clear</button>
+                    <button className="btn sm danger" onClick={() => { setShowClearConfirm(camp.id); setClearConfirmText('') }}>Clear</button>
                   </>
                 )}
-                <button className="btn sm" onClick={() => exportCampaign(camp.id)}>⬇</button>
+                <button className="btn sm" onClick={() => exportCampaign(camp.id)}>Export</button>
                 <button className="btn sm" onClick={() => setShowContacts(showContacts === camp.id ? null : camp.id)}>
-                  {showContacts === camp.id ? 'Hide' : 'Contacts'}
+                  {showContacts === camp.id ? 'Hide contacts' : 'Contacts'}
                 </button>
               </div>
 
+              {/* Contact list */}
               {showContacts === camp.id && (
                 <div style={{ marginTop:4, borderTop:'1px solid var(--border)', paddingTop:10 }}>
                   <div style={{ maxHeight:260, overflowY:'auto' }}>
@@ -244,17 +258,17 @@ export default function CampaignsPage() {
                         {cc.slice(0,100).map(contact => (
                           <tr key={contact.id}>
                             <td style={{padding:'6px 10px'}}>{contact.name}</td>
-                            <td style={{padding:'6px 10px'}}>{contact.phone||'—'}</td>
+                            <td style={{padding:'6px 10px'}}>{contact.phone||'--'}</td>
                             <td style={{padding:'6px 10px'}}><Badge status={contact.status||'Pending'} /></td>
                             {isAdmin && <td style={{padding:'6px 10px'}}>
                               <div style={{display:'flex',gap:4}}>
                                 <button className="btn sm" onClick={() => setEditContact({...contact})}>Edit</button>
-                                <button className="btn sm danger" onClick={() => deleteContact(contact.id)}>Del</button>
+                                <button className="btn sm danger" onClick={() => deleteContact(contact.id)}>Remove</button>
                               </div>
                             </td>}
                           </tr>
                         ))}
-                        {cc.length > 100 && <tr><td colSpan={4} style={{padding:'8px 10px',color:'var(--text-muted)',textAlign:'center'}}>+{cc.length-100} more</td></tr>}
+                        {cc.length > 100 && <tr><td colSpan={4} style={{padding:'8px 10px',color:'var(--text-muted)',textAlign:'center'}}>+{cc.length-100} more contacts</td></tr>}
                       </tbody>
                     </table>
                   </div>
@@ -265,8 +279,9 @@ export default function CampaignsPage() {
         })}
         {campaigns.length === 0 && (
           <div className="empty-state" style={{ gridColumn:'1/-1' }}>
-            <div className="empty-icon">📋</div>
-            <div>{isAdmin ? 'No campaigns yet. Create your first one.' : 'No campaigns yet.'}</div>
+            <div style={{ fontSize:13, color:'var(--text-muted)' }}>
+              {isAdmin ? 'No campaigns yet. Create your first one.' : 'No campaigns yet.'}
+            </div>
           </div>
         )}
       </div>
@@ -284,41 +299,39 @@ export default function CampaignsPage() {
           <div className="form-field">
             <label className="form-label">Call script</label>
             <textarea className="form-input" value={campForm.script} onChange={e=>setCampForm(p=>({...p,script:e.target.value}))}
-              placeholder={'Hi, this is [Name] with Awesome Home Services...\n\nI\'m calling because we recently acquired Rocky Mountain Climate and wanted to reach out to their customers personally...'} style={{ minHeight:120 }} />
+              placeholder={'Hi, this is [Name] with Awesome Home Services...'} style={{ minHeight:120 }} />
           </div>
           <div className="form-field">
             <label className="form-label">Tips & talking points</label>
             <textarea className="form-input" value={campForm.tips} onChange={e=>setCampForm(p=>({...p,tips:e.target.value}))}
-              placeholder={'• Emphasize continuity of service\n• Mention the AHS guarantee\n• If they ask about pricing, offer a free quote\n• Best objection: "I already have someone" → "We want to earn your trust..."'} style={{ minHeight:100 }} />
+              placeholder={'- Emphasize continuity of service\n- Mention the AHS guarantee\n- If they ask about pricing, offer a free quote'} style={{ minHeight:100 }} />
           </div>
           <div className="modal-actions">
             <button className="btn" onClick={() => setShowModal(false)}>Cancel</button>
-            <button className="btn primary" onClick={save} disabled={saving}>{saving ? '…' : editCamp ? 'Save' : 'Create'}</button>
+            <button className="btn primary" onClick={save} disabled={saving}>{saving ? 'Saving...' : editCamp ? 'Save' : 'Create'}</button>
           </div>
         </Modal>
       )}
 
       {/* Script/Tips viewer */}
       {showScriptModal && (
-        <Modal title={`📜 ${showScriptModal.name} — Script & Tips`} onClose={() => setShowScriptModal(null)} width={640}>
+        <Modal title={`${showScriptModal.name} -- Script & Tips`} onClose={() => setShowScriptModal(null)} width={640}>
           {showScriptModal.script ? (
             <div style={{ marginBottom:20 }}>
-              <div style={{ fontSize:12, fontWeight:600, textTransform:'uppercase', letterSpacing:.5, color:'var(--text-secondary)', marginBottom:8 }}>Call Script</div>
+              <div style={{ fontSize:11, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color:'var(--text-muted)', marginBottom:8 }}>Call Script</div>
               <div style={{ background:'var(--surface-2)', borderRadius:'var(--radius)', padding:'14px 16px', fontSize:13, lineHeight:1.7, whiteSpace:'pre-wrap', color:'var(--text-primary)' }}>
                 {showScriptModal.script}
               </div>
             </div>
           ) : <div style={{ color:'var(--text-muted)', fontSize:13, marginBottom:16 }}>No script added yet.</div>}
-
           {showScriptModal.tips ? (
             <div>
-              <div style={{ fontSize:12, fontWeight:600, textTransform:'uppercase', letterSpacing:.5, color:'var(--text-secondary)', marginBottom:8 }}>💡 Tips & Talking Points</div>
-              <div style={{ background:'var(--warning-bg)', border:'1px solid #E8C84A', borderRadius:'var(--radius)', padding:'14px 16px', fontSize:13, lineHeight:1.7, whiteSpace:'pre-wrap', color:'var(--text-primary)' }}>
+              <div style={{ fontSize:11, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color:'var(--text-muted)', marginBottom:8 }}>Tips & Talking Points</div>
+              <div style={{ background:'var(--surface-2)', borderRadius:'var(--radius)', padding:'14px 16px', fontSize:13, lineHeight:1.7, whiteSpace:'pre-wrap', color:'var(--text-primary)' }}>
                 {showScriptModal.tips}
               </div>
             </div>
           ) : <div style={{ color:'var(--text-muted)', fontSize:13 }}>No tips added yet.</div>}
-
           <div className="modal-actions">
             {isAdmin && <button className="btn" onClick={() => { openEdit(showScriptModal); setShowScriptModal(null) }}>Edit script</button>}
             <button className="btn primary" onClick={() => setShowScriptModal(null)}>Close</button>
@@ -328,9 +341,9 @@ export default function CampaignsPage() {
 
       {/* Clear contacts confirmation */}
       {showClearConfirm && (
-        <Modal title="⚠️ Clear all contacts?" onClose={() => setShowClearConfirm(null)}>
+        <Modal title="Clear all contacts?" onClose={() => setShowClearConfirm(null)}>
           <div style={{ background:'var(--danger-bg)', border:'1px solid #E8C0B8', borderRadius:'var(--radius)', padding:'12px 14px', fontSize:13, color:'var(--danger)', marginBottom:16 }}>
-            This will permanently delete ALL contacts and call logs for this campaign. This cannot be undone.
+            This will permanently delete all contacts and call logs for this campaign. This cannot be undone.
           </div>
           <div className="form-field">
             <label className="form-label">Type the campaign name to confirm</label>
@@ -341,7 +354,7 @@ export default function CampaignsPage() {
             <button className="btn" onClick={() => setShowClearConfirm(null)}>Cancel</button>
             <button className="btn danger" disabled={clearConfirmText !== campaigns.find(c=>c.id===showClearConfirm)?.name || saving}
               onClick={() => clearCampaignContacts(showClearConfirm)}>
-              {saving ? 'Clearing…' : 'Yes, delete all contacts'}
+              {saving ? 'Clearing...' : 'Yes, delete all contacts'}
             </button>
           </div>
         </Modal>
@@ -349,18 +362,18 @@ export default function CampaignsPage() {
 
       {/* Delete campaign confirmation */}
       {showDeleteConfirm && (
-        <Modal title="⚠️ Delete Campaign?" onClose={() => setShowDeleteConfirm(null)}>
+        <Modal title="Delete Campaign?" onClose={() => setShowDeleteConfirm(null)}>
           <div style={{ background:'var(--danger-bg)', border:'1px solid #E8C0B8', borderRadius:'var(--radius)', padding:'12px 14px', fontSize:13, color:'var(--danger)', marginBottom:16 }}>
             <strong>You are about to permanently delete "{campaigns.find(c => c.id === showDeleteConfirm)?.name}".</strong>
             <br /><br />
-            This will delete the campaign and ALL contacts attached to it. Call logs and rep stats will be preserved for Analytics. <strong>This cannot be undone.</strong>
+            This will delete the campaign and all contacts attached to it. Call logs and rep stats will be preserved for Analytics. This cannot be undone.
             <br /><br />
-            If you just want to clear the contact list and re-upload, use the 🗑 Clear button instead.
+            To clear the contact list and re-upload, use the Clear button instead.
           </div>
           <div className="modal-actions">
-            <button className="btn" onClick={() => setShowDeleteConfirm(null)}>Cancel — keep campaign</button>
+            <button className="btn" onClick={() => setShowDeleteConfirm(null)}>Cancel</button>
             <button className="btn danger" onClick={() => deleteCampaign(showDeleteConfirm)} disabled={saving}>
-              {saving ? 'Deleting…' : 'Yes, delete campaign'}
+              {saving ? 'Deleting...' : 'Yes, delete campaign'}
             </button>
           </div>
         </Modal>
