@@ -6,7 +6,7 @@ import { useAuth } from '../lib/AuthContext'
 const START_HOUR = 6
 const END_HOUR = 21
 const TOTAL_INTERVALS = (END_HOUR - START_HOUR) * 4 // 15-min slots
-const LABEL_WIDTH = 160
+const LABEL_WIDTH = 200
 const ROW_HEIGHT = 72
 const ADHERENCE_HEIGHT = 12
 const MIN_CELL_WIDTH = 12
@@ -450,7 +450,7 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
                     <div style={{ width:30, height:30, borderRadius:'50%', background:'var(--accent-bg)', color:'var(--accent)', display:'flex', alignItems:'center', justifyContent:'center', fontSize: p.avatar ? 18 : 11, fontWeight:600, flexShrink:0 }}>
                       {p.avatar || (p.name||p.email||'?')[0].toUpperCase()}
                     </div>
-                    <div style={{ fontSize:11, fontWeight:600, color:'var(--text-primary)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', flex:1, minWidth:0 }}>{p.name||p.email}</div>
+                    <div style={{ fontSize:11, fontWeight:600, color:'var(--text-primary)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'normal', wordBreak:'break-word', flex:1, minWidth:0, lineHeight:1.3 }}>{p.name||p.email}</div>
                     {isAdmin && (
                       <button onClick={() => { setAddBlockMenu({ profileId:p.id }) }}
                         style={{ width:22, height:22, borderRadius:'50%', border:'1px solid var(--border)', background:'var(--surface)', cursor:'pointer', fontSize:14, display:'flex', alignItems:'center', justifyContent:'center', color:'var(--text-muted)', flexShrink:0 }}
@@ -459,17 +459,25 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
                         title="Add block">+</button>
                     )}
                   </div>
-                  {/* Shift time + adherence below */}
+                  {/* Shift time + adherence below — read from live blocks so updates during drag */}
                   <div style={{ paddingLeft:38 }}>
-                    {sched?.shift_start && sched?.shift_end && (
-                      <div style={{ fontSize:9, color:'var(--text-muted)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
-                        {fmtTime(sched.shift_start)}–{fmtTime(sched.shift_end)}
-                      </div>
-                    )}
+                    {(() => {
+                      const liveShift = pBlocks.find(b => b.type === 'shift')
+                      if (liveShift) {
+                        return (
+                          <div style={{ fontSize:9, color:'var(--text-muted)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
+                            {fmtTime(intervalToTime(liveShift.start))}–{fmtTime(intervalToTime(liveShift.start + liveShift.duration))}
+                          </div>
+                        )
+                      }
+                      if (sched && ['pto','sick','holiday'].includes(sched.day_type)) {
+                        return <div style={{ fontSize:9, color:'var(--text-muted)' }}>{sched.day_type.toUpperCase()}</div>
+                      }
+                      return <div style={{ fontSize:9, color:'var(--text-muted)' }}>No shift</div>
+                    })()}
                     {totalAdh != null && (
                       <div style={{ fontSize:9, color:adhColor, fontWeight:600 }}>{totalAdh}%</div>
                     )}
-                    {!sched && <div style={{ fontSize:9, color:'var(--text-muted)' }}>No shift</div>}
                   </div>
                 </div>
 
