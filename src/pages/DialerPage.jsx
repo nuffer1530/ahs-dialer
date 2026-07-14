@@ -164,6 +164,23 @@ export default function DialerPage() {
   const [availWeekOffset, setAvailWeekOffset] = useState(0)
   const [stLoading, setStLoading] = useState(false)
 
+  // ST global search
+  const [stSearch, setStSearch] = useState('')
+  const [stSearchResults, setStSearchResults] = useState([])
+  const [stSearchLoading, setStSearchLoading] = useState(false)
+  const [stSearchOpen, setStSearchOpen] = useState(false)
+  const stSearchRef = useRef(null)
+
+  // Text / Email
+  const [showTextModal, setShowTextModal] = useState(false)
+  const [textBody, setTextBody] = useState('')
+  const [textSending, setTextSending] = useState(false)
+  const [textResult, setTextResult] = useState(null)
+
+  // Send note to ST
+  const [stNoteSending, setStNoteSending] = useState(false)
+  const [stNoteResult, setStNoteResult] = useState(null)
+
   // Twilio
   const deviceRef = useRef(null)
   const [incomingCall, setIncomingCall] = useState(null) // { call, from, contactName }
@@ -431,6 +448,98 @@ export default function DialerPage() {
     if (!incomingCall?.call) return
     incomingCall.call.reject()
     setIncomingCall(null)
+  }
+
+  // ── ST global search (debounced)
+  useEffect(() => {
+    if (!stSearch || stSearch.trim().length < 3) { setStSearchResults([]); return }
+    const t = setTimeout(async () => {
+      setStSearchLoading(true)
+      try {
+        const res = await fetch(`/api/st/search?q=${encodeURIComponent(stSearch.trim())}`)
+        const data = await res.json()
+        setStSearchResults(data?.data || [])
+      } catch (e) { setStSearchResults([]) }
+      finally { setStSearchLoading(false) }
+    }, 400)
+    return () => clearTimeout(t)
+  }, [stSearch])
+
+  // Close search dropdown on outside click
+  useEffect(() => {
+    const handler = (e) => { if (stSearchRef.current && !stSearchRef.current.contains(e.target)) setStSearchOpen(false) }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
+
+  // Open a ST customer from search — reuse existing contact or create one
+  const openStCustomer = async (cust) => {
+    setStSearch(''); setStSearchResults([]); setStSearchOpen(false)
+    const existing = contacts.find(x => String(x.external_id) === String(cust.id))
+    if (existing) { selectContact(existing.id); return }
+    const { data: created } = await sb.from('contacts').insert({
+      name: cust.name || 'Unknown',
+      phone: cust.phone || null,
+      email: cust.email || null,
+      address: cust.address || null,
+      city: cust.city || null,
+      state: cust.state || null,
+      zip: cust.zip || null,
+      external_id: String(cust.id),
+      status: 'Pending',
+      attempts: 0,
+      source: 'ST search',
+    }).select().single()
+    if (created) { setContacts(prev => [created, ...prev]); selectContact(created.id) }
+  }
+
+  // Send SMS
+  const sendText = async () => {
+    const contact = selectedContact
+    if (!contact?.phone || !textBody.trim()) return
+    setTextSending(true); setTextResult(null)
+    try {
+      const res = await fetch('/api/twilio/sms', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ to: contact.phone, body: textBody.trim(), repName: currentRep, contactId: contact.id })
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Failed to send')
+      setTextResult({ ok: true })
+      setTextBody('')
+      setTimeout(() => { setShowTextModal(false); setTextResult(null) }, 1200)
+    } catch (e) {
+      setTextResult({ ok: false, error: e.message })
+    } finally { setTextSending(false) }
+  }
+
+  // Email via mailto
+  const sendEmail = () => {
+    const contact = selectedContact
+    const email = stCustomerInfo?.email || contact?.email
+    if (!email) { alert('No email on file for this customer.'); return }
+    const subject = encodeURIComponent('Awesome Home Services')
+    const body = encodeURIComponent(`Hi ${contact?.name || ''},\n\n`)
+    window.open(`mailto:${email}?subject=${subject}&body=${body}`, '_blank')
+  }
+
+  // Send the current notes to the ST location record
+  const sendNoteToST = async () => {
+    const contact = selectedContact
+    if (!contact?.external_id || !notesVal.trim()) return
+    setStNoteSending(true); setStNoteResult(null)
+    try {
+      const res = await fetch('/api/st/note', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ customerId: contact.external_id, note: notesVal.trim(), repName: currentRep })
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Failed to send note')
+      setStNoteResult({ ok: true })
+      setTimeout(() => setStNoteResult(null), 2500)
+    } catch (e) {
+      setStNoteResult({ ok: false, error: e.message })
+    } finally { setStNoteSending(false) }
   }
 
   const makeCall = async (number) => {
@@ -780,6 +889,41 @@ export default function DialerPage() {
             )}
           </div>
         )}
+        {/* ST GLOBAL SEARCH */}
+        <div ref={stSearchRef} style={{ position:'relative', flex:1, maxWidth:380, marginLeft:8 }}>
+          <div style={{ position:'relative' }}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" style={{ position:'absolute', left:9, top:'50%', transform:'translateY(-50%)', pointerEvents:'none' }}>
+              <circle cx="11" cy="11" r="7" stroke="var(--text-muted)" strokeWidth="2"/>
+              <path d="M20 20l-4-4" stroke="var(--text-muted)" strokeWidth="2" strokeLinecap="round"/>
+            </svg>
+            <input value={stSearch}
+              onChange={e => { setStSearch(e.target.value); setStSearchOpen(true) }}
+              onFocus={() => setStSearchOpen(true)}
+              placeholder="Search ServiceTitan by name, phone, or address..."
+              style={{ width:'100%', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'6px 10px 6px 28px', fontSize:12, background:'var(--surface-2)', color:'var(--text-primary)' }} />
+            {stSearchLoading && <div className="spinner" style={{ position:'absolute', right:9, top:'50%', transform:'translateY(-50%)', width:12, height:12, borderWidth:2 }} />}
+          </div>
+          {stSearchOpen && stSearch.trim().length >= 3 && (
+            <div style={{ position:'absolute', top:'100%', left:0, right:0, zIndex:500, background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius)', boxShadow:'0 4px 20px rgba(0,0,0,.15)', marginTop:3, maxHeight:340, overflowY:'auto' }}>
+              {stSearchLoading ? (
+                <div style={{ padding:'14px', textAlign:'center', fontSize:12, color:'var(--text-muted)' }}>Searching...</div>
+              ) : stSearchResults.length === 0 ? (
+                <div style={{ padding:'14px', textAlign:'center', fontSize:12, color:'var(--text-muted)' }}>No customers found</div>
+              ) : stSearchResults.map(cust => (
+                <div key={cust.id} onClick={() => openStCustomer(cust)}
+                  style={{ padding:'9px 12px', borderBottom:'1px solid var(--border)', cursor:'pointer' }}
+                  onMouseEnter={e => e.currentTarget.style.background='var(--accent-bg)'}
+                  onMouseLeave={e => e.currentTarget.style.background='transparent'}>
+                  <div style={{ fontSize:12, fontWeight:600, color:'var(--text-primary)' }}>{cust.name}</div>
+                  <div style={{ fontSize:11, color:'var(--text-muted)', marginTop:1 }}>
+                    {[cust.phone, [cust.address, cust.city].filter(Boolean).join(', ')].filter(Boolean).join(' . ')}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
         <div style={{ flex:1 }} />
         {/* Stats pills */}
         {[
@@ -926,6 +1070,20 @@ export default function DialerPage() {
                       Call
                     </button>
                   )}
+                  {c.phone && (
+                    <button onClick={() => { setShowTextModal(true); setTextResult(null) }}
+                      style={{ display:'flex', alignItems:'center', gap:5, padding:'7px 12px', border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface-2)', cursor:'pointer', fontSize:12, color:'var(--text-primary)' }}
+                      title="Send text message">
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M21 12a8 8 0 01-8 8H8l-5 2 1.5-4.5A8 8 0 1121 12z" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                      Text
+                    </button>
+                  )}
+                  <button onClick={sendEmail} disabled={!stCustomerInfo?.email && !c.email}
+                    style={{ display:'flex', alignItems:'center', gap:5, padding:'7px 12px', border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface-2)', cursor: (stCustomerInfo?.email || c.email) ? 'pointer' : 'not-allowed', opacity: (stCustomerInfo?.email || c.email) ? 1 : .4, fontSize:12, color:'var(--text-primary)' }}
+                    title="Send email">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><rect x="2" y="4" width="20" height="16" rx="2" stroke="currentColor" strokeWidth="1.8"/><path d="M2 7l10 6 10-6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/></svg>
+                    Email
+                  </button>
                   <button onClick={() => openInST(c)} style={{ padding:'7px 12px', border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface-2)', cursor:'pointer', fontSize:12, color:'var(--text-primary)' }}>Open in ST</button>
                   {!c.claimed_by && !done && <button className="btn sm primary" onClick={claimContact}>Claim</button>}
                   {isMe && !done && <button className="btn sm" onClick={() => releaseContact(c.id)}>Release</button>}
@@ -1081,12 +1239,30 @@ export default function DialerPage() {
                           </div>
 
                           {/* Notes */}
-                          <textarea value={notesVal} onChange={e => setNotesVal(e.target.value)} disabled={!isMe}
-                            placeholder={selectedOutcome === 'Booked' ? 'Notes required before booking...' : 'Add call notes...'}
-                            style={{ width:'100%', border:`1px solid ${selectedOutcome==='Booked' ? 'var(--accent)' : 'var(--border)'}`, borderRadius:'var(--radius)', padding:'9px 10px', fontSize:12, fontFamily:'inherit', resize:'vertical', minHeight:80, background:'var(--surface)', color:'var(--text-primary)', opacity: isMe ? 1 : .4 }} />
+                          <div>
+                            <textarea value={notesVal} onChange={e => setNotesVal(e.target.value)} disabled={!isMe}
+                              placeholder={selectedOutcome === 'Booked' ? 'Notes required before booking...' : 'Add call notes...'}
+                              style={{ width:'100%', border:`1px solid ${selectedOutcome==='Booked' ? 'var(--accent)' : 'var(--border)'}`, borderRadius:'var(--radius)', padding:'9px 10px', fontSize:12, fontFamily:'inherit', resize:'vertical', minHeight:80, background:'var(--surface)', color:'var(--text-primary)', opacity: isMe ? 1 : .4 }} />
+                            <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginTop:6 }}>
+                              <div style={{ fontSize:10, color:'var(--text-muted)' }}>
+                                Notes save with the outcome and sync to ServiceTitan.
+                              </div>
+                              <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                                {stNoteResult && (
+                                  <span style={{ fontSize:11, fontWeight:600, color: stNoteResult.ok ? '#16A34A' : '#DC2626' }}>
+                                    {stNoteResult.ok ? 'Sent to ST' : stNoteResult.error}
+                                  </span>
+                                )}
+                                <button onClick={sendNoteToST} disabled={!c.external_id || !notesVal.trim() || stNoteSending}
+                                  style={{ padding:'5px 12px', border:'1px solid var(--accent)', borderRadius:'var(--radius)', background:'var(--surface)', color:'var(--accent)', fontSize:11, fontWeight:600, cursor: (c.external_id && notesVal.trim() && !stNoteSending) ? 'pointer' : 'not-allowed', opacity: (c.external_id && notesVal.trim()) ? 1 : .4 }}>
+                                  {stNoteSending ? 'Sending...' : 'Send note to ST'}
+                                </button>
+                              </div>
+                            </div>
+                          </div>
 
-                          {/* ST Booking panel */}
-                          {selectedOutcome === 'Booked' && (
+                          {/* ST Booking panel — always visible */}
+                          {true && (
                             <div style={{ background:'var(--success-bg)', border:'1px solid var(--success)', borderRadius:'var(--radius)', padding:12, display:'flex', flexDirection:'column', gap:10 }}>
                               <div style={{ fontSize:11, fontWeight:700, color:'var(--success)' }}>ServiceTitan booking details</div>
                               <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8 }}>
@@ -1349,6 +1525,43 @@ export default function DialerPage() {
           <div className="modal-actions">
             <button className="btn" onClick={() => setShowCorrectModal(false)}>Cancel</button>
             <button className="btn primary" onClick={applyCorrection}>Apply correction</button>
+          </div>
+        </Modal>
+      )}
+
+      {/* TEXT MODAL */}
+      {showTextModal && c && (
+        <Modal title={`Text ${c.name || c.phone}`} onClose={() => { setShowTextModal(false); setTextBody(''); setTextResult(null) }} width={420}>
+          <div style={{ fontSize:12, color:'var(--text-muted)', marginBottom:10 }}>To: {c.phone}</div>
+          <textarea autoFocus value={textBody} onChange={e => setTextBody(e.target.value.slice(0, 320))}
+            placeholder="Type your message..."
+            style={{ width:'100%', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'10px 12px', fontSize:13, fontFamily:'inherit', resize:'vertical', minHeight:110, background:'var(--surface-2)', color:'var(--text-primary)' }} />
+          <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginTop:6 }}>
+            <span style={{ fontSize:11, color:'var(--text-muted)' }}>{textBody.length} / 320</span>
+            {textResult && (
+              <span style={{ fontSize:12, fontWeight:600, color: textResult.ok ? '#16A34A' : '#DC2626' }}>
+                {textResult.ok ? 'Message sent' : textResult.error}
+              </span>
+            )}
+          </div>
+          {/* Quick templates */}
+          <div style={{ display:'flex', gap:6, marginTop:10, flexWrap:'wrap' }}>
+            {[
+              "Hi, this is Awesome Home Services following up on your service. Is now a good time to talk?",
+              "Your appointment is confirmed. We'll see you soon!",
+              "We tried reaching you about your HVAC maintenance. Please call us back at your convenience.",
+            ].map((t, i) => (
+              <button key={i} onClick={() => setTextBody(t)}
+                style={{ padding:'4px 9px', fontSize:10, border:'1px solid var(--border)', borderRadius:99, background:'var(--surface-2)', color:'var(--text-secondary)', cursor:'pointer' }}>
+                Template {i+1}
+              </button>
+            ))}
+          </div>
+          <div className="modal-actions">
+            <button className="btn" onClick={() => { setShowTextModal(false); setTextBody(''); setTextResult(null) }}>Cancel</button>
+            <button className="btn primary" onClick={sendText} disabled={!textBody.trim() || textSending}>
+              {textSending ? 'Sending...' : 'Send text'}
+            </button>
           </div>
         </Modal>
       )}
