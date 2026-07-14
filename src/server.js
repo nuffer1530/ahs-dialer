@@ -809,6 +809,174 @@ app.get('/api/st/recording', async (req, res) => {
   }
 })
 
+// ─────────────────────────────────────────────
+// ── CUSTOMER INTELLIGENCE BRIEF
+// ─────────────────────────────────────────────
+// Gathers everything ST knows about a customer, then has Claude synthesize a
+// short pre-call brief for the rep. Cached in Supabase so repeat opens are
+// instant and we don't re-hit ST / Claude on every contact selection.
+
+const BRIEF_TTL_HOURS = 6
+const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY
+
+// Gather structured facts from ST. Every sub-fetch is best-effort: if a scope
+// or endpoint fails, that fact is simply omitted and the brief adapts.
+async function gatherCustomerFacts(id) {
+  const facts = {}
+
+  // Customer + membership (reuse the same shape as /api/st/customer)
+  try {
+    const cust = await stGet(`/crm/v2/tenant/${ST_TENANT_ID}/customers/${id}`)
+    facts.name = cust?.name || null
+    facts.customerType = cust?.type || null
+    try {
+      const memb = await stGet(`/memberships/v2/tenant/${ST_TENANT_ID}/memberships?customerIds=${id}&pageSize=10`)
+      const active = (memb?.data || []).find(m => m.status === 'Active')
+      facts.membership = active ? (active.membershipTypeName || active.type?.name || 'Member') : 'Non-member'
+    } catch {}
+  } catch (e) { console.warn('facts customer:', e.message) }
+
+  // Jobs — most recent first (last service, last outcome, cadence)
+  try {
+    const jobsRes = await stGet(`/jpm/v2/tenant/${ST_TENANT_ID}/jobs?customerId=${id}&pageSize=10&sort=-modifiedOn`)
+    const jobs = jobsRes?.data || []
+    facts.totalJobs = jobs.length
+    if (jobs[0]) {
+      const j = jobs[0]
+      facts.lastJob = {
+        date: j.completedOn || j.scheduledDate || j.createdOn || null,
+        status: j.jobStatus || null,
+        summary: j.summary || null,
+      }
+    }
+    // Business units touched (which trades they've used)
+    facts.jobStatuses = jobs.slice(0, 5).map(j => j.jobStatus).filter(Boolean)
+  } catch (e) { console.warn('facts jobs:', e.message) }
+
+  // Installed equipment — age is the install date
+  try {
+    const locRes = await stGet(`/crm/v2/tenant/${ST_TENANT_ID}/locations?customerId=${id}&pageSize=5`)
+    const locIds = (locRes?.data || []).map(l => l.id).filter(Boolean)
+    if (locIds.length) {
+      const eqRes = await stGet(`/equipmentsystems/v2/tenant/${ST_TENANT_ID}/installed-equipment?locationIds=${locIds.join(',')}&pageSize=50`)
+      const eq = (eqRes?.data || []).map(e => ({
+        name: e.name || e.type || 'Equipment',
+        installedOn: e.installedOn || e.createdOn || null,
+      })).filter(e => e.installedOn)
+      if (eq.length) {
+        facts.equipment = eq.slice(0, 6).map(e => {
+          const yrs = e.installedOn ? Math.floor((Date.now() - new Date(e.installedOn)) / (365.25 * 864e5)) : null
+          return { name: e.name, ageYears: yrs }
+        })
+      }
+    }
+  } catch (e) { console.warn('facts equipment:', e.message) }
+
+  // Open estimates (unsold work = opportunity)
+  try {
+    const estRes = await stGet(`/sales/v2/tenant/${ST_TENANT_ID}/estimates?customerId=${id}&pageSize=50`)
+    const open = (estRes?.data || []).filter(e => {
+      const s = (e.status?.name || e.status || '').toLowerCase()
+      return s === 'open' || s === '' || (!e.soldOn && s !== 'dismissed')
+    })
+    if (open.length) {
+      facts.openEstimates = {
+        count: open.length,
+        total: open.reduce((sum, e) => sum + (e.total || e.subtotal || 0), 0),
+      }
+    }
+  } catch (e) { console.warn('facts estimates:', e.message) }
+
+  // Lifetime value — sum of invoice totals
+  try {
+    const invRes = await stGet(`/accounting/v2/tenant/${ST_TENANT_ID}/invoices?customerId=${id}&pageSize=200`)
+    const invoices = invRes?.data || []
+    if (invoices.length) {
+      facts.lifetimeValue = invoices.reduce((sum, i) => sum + (Number(i.total) || 0), 0)
+      facts.invoiceCount = invoices.length
+    }
+  } catch (e) { console.warn('facts invoices:', e.message) }
+
+  // Customer notes — pinned notes are high-signal operational flags the rep
+  // must see. Surface pinned verbatim; include a couple recent ones as context.
+  try {
+    const notesRes = await stGet(`/crm/v2/tenant/${ST_TENANT_ID}/customers/${id}/notes?pageSize=50`)
+    const notes = Array.isArray(notesRes) ? notesRes : (notesRes?.data || [])
+    const textOf = n => (n.text || n.note || '').trim()
+    const isPinned = n => n.isPinned === true || !!n.pinnedOn
+    const pinned = notes.filter(isPinned).map(textOf).filter(Boolean)
+    const recent = notes.filter(n => !isPinned(n)).map(textOf).filter(Boolean).slice(0, 3)
+    if (pinned.length) facts.pinnedNotes = pinned.slice(0, 5)
+    if (recent.length) facts.recentNotes = recent
+  } catch (e) { console.warn('facts notes:', e.message) }
+
+  return facts
+}
+
+async function generateBrief(facts) {
+  if (!ANTHROPIC_KEY) return null
+  const sys = "You write a punchy pre-call intelligence brief for a home-services call-center rep at Awesome Home Services (HVAC, plumbing, electrical, garage doors). You are given structured ServiceTitan data about a customer. Write 2-3 short sentences of plain prose: first what stands out about their history (age of equipment, time since last service, membership, open estimates, lifetime value), then one tactical line on how to approach the call. If the data includes pinnedNotes, treat them as high-priority operational flags from staff and account for them in your tactical line (do not contradict or soften them). No greeting, no bullet points, no markdown, no preamble. Reference concrete numbers. If data is sparse, say so in one line rather than inventing anything."
+  try {
+    const r = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'x-api-key': ANTHROPIC_KEY,
+        'anthropic-version': '2023-06-01',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 250,
+        system: sys,
+        messages: [{ role: 'user', content: `Customer data (JSON):\n${JSON.stringify(facts, null, 2)}` }],
+      }),
+    })
+    if (!r.ok) {
+      const t = await r.text().catch(() => '')
+      console.error('Anthropic brief error', r.status, t.slice(0, 200))
+      return null
+    }
+    const data = await r.json()
+    return (data.content || []).filter(b => b.type === 'text').map(b => b.text).join('').trim() || null
+  } catch (e) {
+    console.error('generateBrief error:', e.message)
+    return null
+  }
+}
+
+app.get('/api/st/intelligence/:id', async (req, res) => {
+  const id = req.params.id
+  const force = req.query.refresh === '1'
+  try {
+    // Serve fresh cache if present
+    if (!force) {
+      const { data: cached } = await supabase
+        .from('customer_briefs').select('*').eq('customer_id', id).maybeSingle()
+      if (cached?.generated_at) {
+        const ageHrs = (Date.now() - new Date(cached.generated_at)) / 36e5
+        if (ageHrs < BRIEF_TTL_HOURS) {
+          return res.json({ brief: cached.brief, facts: cached.facts, generated_at: cached.generated_at, cached: true })
+        }
+      }
+    }
+
+    const facts = await gatherCustomerFacts(id)
+    const brief = await generateBrief(facts)
+    const generated_at = new Date().toISOString()
+
+    // Cache (best-effort — don't fail the response if the upsert errors)
+    try {
+      await supabase.from('customer_briefs')
+        .upsert({ customer_id: id, brief, facts, generated_at }, { onConflict: 'customer_id' })
+    } catch (e) { console.warn('brief cache upsert:', e.message) }
+
+    res.json({ brief, facts, generated_at, cached: false })
+  } catch (err) {
+    console.error('Intelligence brief error:', err.message)
+    res.status(500).json({ error: err.message })
+  }
+})
+
 // ── Inbound call webhook
 app.post('/api/twilio/inbound', async (req, res) => {
   const { From, CallSid, To } = req.body
