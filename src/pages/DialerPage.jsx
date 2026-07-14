@@ -61,6 +61,50 @@ const OUTCOME_CONFIG = {
   'Bad Data':       { border:'#6B7280', bg:'#F3F4F6', color:'#6B7280' },
 }
 
+function SearchSelect({ label, value, onChange, options, placeholder, disabled }) {
+  const [open, setOpen] = useState(false)
+  const [q, setQ] = useState('')
+  const ref = useRef(null)
+  useEffect(() => {
+    const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false) }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
+  const hits = options.filter(o => o.label.toLowerCase().includes(q.toLowerCase()))
+  const sel = options.find(o => String(o.value) === String(value))
+  return (
+    <div ref={ref} style={{ position:'relative' }}>
+      {label && <div style={{ fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color:'var(--text-muted)', marginBottom:4 }}>{label}</div>}
+      <div onClick={() => !disabled && setOpen(v => !v)}
+        style={{ border:`1px solid ${open ? 'var(--accent)' : 'var(--border)'}`, borderRadius:'var(--radius)', padding:'7px 10px', fontSize:12, background:'var(--surface)', color: sel ? 'var(--text-primary)' : 'var(--text-muted)', cursor: disabled ? 'default' : 'pointer', display:'flex', justifyContent:'space-between', alignItems:'center', userSelect:'none', opacity: disabled ? .5 : 1 }}>
+        <span style={{ overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{sel?.label || placeholder}</span>
+        <span style={{ fontSize:10, marginLeft:4, color:'var(--text-muted)', flexShrink:0 }}>v</span>
+      </div>
+      {open && (
+        <div style={{ position:'absolute', top:'100%', left:0, right:0, zIndex:400, background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius)', boxShadow:'0 4px 20px rgba(0,0,0,.15)', marginTop:2 }}>
+          <div style={{ padding:'5px 8px', borderBottom:'1px solid var(--border)' }}>
+            <input autoFocus value={q} onChange={e => setQ(e.target.value)} onClick={e => e.stopPropagation()}
+              placeholder="Search..." style={{ width:'100%', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'4px 8px', fontSize:11, background:'var(--surface-2)', color:'var(--text-primary)' }} />
+          </div>
+          <div style={{ maxHeight:200, overflowY:'auto' }}>
+            {hits.length === 0
+              ? <div style={{ padding:'9px 12px', fontSize:12, color:'var(--text-muted)', fontStyle:'italic' }}>No results</div>
+              : hits.map(o => (
+                  <div key={o.value} onClick={() => { onChange(o.value); setOpen(false); setQ('') }}
+                    style={{ padding:'9px 12px', fontSize:12, cursor:'pointer', background: String(value)===String(o.value) ? 'var(--accent-bg)' : 'transparent', color: String(value)===String(o.value) ? 'var(--accent)' : 'var(--text-primary)', fontWeight: String(value)===String(o.value) ? 600 : 400 }}
+                    onMouseEnter={e => { if (String(value)!==String(o.value)) e.currentTarget.style.background='var(--surface-2)' }}
+                    onMouseLeave={e => { if (String(value)!==String(o.value)) e.currentTarget.style.background='transparent' }}>
+                    {o.label}
+                  </div>
+                ))
+            }
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function DialerPage() {
   const { contacts, setContacts, campaigns, dncSet } = useData()
   const { profile } = useAuth()
@@ -633,49 +677,6 @@ export default function DialerPage() {
   }, [c?.external_id])
 
   // SearchSelect component
-  const SearchSelect = ({ label, value, onChange, options, placeholder, disabled }) => {
-    const [open, setOpen] = useState(false)
-    const [q, setQ] = useState('')
-    const ref = useRef(null)
-    useEffect(() => {
-      const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false) }
-      document.addEventListener('mousedown', handler)
-      return () => document.removeEventListener('mousedown', handler)
-    }, [])
-    const hits = options.filter(o => o.label.toLowerCase().includes(q.toLowerCase()))
-    const sel = options.find(o => String(o.value) === String(value))
-    return (
-      <div ref={ref} style={{ position:'relative' }}>
-        {label && <div style={{ fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color:'var(--text-muted)', marginBottom:4 }}>{label}</div>}
-        <div onClick={() => !disabled && setOpen(v => !v)}
-          style={{ border:`1px solid ${open ? 'var(--accent)' : 'var(--border)'}`, borderRadius:'var(--radius)', padding:'7px 10px', fontSize:12, background:'var(--surface)', color: sel ? 'var(--text-primary)' : 'var(--text-muted)', cursor: disabled ? 'default' : 'pointer', display:'flex', justifyContent:'space-between', alignItems:'center', userSelect:'none', opacity: disabled ? .5 : 1 }}>
-          <span style={{ overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{sel?.label || placeholder}</span>
-          <span style={{ fontSize:10, marginLeft:4, color:'var(--text-muted)', flexShrink:0 }}>v</span>
-        </div>
-        {open && (
-          <div style={{ position:'absolute', top:'100%', left:0, right:0, zIndex:400, background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius)', boxShadow:'0 4px 20px rgba(0,0,0,.15)', marginTop:2 }}>
-            <div style={{ padding:'5px 8px', borderBottom:'1px solid var(--border)' }}>
-              <input autoFocus value={q} onChange={e => setQ(e.target.value)} onClick={e => e.stopPropagation()}
-                placeholder="Search..." style={{ width:'100%', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'4px 8px', fontSize:11, background:'var(--surface-2)', color:'var(--text-primary)' }} />
-            </div>
-            <div style={{ maxHeight:200, overflowY:'auto' }}>
-              {hits.length === 0
-                ? <div style={{ padding:'9px 12px', fontSize:12, color:'var(--text-muted)', fontStyle:'italic' }}>No results</div>
-                : hits.map(o => (
-                    <div key={o.value} onClick={() => { onChange(o.value); setOpen(false); setQ('') }}
-                      style={{ padding:'9px 12px', fontSize:12, cursor:'pointer', background: String(value)===String(o.value) ? 'var(--accent-bg)' : 'transparent', color: String(value)===String(o.value) ? 'var(--accent)' : 'var(--text-primary)', fontWeight: String(value)===String(o.value) ? 600 : 400 }}
-                      onMouseEnter={e => { if (String(value)!==String(o.value)) e.currentTarget.style.background='var(--surface-2)' }}
-                      onMouseLeave={e => { if (String(value)!==String(o.value)) e.currentTarget.style.background='transparent' }}>
-                      {o.label}
-                    </div>
-                  ))
-              }
-            </div>
-          </div>
-        )}
-      </div>
-    )
-  }
 
   const buOptions = [...stBusinessUnits].sort((a,b) => a.name.localeCompare(b.name)).map(b => ({ value:String(b.id), label:b.name }))
   const jtOptions = [...stJobTypes].filter(jt => !selectedBU || jt.businessUnitIds?.includes(parseInt(selectedBU)) || jt.businessUnitId===parseInt(selectedBU)).sort((a,b) => a.name.localeCompare(b.name)).map(j => ({ value:String(j.id), label:j.name }))
@@ -942,19 +943,29 @@ export default function DialerPage() {
                   <div style={sectionCard}>
                     <div style={sectionHeader}>
                       <span style={sectionTitle}>Customer info</span>
-                      {stCustomerInfo?.membershipStatus && (
-                        <span style={{ fontSize:10, background:'#DCFCE7', color:'#15803D', border:'1px solid #86EFAC', borderRadius:99, padding:'1px 7px', fontWeight:600 }}>Member</span>
+                      {stCustomerInfo?.membership && (
+                        <span style={{ fontSize:10, fontWeight:700, borderRadius:99, padding:'2px 8px',
+                          background: stCustomerInfo.membership.active ? '#DCFCE7' : '#F3F4F6',
+                          color: stCustomerInfo.membership.active ? '#15803D' : '#6B7280',
+                          border: `1px solid ${stCustomerInfo.membership.active ? '#86EFAC' : 'var(--border)'}` }}>
+                          {stCustomerInfo.membership.active ? (stCustomerInfo.membership.name || 'Member') : 'Non-Member'}
+                        </span>
                       )}
                     </div>
                     <div style={{ padding:'12px 14px', display:'flex', flexDirection:'column', gap:10 }}>
                       <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
-                        <div><L text="Email" /><div style={{ fontSize:12, color:'var(--text-primary)', wordBreak:'break-all' }}>{c.email || '--'}</div></div>
+                        <div><L text="Email" /><div style={{ fontSize:12, color:'var(--text-primary)', wordBreak:'break-all' }}>
+                          {stCustomerInfo?.email || c.email || (c.external_id && !stCustomerInfo ? 'Loading...' : '--')}
+                        </div></div>
                         <div><L text="Source" /><div style={{ fontSize:12, color:'var(--text-primary)' }}>{c.source || '--'}</div></div>
-                        <div><L text="Membership" /><div style={{ fontSize:12, color: stCustomerInfo ? '#16A34A' : 'var(--text-muted)', fontWeight: stCustomerInfo ? 600 : 400 }}>
-                          {stCustomerInfo ? (stCustomerInfo.membershipStatus || 'Checking...') : c.external_id ? 'Loading...' : '--'}
+                        <div><L text="Membership" /><div style={{ fontSize:12, fontWeight:600,
+                          color: stCustomerInfo?.membership?.active ? '#16A34A' : stCustomerInfo ? 'var(--text-muted)' : 'var(--text-muted)' }}>
+                          {stCustomerInfo?.membership
+                            ? (stCustomerInfo.membership.active ? (stCustomerInfo.membership.name || 'Active') : 'Non-Member')
+                            : c.external_id ? 'Loading...' : '--'}
                         </div></div>
                         <div><L text="Last service" /><div style={{ fontSize:12, color:'var(--text-primary)' }}>
-                          {stJobHistory[0] ? fmtDate(stJobHistory[0].completedOn || stJobHistory[0].scheduledDate) : c.external_id ? (stJobHistoryLoading ? 'Loading...' : 'None found') : '--'}
+                          {stJobHistory[0] ? fmtDate(stJobHistory[0].completedOn || stJobHistory[0].scheduledDate || stJobHistory[0].createdOn) : c.external_id ? (stJobHistoryLoading ? 'Loading...' : 'None found') : '--'}
                         </div></div>
                       </div>
                       <div>
@@ -977,22 +988,36 @@ export default function DialerPage() {
                         <div style={{ padding:'14px', display:'flex', justifyContent:'center' }}><div className="spinner" /></div>
                       ) : stJobHistory.length === 0 ? (
                         <div style={{ padding:'14px', fontSize:12, color:'var(--text-muted)', textAlign:'center' }}>No jobs found</div>
-                      ) : stJobHistory.map((job, i) => (
-                        <div key={job.id || i} style={{ padding:'10px 14px', borderBottom: i < stJobHistory.length-1 ? '1px solid var(--border)' : 'none', display:'flex', alignItems:'flex-start', gap:10 }}>
-                          <div style={{ flex:1, minWidth:0 }}>
-                            <div style={{ fontSize:12, fontWeight:600, color:'var(--text-primary)', marginBottom:2 }}>{job.type?.name || job.jobTypeName || 'Job'}</div>
-                            <div style={{ fontSize:10, color:'var(--text-muted)' }}>{job.businessUnit?.name || ''}</div>
-                          </div>
-                          <div style={{ textAlign:'right', flexShrink:0 }}>
-                            <div style={{ fontSize:10, padding:'2px 7px', borderRadius:99, fontWeight:600,
-                              background: job.jobStatus === 'Completed' ? '#DCFCE7' : '#F3F4F6',
-                              color: job.jobStatus === 'Completed' ? '#15803D' : '#6B7280' }}>
-                              {job.jobStatus || 'Unknown'}
+                      ) : stJobHistory.map((job, i) => {
+                        const jobTypeName = job.jobType?.name || job.type?.name || job.jobTypeName || job.summary || 'Job'
+                        const buName = job.businessUnit?.name || job.businessUnitName || ''
+                        const jobDate = job.completedOn || job.scheduledDate || job.createdOn
+                        const isComplete = (job.jobStatus || '').toLowerCase() === 'completed'
+                        return (
+                          <div key={job.id || i}
+                            onClick={() => job.id && window.open(`https://go.servicetitan.com/#/job/${job.id}`, '_blank')}
+                            style={{ padding:'10px 14px', borderBottom: i < stJobHistory.length-1 ? '1px solid var(--border)' : 'none', display:'flex', alignItems:'flex-start', gap:10, cursor: job.id ? 'pointer' : 'default', transition:'background .1s' }}
+                            onMouseEnter={e => { if (job.id) e.currentTarget.style.background='var(--accent-bg)' }}
+                            onMouseLeave={e => e.currentTarget.style.background='transparent'}>
+                            <div style={{ flex:1, minWidth:0 }}>
+                              <div style={{ fontSize:12, fontWeight:600, color:'var(--text-primary)', marginBottom:2, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                                {jobTypeName}
+                              </div>
+                              <div style={{ fontSize:10, color:'var(--text-muted)' }}>
+                                {buName}{job.jobNumber ? `${buName ? ' - ' : ''}#${job.jobNumber}` : ''}
+                              </div>
                             </div>
-                            <div style={{ fontSize:10, color:'var(--text-muted)', marginTop:3 }}>{job.completedOn ? fmtDate(job.completedOn) : fmtDate(job.scheduledDate)}</div>
+                            <div style={{ textAlign:'right', flexShrink:0 }}>
+                              <div style={{ fontSize:10, padding:'2px 7px', borderRadius:99, fontWeight:600, display:'inline-block',
+                                background: isComplete ? '#DCFCE7' : '#F3F4F6',
+                                color: isComplete ? '#15803D' : '#6B7280' }}>
+                                {job.jobStatus || 'Unknown'}
+                              </div>
+                              <div style={{ fontSize:10, color:'var(--text-muted)', marginTop:3 }}>{jobDate ? fmtDate(jobDate) : ''}</div>
+                            </div>
                           </div>
-                        </div>
-                      ))}
+                        )
+                      })}
                     </div>
                   </div>
 
