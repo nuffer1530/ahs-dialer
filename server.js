@@ -124,11 +124,33 @@ app.post('/api/st/note', async (req, res) => {
   }
 })
 
-// ── ST: Get customer by ID
+// ── ST: Get customer by ID (with email + membership status)
 app.get('/api/st/customer/:id', async (req, res) => {
   try {
-    const data = await stGet(`/crm/v2/tenant/${ST_TENANT_ID}/customers/${req.params.id}`)
-    res.json(data)
+    const id = req.params.id
+    const customer = await stGet(`/crm/v2/tenant/${ST_TENANT_ID}/customers/${id}`)
+
+    // Email lives on the customer's contact records, not the customer itself
+    let email = customer?.email || null
+    if (!email) {
+      try {
+        const contacts = await stGet(`/crm/v2/tenant/${ST_TENANT_ID}/customers/${id}/contacts`)
+        const emailContact = (contacts?.data || []).find(ct => ct.type === 'Email' || ct.type === 'MobileEmail')
+        email = emailContact?.value || null
+      } catch (e) { console.warn('ST customer contacts failed:', e.message) }
+    }
+
+    // Membership status
+    let membership = { active: false, name: null }
+    try {
+      const memb = await stGet(`/memberships/v2/tenant/${ST_TENANT_ID}/memberships?customerIds=${id}&pageSize=10`)
+      const active = (memb?.data || []).find(m => m.status === 'Active')
+      if (active) {
+        membership = { active: true, name: active.membershipTypeName || active.type?.name || 'Member', expiresOn: active.to || null }
+      }
+    } catch (e) { console.warn('ST memberships failed:', e.message) }
+
+    res.json({ ...customer, email, membership })
   } catch (err) {
     console.error('ST customer error:', err.message)
     res.status(500).json({ error: err.message })
@@ -307,8 +329,25 @@ app.get('/api/st/jobs', async (req, res) => {
   try {
     const { customerId } = req.query
     if (!customerId) return res.status(400).json({ error: 'customerId required' })
-    const data = await stGet(`/jpm/v2/tenant/${ST_TENANT_ID}/jobs?customerId=${customerId}&pageSize=5&orderBy=modifiedOn&orderByDirection=Descending&active=true`)
-    res.json(data)
+    const data = await stGet(`/jpm/v2/tenant/${ST_TENANT_ID}/jobs?customerId=${customerId}&pageSize=5&sort=-modifiedOn`)
+    const jobs = data?.data || []
+
+    // ST returns jobTypeId / businessUnitId — resolve them to names
+    const [jtRes, buRes] = await Promise.all([
+      stGet(`/jpm/v2/tenant/${ST_TENANT_ID}/job-types?pageSize=500`).catch(() => null),
+      stGet(`/settings/v2/tenant/${ST_TENANT_ID}/business-units?pageSize=200`).catch(() => null),
+    ])
+    const jtMap = {}, buMap = {}
+    ;(jtRes?.data || []).forEach(jt => { jtMap[jt.id] = jt.name })
+    ;(buRes?.data || []).forEach(bu => { buMap[bu.id] = bu.name })
+
+    const enriched = jobs.map(j => ({
+      ...j,
+      jobType: { id: j.jobTypeId, name: jtMap[j.jobTypeId] || j.summary || 'Job' },
+      businessUnit: { id: j.businessUnitId, name: buMap[j.businessUnitId] || '' },
+    }))
+
+    res.json({ data: enriched })
   } catch (err) {
     console.error('ST jobs error:', err.message)
     res.status(500).json({ error: err.message })
