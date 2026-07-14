@@ -995,7 +995,7 @@ export default function DialerPage() {
                         const isComplete = (job.jobStatus || '').toLowerCase() === 'completed'
                         return (
                           <div key={job.id || i}
-                            onClick={() => job.id && window.open(`https://go.servicetitan.com/#/job/${job.id}`, '_blank')}
+                            onClick={() => job.id && window.open(`https://go.servicetitan.com/#/Job/Index/${job.id}`, '_blank')}
                             style={{ padding:'10px 14px', borderBottom: i < stJobHistory.length-1 ? '1px solid var(--border)' : 'none', display:'flex', alignItems:'flex-start', gap:10, cursor: job.id ? 'pointer' : 'default', transition:'background .1s' }}
                             onMouseEnter={e => { if (job.id) e.currentTarget.style.background='var(--accent-bg)' }}
                             onMouseLeave={e => e.currentTarget.style.background='transparent'}>
