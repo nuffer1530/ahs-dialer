@@ -176,7 +176,6 @@ app.get('/api/st/availability', async (req, res) => {
 
     // Known AHS arrival windows (local MT times): filter to only these
     const VALID_WINDOWS = [
-      { start: '07:59', end: '20:00' },
       { start: '08:00', end: '12:00' },
       { start: '10:00', end: '14:00' },
       { start: '12:00', end: '16:00' },
@@ -185,7 +184,7 @@ app.get('/api/st/availability', async (req, res) => {
       { start: '18:00', end: '22:00' },
     ]
 
-    const toHHMM = (isoLocal) => isoLocal.slice(11, 16) // extract HH:MM from local ISO
+    const toHHMM = (isoLocal) => isoLocal.slice(11, 16)
 
     const availabilities = (data?.availabilities || data?.data || [])
       .map(slot => ({
@@ -198,6 +197,7 @@ app.get('/api/st/availability', async (req, res) => {
         const endHHMM = toHHMM(slot.end)
         return VALID_WINDOWS.some(w => w.start === startHHMM && w.end === endHHMM)
       })
+      .sort((a, b) => a.start.localeCompare(b.start))
 
     res.json({ availabilities })
   } catch (err) {
