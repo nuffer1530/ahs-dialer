@@ -518,505 +518,473 @@ export default function DialerPage() {
   const camp = c ? campaigns.find(x => x.id === c.campaign_id) : null
   const myStats = { calls: todayLogs.length, booked: todayLogs.filter(x => x.outcome === 'Booked').length }
 
-  return (
-    <div style={{ display:'flex', flex:1, overflow:'hidden', height:'100%', background:'var(--bg)' }}>
 
-      {/* ── QUEUE SIDEBAR ── */}
-      <aside style={{ width: queueCollapsed ? 0 : 240, minWidth: queueCollapsed ? 0 : 240, flexShrink:0, background:'var(--surface)', borderRight:'1px solid var(--border)', display:'flex', flexDirection:'column', overflow:'hidden', transition:'width .2s, min-width .2s' }}>
-        <div style={{ padding:'10px 12px 8px', borderBottom:'1px solid var(--border)', flexShrink:0 }}>
-          <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:8 }}>
-            <span style={{ fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:.8, color:'var(--text-muted)' }}>Queue</span>
-            <span style={{ fontSize:11, color:'var(--text-muted)' }}>{filtered.length.toLocaleString()} / {contacts.length.toLocaleString()}</span>
-          </div>
-          <input style={{ width:'100%', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'5px 8px', fontSize:12, background:'var(--surface-2)', color:'var(--text-primary)' }}
-            placeholder="Search..." value={search} onChange={e => setSearch(e.target.value)} />
-          <div style={{ display:'flex', gap:3, marginTop:6, flexWrap:'wrap' }}>
-            {[{id:'active',label:'Active'},{id:'callback',label:'📅 CB'},{id:'no-answer',label:'No Ans'},{id:'voicemail',label:'VM'},{id:'done',label:'Done'},{id:'all',label:'All'}].map(f => (
-              <button key={f.id} onClick={() => setFilter(f.id)}
-                style={{ padding:'2px 7px', borderRadius:99, fontSize:10, fontWeight:500, border:'1px solid', cursor:'pointer', borderColor: filter===f.id ? 'var(--accent)' : 'var(--border)', background: filter===f.id ? 'var(--accent)' : 'transparent', color: filter===f.id ? '#fff' : 'var(--text-muted)' }}>
-                {f.label}
-              </button>
-            ))}
-          </div>
-          <select value={campFilter} onChange={e => setCampFilter(e.target.value)}
-            style={{ width:'100%', marginTop:6, border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'4px 6px', fontSize:11, background:'var(--surface-2)', color:'var(--text-primary)' }}>
-            <option value="">All campaigns</option>
-            {campaigns.map(camp => <option key={camp.id} value={camp.id}>{camp.name}</option>)}
-          </select>
+  // SearchSelect helper
+  const SearchSelect = ({ label, value, onChange, options, placeholder, disabled }) => {
+    const [open, setOpen] = useState(false)
+    const [q, setQ] = useState('')
+    const ref = useRef(null)
+    useEffect(() => {
+      const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false) }
+      document.addEventListener('mousedown', handler)
+      return () => document.removeEventListener('mousedown', handler)
+    }, [])
+    const filtered = options.filter(o => o.label.toLowerCase().includes(q.toLowerCase()))
+    const selected = options.find(o => String(o.value) === String(value))
+    return (
+      <div ref={ref} style={{ position:'relative' }}>
+        {label && <div style={{ fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color:'var(--text-muted)', marginBottom:4 }}>{label}</div>}
+        <div onClick={() => !disabled && setOpen(v => !v)}
+          style={{ border:`1px solid ${open ? 'var(--accent)' : 'var(--border)'}`, borderRadius:'var(--radius)', padding:'7px 10px', fontSize:12, background:'var(--surface)', color: selected ? 'var(--text-primary)' : 'var(--text-muted)', cursor: disabled ? 'default' : 'pointer', display:'flex', justifyContent:'space-between', alignItems:'center', userSelect:'none', opacity: disabled ? .5 : 1 }}>
+          <span style={{ overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{selected?.label || placeholder}</span>
+          <span style={{ fontSize:10, marginLeft:4, flexShrink:0, color:'var(--text-muted)' }}>▾</span>
         </div>
-        <div style={{ flex:1, overflowY:'auto' }}>
-          {filtered.slice(0, PAGE_SIZE).map((contact, idx) => {
-            const active = contact.id === selectedId
-            const hasCb = isCallbackDueToday(contact) && !isDone(contact)
-            const isMyContact = contact.claimed_by === currentRep
-            return (
-              <div key={contact.id} onClick={() => selectContact(contact.id)}
-                style={{ padding:'8px 12px', cursor:'pointer', borderBottom:'1px solid var(--border)', background: active ? 'var(--accent-bg)' : 'transparent', borderLeft: active ? '3px solid var(--accent)' : '3px solid transparent' }}>
-                <div style={{ display:'flex', alignItems:'center', gap:6 }}>
-                  <span style={{ fontSize:10, color:'var(--text-muted)', width:14, flexShrink:0 }}>{idx+1}</span>
-                  <div style={{ flex:1, minWidth:0 }}>
-                    <div style={{ fontWeight:600, fontSize:12, color: active ? 'var(--accent)' : 'var(--text-primary)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
-                      {hasCb && '📅 '}{contact.name || '—'}
-                      {isMyContact && <span style={{ marginLeft:4, fontSize:9, background:'var(--accent)', color:'#fff', borderRadius:3, padding:'1px 4px' }}>You</span>}
-                    </div>
-                    <div style={{ fontSize:10, color:'var(--text-muted)' }}>{contact.phone || 'No phone'}</div>
-                  </div>
-                  <div style={{ display:'flex', gap:2, flexShrink:0 }}>
-                    {Array.from({length:MAX_ATTEMPTS},(_,i) => <div key={i} style={{width:4,height:4,borderRadius:'50%',background:i<(contact.attempts||0)?'var(--accent)':'var(--border)'}}></div>)}
-                  </div>
-                </div>
-              </div>
-            )
-          })}
-          {filtered.length > PAGE_SIZE && (
-            <div style={{ padding:'8px 12px', fontSize:11, color:'var(--text-muted)', textAlign:'center', borderTop:'1px solid var(--border)' }}>
-              +{(filtered.length - PAGE_SIZE).toLocaleString()} more in queue
+        {open && (
+          <div style={{ position:'absolute', top:'100%', left:0, right:0, zIndex:400, background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius)', boxShadow:'0 4px 20px rgba(0,0,0,.15)', marginTop:2 }}>
+            <div style={{ padding:'5px 8px', borderBottom:'1px solid var(--border)' }}>
+              <input autoFocus value={q} onChange={e => setQ(e.target.value)} onClick={e => e.stopPropagation()}
+                placeholder="Search..." style={{ width:'100%', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'4px 8px', fontSize:11, background:'var(--surface-2)', color:'var(--text-primary)' }} />
             </div>
-          )}
-        </div>
-      </aside>
-
-      {/* ── MAIN WORKSPACE ── */}
-      <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden', minWidth:0 }}>
-
-        {/* ── TOP BAR ── */}
-        <div style={{ display:'flex', alignItems:'center', gap:10, padding:'10px 20px', background:'var(--surface)', borderBottom:'1px solid var(--border)', flexShrink:0 }}>
-          <button onClick={() => setQueueCollapsed(p => !p)}
-            style={{ width:34, height:34, border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface-2)', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', fontSize:14, color:'var(--text-muted)', flexShrink:0 }}
-            title={queueCollapsed ? 'Show queue' : 'Hide queue'}>
-            {queueCollapsed ? '›' : '‹'}
-          </button>
-          <button className="btn" disabled={selectedIdx <= 0} onClick={() => { const prev = filtered[selectedIdx-1]; if(prev) selectContact(prev.id) }} style={{fontSize:13, padding:"7px 14px"}}>‹ Prev</button>
-          <button className="btn" disabled={selectedIdx >= filtered.length-1} onClick={() => { const next = filtered[selectedIdx+1]; if(next) selectContact(next.id) }} style={{fontSize:13, padding:"7px 14px"}}>Next ›</button>
-          <button className="btn primary" onClick={navNextPending} style={{ fontWeight:600, fontSize:13, padding:"7px 16px" }}>Next pending →</button>
-
-          {/* ── PROMINENT DIAL BUTTON ── */}
-          <button onClick={() => setShowDialpad(true)}
-            style={{ display:'flex', alignItems:'center', gap:8, padding:'8px 20px', background: twilioReady ? '#16A34A' : 'var(--border)', border:'none', borderRadius:'var(--radius)', cursor: twilioReady ? 'pointer' : 'not-allowed', fontSize:14, fontWeight:700, color:'#fff', transition:'all .1s' }}
-            title="Manual dial any number">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="white">
-              <path d="M6.6 10.8c1.4 2.8 3.8 5.1 6.6 6.6l2.2-2.2c.3-.3.7-.4 1-.2 1.1.4 2.3.6 3.6.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1C10.6 21 3 13.4 3 4c0-.6.4-1 1-1h3.5c.6 0 1 .4 1 1 0 1.3.2 2.5.6 3.6.1.3 0 .7-.2 1L6.6 10.8z"/>
-            </svg>
-            Manual Dial
-          </button>
-
-          {powerDialActive && (
-            <div style={{ display:'flex', alignItems:'center', gap:8, padding:'4px 12px', background:'var(--accent)', borderRadius:'var(--radius)', color:'#fff', fontSize:12 }}>
-              ⚡ <strong>Power Dial</strong>
-              <button onClick={() => setPowerDialActive(false)} style={{ background:'rgba(255,255,255,.2)', border:'none', color:'#fff', padding:'2px 8px', borderRadius:4, cursor:'pointer', fontSize:11 }}>Stop</button>
-            </div>
-          )}
-
-          <div style={{ flex:1 }} />
-
-          <div style={{ display:'flex', alignItems:'center', gap:12, fontSize:11, color:'var(--text-muted)' }}>
-            <span>Calls: <strong style={{ color:'var(--text-primary)' }}>{myStats.calls}</strong></span>
-            <span>Booked: <strong style={{ color:'#16A34A' }}>{myStats.booked}</strong></span>
-            {cbDue.length > 0 && <span style={{ color:'#C87800' }}>Callbacks: <strong>{cbDue.length}</strong></span>}
-            {/* Daily earnings pill */}
-            <div style={{ position:'relative' }}>
-              <button onClick={() => setShowEarningsDetail(p => !p)}
-                style={{ display:'flex', alignItems:'center', gap:6, padding:'4px 12px', background: dailyEarnings > 0 ? '#16A34A' : 'var(--surface-2)', border:`1px solid ${dailyEarnings > 0 ? '#16A34A' : 'var(--border)'}`, borderRadius:99, cursor:'pointer', color: dailyEarnings > 0 ? '#fff' : 'var(--text-muted)', fontSize:12, fontWeight:700 }}>
-                💰 {'$'}{dailyEarnings.toFixed(2)}
-              </button>
-              {showEarningsDetail && (
-                <div style={{ position:'fixed', right:16, top:52, background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius)', boxShadow:'0 4px 20px rgba(0,0,0,.15)', zIndex:300, minWidth:200, overflow:'hidden' }}
-                  onMouseLeave={() => setShowEarningsDetail(false)}>
-                  <div style={{ padding:'12px 16px', borderBottom:'1px solid var(--border)', fontSize:11, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color:'var(--text-muted)' }}>My Earnings</div>
-                  <div style={{ padding:'12px 16px', display:'flex', flexDirection:'column', gap:10 }}>
-                    <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-                      <span style={{ fontSize:12, color:'var(--text-secondary)' }}>Today</span>
-                      <span style={{ fontSize:18, fontWeight:800, color:'#16A34A' }}>{'$'}{dailyEarnings.toFixed(2)}</span>
-                    </div>
-                    <div style={{ height:1, background:'var(--border)' }} />
-                    <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-                      <span style={{ fontSize:12, color:'var(--text-secondary)' }}>This week</span>
-                      <span style={{ fontSize:18, fontWeight:800, color:'var(--accent)' }}>{'$'}{weeklyEarnings.toFixed(2)}</span>
-                    </div>
-                    <div style={{ fontSize:10, color:'var(--text-muted)', textAlign:'center', paddingTop:4 }}>Resets daily · Paid weekly</div>
+            <div style={{ maxHeight:200, overflowY:'auto' }}>
+              {filtered.length === 0 ? <div style={{ padding:'9px 12px', fontSize:12, color:'var(--text-muted)', fontStyle:'italic' }}>No results</div> :
+                filtered.map(o => (
+                  <div key={o.value} onClick={() => { onChange(o.value); setOpen(false); setQ('') }}
+                    style={{ padding:'9px 12px', fontSize:12, cursor:'pointer', background: String(value) === String(o.value) ? 'var(--accent-bg)' : 'transparent', color: String(value) === String(o.value) ? 'var(--accent)' : 'var(--text-primary)', fontWeight: String(value) === String(o.value) ? 600 : 400 }}
+                    onMouseEnter={e => { if (String(value) !== String(o.value)) e.currentTarget.style.background='var(--surface-2)' }}
+                    onMouseLeave={e => { if (String(value) !== String(o.value)) e.currentTarget.style.background='transparent' }}>
+                    {o.label}
                   </div>
-                </div>
-              )}
+                ))
+              }
             </div>
-          </div>
-
-          {callStatus && (
-            <div style={{ display:'flex', alignItems:'center', gap:8, padding:'4px 12px', borderRadius:'var(--radius)', fontWeight:600, fontSize:12,
-              background: callStatus==='connected' ? '#DCFCE7' : callStatus==='ended' ? '#F3F4F6' : '#FFF8E6',
-              border:`1px solid ${callStatus==='connected' ? '#16A34A' : callStatus==='ended' ? '#D1D5DB' : '#C87800'}`,
-              color: callStatus==='connected' ? '#16A34A' : callStatus==='ended' ? '#6B7280' : '#C87800' }}>
-              <span style={{ width:8, height:8, borderRadius:'50%', background:'currentColor', display:'inline-block', animation: callStatus==='connected' ? 'pulse 1.5s infinite' : 'none' }}></span>
-              {callStatus==='calling' ? 'Dialing...' : callStatus==='ringing' ? 'Ringing...' : callStatus==='connected' ? `Connected ${fmtDuration(callDuration)}` : 'Call ended'}
-              {['calling','ringing','connected'].includes(callStatus) && (
-                <button onClick={hangUp} style={{ background:'#DC2626', border:'none', color:'#fff', padding:'2px 8px', borderRadius:4, cursor:'pointer', fontSize:11, marginLeft:4 }}>Hang up</button>
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* ── EMPTY STATE ── */}
-        {!c && (
-          <div style={{ flex:1, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:24, padding:32 }}>
-            <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:12, width:'100%', maxWidth:640 }}>
-              {[
-                { label:'My Calls Today', value: myStats.calls, accent:'var(--accent)' },
-                { label:'My Bookings Today', value: myStats.booked, accent:'#16A34A' },
-                { label:'Booking Rate', value: todayLogs.length ? Math.round((myStats.booked/todayLogs.length)*100)+'%' : '—', accent:'#7C3AED' },
-                { label:'Callbacks Due', value: cbDue.length, accent:'#C87800', click:()=>setFilter('callback') },
-              ].map(({ label, value, accent, click }) => (
-                <div key={label} onClick={click} style={{ background:'var(--surface)', border:'1px solid var(--border)', borderTop:`3px solid ${accent}`, borderRadius:'var(--radius)', padding:'14px 16px', cursor: click ? 'pointer' : 'default' }}>
-                  <div style={{ fontSize:10, textTransform:'uppercase', letterSpacing:.6, color:'var(--text-muted)', marginBottom:6 }}>{label}</div>
-                  <div style={{ fontSize:26, fontWeight:700, color: accent }}>{value}</div>
-                </div>
-              ))}
-            </div>
-            <div style={{ textAlign:'center' }}>
-              <div style={{ fontSize:42, marginBottom:8 }}>📞</div>
-              <div style={{ fontSize:16, fontWeight:600, color:'var(--text-primary)', marginBottom:4 }}>Ready to dial</div>
-              <div style={{ fontSize:13, color:'var(--text-muted)', marginBottom:20 }}>Click a contact in the queue or hit Next pending to start</div>
-              <button className="btn primary" style={{ padding:'10px 32px', fontSize:14, fontWeight:600 }} onClick={navNextPending}>Next pending →</button>
-            </div>
-          </div>
-        )}
-
-        {/* ── CONTACT WORKSPACE ── */}
-        {c && (
-          <div style={{ flex:1, overflowY:'auto', display:'grid', gridTemplateColumns:'1fr 300px', gap:0 }}>
-
-            {/* ── COL 1: Contact + Outcome ── */}
-            <div style={{ padding:16, display:'flex', flexDirection:'column', gap:12, overflowY:'auto', borderRight:'1px solid var(--border)' }}>
-
-              {isDNC && <div style={{ background:'#FEF2F2', border:'1px solid #FECACA', borderRadius:'var(--radius)', padding:'8px 12px', fontSize:12, color:'#7F1D1D', fontWeight:600 }}>⛔ DNC — Do not dial this number</div>}
-              {isDup && <div style={{ background:'#F3E8FF', border:'1px solid #DDD6FE', borderRadius:'var(--radius)', padding:'8px 12px', fontSize:12, color:'#5B21B6' }}>⚠ Duplicate number on multiple contacts</div>}
-              {c.callback_at && (
-                <div style={{ background:'#FFFBEB', border:'1px solid #FCD34D', borderRadius:'var(--radius)', padding:'8px 12px', fontSize:12, color:'#92400E', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
-                  <span>📅 <strong>Callback:</strong> {fmtDate(c.callback_at)}{c.callback_note ? ` — ${c.callback_note}` : ''}</span>
-                  <button className="btn sm" onClick={() => clearCallback(c.id)}>Clear</button>
-                </div>
-              )}
-
-              {/* Contact card */}
-              <div style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius)', overflow:'hidden' }}>
-                <div style={{ padding:'12px 14px', borderBottom:'1px solid var(--border)', display:'flex', alignItems:'center', justifyContent:'space-between', gap:8 }}>
-                  <div style={{ display:'flex', alignItems:'center', gap:10 }}>
-                    <div style={{ width:36, height:36, borderRadius:'50%', background:'var(--accent-bg)', color:'var(--accent)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:13, fontWeight:700, flexShrink:0 }}>
-                      {getInitials(c.name)}
-                    </div>
-                    <div>
-                      <div style={{ fontSize:17, fontWeight:700, color:'var(--text-primary)' }}>{c.name || '—'}</div>
-                      <div style={{ fontSize:11, color:'var(--text-muted)' }}>{campName(c) || 'No campaign'}</div>
-                    </div>
-                  </div>
-                  <div style={{ display:'flex', gap:6, alignItems:'center' }}>
-                    <Badge status={c.status || 'Pending'} />
-                    {!c.claimed_by && !done && <button className="btn sm primary" onClick={claimContact}>Claim</button>}
-                    {isMe && !done && <button className="btn sm" onClick={() => releaseContact(c.id)}>Release</button>}
-                    {isOther && <span style={{ fontSize:11, color:'var(--text-muted)' }}>Claimed by {c.claimed_by}</span>}
-                  </div>
-                </div>
-
-                <div style={{ display:'flex', flexWrap:'wrap', borderBottom:'1px solid var(--border)' }}>
-                  {[
-                    { label:'Phone', value: c.phone || '—' },
-                    { label:'Email', value: c.email || '—' },
-                    { label:'Address', value: [c.address, c.city, c.state, c.zip].filter(Boolean).join(', ') || '—' },
-                    { label:'Source', value: c.source || '—' },
-                    { label:'Attempts', value: `${c.attempts || 0} / ${MAX_ATTEMPTS}` },
-                    { label:'ST Customer ID', value: c.external_id || '—' },
-                  ].map(({ label, value }) => (
-                    <div key={label} style={{ padding:'8px 14px', borderRight:'1px solid var(--border)', minWidth:'33%' }}>
-                      <div style={{ fontSize:10, textTransform:'uppercase', letterSpacing:.6, color:'var(--text-muted)', marginBottom:3 }}>{label}</div>
-                      <div style={{ fontSize:13, color:'var(--text-primary)' }}>{value}</div>
-                    </div>
-                  ))}
-                </div>
-
-                <div style={{ padding:'10px 14px', display:'flex', gap:8 }}>
-                  {c.phone && (
-                    <button onClick={() => makeCall(c.phone)} disabled={!twilioReady || !!callStatus}
-                      style={{ flex:1, padding:'11px 0', border:'none', borderRadius:'var(--radius)', background: twilioReady && !callStatus ? '#16A34A' : 'var(--border)', cursor: twilioReady && !callStatus ? 'pointer' : 'not-allowed', fontSize:14, fontWeight:700, color:'#fff', display:'flex', alignItems:'center', justifyContent:'center', gap:6 }}>
-                      📞 {callStatus ? 'On call...' : 'Call'}
-                    </button>
-                  )}
-                  <button onClick={() => openInST(c)}
-                    style={{ flex:1, padding:'11px 0', border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface)', cursor:'pointer', fontSize:13, fontWeight:600, color:'var(--text-primary)', display:'flex', alignItems:'center', justifyContent:'center', gap:6 }}
-                    onMouseEnter={e => e.currentTarget.style.background='var(--accent-bg)'}
-                    onMouseLeave={e => e.currentTarget.style.background='var(--surface)'}>
-                    {c.external_id ? '🔗 Open in ST' : '🔍 Search in ST'}
-                  </button>
-                </div>
-              </div>
-
-              {/* Outcome Logger */}
-              {!done && (
-                <div style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius)', overflow:'hidden' }}>
-                  <div style={{ padding:'8px 14px', borderBottom:'1px solid var(--border)', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
-                    <span style={{ fontSize:11, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color:'var(--text-muted)' }}>Log outcome</span>
-                    {isOther && <span style={{ fontSize:11, color:'var(--text-muted)' }}>Claimed by {c.claimed_by}</span>}
-                  </div>
-                  <div style={{ padding:'12px 14px', display:'flex', flexDirection:'column', gap:10 }}>
-                    <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:8 }}>
-                      {OUTCOMES.map(o => {
-                        const sel = selectedOutcome === o.id
-                        const cm = OUTCOME_CONFIG[o.id] || {}
-                        return (
-                          <button key={o.id} disabled={!isMe} onClick={() => setSelectedOutcome(sel ? null : o.id)}
-                            style={{ padding:'14px 8px', borderRadius:'var(--radius)', fontSize:13, fontWeight: sel ? 700 : 500, border: sel ? `2px solid ${cm.border}` : '1.5px solid var(--border)', background: sel ? cm.bg : 'var(--surface-2)', color: sel ? cm.color : 'var(--text-secondary)', cursor: isMe ? 'pointer' : 'not-allowed', opacity: isMe ? 1 : .4, textAlign:'center', transition:'all .1s', transform: sel ? 'scale(1.02)' : 'scale(1)' }}>
-                            <div style={{ marginBottom:4, display:'flex', alignItems:'center', justifyContent:'center' }}>{OUTCOME_ICONS[o.id]?.(cm.color)}</div>
-                            <div style={{ fontSize:11, fontWeight: sel ? 700 : 500 }}>{o.id}</div>
-                          </button>
-                        )
-                      })}
-                    </div>
-                    <textarea value={notesVal} onChange={e => setNotesVal(e.target.value)} disabled={!isMe}
-                      placeholder={selectedOutcome === 'Booked' ? 'Notes required before booking...' : 'Add notes...'}
-                      style={{ width:'100%', border:`1px solid ${selectedOutcome==='Booked' ? 'var(--accent)' : 'var(--border)'}`, borderRadius:'var(--radius)', padding:'8px 10px', fontSize:12, fontFamily:'inherit', resize:'vertical', minHeight:80, background:'var(--surface)', color:'var(--text-primary)', opacity: isMe ? 1 : .4 }} />
-                    {/* ST Booking fields — only shown when Booked is selected */}
-                    {selectedOutcome === 'Booked' && (
-                      <div style={{ display:'flex', flexDirection:'column', gap:10, padding:'16px', background:'var(--success-bg)', border:'1px solid var(--success)', borderRadius:'var(--radius)' }}>
-                        <div style={{ fontSize:11, fontWeight:700, color:'var(--success)', marginBottom:2 }}>ServiceTitan Booking Details</div>
-                        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8 }}>
-                          {/* Business Unit */}
-                          <div style={{ position:'relative' }}>
-                            <label style={{ fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color:'var(--text-muted)', display:'block', marginBottom:5 }}>Business Unit</label>
-                            <div onClick={() => { setBuOpen(v => !v); setJtOpen(false); setCampOpen(false) }}
-                              style={{ width:'100%', border:`1px solid ${buOpen ? 'var(--accent)' : 'var(--border)'}`, borderRadius:'var(--radius)', padding:'8px 10px', fontSize:12, background:'var(--surface)', color: selectedBU ? 'var(--text-primary)' : 'var(--text-muted)', cursor:'pointer', display:'flex', justifyContent:'space-between', alignItems:'center', userSelect:'none' }}>
-                              <span style={{ overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
-                                {selectedBU ? stBusinessUnits.find(b => String(b.id) === String(selectedBU))?.name : 'Select business unit...'}
-                              </span>
-                              <span style={{ fontSize:10, marginLeft:6, flexShrink:0 }}>▾</span>
-                            </div>
-                            {buOpen && (
-                              <div style={{ position:'absolute', top:'100%', left:0, right:0, zIndex:200, background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius)', boxShadow:'0 4px 20px rgba(0,0,0,.15)', marginTop:2 }}>
-                                <div style={{ padding:'6px 8px', borderBottom:'1px solid var(--border)' }}>
-                                  <input autoFocus value={buSearch} onChange={e => setBuSearch(e.target.value)}
-                                    placeholder="Search..." onClick={e => e.stopPropagation()}
-                                    style={{ width:'100%', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'5px 8px', fontSize:12, background:'var(--surface-2)', color:'var(--text-primary)' }} />
-                                </div>
-                                <div style={{ maxHeight:200, overflowY:'auto' }}>
-                                  {[...stBusinessUnits]
-                                    .filter(b => b.name.toLowerCase().includes(buSearch.toLowerCase()))
-                                    .sort((a,b) => a.name.localeCompare(b.name))
-                                    .map(bu => (
-                                      <div key={bu.id} onClick={() => { setSelectedBU(String(bu.id)); setSelectedJobType(''); setAvailability([]); setBookingResult(null); setBuOpen(false); setBuSearch('') }}
-                                        style={{ padding:'9px 12px', fontSize:12, cursor:'pointer', background: String(selectedBU) === String(bu.id) ? 'var(--accent-bg)' : 'transparent', color: String(selectedBU) === String(bu.id) ? 'var(--accent)' : 'var(--text-primary)', fontWeight: String(selectedBU) === String(bu.id) ? 600 : 400 }}
-                                        onMouseEnter={e => { if (String(selectedBU) !== String(bu.id)) e.currentTarget.style.background='var(--surface-2)' }}
-                                        onMouseLeave={e => { if (String(selectedBU) !== String(bu.id)) e.currentTarget.style.background='transparent' }}>
-                                        {bu.name}
-                                      </div>
-                                    ))}
-                                  {stBusinessUnits.filter(b => b.name.toLowerCase().includes(buSearch.toLowerCase())).length === 0 && (
-                                    <div style={{ padding:'9px 12px', fontSize:12, color:'var(--text-muted)', fontStyle:'italic' }}>No results</div>
-                                  )}
-                                </div>
-                              </div>
-                            )}
-                          </div>
-
-                          {/* Job Type */}
-                          <div style={{ position:'relative' }}>
-                            <label style={{ fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color:'var(--text-muted)', display:'block', marginBottom:5 }}>Job Type</label>
-                            <div onClick={() => { setJtOpen(v => !v); setBuOpen(false); setCampOpen(false) }}
-                              style={{ width:'100%', border:`1px solid ${jtOpen ? 'var(--accent)' : 'var(--border)'}`, borderRadius:'var(--radius)', padding:'8px 10px', fontSize:12, background:'var(--surface)', color: selectedJobType ? 'var(--text-primary)' : 'var(--text-muted)', cursor:'pointer', display:'flex', justifyContent:'space-between', alignItems:'center', userSelect:'none' }}>
-                              <span style={{ overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
-                                {selectedJobType ? stJobTypes.find(j => String(j.id) === String(selectedJobType))?.name : 'Select job type...'}
-                              </span>
-                              <span style={{ fontSize:10, marginLeft:6, flexShrink:0 }}>▾</span>
-                            </div>
-                            {jtOpen && (
-                              <div style={{ position:'absolute', top:'100%', left:0, right:0, zIndex:200, background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius)', boxShadow:'0 4px 20px rgba(0,0,0,.15)', marginTop:2 }}>
-                                <div style={{ padding:'6px 8px', borderBottom:'1px solid var(--border)' }}>
-                                  <input autoFocus value={jtSearch} onChange={e => setJtSearch(e.target.value)}
-                                    placeholder="Search job types..." onClick={e => e.stopPropagation()}
-                                    style={{ width:'100%', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'5px 8px', fontSize:12, background:'var(--surface-2)', color:'var(--text-primary)' }} />
-                                </div>
-                                <div style={{ maxHeight:200, overflowY:'auto' }}>
-                                  {[...stJobTypes]
-                                    .filter(jt => (!selectedBU || jt.businessUnitIds?.includes(parseInt(selectedBU)) || jt.businessUnitId === parseInt(selectedBU)))
-                                    .filter(jt => jt.name.toLowerCase().includes(jtSearch.toLowerCase()))
-                                    .sort((a,b) => a.name.localeCompare(b.name))
-                                    .map(jt => (
-                                      <div key={jt.id} onClick={() => { setSelectedJobType(String(jt.id)); setAvailability([]); setBookingResult(null); setJtOpen(false); setJtSearch('') }}
-                                        style={{ padding:'9px 12px', fontSize:12, cursor:'pointer', background: String(selectedJobType) === String(jt.id) ? 'var(--accent-bg)' : 'transparent', color: String(selectedJobType) === String(jt.id) ? 'var(--accent)' : 'var(--text-primary)', fontWeight: String(selectedJobType) === String(jt.id) ? 600 : 400 }}
-                                        onMouseEnter={e => { if (String(selectedJobType) !== String(jt.id)) e.currentTarget.style.background='var(--surface-2)' }}
-                                        onMouseLeave={e => { if (String(selectedJobType) !== String(jt.id)) e.currentTarget.style.background='transparent' }}>
-                                        {jt.name}
-                                      </div>
-                                    ))}
-                                  {stJobTypes.filter(jt => jt.name.toLowerCase().includes(jtSearch.toLowerCase())).length === 0 && (
-                                    <div style={{ padding:'9px 12px', fontSize:12, color:'var(--text-muted)', fontStyle:'italic' }}>No results</div>
-                                  )}
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-
-                        {/* Marketing Campaign */}
-                        <div style={{ position:'relative' }}>
-                          <label style={{ fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color:'var(--text-muted)', display:'block', marginBottom:5 }}>Marketing Campaign</label>
-                          <div onClick={() => { setCampOpen(v => !v); setBuOpen(false); setJtOpen(false) }}
-                            style={{ width:'100%', border:`1px solid ${campOpen ? 'var(--accent)' : 'var(--border)'}`, borderRadius:'var(--radius)', padding:'8px 10px', fontSize:12, background:'var(--surface)', color: stCampaignId ? 'var(--text-primary)' : 'var(--text-muted)', cursor:'pointer', display:'flex', justifyContent:'space-between', alignItems:'center', userSelect:'none' }}>
-                            <span style={{ overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
-                              {stCampaignId ? stCampaigns.find(c => c.id === stCampaignId || String(c.id) === String(stCampaignId))?.name : 'Select campaign...'}
-                            </span>
-                            <span style={{ fontSize:10, marginLeft:6, flexShrink:0 }}>▾</span>
-                          </div>
-                          {campOpen && (
-                            <div style={{ position:'absolute', top:'100%', left:0, right:0, zIndex:200, background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius)', boxShadow:'0 4px 20px rgba(0,0,0,.15)', marginTop:2 }}>
-                              <div style={{ padding:'6px 8px', borderBottom:'1px solid var(--border)' }}>
-                                <input autoFocus value={campSearch} onChange={e => setCampSearch(e.target.value)}
-                                  placeholder="Search campaigns..." onClick={e => e.stopPropagation()}
-                                  style={{ width:'100%', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'5px 8px', fontSize:12, background:'var(--surface-2)', color:'var(--text-primary)' }} />
-                              </div>
-                              <div style={{ maxHeight:200, overflowY:'auto' }}>
-                                {[...stCampaigns]
-                                  .filter(c => c.name.toLowerCase().includes(campSearch.toLowerCase()))
-                                  .sort((a,b) => a.name.localeCompare(b.name))
-                                  .map(c => (
-                                    <div key={c.id} onClick={() => { setStCampaignId(c.id); setCampOpen(false); setCampSearch('') }}
-                                      style={{ padding:'9px 12px', fontSize:12, cursor:'pointer', background: stCampaignId === c.id ? 'var(--accent-bg)' : 'transparent', color: stCampaignId === c.id ? 'var(--accent)' : 'var(--text-primary)', fontWeight: stCampaignId === c.id ? 600 : 400 }}
-                                      onMouseEnter={e => { if (stCampaignId !== c.id) e.currentTarget.style.background='var(--surface-2)' }}
-                                      onMouseLeave={e => { if (stCampaignId !== c.id) e.currentTarget.style.background='transparent' }}>
-                                      {c.name}
-                                    </div>
-                                  ))}
-                                {stCampaigns.filter(c => c.name.toLowerCase().includes(campSearch.toLowerCase())).length === 0 && (
-                                  <div style={{ padding:'9px 12px', fontSize:12, color:'var(--text-muted)', fontStyle:'italic' }}>No results</div>
-                                )}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                        {/* Membership add-on checkbox */}
-                        <label style={{ display:'flex', alignItems:'center', gap:10, padding:'10px 12px', background: alsoMembership ? '#EFF6FF' : 'var(--surface)', border:`1.5px solid ${alsoMembership ? '#3b82f6' : 'var(--border)'}`, borderRadius:'var(--radius)', cursor:'pointer', transition:'all .1s' }}>
-                          <div onClick={() => setAlsoMembership(p => !p)}
-                            style={{ width:20, height:20, borderRadius:5, border:`2px solid ${alsoMembership ? '#3b82f6' : 'var(--border)'}`, background: alsoMembership ? '#3b82f6' : 'transparent', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0, cursor:'pointer', transition:'all .1s' }}>
-                            {alsoMembership && <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>}
-                          </div>
-                          <div onClick={() => setAlsoMembership(p => !p)}>
-                            <div style={{ fontSize:12, fontWeight:600, color: alsoMembership ? '#1d4ed8' : 'var(--text-primary)' }}>⭐ Also sold a membership</div>
-                            <div style={{ fontSize:10, color:'var(--text-muted)', marginTop:1 }}>+${(commissionRates.membership || 2).toFixed(2)} commission</div>
-                          </div>
-                        </label>
-
-                        <button onClick={checkAvailability} disabled={!selectedJobType || !selectedBU || availLoading}
-                          style={{ width:'100%', padding:'9px 0', border:'1px solid #16A34A', borderRadius:'var(--radius)', background:'#fff', color:'#16A34A', fontSize:12, fontWeight:600, cursor: selectedJobType && selectedBU ? 'pointer' : 'not-allowed', opacity: selectedJobType && selectedBU ? 1 : .5, display:'flex', alignItems:'center', justifyContent:'center', gap:6 }}>
-                          {availLoading ? <><div className="spinner" style={{width:13,height:13,borderWidth:2}}></div> Loading availability...</> : '📅 Check Availability'}
-                        </button>
-                        {availError && <div style={{ fontSize:11, color:'var(--danger)', padding:'6px 8px', background:'var(--danger-bg)', borderRadius:'var(--radius)' }}>{availError}</div>}
-                        {selectedSlot && (
-                          <div style={{ padding:'8px 10px', background:'#DCFCE7', border:'2px solid #16A34A', borderRadius:'var(--radius)', fontSize:12, color:'#15803D', fontWeight:600, display:'flex', alignItems:'center', justifyContent:'space-between' }}>
-                            <span>✓ {new Date(selectedSlot.start).toLocaleDateString('en-US', { weekday:'short', month:'short', day:'numeric' })} · {new Date(selectedSlot.start).toLocaleTimeString('en-US', { hour:'numeric', minute:'2-digit' })} – {new Date(selectedSlot.end).toLocaleTimeString('en-US', { hour:'numeric', minute:'2-digit' })}</span>
-                            <button onClick={() => { setSelectedSlot(null); setShowAvailModal(true) }} style={{ fontSize:10, padding:'2px 8px', background:'#16A34A', color:'#fff', border:'none', borderRadius:4, cursor:'pointer' }}>Change</button>
-                          </div>
-                        )}
-
-
-                        <button onClick={bookInST} disabled={!c.external_id || !selectedJobType || !selectedBU || booking}
-                          style={{ width:'100%', padding:'11px 0', border:'none', borderRadius:'var(--radius)',
-                            background: c.external_id && selectedJobType && selectedBU ? '#16A34A' : 'var(--border)',
-                            color:'#fff', fontSize:13, fontWeight:700,
-                            cursor: c.external_id && selectedJobType && selectedBU ? 'pointer' : 'not-allowed',
-                            display:'flex', alignItems:'center', justifyContent:'center', gap:8 }}>
-                          {booking ? <><div className="spinner" style={{width:14,height:14,borderWidth:2,borderTopColor:'#fff'}}></div> Booking...</> :
-                            selectedSlot ? `✅ Book ${new Date(selectedSlot.start).toLocaleDateString('en-US', { weekday:'short', month:'short', day:'numeric' })} ${new Date(selectedSlot.start).toLocaleTimeString('en-US', { hour:'numeric', minute:'2-digit' })}` :
-                            '✅ Book in ServiceTitan (Unscheduled)'}
-                        </button>
-                        {!c.external_id && <div style={{ fontSize:10, color:'var(--warning)', textAlign:'center' }}>⚠ No ST Customer ID on this contact</div>}
-                        {bookingResult && (
-                          <div style={{ padding:'8px 10px', borderRadius:'var(--radius)', fontSize:11, fontWeight:500, background: bookingResult.ok ? '#fff' : '#FEE2E2', border:`1px solid ${bookingResult.ok ? '#16A34A' : '#DC2626'}`, color: bookingResult.ok ? '#15803D' : '#DC2626' }}>
-                            {bookingResult.ok ? `✅ Job #${bookingResult.jobNumber || bookingResult.jobId} created on dispatch board!` : `❌ ${bookingResult.error}`}
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    <div style={{ display:'flex', gap:6, justifyContent:'space-between', flexWrap:'wrap' }}>
-                      <button className="btn warning" disabled={!isMe} onClick={openCallbackModal} style={{fontSize:13}}>📅 Callback</button>
-                      <div style={{ display:'flex', gap:6 }}>
-                        <button className="btn" disabled={!isMe || !selectedOutcome || saving} onClick={() => logOutcome(true)} style={{fontSize:13}}>{saving ? 'Saving...' : 'Log & stay'}</button>
-                        <button className="btn" disabled={!isMe || !selectedOutcome || saving} onClick={() => logOutcome(false)}
-                          style={{ background:'#16A34A', borderColor:'#16A34A', color:'#fff', fontWeight:600, fontSize:13 }}>
-                          {saving ? 'Saving...' : 'Log & next →'}
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {done && (
-                <div style={{ background:'#DCFCE7', border:'1px solid #BBF7D0', borderRadius:'var(--radius)', padding:'12px 16px', fontSize:13, color:'#15803D', fontWeight:500 }}>
-                  ✓ Contact complete — {c.status}
-                </div>
-              )}
-            </div>
-
-            {/* ── COL 2: Script / History ── */}
-            <div style={{ display:'flex', flexDirection:'column', overflow:'hidden', background:'var(--surface-2)', borderRight:'1px solid var(--border)' }}>
-              <div style={{ display:'flex', borderBottom:'1px solid var(--border)', flexShrink:0, background:'var(--surface)' }}>
-                {['script','history'].map(t => (
-                  <button key={t} onClick={() => setActiveTab(t)}
-                    style={{ flex:1, padding:'10px 0', fontSize:12, fontWeight: activeTab===t ? 600 : 400, border:'none', cursor:'pointer', background: activeTab===t ? 'var(--surface-2)' : 'var(--surface)', color: activeTab===t ? 'var(--accent)' : 'var(--text-muted)', borderBottom: activeTab===t ? '2px solid var(--accent)' : '2px solid transparent' }}>
-                    {t === 'script' ? '📜 Script' : `📋 History (${contactLogs.length})`}
-                  </button>
-                ))}
-              </div>
-              <div style={{ flex:1, overflowY:'auto', padding:14 }}>
-                {activeTab === 'script' && (
-                  <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
-                    {camp?.script ? (
-                      <div>
-                        <div style={{ fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color:'var(--text-muted)', marginBottom:6 }}>Call Script</div>
-                        <div style={{ background:'var(--surface)', border:'1px solid var(--border)', borderLeft:'3px solid var(--accent)', borderRadius:'var(--radius)', padding:'12px 14px', fontSize:13, lineHeight:1.8, whiteSpace:'pre-wrap', color:'var(--text-primary)' }}>
-                          {camp.script}
-                        </div>
-                      </div>
-                    ) : (
-                      <div style={{ fontSize:12, color:'var(--text-muted)', fontStyle:'italic' }}>No script set for this campaign.</div>
-                    )}
-                    {camp?.tips && (
-                      <div>
-                        <div style={{ fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color:'var(--text-muted)', marginBottom:6 }}>Tips & Talking Points</div>
-                        <div style={{ background:'#FFFBEB', border:'1px solid #FCD34D', borderRadius:'var(--radius)', padding:'12px 14px', fontSize:13, lineHeight:1.8, whiteSpace:'pre-wrap', color:'#78350F' }}>
-                          {camp.tips}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-                {activeTab === 'history' && (
-                  <div>
-                    <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:10 }}>
-                      <span style={{ fontSize:11, color:'var(--text-muted)' }}>{contactLogs.length} attempt{contactLogs.length !== 1 ? 's' : ''}</span>
-                      {contactLogs.length > 0 && <button className="btn sm" onClick={openCorrectModal}>✏️ Correct last</button>}
-                    </div>
-                    {logsLoading ? <div className="spinner" style={{ margin:'20px auto' }} /> :
-                      contactLogs.length === 0 ? <div style={{ fontSize:12, color:'var(--text-muted)', fontStyle:'italic', textAlign:'center', marginTop:20 }}>No attempts yet</div> :
-                      contactLogs.map(l => (
-                        <div key={l.id} style={{ padding:'10px 12px', marginBottom:8, background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius)', borderLeft:`3px solid ${OUTCOME_CONFIG[l.outcome]?.border || 'var(--border)'}` }}>
-                          <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:4 }}>
-                            <div style={{ display:'flex', alignItems:'center', gap:6 }}>
-                              <span style={{ display:'flex', alignItems:'center' }}>{OUTCOME_ICONS[l.outcome]?.(OUTCOME_CONFIG[l.outcome]?.color || '#9E9B96') || <span style={{fontSize:12}}>•</span>}</span>
-                              <span style={{ fontSize:12, fontWeight:600, color: OUTCOME_CONFIG[l.outcome]?.color || 'var(--text-primary)' }}>{l.outcome}</span>
-                            </div>
-                            <span style={{ fontSize:10, color:'var(--text-muted)' }}>{fmtShort(l.created_at)}</span>
-                          </div>
-                          {l.notes && <div style={{ fontSize:11, color:'var(--text-secondary)', marginTop:2, lineHeight:1.5 }}>{l.notes}</div>}
-                          <div style={{ fontSize:10, color:'var(--text-muted)', marginTop:4 }}>by {l.rep}</div>
-                        </div>
-                      ))
-                    }
-                  </div>
-                )}
-              </div>
-            </div>
-
           </div>
         )}
       </div>
-      {/* ── AVAILABILITY CALENDAR MODAL ── */}
+    )
+  }
+
+  const buOptions = [...stBusinessUnits].sort((a,b) => a.name.localeCompare(b.name)).map(b => ({ value: String(b.id), label: b.name }))
+  const jtOptions = [...stJobTypes]
+    .filter(jt => !selectedBU || jt.businessUnitIds?.includes(parseInt(selectedBU)) || jt.businessUnitId === parseInt(selectedBU))
+    .sort((a,b) => a.name.localeCompare(b.name))
+    .map(j => ({ value: String(j.id), label: j.name }))
+  const campOptions = [...stCampaigns].sort((a,b) => a.name.localeCompare(b.name)).map(c => ({ value: String(c.id), label: c.name }))
+
+  return (
+    <div style={{ display:'flex', flex:1, overflow:'hidden', height:'100%', flexDirection:'column', background:'var(--bg)' }}>
+
+      {/* ── TOP BAR ── */}
+      <div style={{ display:'flex', alignItems:'center', gap:8, padding:'6px 14px', background:'var(--surface)', borderBottom:'1px solid var(--border)', flexShrink:0, flexWrap:'wrap' }}>
+
+        {/* Nav */}
+        <button onClick={() => setQueueCollapsed(p => !p)}
+          style={{ width:30, height:30, border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface-2)', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', fontSize:13, color:'var(--text-muted)', flexShrink:0 }}>
+          {queueCollapsed ? '›' : '‹'}
+        </button>
+        <button className="btn" disabled={selectedIdx <= 0} onClick={() => { const p = filtered[selectedIdx-1]; if(p) selectContact(p.id) }} style={{fontSize:12,padding:'5px 10px'}}>Prev</button>
+        <button className="btn" disabled={selectedIdx >= filtered.length-1} onClick={() => { const n = filtered[selectedIdx+1]; if(n) selectContact(n.id) }} style={{fontSize:12,padding:'5px 10px'}}>Next</button>
+        <button className="btn primary" onClick={navNextPending} style={{fontSize:12,padding:'5px 12px',fontWeight:600}}>Next pending</button>
+        <button onClick={() => setShowDialpad(true)}
+          style={{ display:'flex', alignItems:'center', gap:6, padding:'5px 12px', background: twilioReady ? '#16A34A' : 'var(--border)', border:'none', borderRadius:'var(--radius)', cursor: twilioReady ? 'pointer' : 'not-allowed', fontSize:12, fontWeight:600, color:'#fff' }}>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="white"><path d="M6.6 10.8c1.4 2.8 3.8 5.1 6.6 6.6l2.2-2.2c.3-.3.7-.4 1-.2 1.1.4 2.3.6 3.6.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1C10.6 21 3 13.4 3 4c0-.6.4-1 1-1h3.5c.6 0 1 .4 1 1 0 1.3.2 2.5.6 3.6.1.3 0 .7-.2 1L6.6 10.8z"/></svg>
+          Manual Dial
+        </button>
+
+        {powerDialActive && (
+          <div style={{ display:'flex', alignItems:'center', gap:6, padding:'4px 10px', background:'var(--accent)', borderRadius:'var(--radius)', color:'#fff', fontSize:11 }}>
+            Power Dial
+            <button onClick={() => setPowerDialActive(false)} style={{ background:'rgba(255,255,255,.2)', border:'none', color:'#fff', padding:'1px 6px', borderRadius:3, cursor:'pointer', fontSize:10 }}>Stop</button>
+          </div>
+        )}
+
+        {/* Call status */}
+        {callStatus && (
+          <div style={{ display:'flex', alignItems:'center', gap:6, padding:'4px 10px', borderRadius:'var(--radius)', fontSize:12, fontWeight:600,
+            background: callStatus==='connected' ? '#DCFCE7' : callStatus==='ended' ? 'var(--surface-2)' : '#FFF8E6',
+            border:`1px solid ${callStatus==='connected' ? '#16A34A' : callStatus==='ended' ? 'var(--border)' : '#C87800'}`,
+            color: callStatus==='connected' ? '#16A34A' : callStatus==='ended' ? 'var(--text-muted)' : '#C87800' }}>
+            <span style={{ width:7, height:7, borderRadius:'50%', background:'currentColor', display:'inline-block' }}></span>
+            {callStatus==='calling' ? 'Dialing...' : callStatus==='ringing' ? 'Ringing...' : callStatus==='connected' ? fmtDuration(callDuration) : 'Call ended'}
+            {['calling','ringing','connected'].includes(callStatus) && (
+              <button onClick={hangUp} style={{ background:'#DC2626', border:'none', color:'#fff', padding:'2px 7px', borderRadius:3, cursor:'pointer', fontSize:10, marginLeft:2 }}>Hang up</button>
+            )}
+          </div>
+        )}
+
+        <div style={{ flex:1 }} />
+
+        {/* Stats */}
+        <div style={{ display:'flex', alignItems:'center', gap:10, fontSize:12 }}>
+          <span style={{ color:'var(--text-muted)' }}>Calls: <strong style={{ color:'var(--text-primary)' }}>{myStats.calls}</strong></span>
+          <span style={{ color:'var(--text-muted)' }}>Booked: <strong style={{ color:'#16A34A' }}>{myStats.booked}</strong></span>
+          {cbDue.length > 0 && <span style={{ color:'#C87800', fontWeight:600 }}>Callbacks: {cbDue.length}</span>}
+          <div style={{ position:'relative' }}>
+            <button onClick={() => setShowEarningsDetail(p => !p)}
+              style={{ display:'flex', alignItems:'center', gap:4, padding:'4px 10px', background: dailyEarnings > 0 ? '#16A34A' : 'var(--surface-2)', border:`1px solid ${dailyEarnings > 0 ? '#16A34A' : 'var(--border)'}`, borderRadius:99, cursor:'pointer', color: dailyEarnings > 0 ? '#fff' : 'var(--text-muted)', fontSize:12, fontWeight:700 }}>
+              ${dailyEarnings.toFixed(2)}
+            </button>
+            {showEarningsDetail && (
+              <div style={{ position:'fixed', right:16, top:48, background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius)', boxShadow:'0 4px 20px rgba(0,0,0,.15)', zIndex:300, minWidth:190 }}
+                onMouseLeave={() => setShowEarningsDetail(false)}>
+                <div style={{ padding:'10px 14px', borderBottom:'1px solid var(--border)', fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color:'var(--text-muted)' }}>Earnings</div>
+                <div style={{ padding:'12px 14px', display:'flex', flexDirection:'column', gap:8 }}>
+                  <div style={{ display:'flex', justifyContent:'space-between' }}><span style={{ fontSize:12, color:'var(--text-secondary)' }}>Today</span><span style={{ fontSize:16, fontWeight:800, color:'#16A34A' }}>${dailyEarnings.toFixed(2)}</span></div>
+                  <div style={{ height:1, background:'var(--border)' }} />
+                  <div style={{ display:'flex', justifyContent:'space-between' }}><span style={{ fontSize:12, color:'var(--text-secondary)' }}>This week</span><span style={{ fontSize:16, fontWeight:800, color:'var(--accent)' }}>${weeklyEarnings.toFixed(2)}</span></div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* ── BODY ── */}
+      <div style={{ flex:1, display:'flex', overflow:'hidden', minHeight:0 }}>
+
+        {/* ── QUEUE SIDEBAR ── */}
+        <aside style={{ width: queueCollapsed ? 0 : 230, minWidth: queueCollapsed ? 0 : 230, flexShrink:0, background:'var(--surface)', borderRight:'1px solid var(--border)', display:'flex', flexDirection:'column', overflow:'hidden', transition:'width .2s, min-width .2s' }}>
+          <div style={{ padding:'10px 10px 8px', borderBottom:'1px solid var(--border)', flexShrink:0 }}>
+            <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:6 }}>
+              <span style={{ fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:.8, color:'var(--text-muted)' }}>Queue</span>
+              <span style={{ fontSize:10, color:'var(--text-muted)' }}>{filtered.length}/{contacts.length}</span>
+            </div>
+            <input style={{ width:'100%', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'5px 8px', fontSize:11, background:'var(--surface-2)', color:'var(--text-primary)' }}
+              placeholder="Search..." value={search} onChange={e => setSearch(e.target.value)} />
+            <div style={{ display:'flex', gap:3, marginTop:5, flexWrap:'wrap' }}>
+              {[{id:'active',label:'Active'},{id:'callback',label:'CB'},{id:'no-answer',label:'N/A'},{id:'voicemail',label:'VM'},{id:'done',label:'Done'},{id:'all',label:'All'}].map(f => (
+                <button key={f.id} onClick={() => setFilter(f.id)}
+                  style={{ padding:'2px 7px', borderRadius:99, fontSize:10, border:'1px solid', cursor:'pointer', borderColor: filter===f.id ? 'var(--accent)' : 'var(--border)', background: filter===f.id ? 'var(--accent)' : 'transparent', color: filter===f.id ? '#fff' : 'var(--text-muted)' }}>
+                  {f.label}
+                </button>
+              ))}
+            </div>
+            <select value={campFilter} onChange={e => setCampFilter(e.target.value)}
+              style={{ width:'100%', marginTop:5, border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'4px 6px', fontSize:11, background:'var(--surface-2)', color:'var(--text-primary)' }}>
+              <option value="">All campaigns</option>
+              {campaigns.map(camp => <option key={camp.id} value={camp.id}>{camp.name}</option>)}
+            </select>
+          </div>
+          <div style={{ flex:1, overflowY:'auto' }}>
+            {filtered.slice(0, PAGE_SIZE).map((contact, idx) => {
+              const active = contact.id === selectedId
+              const hasCb = isCallbackDueToday(contact) && !isDone(contact)
+              const isMyContact = contact.claimed_by === currentRep
+              return (
+                <div key={contact.id} onClick={() => selectContact(contact.id)}
+                  style={{ padding:'8px 10px', cursor:'pointer', borderBottom:'1px solid var(--border)', background: active ? 'var(--accent-bg)' : 'transparent', borderLeft: active ? '2px solid var(--accent)' : '2px solid transparent' }}>
+                  <div style={{ display:'flex', alignItems:'center', gap:5 }}>
+                    <span style={{ fontSize:10, color:'var(--text-muted)', width:14, flexShrink:0 }}>{idx+1}</span>
+                    <div style={{ flex:1, minWidth:0 }}>
+                      <div style={{ fontWeight:600, fontSize:11, color: active ? 'var(--accent)' : 'var(--text-primary)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                        {hasCb && '• '}{contact.name || '—'}
+                        {isMyContact && <span style={{ marginLeft:3, fontSize:9, background:'var(--accent)', color:'#fff', borderRadius:3, padding:'1px 3px' }}>You</span>}
+                      </div>
+                      <div style={{ fontSize:10, color:'var(--text-muted)' }}>{contact.phone || 'No phone'}</div>
+                    </div>
+                    <div style={{ display:'flex', gap:2, flexShrink:0 }}>
+                      {Array.from({length:MAX_ATTEMPTS},(_,i) => <div key={i} style={{width:4,height:4,borderRadius:'50%',background:i<(contact.attempts||0)?'var(--accent)':'var(--border)'}}></div>)}
+                    </div>
+                  </div>
+                </div>
+              )
+            })}
+            {filtered.length > PAGE_SIZE && (
+              <div style={{ padding:'6px 10px', fontSize:10, color:'var(--text-muted)', textAlign:'center' }}>+{(filtered.length-PAGE_SIZE).toLocaleString()} more</div>
+            )}
+          </div>
+        </aside>
+
+        {/* ── MAIN WORKSPACE ── */}
+        <div style={{ flex:1, display:'flex', overflow:'hidden', minWidth:0 }}>
+
+          {/* EMPTY STATE */}
+          {!c && (
+            <div style={{ flex:1, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:20, padding:32 }}>
+              <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:12, width:'100%', maxWidth:580 }}>
+                {[
+                  { label:'Calls today', value: myStats.calls, color:'var(--accent)' },
+                  { label:'Booked today', value: myStats.booked, color:'#16A34A' },
+                  { label:'Booking rate', value: todayLogs.length ? Math.round((myStats.booked/todayLogs.length)*100)+'%' : '—', color:'#7C3AED' },
+                  { label:'Callbacks due', value: cbDue.length, color:'#C87800', click:()=>setFilter('callback') },
+                ].map(({ label, value, color, click }) => (
+                  <div key={label} onClick={click} style={{ background:'var(--surface)', border:'1px solid var(--border)', borderTop:`3px solid ${color}`, borderRadius:'var(--radius)', padding:'12px 14px', cursor: click ? 'pointer' : 'default' }}>
+                    <div style={{ fontSize:10, textTransform:'uppercase', letterSpacing:.6, color:'var(--text-muted)', marginBottom:4 }}>{label}</div>
+                    <div style={{ fontSize:24, fontWeight:700, color }}>{value}</div>
+                  </div>
+                ))}
+              </div>
+              <div style={{ textAlign:'center' }}>
+                <div style={{ fontSize:15, fontWeight:600, color:'var(--text-primary)', marginBottom:4 }}>Ready to dial</div>
+                <div style={{ fontSize:13, color:'var(--text-muted)', marginBottom:16 }}>Select a contact or hit Next pending</div>
+                <button className="btn primary" style={{ padding:'9px 28px', fontSize:14, fontWeight:600 }} onClick={navNextPending}>Next pending</button>
+              </div>
+            </div>
+          )}
+
+          {/* CONTACT WORKSPACE */}
+          {c && (
+            <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden', minWidth:0 }}>
+
+              {/* ── CONTACT HEADER BAR ── */}
+              <div style={{ padding:'10px 14px', background:'var(--surface)', borderBottom:'1px solid var(--border)', display:'flex', alignItems:'center', gap:10, flexShrink:0 }}>
+                {/* Avatar */}
+                <div style={{ width:36, height:36, borderRadius:'50%', background:'var(--accent-bg)', color:'var(--accent)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:13, fontWeight:700, flexShrink:0 }}>
+                  {getInitials(c.name)}
+                </div>
+                {/* Name + badges + fields */}
+                <div style={{ flex:1, minWidth:0 }}>
+                  <div style={{ display:'flex', alignItems:'center', gap:7, flexWrap:'wrap' }}>
+                    <span style={{ fontSize:15, fontWeight:700, color:'var(--text-primary)' }}>{c.name || '—'}</span>
+                    <Badge status={c.status || 'Pending'} />
+                    {isDNC && <span style={{ fontSize:10, fontWeight:700, background:'#FEE2E2', color:'#7F1D1D', border:'1px solid #FECACA', borderRadius:99, padding:'1px 6px' }}>DNC</span>}
+                    {isDup && <span style={{ fontSize:10, fontWeight:700, background:'#F3E8FF', color:'#5B21B6', border:'1px solid #DDD6FE', borderRadius:99, padding:'1px 6px' }}>Duplicate</span>}
+                    {campName(c) && <span style={{ fontSize:10, background:'var(--surface-2)', color:'var(--text-muted)', border:'1px solid var(--border)', borderRadius:99, padding:'1px 7px' }}>{campName(c)}</span>}
+                  </div>
+                  <div style={{ display:'flex', gap:14, marginTop:3, flexWrap:'wrap' }}>
+                    {[
+                      { v: c.phone || '—' },
+                      { v: c.email || '—' },
+                      { v: [c.address, c.city, c.state].filter(Boolean).join(', ') || '—' },
+                      { label:'ST', v: c.external_id || '—' },
+                      { label:'Attempts', v: `${c.attempts||0}/${MAX_ATTEMPTS}` },
+                    ].map(({ label, v }, i) => (
+                      <span key={i} style={{ fontSize:11, color:'var(--text-secondary)' }}>
+                        {label && <span style={{ color:'var(--text-muted)', marginRight:2 }}>{label}:</span>}{v}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+                {/* Action buttons */}
+                <div style={{ display:'flex', gap:6, flexShrink:0 }}>
+                  {c.callback_at && (
+                    <span style={{ fontSize:11, padding:'5px 8px', background:'#FFF8E6', border:'1px solid #FCD34D', borderRadius:'var(--radius)', color:'#92400E' }}>
+                      CB: {fmtDate(c.callback_at)}
+                    </span>
+                  )}
+                  {c.phone && (
+                    <button onClick={() => makeCall(c.phone)} disabled={!twilioReady || !!callStatus}
+                      style={{ display:'flex', alignItems:'center', gap:5, padding:'7px 16px', border:'none', borderRadius:'var(--radius)', background: twilioReady && !callStatus ? '#16A34A' : 'var(--border)', cursor: twilioReady && !callStatus ? 'pointer' : 'not-allowed', fontSize:13, fontWeight:700, color:'#fff' }}>
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="white"><path d="M6.6 10.8c1.4 2.8 3.8 5.1 6.6 6.6l2.2-2.2c.3-.3.7-.4 1-.2 1.1.4 2.3.6 3.6.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1C10.6 21 3 13.4 3 4c0-.6.4-1 1-1h3.5c.6 0 1 .4 1 1 0 1.3.2 2.5.6 3.6.1.3 0 .7-.2 1L6.6 10.8z"/></svg>
+                      Call
+                    </button>
+                  )}
+                  <button onClick={() => openInST(c)}
+                    style={{ padding:'7px 12px', border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface-2)', cursor:'pointer', fontSize:12, color:'var(--text-primary)' }}>
+                    Open in ST
+                  </button>
+                  {!c.claimed_by && !done && <button className="btn sm primary" onClick={claimContact}>Claim</button>}
+                  {isMe && !done && <button className="btn sm" onClick={() => releaseContact(c.id)}>Release</button>}
+                  {isOther && <span style={{ fontSize:11, color:'var(--text-muted)', alignSelf:'center' }}>Claimed by {c.claimed_by}</span>}
+                </div>
+              </div>
+
+              {/* ── MAIN BODY: LEFT COL + RIGHT PANEL ── */}
+              <div style={{ flex:1, display:'flex', overflow:'hidden', minHeight:0 }}>
+
+                {/* LEFT: Outcome + Booking */}
+                <div style={{ flex:1, overflowY:'auto', padding:12, display:'flex', flexDirection:'column', gap:10 }}>
+
+                  {/* Banners */}
+                  {isDNC && <div style={{ background:'#FEF2F2', border:'1px solid #FECACA', borderRadius:'var(--radius)', padding:'8px 12px', fontSize:12, color:'#7F1D1D', fontWeight:600 }}>DNC — Do not dial this number</div>}
+                  {isDup && <div style={{ background:'#F3E8FF', border:'1px solid #DDD6FE', borderRadius:'var(--radius)', padding:'8px 12px', fontSize:12, color:'#5B21B6' }}>Duplicate number on multiple contacts</div>}
+                  {c.callback_at && (
+                    <div style={{ background:'#FFFBEB', border:'1px solid #FCD34D', borderRadius:'var(--radius)', padding:'8px 12px', fontSize:12, color:'#92400E', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+                      <span><strong>Callback:</strong> {fmtDate(c.callback_at)}{c.callback_note ? ` — ${c.callback_note}` : ''}</span>
+                      <button className="btn sm" onClick={() => clearCallback(c.id)}>Clear</button>
+                    </div>
+                  )}
+
+                  {/* Outcome buttons */}
+                  {!done && (
+                    <div style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius)', overflow:'hidden' }}>
+                      <div style={{ padding:'8px 12px', borderBottom:'1px solid var(--border)', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+                        <span style={{ fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color:'var(--text-muted)' }}>Log outcome</span>
+                        {isOther && <span style={{ fontSize:11, color:'var(--text-muted)' }}>Claimed by {c.claimed_by}</span>}
+                      </div>
+                      <div style={{ padding:'12px', display:'flex', flexDirection:'column', gap:10 }}>
+                        <div style={{ display:'grid', gridTemplateColumns:'repeat(6,1fr)', gap:6 }}>
+                          {OUTCOMES.map(o => {
+                            const sel = selectedOutcome === o.id
+                            const cm = OUTCOME_CONFIG[o.id] || {}
+                            return (
+                              <button key={o.id} disabled={!isMe} onClick={() => setSelectedOutcome(sel ? null : o.id)}
+                                style={{ padding:'10px 6px', borderRadius:'var(--radius)', fontSize:11, fontWeight: sel ? 700 : 500, border: sel ? `2px solid ${cm.border}` : '1px solid var(--border)', background: sel ? cm.bg : 'var(--surface-2)', color: sel ? cm.color : 'var(--text-secondary)', cursor: isMe ? 'pointer' : 'not-allowed', opacity: isMe ? 1 : .4, textAlign:'center', transition:'all .1s' }}>
+                                <div style={{ display:'flex', alignItems:'center', justifyContent:'center', marginBottom:4 }}>{OUTCOME_ICONS[o.id]?.(sel ? cm.color : 'var(--text-muted)')}</div>
+                                <div style={{ fontSize:10 }}>{o.id}</div>
+                              </button>
+                            )
+                          })}
+                        </div>
+
+                        {/* Notes */}
+                        <textarea value={notesVal} onChange={e => setNotesVal(e.target.value)} disabled={!isMe}
+                          placeholder={selectedOutcome === 'Booked' ? 'Notes required before booking...' : 'Add call notes...'}
+                          style={{ width:'100%', border:`1px solid ${selectedOutcome==='Booked' ? 'var(--accent)' : 'var(--border)'}`, borderRadius:'var(--radius)', padding:'8px 10px', fontSize:12, fontFamily:'inherit', resize:'vertical', minHeight:72, background:'var(--surface)', color:'var(--text-primary)', opacity: isMe ? 1 : .4 }} />
+
+                        {/* ST Booking panel — shown when Booked selected */}
+                        {selectedOutcome === 'Booked' && (
+                          <div style={{ background:'var(--success-bg)', border:'1px solid var(--success)', borderRadius:'var(--radius)', padding:'12px', display:'flex', flexDirection:'column', gap:10 }}>
+                            <div style={{ fontSize:11, fontWeight:700, color:'var(--success)', letterSpacing:.3 }}>ServiceTitan booking details</div>
+                            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8 }}>
+                              <SearchSelect label="Business unit" value={selectedBU} onChange={v => { setSelectedBU(v); setSelectedJobType(''); setAvailability([]); setBookingResult(null) }} options={buOptions} placeholder="Select..." />
+                              <SearchSelect label="Job type" value={selectedJobType} onChange={v => { setSelectedJobType(v); setAvailability([]); setBookingResult(null) }} options={jtOptions} placeholder="Select..." disabled={!selectedBU} />
+                            </div>
+                            <SearchSelect label="Marketing campaign" value={String(stCampaignId || '')} onChange={v => setStCampaignId(v)} options={campOptions} placeholder="Select campaign..." />
+
+                            {/* Membership */}
+                            <label style={{ display:'flex', alignItems:'center', gap:8, padding:'8px 10px', background: alsoMembership ? '#EFF6FF' : 'var(--surface)', border:`1px solid ${alsoMembership ? '#3b82f6' : 'var(--border)'}`, borderRadius:'var(--radius)', cursor:'pointer' }}>
+                              <div onClick={() => setAlsoMembership(p => !p)}
+                                style={{ width:18, height:18, borderRadius:4, border:`2px solid ${alsoMembership ? '#3b82f6' : 'var(--border)'}`, background: alsoMembership ? '#3b82f6' : 'transparent', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0, cursor:'pointer' }}>
+                                {alsoMembership && <svg width="10" height="10" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+                              </div>
+                              <div onClick={() => setAlsoMembership(p => !p)}>
+                                <span style={{ fontSize:12, fontWeight:600, color: alsoMembership ? '#1d4ed8' : 'var(--text-primary)' }}>Also sold a membership</span>
+                                <span style={{ fontSize:11, color:'var(--text-muted)', marginLeft:6 }}>+${(commissionRates.membership || 2).toFixed(2)}</span>
+                              </div>
+                            </label>
+
+                            {/* Availability */}
+                            <button onClick={checkAvailability} disabled={!selectedJobType || !selectedBU || availLoading}
+                              style={{ width:'100%', padding:'8px 0', border:'1px solid #16A34A', borderRadius:'var(--radius)', background:'var(--surface)', color:'#16A34A', fontSize:12, fontWeight:600, cursor: selectedJobType && selectedBU ? 'pointer' : 'not-allowed', opacity: selectedJobType && selectedBU ? 1 : .5, display:'flex', alignItems:'center', justifyContent:'center', gap:6 }}>
+                              {availLoading ? <><div className="spinner" style={{width:12,height:12,borderWidth:2}}></div> Loading...</> : 'Check availability'}
+                            </button>
+                            {availError && <div style={{ fontSize:11, color:'var(--danger)', padding:'5px 8px', background:'var(--danger-bg)', borderRadius:'var(--radius)' }}>{availError}</div>}
+
+                            {selectedSlot && (
+                              <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'7px 10px', background:'#DCFCE7', border:'1px solid #16A34A', borderRadius:'var(--radius)' }}>
+                                <span style={{ fontSize:12, fontWeight:600, color:'#15803D' }}>
+                                  {new Date(selectedSlot.start).toLocaleDateString('en-US', { weekday:'short', month:'short', day:'numeric' })} · {new Date(selectedSlot.start).toLocaleTimeString('en-US', { hour:'numeric', minute:'2-digit' })} – {new Date(selectedSlot.end).toLocaleTimeString('en-US', { hour:'numeric', minute:'2-digit' })}
+                                </span>
+                                <button onClick={() => { setSelectedSlot(null); setShowAvailModal(true) }} style={{ fontSize:10, padding:'2px 8px', background:'#16A34A', color:'#fff', border:'none', borderRadius:4, cursor:'pointer' }}>Change</button>
+                              </div>
+                            )}
+
+                            <button onClick={bookInST} disabled={!c.external_id || !selectedJobType || !selectedBU || booking}
+                              style={{ width:'100%', padding:'10px 0', border:'none', borderRadius:'var(--radius)', background: c.external_id && selectedJobType && selectedBU ? '#16A34A' : 'var(--border)', color:'#fff', fontSize:13, fontWeight:700, cursor: c.external_id && selectedJobType && selectedBU ? 'pointer' : 'not-allowed', display:'flex', alignItems:'center', justifyContent:'center', gap:6 }}>
+                              {booking ? <><div className="spinner" style={{width:13,height:13,borderWidth:2,borderTopColor:'#fff'}}></div> Booking...</> :
+                                selectedSlot ? `Book ${new Date(selectedSlot.start).toLocaleDateString('en-US', { weekday:'short', month:'short', day:'numeric' })} ${new Date(selectedSlot.start).toLocaleTimeString('en-US', { hour:'numeric', minute:'2-digit' })}` :
+                                'Book in ServiceTitan (Unscheduled)'}
+                            </button>
+
+                            {!c.external_id && <div style={{ fontSize:10, color:'var(--warning)', textAlign:'center' }}>No ST Customer ID on this contact</div>}
+                            {bookingResult && (
+                              <div style={{ padding:'7px 10px', borderRadius:'var(--radius)', fontSize:11, fontWeight:500, background: bookingResult.ok ? '#DCFCE7' : '#FEE2E2', border:`1px solid ${bookingResult.ok ? '#16A34A' : '#DC2626'}`, color: bookingResult.ok ? '#15803D' : '#DC2626' }}>
+                                {bookingResult.ok ? `Job #${bookingResult.jobNumber || bookingResult.jobId} created on dispatch board!` : bookingResult.error}
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Log actions */}
+                        <div style={{ display:'flex', gap:6, justifyContent:'space-between' }}>
+                          <button className="btn" disabled={!isMe} onClick={openCallbackModal} style={{fontSize:12}}>Callback</button>
+                          <div style={{ display:'flex', gap:6 }}>
+                            <button className="btn" disabled={!isMe || !selectedOutcome || saving} onClick={() => logOutcome(true)} style={{fontSize:12}}>{saving ? 'Saving...' : 'Log & stay'}</button>
+                            <button className="btn" disabled={!isMe || !selectedOutcome || saving} onClick={() => logOutcome(false)}
+                              style={{ background:'#16A34A', borderColor:'#16A34A', color:'#fff', fontWeight:600, fontSize:12 }}>
+                              {saving ? 'Saving...' : 'Log & next'}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {done && (
+                    <div style={{ background:'#DCFCE7', border:'1px solid #BBF7D0', borderRadius:'var(--radius)', padding:'10px 14px', fontSize:13, color:'#15803D', fontWeight:500 }}>
+                      Contact complete — {c.status}
+                    </div>
+                  )}
+                </div>
+
+                {/* RIGHT PANEL: Stats always visible, script slides in on top */}
+                <div style={{ width:300, flexShrink:0, display:'flex', flexDirection:'column', overflow:'hidden', background:'var(--surface-2)', borderLeft:'1px solid var(--border)' }}>
+
+                  {/* Stats bar — always visible */}
+                  <div style={{ padding:'8px 12px', borderBottom:'1px solid var(--border)', background:'var(--surface)', display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:4, flexShrink:0 }}>
+                    {[
+                      { l:'Calls', v: myStats.calls, col:'var(--text-primary)' },
+                      { l:'Booked', v: myStats.booked, col:'#16A34A' },
+                      { l:'Rate', v: todayLogs.length ? Math.round((myStats.booked/todayLogs.length)*100)+'%' : '—', col:'#7C3AED' },
+                      { l:'$', v: '$'+dailyEarnings.toFixed(2), col:'#2563eb' },
+                    ].map(({ l, v, col }) => (
+                      <div key={l} style={{ textAlign:'center' }}>
+                        <div style={{ fontSize:9, textTransform:'uppercase', letterSpacing:.5, color:'var(--text-muted)' }}>{l}</div>
+                        <div style={{ fontSize:12, fontWeight:700, color:col, marginTop:1 }}>{v}</div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Tabs */}
+                  <div style={{ display:'flex', borderBottom:'1px solid var(--border)', flexShrink:0, background:'var(--surface)' }}>
+                    {['script','history'].map(t => (
+                      <button key={t} onClick={() => setActiveTab(t)}
+                        style={{ flex:1, padding:'8px 0', fontSize:11, fontWeight: activeTab===t ? 600 : 400, border:'none', cursor:'pointer', background: activeTab===t ? 'var(--surface-2)' : 'var(--surface)', color: activeTab===t ? 'var(--accent)' : 'var(--text-muted)', borderBottom: activeTab===t ? '2px solid var(--accent)' : '2px solid transparent' }}>
+                        {t === 'script' ? 'Script' : `History (${contactLogs.length})`}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Content */}
+                  <div style={{ flex:1, overflowY:'auto', padding:12 }}>
+                    {activeTab === 'script' && (
+                      <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
+                        {camp?.script ? (
+                          <div>
+                            <div style={{ fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color:'var(--text-muted)', marginBottom:6 }}>Call script</div>
+                            <div style={{ background:'var(--surface)', border:'1px solid var(--border)', borderLeft:'3px solid var(--accent)', borderRadius:'var(--radius)', padding:'11px 13px', fontSize:12, lineHeight:1.8, whiteSpace:'pre-wrap', color:'var(--text-primary)' }}>
+                              {camp.script}
+                            </div>
+                          </div>
+                        ) : (
+                          <div style={{ fontSize:12, color:'var(--text-muted)', fontStyle:'italic' }}>No script set for this campaign.</div>
+                        )}
+                        {camp?.tips && (
+                          <div>
+                            <div style={{ fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color:'var(--text-muted)', marginBottom:6 }}>Tips & talking points</div>
+                            <div style={{ background:'#FFFBEB', border:'1px solid #FCD34D', borderRadius:'var(--radius)', padding:'11px 13px', fontSize:12, lineHeight:1.8, whiteSpace:'pre-wrap', color:'#78350F' }}>
+                              {camp.tips}
+                            </div>
+                          </div>
+                        )}
+                        {!camp?.script && !camp?.tips && (
+                          <div style={{ fontSize:12, color:'var(--text-muted)', textAlign:'center', paddingTop:20 }}>No script or tips for this campaign yet.</div>
+                        )}
+                      </div>
+                    )}
+                    {activeTab === 'history' && (
+                      <div>
+                        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:10 }}>
+                          <span style={{ fontSize:11, color:'var(--text-muted)' }}>{contactLogs.length} attempt{contactLogs.length !== 1 ? 's' : ''}</span>
+                          {contactLogs.length > 0 && <button className="btn sm" onClick={openCorrectModal}>Correct last</button>}
+                        </div>
+                        {logsLoading ? <div className="spinner" style={{ margin:'20px auto' }} /> :
+                          contactLogs.length === 0 ? <div style={{ fontSize:12, color:'var(--text-muted)', fontStyle:'italic', textAlign:'center', marginTop:20 }}>No attempts yet</div> :
+                          contactLogs.map(l => (
+                            <div key={l.id} style={{ padding:'9px 11px', marginBottom:8, background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius)', borderLeft:`3px solid ${OUTCOME_CONFIG[l.outcome]?.border || 'var(--border)'}` }}>
+                              <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:3 }}>
+                                <div style={{ display:'flex', alignItems:'center', gap:5 }}>
+                                  <span style={{ display:'flex', alignItems:'center' }}>{OUTCOME_ICONS[l.outcome]?.(OUTCOME_CONFIG[l.outcome]?.color || '#9E9B96')}</span>
+                                  <span style={{ fontSize:12, fontWeight:600, color: OUTCOME_CONFIG[l.outcome]?.color || 'var(--text-primary)' }}>{l.outcome}</span>
+                                </div>
+                                <span style={{ fontSize:10, color:'var(--text-muted)' }}>{fmtShort(l.created_at)}</span>
+                              </div>
+                              {l.notes && <div style={{ fontSize:11, color:'var(--text-secondary)', lineHeight:1.5 }}>{l.notes}</div>}
+                              <div style={{ fontSize:10, color:'var(--text-muted)', marginTop:3 }}>by {l.rep}</div>
+                            </div>
+                          ))
+                        }
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ── AVAILABILITY MODAL ── */}
       {showAvailModal && (() => {
         const weekDates = getWeekDates(availWeekOffset)
         const byDay = getSlotsByDay(weekDates)
@@ -1024,84 +992,56 @@ export default function DialerPage() {
         const weekEnd = weekDates[6]
         const hasNext = availability.some(s => new Date(s.start) > weekEnd)
         const hasPrev = availWeekOffset > 0
-
         return (
           <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,.5)', zIndex:600, display:'flex', alignItems:'center', justifyContent:'center', padding:20 }}>
             <div style={{ background:'var(--surface)', borderRadius:12, width:'100%', maxWidth:780, boxShadow:'0 8px 32px rgba(0,0,0,.2)', overflow:'hidden', display:'flex', flexDirection:'column', maxHeight:'90vh' }}>
-
-              {/* Header */}
-              <div style={{ padding:'16px 20px', borderBottom:'1px solid var(--border)', display:'flex', alignItems:'center', justifyContent:'space-between', flexShrink:0 }}>
+              <div style={{ padding:'14px 20px', borderBottom:'1px solid var(--border)', display:'flex', alignItems:'center', justifyContent:'space-between', flexShrink:0 }}>
                 <div>
-                  <div style={{ fontSize:16, fontWeight:600, color:'var(--text-primary)' }}>Check availability</div>
-                  <div style={{ fontSize:12, color:'var(--text-muted)', marginTop:2 }}>
-                    {stBusinessUnits.find(b => b.id === parseInt(selectedBU))?.name} · {stJobTypes.find(j => j.id === parseInt(selectedJobType))?.name}
-                  </div>
+                  <div style={{ fontSize:15, fontWeight:600, color:'var(--text-primary)' }}>Check availability</div>
+                  <div style={{ fontSize:11, color:'var(--text-muted)', marginTop:1 }}>{stBusinessUnits.find(b => b.id === parseInt(selectedBU))?.name} · {stJobTypes.find(j => j.id === parseInt(selectedJobType))?.name}</div>
                 </div>
                 <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-                  <button onClick={() => setAvailWeekOffset(p => p-1)} disabled={!hasPrev}
-                    style={{ width:32, height:32, borderRadius:'var(--radius)', border:'1px solid var(--border)', background:'var(--surface-2)', cursor: hasPrev ? 'pointer' : 'not-allowed', opacity: hasPrev ? 1 : .3, fontSize:16, color:'var(--text-secondary)', display:'flex', alignItems:'center', justifyContent:'center' }}>‹</button>
-                  <span style={{ fontSize:13, fontWeight:500, color:'var(--text-primary)', minWidth:160, textAlign:'center' }}>
-                    {MONTHS_SHORT[weekStart.getMonth()]} {weekStart.getDate()} – {MONTHS_SHORT[weekEnd.getMonth()]} {weekEnd.getDate()}, {weekEnd.getFullYear()}
-                  </span>
-                  <button onClick={() => setAvailWeekOffset(p => p+1)} disabled={!hasNext}
-                    style={{ width:32, height:32, borderRadius:'var(--radius)', border:'1px solid var(--border)', background:'var(--surface-2)', cursor: hasNext ? 'pointer' : 'not-allowed', opacity: hasNext ? 1 : .3, fontSize:16, color:'var(--text-secondary)', display:'flex', alignItems:'center', justifyContent:'center' }}>›</button>
-                  <button onClick={() => setShowAvailModal(false)}
-                    style={{ width:32, height:32, borderRadius:'var(--radius)', border:'1px solid var(--border)', background:'var(--surface-2)', cursor:'pointer', fontSize:18, color:'var(--text-muted)', display:'flex', alignItems:'center', justifyContent:'center', marginLeft:4 }}>×</button>
+                  <button onClick={() => setAvailWeekOffset(p => p-1)} disabled={!hasPrev} style={{ width:30, height:30, borderRadius:'var(--radius)', border:'1px solid var(--border)', background:'var(--surface-2)', cursor: hasPrev ? 'pointer' : 'not-allowed', opacity: hasPrev ? 1 : .3, fontSize:16, color:'var(--text-secondary)', display:'flex', alignItems:'center', justifyContent:'center' }}>{'<'}</button>
+                  <span style={{ fontSize:12, fontWeight:500, color:'var(--text-primary)', minWidth:150, textAlign:'center' }}>{MONTHS_SHORT[weekStart.getMonth()]} {weekStart.getDate()} – {MONTHS_SHORT[weekEnd.getMonth()]} {weekEnd.getDate()}, {weekEnd.getFullYear()}</span>
+                  <button onClick={() => setAvailWeekOffset(p => p+1)} disabled={!hasNext} style={{ width:30, height:30, borderRadius:'var(--radius)', border:'1px solid var(--border)', background:'var(--surface-2)', cursor: hasNext ? 'pointer' : 'not-allowed', opacity: hasNext ? 1 : .3, fontSize:16, color:'var(--text-secondary)', display:'flex', alignItems:'center', justifyContent:'center' }}>{'>'}</button>
+                  <button onClick={() => setShowAvailModal(false)} style={{ width:30, height:30, borderRadius:'var(--radius)', border:'1px solid var(--border)', background:'var(--surface-2)', cursor:'pointer', fontSize:16, color:'var(--text-muted)', display:'flex', alignItems:'center', justifyContent:'center', marginLeft:4 }}>x</button>
                 </div>
               </div>
-
-              {/* Calendar grid */}
-              <div style={{ padding:'16px 20px', overflowY:'auto', flex:1 }}>
-                <div style={{ display:'grid', gridTemplateColumns:'repeat(7,1fr)', gap:10 }}>
+              <div style={{ padding:'14px 18px', overflowY:'auto', flex:1 }}>
+                <div style={{ display:'grid', gridTemplateColumns:'repeat(7,1fr)', gap:8 }}>
                   {weekDates.map((date, i) => {
                     const isToday = date.toDateString() === new Date().toDateString()
                     const daySlots = byDay[i] || []
                     return (
-                      <div key={i} style={{ display:'flex', flexDirection:'column', gap:6 }}>
-                        {/* Day header */}
-                        <div style={{ textAlign:'center', marginBottom:4 }}>
+                      <div key={i} style={{ display:'flex', flexDirection:'column', gap:5 }}>
+                        <div style={{ textAlign:'center', marginBottom:3 }}>
                           <div style={{ fontSize:10, fontWeight:600, textTransform:'uppercase', letterSpacing:.8, color:'var(--text-muted)' }}>{WEEK_DAYS[i]}</div>
-                          <div style={{ width:28, height:28, borderRadius:'50%', background: isToday ? '#3b82f6' : 'transparent', color: isToday ? '#fff' : 'var(--text-primary)', fontSize:14, fontWeight: isToday ? 600 : 400, display:'inline-flex', alignItems:'center', justifyContent:'center', marginTop:3 }}>
-                            {date.getDate()}
-                          </div>
+                          <div style={{ width:26, height:26, borderRadius:'50%', background: isToday ? '#3b82f6' : 'transparent', color: isToday ? '#fff' : 'var(--text-primary)', fontSize:13, fontWeight: isToday ? 600 : 400, display:'inline-flex', alignItems:'center', justifyContent:'center', marginTop:2 }}>{date.getDate()}</div>
                         </div>
-
-                        {/* Slots */}
                         {daySlots.length === 0 ? (
-                          <div style={{ height:56, borderRadius:'var(--radius)', border:'1px dashed var(--border)' }} />
+                          <div style={{ height:52, borderRadius:'var(--radius)', border:'1px dashed var(--border)' }} />
                         ) : daySlots.map((slot, si) => {
-                          const start = new Date(slot.start)
-                          const end = new Date(slot.end)
                           const open = slot.openAvailability || 0
                           const total = slot.totalAvailability || open
                           const pctOpen = total ? Math.round((open/total)*100) : 0
                           const isSelected = selectedSlot?.start === slot.start
                           const hasOpen = open > 0
-
                           let bg, border, textColor, barColor
                           if (isSelected) { bg='#16A34A'; border='2px solid #16A34A'; textColor='#fff'; barColor='rgba(255,255,255,.4)' }
                           else if (!hasOpen) { bg='var(--surface-2)'; border='1px solid var(--border)'; textColor='var(--text-muted)'; barColor='var(--border)' }
                           else if (pctOpen < 50) { bg='#FEF3C7'; border='1px solid #F59E0B'; textColor='#92400E'; barColor='#F59E0B' }
                           else { bg='#DCFCE7'; border='1px solid #16A34A'; textColor='#15803D'; barColor='#16A34A' }
-
                           return (
                             <div key={si} onClick={() => { if (!hasOpen) return; setSelectedSlot(isSelected ? null : slot); if (!isSelected) setShowAvailModal(false) }}
-                              style={{ padding:'8px 10px', borderRadius:'var(--radius)', background:bg, border, cursor: hasOpen ? 'pointer' : 'default', transition:'all .12s' }}
+                              style={{ padding:'7px 8px', borderRadius:'var(--radius)', background:bg, border, cursor: hasOpen ? 'pointer' : 'default', transition:'all .12s' }}
                               onMouseEnter={e => { if (hasOpen && !isSelected) e.currentTarget.style.opacity='.85' }}
-                              onMouseLeave={e => { e.currentTarget.style.opacity='1' }}>
-                              <div style={{ fontSize:10, fontWeight:600, color:textColor, lineHeight:1.3 }}>
-                                {start.toLocaleTimeString('en-US', { hour:'numeric', minute:'2-digit' })}
-                              </div>
-                              <div style={{ fontSize:10, color:textColor, opacity:.8 }}>
-                                – {end.toLocaleTimeString('en-US', { hour:'numeric', minute:'2-digit' })}
-                              </div>
-                              {/* Availability bar */}
-                              <div style={{ marginTop:6, height:3, background:'rgba(0,0,0,.1)', borderRadius:99, overflow:'hidden' }}>
+                              onMouseLeave={e => e.currentTarget.style.opacity='1'}>
+                              <div style={{ fontSize:10, fontWeight:600, color:textColor, lineHeight:1.3 }}>{new Date(slot.start).toLocaleTimeString('en-US', { hour:'numeric', minute:'2-digit' })}</div>
+                              <div style={{ fontSize:10, color:textColor, opacity:.8 }}>– {new Date(slot.end).toLocaleTimeString('en-US', { hour:'numeric', minute:'2-digit' })}</div>
+                              <div style={{ marginTop:4, height:3, background:'rgba(0,0,0,.1)', borderRadius:99, overflow:'hidden' }}>
                                 <div style={{ height:'100%', width:`${pctOpen}%`, background:barColor, borderRadius:99 }} />
                               </div>
-                              <div style={{ fontSize:9, color:textColor, marginTop:3, opacity:.9 }}>
-                                {isSelected ? 'Selected' : hasOpen ? `${open} open` : 'Full'}
-                              </div>
+                              <div style={{ fontSize:9, color:textColor, marginTop:2, opacity:.9 }}>{isSelected ? 'Selected' : hasOpen ? `${open} open` : 'Full'}</div>
                             </div>
                           )
                         })}
@@ -1109,34 +1049,24 @@ export default function DialerPage() {
                     )
                   })}
                 </div>
-
-                {/* Legend */}
-                <div style={{ display:'flex', gap:16, marginTop:16, paddingTop:12, borderTop:'1px solid var(--border)' }}>
-                  {[['#DCFCE7','#16A34A','#15803D','Available'],['#FEF3C7','#F59E0B','#92400E','Filling up'],['var(--surface-2)','var(--border)','var(--text-muted)','Full']].map(([bg,bdr,txt,label]) => (
-                    <div key={label} style={{ display:'flex', alignItems:'center', gap:6 }}>
-                      <div style={{ width:12, height:12, borderRadius:3, background:bg, border:`1px solid ${bdr}` }} />
+                <div style={{ display:'flex', gap:14, marginTop:14, paddingTop:10, borderTop:'1px solid var(--border)' }}>
+                  {[['#DCFCE7','#16A34A','Available'],['#FEF3C7','#F59E0B','Filling up'],['var(--surface-2)','var(--border)','Full']].map(([bg,bdr,label]) => (
+                    <div key={label} style={{ display:'flex', alignItems:'center', gap:5 }}>
+                      <div style={{ width:10, height:10, borderRadius:3, background:bg, border:`1px solid ${bdr}` }} />
                       <span style={{ fontSize:11, color:'var(--text-muted)' }}>{label}</span>
                     </div>
                   ))}
                 </div>
               </div>
-
-              {/* Footer */}
               {selectedSlot ? (
-                <div style={{ padding:'12px 20px', borderTop:'1px solid var(--border)', background:'#DCFCE7', display:'flex', alignItems:'center', justifyContent:'space-between', flexShrink:0 }}>
-                  <div>
-                    <div style={{ fontSize:13, fontWeight:600, color:'#15803D' }}>
-                      ✓ {new Date(selectedSlot.start).toLocaleDateString('en-US', { weekday:'long', month:'short', day:'numeric' })} · {new Date(selectedSlot.start).toLocaleTimeString('en-US', { hour:'numeric', minute:'2-digit' })} – {new Date(selectedSlot.end).toLocaleTimeString('en-US', { hour:'numeric', minute:'2-digit' })}
-                    </div>
-                    <div style={{ fontSize:11, color:'#15803D', opacity:.7, marginTop:1 }}>Slot selected — close to confirm booking details</div>
-                  </div>
-                  <button onClick={() => setShowAvailModal(false)}
-                    style={{ padding:'8px 20px', background:'#16A34A', color:'#fff', border:'none', borderRadius:'var(--radius)', fontSize:13, fontWeight:600, cursor:'pointer' }}>
-                    Confirm slot →
-                  </button>
+                <div style={{ padding:'10px 18px', borderTop:'1px solid var(--border)', background:'#DCFCE7', display:'flex', alignItems:'center', justifyContent:'space-between', flexShrink:0 }}>
+                  <span style={{ fontSize:12, fontWeight:600, color:'#15803D' }}>
+                    {new Date(selectedSlot.start).toLocaleDateString('en-US', { weekday:'long', month:'short', day:'numeric' })} · {new Date(selectedSlot.start).toLocaleTimeString('en-US', { hour:'numeric', minute:'2-digit' })} – {new Date(selectedSlot.end).toLocaleTimeString('en-US', { hour:'numeric', minute:'2-digit' })}
+                  </span>
+                  <button onClick={() => setShowAvailModal(false)} style={{ padding:'6px 16px', background:'#16A34A', color:'#fff', border:'none', borderRadius:'var(--radius)', fontSize:12, fontWeight:600, cursor:'pointer' }}>Confirm slot</button>
                 </div>
               ) : (
-                <div style={{ padding:'12px 20px', borderTop:'1px solid var(--border)', flexShrink:0 }}>
+                <div style={{ padding:'10px 18px', borderTop:'1px solid var(--border)', flexShrink:0 }}>
                   <div style={{ fontSize:12, color:'var(--text-muted)', textAlign:'center' }}>Click an available slot to select it</div>
                 </div>
               )}
@@ -1187,7 +1117,7 @@ export default function DialerPage() {
           <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:8, marginBottom:12 }}>
             {['1','2','3','4','5','6','7','8','9','*','0','#'].map(k => (
               <button key={k} onClick={() => setDialpadNumber(p => p.length < 15 ? p + k : p)}
-                style={{ padding:'14px 0', fontSize:18, fontWeight:600, border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface-2)', cursor:'pointer', color:'var(--text-primary)' }}
+                style={{ padding:'13px 0', fontSize:18, fontWeight:600, border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface-2)', cursor:'pointer', color:'var(--text-primary)' }}
                 onMouseEnter={e => e.currentTarget.style.background='var(--accent-bg)'}
                 onMouseLeave={e => e.currentTarget.style.background='var(--surface-2)'}>
                 {k}
@@ -1196,11 +1126,11 @@ export default function DialerPage() {
           </div>
           <div style={{ display:'flex', gap:8 }}>
             <button onClick={() => setDialpadNumber(p => p.slice(0,-1))}
-              style={{ flex:1, padding:'10px 0', border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface-2)', cursor:'pointer', fontSize:16, color:'var(--text-muted)' }}>⌫</button>
+              style={{ flex:1, padding:'10px 0', border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface-2)', cursor:'pointer', fontSize:15, color:'var(--text-muted)' }}>Del</button>
             <button onClick={() => { if (dialpadNumber.length >= 10) { makeCall(dialpadNumber); setShowDialpad(false) } }}
               disabled={dialpadNumber.length < 10}
               style={{ flex:2, padding:'10px 0', border:'none', borderRadius:'var(--radius)', background: dialpadNumber.length >= 10 ? '#16A34A' : 'var(--border)', cursor: dialpadNumber.length >= 10 ? 'pointer' : 'not-allowed', fontSize:14, fontWeight:700, color:'#fff' }}>
-              📞 Call
+              Call
             </button>
           </div>
         </Modal>
