@@ -279,14 +279,30 @@ export default function DialerPage() {
         device = new Device(token, { logLevel: 1, codecPreferences: ['opus', 'pcmu'] })
         device.on('registered', () => { setTwilioReady(true) })
         device.on('error', (err) => console.error('Twilio error:', err))
-        device.on('incoming', (call) => {
+        device.on('incoming', async (call) => {
           const from = call.parameters?.From || call.parameters?.from || 'Unknown'
           const normalizedPhone = from.replace(/\D/g, '').slice(-10)
-          // Try to find matching contact
+          // First check local contacts
           const matchedContact = contacts.find(c => c.phone && c.phone.replace(/\D/g,'').slice(-10) === normalizedPhone)
-          setIncomingCall({ call, from, contactName: matchedContact?.name || null, contactId: matchedContact?.id || null })
-          // Play browser notification sound if possible
-          try { new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAA==').play().catch(()=>{}) } catch(e){}
+          setIncomingCall({
+            call,
+            from,
+            contactName: matchedContact?.name || null,
+            contactId: matchedContact?.id || null,
+            stLookup: matchedContact ? null : 'loading',
+          })
+          // If no local match, look up in ServiceTitan
+          if (!matchedContact && normalizedPhone.length === 10) {
+            try {
+              const res = await fetch(`/api/st/lookup?phone=${normalizedPhone}`)
+              const data = await res.json()
+              setIncomingCall(prev => prev && prev.call === call
+                ? { ...prev, stLookup: data.found ? data : 'none', contactName: data.found ? data.name : null }
+                : prev)
+            } catch (e) {
+              setIncomingCall(prev => prev && prev.call === call ? { ...prev, stLookup: 'none' } : prev)
+            }
+          }
         })
         await device.register()
         deviceRef.current = device
@@ -305,9 +321,10 @@ export default function DialerPage() {
     await sb.from('profiles').update({ status, status_since: new Date().toISOString() }).eq('id', profile.id)
   }
 
-  const acceptIncomingCall = () => {
+  const acceptIncomingCall = async () => {
     if (!incomingCall?.call) return
     const call = incomingCall.call
+    const inc = incomingCall
     callRef.current = call
     setCallStatus('connected')
     startCallTimer()
@@ -315,9 +332,55 @@ export default function DialerPage() {
     call.on('disconnect', () => { setCallStatus('ended'); stopCallTimer(); setTimeout(() => setCallStatus(null), 3000); updateAgentStatus('Wrap Up') })
     call.on('error', () => { setCallStatus('ended'); stopCallTimer(); setTimeout(() => setCallStatus(null), 2000) })
     call.accept()
-    // Auto-select the contact if we found one
-    if (incomingCall.contactId) selectContact(incomingCall.contactId)
     setIncomingCall(null)
+
+    // Case 1: already a local contact — just select it
+    if (inc.contactId) { selectContact(inc.contactId); claimContactById(inc.contactId); return }
+
+    // Case 2: found in ST but not local — create the contact so booking/history work
+    const st = inc.stLookup
+    if (st && st !== 'loading' && st !== 'none' && st.found) {
+      const { data: created } = await sb.from('contacts').insert({
+        name: st.name || 'Unknown caller',
+        phone: inc.from,
+        email: st.email || null,
+        address: st.address || null,
+        city: st.city || null,
+        state: st.state || null,
+        zip: st.zip || null,
+        external_id: String(st.customerId),
+        status: 'Pending',
+        attempts: 0,
+        source: 'Inbound call',
+        claimed_by: currentRep,
+        claimed_at: new Date().toISOString(),
+      }).select().single()
+      if (created) {
+        setContacts(prev => [created, ...prev])
+        selectContact(created.id)
+      }
+      return
+    }
+
+    // Case 3: unknown caller — create a bare contact so the CSR can still log the call
+    const { data: created } = await sb.from('contacts').insert({
+      name: 'Unknown caller',
+      phone: inc.from,
+      status: 'Pending',
+      attempts: 0,
+      source: 'Inbound call',
+      claimed_by: currentRep,
+      claimed_at: new Date().toISOString(),
+    }).select().single()
+    if (created) {
+      setContacts(prev => [created, ...prev])
+      selectContact(created.id)
+    }
+  }
+
+  const claimContactById = async (id) => {
+    const { data } = await sb.from('contacts').update({ claimed_by: currentRep, claimed_at: new Date().toISOString() }).eq('id', id).select().single()
+    if (data) setContacts(prev => prev.map(c => c.id === id ? data : c))
   }
 
   const rejectIncomingCall = () => {
@@ -640,14 +703,32 @@ export default function DialerPage() {
               </div>
             </div>
             <div style={{ flex:1, minWidth:0 }}>
-              <div style={{ fontSize:13, fontWeight:700, color:'var(--text-primary)' }}>Incoming call</div>
+              <div style={{ fontSize:12, fontWeight:700, color:'var(--text-muted)', textTransform:'uppercase', letterSpacing:.6 }}>Incoming call</div>
               {incomingCall.contactName ? (
                 <>
-                  <div style={{ fontSize:14, fontWeight:700, color:'#16A34A', marginTop:1 }}>{incomingCall.contactName}</div>
+                  <div style={{ fontSize:15, fontWeight:700, color:'var(--text-primary)', marginTop:2 }}>{incomingCall.contactName}</div>
                   <div style={{ fontSize:11, color:'var(--text-muted)' }}>{incomingCall.from}</div>
+                  {incomingCall.contactId ? (
+                    <div style={{ fontSize:10, color:'#16A34A', marginTop:3, fontWeight:600 }}>Known contact</div>
+                  ) : incomingCall.stLookup?.found ? (
+                    <div style={{ fontSize:10, color:'#2563eb', marginTop:3, fontWeight:600 }}>
+                      Found in ServiceTitan
+                      {incomingCall.stLookup.city && ` · ${incomingCall.stLookup.city}, ${incomingCall.stLookup.state || ''}`}
+                    </div>
+                  ) : null}
+                </>
+              ) : incomingCall.stLookup === 'loading' ? (
+                <>
+                  <div style={{ fontSize:15, fontWeight:700, color:'var(--text-primary)', marginTop:2 }}>{incomingCall.from}</div>
+                  <div style={{ fontSize:10, color:'var(--text-muted)', marginTop:3, display:'flex', alignItems:'center', gap:5 }}>
+                    <div className="spinner" style={{ width:10, height:10, borderWidth:2 }} /> Searching ServiceTitan...
+                  </div>
                 </>
               ) : (
-                <div style={{ fontSize:13, color:'var(--text-secondary)', marginTop:1 }}>{incomingCall.from}</div>
+                <>
+                  <div style={{ fontSize:15, fontWeight:700, color:'var(--text-primary)', marginTop:2 }}>{incomingCall.from}</div>
+                  <div style={{ fontSize:10, color:'#C87800', marginTop:3, fontWeight:600 }}>New caller — not in ST</div>
+                </>
               )}
             </div>
           </div>
