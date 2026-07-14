@@ -772,10 +772,26 @@ export default function DialerPage() {
   const [stJobHistory, setStJobHistory] = useState([])
   const [stJobHistoryLoading, setStJobHistoryLoading] = useState(false)
   const [stCustomerInfo, setStCustomerInfo] = useState(null)
+  const [stCalls, setStCalls] = useState([])
+  const [playingCall, setPlayingCall] = useState(null)
+  const audioRef = useRef(null)
 
-  // Fetch ST customer info + job history when contact changes
+  const playRecording = (id, url) => {
+    if (playingCall === id) { audioRef.current?.pause(); setPlayingCall(null); return }
+    audioRef.current?.pause()
+    const sid = url?.includes('api.twilio.com') ? url.split('/').pop()?.replace('.mp3','') : null
+    const src = sid ? `/api/twilio/recording/${sid}` : url
+    const audio = new Audio(src)
+    audioRef.current = audio
+    audio.onended = () => setPlayingCall(null)
+    audio.onerror = () => { setPlayingCall(null); alert('Could not load recording.') }
+    audio.play().then(() => setPlayingCall(id)).catch(() => setPlayingCall(null))
+  }
+  useEffect(() => () => audioRef.current?.pause(), [])
+
+  // Fetch ST customer info + job history + calls when contact changes
   useEffect(() => {
-    if (!c?.external_id) { setStJobHistory([]); setStCustomerInfo(null); return }
+    if (!c?.external_id) { setStJobHistory([]); setStCustomerInfo(null); setStCalls([]); return }
     setStJobHistoryLoading(true)
     fetch(`/api/st/customer/${c.external_id}`)
       .then(r => r.ok ? r.json() : null)
@@ -785,6 +801,10 @@ export default function DialerPage() {
       .then(r => r.ok ? r.json() : null)
       .then(data => { setStJobHistory(data?.data?.slice(0,3) || []); setStJobHistoryLoading(false) })
       .catch(() => setStJobHistoryLoading(false))
+    fetch(`/api/st/calls?customerId=${c.external_id}&limit=5`)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => setStCalls(data?.data || []))
+      .catch(() => setStCalls([]))
   }, [c?.external_id])
 
   // SearchSelect component
@@ -927,33 +947,6 @@ export default function DialerPage() {
         </div>
 
         <div style={{ flex:1 }} />
-        {/* Stats pills */}
-        {[
-          { l:'Calls', v:myStats.calls, c:'var(--text-primary)' },
-          { l:'Booked', v:myStats.booked, c:'#16A34A' },
-          { l:'Rate', v:todayLogs.length ? Math.round((myStats.booked/todayLogs.length)*100)+'%' : '--', c:'#7C3AED' },
-        ].map(({ l, v, c:col }) => (
-          <div key={l} style={{ display:'flex', flexDirection:'column', alignItems:'center', minWidth:44 }}>
-            <div style={{ fontSize:9, textTransform:'uppercase', letterSpacing:.5, color:'var(--text-muted)' }}>{l}</div>
-            <div style={{ fontSize:13, fontWeight:700, color:col }}>{v}</div>
-          </div>
-        ))}
-        <div style={{ position:'relative' }}>
-          <button onClick={() => setShowEarningsDetail(p => !p)}
-            style={{ display:'flex', alignItems:'center', gap:4, padding:'4px 10px', background: dailyEarnings > 0 ? '#16A34A' : 'var(--surface-2)', border:`1px solid ${dailyEarnings > 0 ? '#16A34A' : 'var(--border)'}`, borderRadius:99, cursor:'pointer', color: dailyEarnings > 0 ? '#fff' : 'var(--text-muted)', fontSize:12, fontWeight:700 }}>
-            ${dailyEarnings.toFixed(2)}
-          </button>
-          {showEarningsDetail && (
-            <div style={{ position:'fixed', right:16, top:46, background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius)', boxShadow:'0 4px 20px rgba(0,0,0,.15)', zIndex:500, minWidth:190 }} onMouseLeave={() => setShowEarningsDetail(false)}>
-              <div style={{ padding:'9px 14px', borderBottom:'1px solid var(--border)', fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color:'var(--text-muted)' }}>Earnings</div>
-              <div style={{ padding:'12px 14px', display:'flex', flexDirection:'column', gap:8 }}>
-                <div style={{ display:'flex', justifyContent:'space-between' }}><span style={{ fontSize:12, color:'var(--text-secondary)' }}>Today</span><span style={{ fontSize:16, fontWeight:800, color:'#16A34A' }}>${dailyEarnings.toFixed(2)}</span></div>
-                <div style={{ height:1, background:'var(--border)' }} />
-                <div style={{ display:'flex', justifyContent:'space-between' }}><span style={{ fontSize:12, color:'var(--text-secondary)' }}>This week</span><span style={{ fontSize:16, fontWeight:800, color:'var(--accent)' }}>${weeklyEarnings.toFixed(2)}</span></div>
-              </div>
-            </div>
-          )}
-        </div>
         {cbDue.length > 0 && <div style={{ fontSize:11, fontWeight:600, color:'#C87800', padding:'3px 8px', background:'#FFFBEB', border:'1px solid #FCD34D', borderRadius:99 }}>CB: {cbDue.length}</div>}
       </div>
 
@@ -1181,26 +1174,92 @@ export default function DialerPage() {
                     </div>
                   </div>
 
-                  {/* Call log history */}
-                  <div style={{ ...sectionCard, marginTop:1, flex:1 }}>
+                  {/* Call activity — Andi logs + ST calls merged */}
+                  <div style={{ ...sectionCard, marginTop:1, flex:1, display:'flex', flexDirection:'column', minHeight:0 }}>
                     <div style={sectionHeader}>
-                      <span style={sectionTitle}>Call history</span>
+                      <span style={sectionTitle}>Call activity</span>
                       {contactLogs.length > 0 && <button className="btn sm" style={{ fontSize:10, padding:'2px 7px' }} onClick={openCorrectModal}>Correct last</button>}
                     </div>
-                    <div style={{ overflowY:'auto' }}>
-                      {logsLoading ? <div style={{ padding:14, display:'flex', justifyContent:'center' }}><div className="spinner" /></div> :
-                        contactLogs.length === 0 ? <div style={{ padding:'14px', fontSize:12, color:'var(--text-muted)', textAlign:'center' }}>No attempts yet</div> :
-                        contactLogs.map(l => (
-                          <div key={l.id} style={{ padding:'9px 14px', borderBottom:'1px solid var(--border)', borderLeft:`3px solid ${OUTCOME_CONFIG[l.outcome]?.border || 'var(--border)'}` }}>
-                            <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:2 }}>
-                              <span style={{ fontSize:11, fontWeight:600, color: OUTCOME_CONFIG[l.outcome]?.color || 'var(--text-primary)' }}>{l.outcome}</span>
-                              <span style={{ fontSize:10, color:'var(--text-muted)' }}>{fmtShort(l.created_at)}</span>
-                            </div>
-                            {l.notes && <div style={{ fontSize:11, color:'var(--text-secondary)', lineHeight:1.5 }}>{l.notes}</div>}
-                            <div style={{ fontSize:10, color:'var(--text-muted)', marginTop:2 }}>by {l.rep}</div>
-                          </div>
-                        ))
-                      }
+                    <div style={{ overflowY:'auto', flex:1 }}>
+                      {(() => {
+                        // Merge Andi call logs + ST calls into one timeline, newest first, cap at 5
+                        const andiItems = contactLogs.map(l => ({
+                          key: `andi-${l.id}`,
+                          source: 'andi',
+                          when: l.created_at,
+                          outcome: l.outcome,
+                          notes: l.notes,
+                          rep: l.rep,
+                          duration: l.recording_duration,
+                          recordingUrl: l.recording_url,
+                        }))
+                        const stItems = stCalls.map(sc => ({
+                          key: `st-${sc.id}`,
+                          source: 'st',
+                          when: sc.receivedOn || sc.createdOn,
+                          outcome: sc.reason || (sc.direction === 'Inbound' ? 'Inbound call' : 'Outbound call'),
+                          notes: [sc.campaign, sc.direction].filter(Boolean).join(' . '),
+                          rep: sc.agent,
+                          duration: sc.duration ? (() => {
+                            const p = String(sc.duration).split(':')
+                            return p.length === 3 ? (+p[0])*3600 + (+p[1])*60 + Math.round(+p[2]) : null
+                          })() : null,
+                          recordingUrl: sc.recordingUrl || sc.voiceMailUrl,
+                        }))
+                        const all = [...andiItems, ...stItems]
+                          .filter(x => x.when)
+                          .sort((a, b) => new Date(b.when) - new Date(a.when))
+                        const shown = all.slice(0, 5)
+                        const more = all.length - shown.length
+
+                        if (logsLoading) return <div style={{ padding:14, display:'flex', justifyContent:'center' }}><div className="spinner" /></div>
+                        if (shown.length === 0) return <div style={{ padding:'14px', fontSize:12, color:'var(--text-muted)', textAlign:'center' }}>No call activity yet</div>
+
+                        return (
+                          <>
+                            {shown.map(item => {
+                              const oc = OUTCOME_CONFIG[item.outcome] || {}
+                              const isPlaying = playingCall === item.key
+                              return (
+                                <div key={item.key} style={{ padding:'9px 12px', borderBottom:'1px solid var(--border)', borderLeft:`3px solid ${oc.border || (item.source === 'st' ? '#3b82f6' : 'var(--border)')}` }}>
+                                  <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:6, marginBottom:2 }}>
+                                    <div style={{ display:'flex', alignItems:'center', gap:5, minWidth:0 }}>
+                                      {item.recordingUrl && (
+                                        <button onClick={() => playRecording(item.key, item.recordingUrl)}
+                                          title={isPlaying ? 'Pause' : 'Play recording'}
+                                          style={{ width:20, height:20, borderRadius:'50%', flexShrink:0, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center',
+                                            background: isPlaying ? '#16A34A' : 'var(--surface-2)', border:`1px solid ${isPlaying ? '#16A34A' : 'var(--border)'}` }}>
+                                          {isPlaying
+                                            ? <svg width="7" height="7" viewBox="0 0 12 12" fill="#fff"><rect x="2" y="1" width="3" height="10" rx="1"/><rect x="7" y="1" width="3" height="10" rx="1"/></svg>
+                                            : <svg width="7" height="7" viewBox="0 0 12 12" fill="var(--text-secondary)"><path d="M3 1.5v9l7-4.5-7-4.5z"/></svg>}
+                                        </button>
+                                      )}
+                                      <span style={{ fontSize:11, fontWeight:600, color: oc.color || 'var(--text-primary)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                                        {item.outcome}
+                                      </span>
+                                      {item.source === 'st' && (
+                                        <span style={{ fontSize:9, fontWeight:600, background:'#EFF6FF', color:'#1D4ED8', border:'1px solid #BFDBFE', borderRadius:99, padding:'0 5px', flexShrink:0 }}>ST</span>
+                                      )}
+                                    </div>
+                                    <span style={{ fontSize:10, color:'var(--text-muted)', flexShrink:0 }}>{fmtShort(item.when)}</span>
+                                  </div>
+                                  {item.notes && <div style={{ fontSize:11, color:'var(--text-secondary)', lineHeight:1.5 }}>{item.notes.length > 80 ? item.notes.slice(0,80)+'...' : item.notes}</div>}
+                                  <div style={{ fontSize:10, color:'var(--text-muted)', marginTop:2, display:'flex', gap:8 }}>
+                                    {item.rep && <span>by {item.rep}</span>}
+                                    {item.duration != null && <span>{Math.floor(item.duration/60)}:{String(item.duration%60).padStart(2,'0')}</span>}
+                                  </div>
+                                </div>
+                              )
+                            })}
+                            {(more > 0 || c.external_id) && (
+                              <div onClick={() => c.external_id && window.open(`https://go.servicetitan.com/#/Customer/${c.external_id}`, '_blank')}
+                                style={{ padding:'9px 12px', fontSize:11, color:'var(--accent)', textAlign:'center', cursor: c.external_id ? 'pointer' : 'default', fontWeight:600 }}>
+                                {more > 0 ? `View ${more} more in ServiceTitan` : 'View all in ServiceTitan'}
+                              </div>
+                            )}
+                          </>
+                        )
+                      })()}
                     </div>
                   </div>
                 </div>
