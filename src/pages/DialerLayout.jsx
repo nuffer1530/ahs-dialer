@@ -12,6 +12,7 @@ import AdminPage from './AdminPage'
 import WarRoomPage from './WarRoomPage'
 import LeaderboardPage from './LeaderboardPage'
 import AttendancePage from './AttendancePage'
+import RecordingsPage from './RecordingsPage'
 import MyPage from './MyPage'
 import WinCelebration from '../components/WinCelebration'
 
@@ -103,6 +104,15 @@ const NAV_ICONS = {
       </svg>
     )
   },
+  recordings: (active) => {
+    const c = active ? ICON_COLOR : ICON_MUTED
+    return (
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="12" cy="12" r="9" stroke={c} strokeWidth="1.8" fill="none"/>
+        <path d="M10 8.5v7l6-3.5-6-3.5z" fill={c}/>
+      </svg>
+    )
+  },
   mypage: (active) => {
     const c = active ? ICON_COLOR : ICON_MUTED
     return (
@@ -127,6 +137,7 @@ const NAV_ITEMS = [
   { to:'/', label:'Dialer', iconKey:'dialer', end:true },
   { to:'/live', label:'Live Dashboard', iconKey:'live' },
   { to:'/analytics', label:'Analytics', iconKey:'analytics' },
+  { to:'/recordings', label:'Recordings', iconKey:'recordings' },
   { to:'/leaderboard', label:'Leaderboard', iconKey:'leaderboard' },
   { to:'/attendance', label:'WFM', iconKey:'wfm' },
   { to:'/notes', label:'Notes', iconKey:'notes' },
@@ -422,76 +433,92 @@ export default function DialerLayout() {
           )}
         </div>
 
-        {/* Bottom: status picker + user + sign out */}
+        {/* Bottom: theme toggle only — status/profile now lives in the top-right menu */}
         <div style={{ borderTop:'1px solid var(--border)', padding:'10px 8px', flexShrink:0 }}>
-
-          {/* Status picker */}
-          <div ref={menuRef} style={{ position:'relative', marginBottom:8 }}>
-            <button onClick={() => setShowStatusMenu(v => !v)}
-              style={{ display:'flex', alignItems:'center', gap: navCollapsed ? 0 : 8, width:'100%', padding: navCollapsed ? '8px 0' : '7px 10px', justifyContent: navCollapsed ? 'center' : 'flex-start', background:'var(--surface-2)', border:'1px solid var(--border)', borderRadius:'var(--radius)', cursor:'pointer', fontSize:12, fontWeight:600, color:'var(--text-primary)' }}>
-              <div style={{ width:10, height:10, borderRadius:'50%', background:currentStatusObj.color, flexShrink:0 }}></div>
-              {!navCollapsed && (
-                <>
-                  <span>{currentStatusObj.value}</span>
-                  <span style={{ marginLeft:'auto', fontSize:10, color:'var(--text-muted)', fontWeight:400, fontVariantNumeric:'tabular-nums' }}>{fmtDur(statusDuration)}</span>
-                </>
-              )}
-            </button>
-            {showStatusMenu && (
-              <div style={{
-                position: 'fixed',
-                bottom: navCollapsed ? 10 : 90,
-                left: navCollapsed ? NAV_WIDTH + 8 : 8,
-                width: navCollapsed ? 210 : NAV_WIDTH - 16,
-                background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius)',
-                boxShadow:'0 4px 24px rgba(0,0,0,.2)', zIndex:9999, overflow:'hidden',
-              }}>
-                {statusOptions.map(s => (
-                  <button key={s.value} onClick={() => updateStatus(s.value)}
-                    onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
-                    onMouseLeave={e => e.currentTarget.style.background = agentStatus === s.value ? 'var(--accent-bg)' : 'transparent'}
-                    style={{ display:'flex', alignItems:'center', gap:8, width:'100%', padding:'9px 12px', background: agentStatus === s.value ? 'var(--accent-bg)' : 'transparent', border:'none', cursor:'pointer', fontSize:12, fontWeight: agentStatus === s.value ? 600 : 400, color: agentStatus === s.value ? 'var(--accent)' : 'var(--text-primary)', textAlign:'left' }}>
-                    <div style={{ width:8, height:8, borderRadius:'50%', background:s.color, flexShrink:0 }}></div>
-                    {s.value}
-                    {agentStatus === s.value && <span style={{ marginLeft:'auto', fontSize:11 }}>✓</span>}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* User info */}
-          {!navCollapsed && (
-            <div style={{ display:'flex', alignItems:'center', gap:8, padding:'6px 4px', marginBottom:6 }}>
-              <div style={{ width:28, height:28, borderRadius:'50%', background:'var(--accent-bg)', color:'var(--accent)', display:'flex', alignItems:'center', justifyContent:'center', fontSize: profile?.avatar ? 16 : 11, fontWeight:600, flexShrink:0 }}>
-                {profile?.avatar || (profile?.name || profile?.email || '?')[0].toUpperCase()}
-              </div>
-              <div style={{ flex:1, minWidth:0 }}>
-                <div style={{ fontSize:12, fontWeight:600, color:'var(--text-primary)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{profile?.name || profile?.email}</div>
-                {isAdmin && <div style={{ fontSize:9, color:'var(--accent)', fontWeight:700, textTransform:'uppercase', letterSpacing:.5 }}>Admin</div>}
-              </div>
-            </div>
-          )}
-
-          {/* Theme toggle */}
           <button onClick={toggleTheme}
-            style={{ width:'100%', padding: navCollapsed ? '8px 0' : '7px 10px', background:'transparent', border:'1px solid var(--border)', borderRadius:'var(--radius)', cursor:'pointer', fontSize:12, color:'var(--text-muted)', display:'flex', alignItems:'center', justifyContent: navCollapsed ? 'center' : 'flex-start', gap:8, marginBottom:6 }}
+            style={{ width:'100%', padding: navCollapsed ? '8px 0' : '7px 10px', background:'transparent', border:'1px solid var(--border)', borderRadius:'var(--radius)', cursor:'pointer', fontSize:12, color:'var(--text-muted)', display:'flex', alignItems:'center', justifyContent: navCollapsed ? 'center' : 'flex-start', gap:8 }}
             onMouseEnter={e => { e.currentTarget.style.background = 'var(--surface-2)'; e.currentTarget.style.color = 'var(--text-primary)' }}
             onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-muted)' }}
             title={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}>
-            <span style={{ fontSize:14 }}>{darkMode ? '☀️' : '🌙'}</span>
+            <span style={{ fontSize:14 }}>{darkMode ? '\u2600\uFE0F' : '\uD83C\uDF19'}</span>
             {!navCollapsed && <span>{darkMode ? 'Light mode' : 'Dark mode'}</span>}
-          </button>
-
-          {/* Sign out */}
-          <button onClick={signOut}
-            style={{ width:'100%', padding: navCollapsed ? '8px 0' : '7px 0', background:'transparent', border:'1px solid var(--border)', borderRadius:'var(--radius)', cursor:'pointer', fontSize:12, color:'var(--text-muted)', display:'flex', alignItems:'center', justifyContent:'center', gap:6 }}
-            onMouseEnter={e => { e.currentTarget.style.background = 'var(--danger-bg)'; e.currentTarget.style.color = 'var(--danger)'; e.currentTarget.style.borderColor = 'var(--danger)' }}
-            onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-muted)'; e.currentTarget.style.borderColor = 'var(--border)' }}>
-            {navCollapsed ? '↩' : '↩ Sign out'}
           </button>
         </div>
       </aside>
+
+      {/* ── FLOATING PROFILE / STATUS MENU (top-right, all pages) ── */}
+      <div ref={menuRef} style={{ position:'fixed', top:10, right:14, zIndex:9998 }}>
+        <button onClick={() => setShowStatusMenu(v => !v)}
+          style={{ display:'flex', alignItems:'center', gap:8, padding:'5px 10px 5px 6px', background:'var(--surface)', border:'1px solid var(--border)', borderRadius:99, cursor:'pointer', boxShadow:'0 1px 6px rgba(0,0,0,.08)' }}>
+          {/* Avatar with status ring */}
+          <div style={{ position:'relative', flexShrink:0 }}>
+            <div style={{ width:30, height:30, borderRadius:'50%', background:'var(--accent-bg)', color:'var(--accent)', display:'flex', alignItems:'center', justifyContent:'center', fontSize: profile?.avatar ? 16 : 12, fontWeight:700, border:`2px solid ${currentStatusObj.color}` }}>
+              {profile?.avatar || (profile?.name || profile?.email || '?')[0].toUpperCase()}
+            </div>
+            <div style={{ position:'absolute', bottom:-1, right:-1, width:9, height:9, borderRadius:'50%', background:currentStatusObj.color, border:'2px solid var(--surface)' }} />
+          </div>
+          <div style={{ textAlign:'left', lineHeight:1.25 }}>
+            <div style={{ fontSize:11, fontWeight:700, color:'var(--text-primary)', whiteSpace:'nowrap' }}>{currentStatusObj.value}</div>
+            <div style={{ fontSize:10, color:'var(--text-muted)', fontVariantNumeric:'tabular-nums' }}>{fmtDur(statusDuration)}</div>
+          </div>
+          <span style={{ fontSize:9, color:'var(--text-muted)' }}>v</span>
+        </button>
+
+        {showStatusMenu && (
+          <div style={{ position:'absolute', top:'calc(100% + 6px)', right:0, width:240, background:'var(--surface)', border:'1px solid var(--border)', borderRadius:10, boxShadow:'0 8px 32px rgba(0,0,0,.18)', overflow:'hidden' }}>
+
+            {/* Who you are */}
+            <div style={{ padding:'12px 14px', borderBottom:'1px solid var(--border)', background:'var(--surface-2)', display:'flex', alignItems:'center', gap:10 }}>
+              <div style={{ width:34, height:34, borderRadius:'50%', background:'var(--accent-bg)', color:'var(--accent)', display:'flex', alignItems:'center', justifyContent:'center', fontSize: profile?.avatar ? 18 : 13, fontWeight:700, flexShrink:0 }}>
+                {profile?.avatar || (profile?.name || profile?.email || '?')[0].toUpperCase()}
+              </div>
+              <div style={{ minWidth:0 }}>
+                <div style={{ fontSize:12, fontWeight:700, color:'var(--text-primary)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{profile?.name || profile?.email}</div>
+                {isAdmin && <div style={{ fontSize:9, color:'var(--accent)', fontWeight:700, textTransform:'uppercase', letterSpacing:.5 }}>Admin</div>}
+              </div>
+            </div>
+
+            {/* Status list */}
+            <div style={{ padding:'6px 0', borderBottom:'1px solid var(--border)' }}>
+              <div style={{ fontSize:9, fontWeight:700, textTransform:'uppercase', letterSpacing:.7, color:'var(--text-muted)', padding:'4px 14px 6px' }}>Set status</div>
+              {statusOptions.map(s => (
+                <button key={s.value} onClick={() => { updateStatus(s.value); setShowStatusMenu(false) }}
+                  onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
+                  onMouseLeave={e => e.currentTarget.style.background = agentStatus === s.value ? 'var(--accent-bg)' : 'transparent'}
+                  style={{ display:'flex', alignItems:'center', gap:9, width:'100%', padding:'8px 14px', background: agentStatus === s.value ? 'var(--accent-bg)' : 'transparent', border:'none', cursor:'pointer', fontSize:12, fontWeight: agentStatus === s.value ? 600 : 400, color: agentStatus === s.value ? 'var(--accent)' : 'var(--text-primary)', textAlign:'left' }}>
+                  <div style={{ width:9, height:9, borderRadius:'50%', background:s.color, flexShrink:0 }}></div>
+                  {s.value}
+                  {agentStatus === s.value && <span style={{ marginLeft:'auto', fontSize:11 }}>{'\u2713'}</span>}
+                </button>
+              ))}
+            </div>
+
+            {/* Links */}
+            <div style={{ padding:'6px 0', borderBottom:'1px solid var(--border)' }}>
+              {[
+                { to:'/mypage', label:'My Page' },
+                { to:'/mypage?tab=my-schedule', label:'My Schedule' },
+                ...(isAdmin ? [{ to:'/settings', label:'Settings' }] : []),
+              ].map(({ to, label }) => (
+                <button key={label} onClick={() => { navigate(to); setShowStatusMenu(false) }}
+                  onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
+                  onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                  style={{ display:'flex', alignItems:'center', width:'100%', padding:'8px 14px', background:'transparent', border:'none', cursor:'pointer', fontSize:12, color:'var(--text-primary)', textAlign:'left' }}>
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            {/* Sign out */}
+            <button onClick={signOut}
+              onMouseEnter={e => { e.currentTarget.style.background = 'var(--danger-bg)'; e.currentTarget.style.color = 'var(--danger)' }}
+              onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-muted)' }}
+              style={{ display:'flex', alignItems:'center', width:'100%', padding:'9px 14px', background:'transparent', border:'none', cursor:'pointer', fontSize:12, color:'var(--text-muted)', textAlign:'left' }}>
+              Sign out
+            </button>
+          </div>
+        )}
+      </div>
 
       {/* ── MAIN CONTENT ── */}
       <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden', minWidth:0 }}>
@@ -499,6 +526,7 @@ export default function DialerLayout() {
           <Route path="/" element={<DialerPage />} />
           <Route path="/live" element={<LivePage />} />
           <Route path="/analytics" element={<DashboardPage />} />
+          <Route path="/recordings" element={<RecordingsPage />} />
           <Route path="/leaderboard" element={<LeaderboardPage />} />
           <Route path="/attendance" element={<AttendancePage />} />
           <Route path="/notes" element={<NotesPage />} />
