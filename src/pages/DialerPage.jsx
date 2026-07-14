@@ -104,6 +104,12 @@ export default function DialerPage() {
   const [stCampaignId, setStCampaignId] = useState(null)
   const [selectedJobType, setSelectedJobType] = useState('')
   const [selectedBU, setSelectedBU] = useState('')
+  const [buSearch, setBuSearch] = useState('')
+  const [buOpen, setBuOpen] = useState(false)
+  const [jtSearch, setJtSearch] = useState('')
+  const [jtOpen, setJtOpen] = useState(false)
+  const [campSearch, setCampSearch] = useState('')
+  const [campOpen, setCampOpen] = useState(false)
   const [availability, setAvailability] = useState([])
   const [availLoading, setAvailLoading] = useState(false)
   const [availError, setAvailError] = useState(null)
@@ -768,36 +774,119 @@ export default function DialerPage() {
                     {/* ST Booking fields — only shown when Booked is selected */}
                     {selectedOutcome === 'Booked' && (
                       <div style={{ display:'flex', flexDirection:'column', gap:10, padding:'16px', background:'var(--success-bg)', border:'1px solid var(--success)', borderRadius:'var(--radius)' }}>
-                        <div style={{ fontSize:11, fontWeight:700, color:'var(--success)', marginBottom:2 }}>📋 ServiceTitan Booking Details</div>
+                        <div style={{ fontSize:11, fontWeight:700, color:'var(--success)', marginBottom:2 }}>ServiceTitan Booking Details</div>
                         <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8 }}>
-                          <div>
+                          {/* Business Unit */}
+                          <div style={{ position:'relative' }}>
                             <label style={{ fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color:'var(--text-muted)', display:'block', marginBottom:5 }}>Business Unit</label>
-                            <select value={selectedBU} onChange={e => { setSelectedBU(e.target.value); setSelectedJobType(''); setAvailability([]); setBookingResult(null) }}
-                              style={{ width:'100%', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'8px 10px', fontSize:12, background:'var(--surface)', color:'var(--text-primary)' }}>
-                              <option value="">Select business unit...</option>
-                              {[...stBusinessUnits].sort((a,b) => a.name.localeCompare(b.name)).map(bu => <option key={bu.id} value={bu.id}>{bu.name}</option>)}
-                            </select>
+                            <div onClick={() => { setBuOpen(v => !v); setJtOpen(false); setCampOpen(false) }}
+                              style={{ width:'100%', border:`1px solid ${buOpen ? 'var(--accent)' : 'var(--border)'}`, borderRadius:'var(--radius)', padding:'8px 10px', fontSize:12, background:'var(--surface)', color: selectedBU ? 'var(--text-primary)' : 'var(--text-muted)', cursor:'pointer', display:'flex', justifyContent:'space-between', alignItems:'center', userSelect:'none' }}>
+                              <span style={{ overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                                {selectedBU ? stBusinessUnits.find(b => String(b.id) === String(selectedBU))?.name : 'Select business unit...'}
+                              </span>
+                              <span style={{ fontSize:10, marginLeft:6, flexShrink:0 }}>▾</span>
+                            </div>
+                            {buOpen && (
+                              <div style={{ position:'absolute', top:'100%', left:0, right:0, zIndex:200, background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius)', boxShadow:'0 4px 20px rgba(0,0,0,.15)', marginTop:2 }}>
+                                <div style={{ padding:'6px 8px', borderBottom:'1px solid var(--border)' }}>
+                                  <input autoFocus value={buSearch} onChange={e => setBuSearch(e.target.value)}
+                                    placeholder="Search..." onClick={e => e.stopPropagation()}
+                                    style={{ width:'100%', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'5px 8px', fontSize:12, background:'var(--surface-2)', color:'var(--text-primary)' }} />
+                                </div>
+                                <div style={{ maxHeight:200, overflowY:'auto' }}>
+                                  {[...stBusinessUnits]
+                                    .filter(b => b.name.toLowerCase().includes(buSearch.toLowerCase()))
+                                    .sort((a,b) => a.name.localeCompare(b.name))
+                                    .map(bu => (
+                                      <div key={bu.id} onClick={() => { setSelectedBU(String(bu.id)); setSelectedJobType(''); setAvailability([]); setBookingResult(null); setBuOpen(false); setBuSearch('') }}
+                                        style={{ padding:'9px 12px', fontSize:12, cursor:'pointer', background: String(selectedBU) === String(bu.id) ? 'var(--accent-bg)' : 'transparent', color: String(selectedBU) === String(bu.id) ? 'var(--accent)' : 'var(--text-primary)', fontWeight: String(selectedBU) === String(bu.id) ? 600 : 400 }}
+                                        onMouseEnter={e => { if (String(selectedBU) !== String(bu.id)) e.currentTarget.style.background='var(--surface-2)' }}
+                                        onMouseLeave={e => { if (String(selectedBU) !== String(bu.id)) e.currentTarget.style.background='transparent' }}>
+                                        {bu.name}
+                                      </div>
+                                    ))}
+                                  {stBusinessUnits.filter(b => b.name.toLowerCase().includes(buSearch.toLowerCase())).length === 0 && (
+                                    <div style={{ padding:'9px 12px', fontSize:12, color:'var(--text-muted)', fontStyle:'italic' }}>No results</div>
+                                  )}
+                                </div>
+                              </div>
+                            )}
                           </div>
-                          <div>
+
+                          {/* Job Type */}
+                          <div style={{ position:'relative' }}>
                             <label style={{ fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color:'var(--text-muted)', display:'block', marginBottom:5 }}>Job Type</label>
-                            <select value={selectedJobType} onChange={e => { setSelectedJobType(e.target.value); setAvailability([]); setBookingResult(null) }}
-                              style={{ width:'100%', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'8px 10px', fontSize:12, background:'var(--surface)', color:'var(--text-primary)' }}>
-                              <option value="">Select job type...</option>
-                              {[...stJobTypes]
-                                .filter(jt => !selectedBU || (jt.businessUnitIds?.includes(parseInt(selectedBU)) || jt.businessUnitId === parseInt(selectedBU)))
-                                .sort((a,b) => a.name.localeCompare(b.name))
-                                .map(jt => <option key={jt.id} value={jt.id}>{jt.name}</option>)}
-                            </select>
+                            <div onClick={() => { setJtOpen(v => !v); setBuOpen(false); setCampOpen(false) }}
+                              style={{ width:'100%', border:`1px solid ${jtOpen ? 'var(--accent)' : 'var(--border)'}`, borderRadius:'var(--radius)', padding:'8px 10px', fontSize:12, background:'var(--surface)', color: selectedJobType ? 'var(--text-primary)' : 'var(--text-muted)', cursor:'pointer', display:'flex', justifyContent:'space-between', alignItems:'center', userSelect:'none' }}>
+                              <span style={{ overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                                {selectedJobType ? stJobTypes.find(j => String(j.id) === String(selectedJobType))?.name : 'Select job type...'}
+                              </span>
+                              <span style={{ fontSize:10, marginLeft:6, flexShrink:0 }}>▾</span>
+                            </div>
+                            {jtOpen && (
+                              <div style={{ position:'absolute', top:'100%', left:0, right:0, zIndex:200, background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius)', boxShadow:'0 4px 20px rgba(0,0,0,.15)', marginTop:2 }}>
+                                <div style={{ padding:'6px 8px', borderBottom:'1px solid var(--border)' }}>
+                                  <input autoFocus value={jtSearch} onChange={e => setJtSearch(e.target.value)}
+                                    placeholder="Search job types..." onClick={e => e.stopPropagation()}
+                                    style={{ width:'100%', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'5px 8px', fontSize:12, background:'var(--surface-2)', color:'var(--text-primary)' }} />
+                                </div>
+                                <div style={{ maxHeight:200, overflowY:'auto' }}>
+                                  {[...stJobTypes]
+                                    .filter(jt => (!selectedBU || jt.businessUnitIds?.includes(parseInt(selectedBU)) || jt.businessUnitId === parseInt(selectedBU)))
+                                    .filter(jt => jt.name.toLowerCase().includes(jtSearch.toLowerCase()))
+                                    .sort((a,b) => a.name.localeCompare(b.name))
+                                    .map(jt => (
+                                      <div key={jt.id} onClick={() => { setSelectedJobType(String(jt.id)); setAvailability([]); setBookingResult(null); setJtOpen(false); setJtSearch('') }}
+                                        style={{ padding:'9px 12px', fontSize:12, cursor:'pointer', background: String(selectedJobType) === String(jt.id) ? 'var(--accent-bg)' : 'transparent', color: String(selectedJobType) === String(jt.id) ? 'var(--accent)' : 'var(--text-primary)', fontWeight: String(selectedJobType) === String(jt.id) ? 600 : 400 }}
+                                        onMouseEnter={e => { if (String(selectedJobType) !== String(jt.id)) e.currentTarget.style.background='var(--surface-2)' }}
+                                        onMouseLeave={e => { if (String(selectedJobType) !== String(jt.id)) e.currentTarget.style.background='transparent' }}>
+                                        {jt.name}
+                                      </div>
+                                    ))}
+                                  {stJobTypes.filter(jt => jt.name.toLowerCase().includes(jtSearch.toLowerCase())).length === 0 && (
+                                    <div style={{ padding:'9px 12px', fontSize:12, color:'var(--text-muted)', fontStyle:'italic' }}>No results</div>
+                                  )}
+                                </div>
+                              </div>
+                            )}
                           </div>
                         </div>
+
                         {/* Marketing Campaign */}
-                        <div>
+                        <div style={{ position:'relative' }}>
                           <label style={{ fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color:'var(--text-muted)', display:'block', marginBottom:5 }}>Marketing Campaign</label>
-                          <select value={stCampaignId || ''} onChange={e => setStCampaignId(e.target.value ? parseInt(e.target.value) : null)}
-                            style={{ width:'100%', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'8px 10px', fontSize:12, background:'var(--surface)', color:'var(--text-primary)' }}>
-                            <option value="">Select campaign...</option>
-                            {[...stCampaigns].sort((a,b) => a.name.localeCompare(b.name)).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                          </select>
+                          <div onClick={() => { setCampOpen(v => !v); setBuOpen(false); setJtOpen(false) }}
+                            style={{ width:'100%', border:`1px solid ${campOpen ? 'var(--accent)' : 'var(--border)'}`, borderRadius:'var(--radius)', padding:'8px 10px', fontSize:12, background:'var(--surface)', color: stCampaignId ? 'var(--text-primary)' : 'var(--text-muted)', cursor:'pointer', display:'flex', justifyContent:'space-between', alignItems:'center', userSelect:'none' }}>
+                            <span style={{ overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                              {stCampaignId ? stCampaigns.find(c => c.id === stCampaignId || String(c.id) === String(stCampaignId))?.name : 'Select campaign...'}
+                            </span>
+                            <span style={{ fontSize:10, marginLeft:6, flexShrink:0 }}>▾</span>
+                          </div>
+                          {campOpen && (
+                            <div style={{ position:'absolute', top:'100%', left:0, right:0, zIndex:200, background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius)', boxShadow:'0 4px 20px rgba(0,0,0,.15)', marginTop:2 }}>
+                              <div style={{ padding:'6px 8px', borderBottom:'1px solid var(--border)' }}>
+                                <input autoFocus value={campSearch} onChange={e => setCampSearch(e.target.value)}
+                                  placeholder="Search campaigns..." onClick={e => e.stopPropagation()}
+                                  style={{ width:'100%', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'5px 8px', fontSize:12, background:'var(--surface-2)', color:'var(--text-primary)' }} />
+                              </div>
+                              <div style={{ maxHeight:200, overflowY:'auto' }}>
+                                {[...stCampaigns]
+                                  .filter(c => c.name.toLowerCase().includes(campSearch.toLowerCase()))
+                                  .sort((a,b) => a.name.localeCompare(b.name))
+                                  .map(c => (
+                                    <div key={c.id} onClick={() => { setStCampaignId(c.id); setCampOpen(false); setCampSearch('') }}
+                                      style={{ padding:'9px 12px', fontSize:12, cursor:'pointer', background: stCampaignId === c.id ? 'var(--accent-bg)' : 'transparent', color: stCampaignId === c.id ? 'var(--accent)' : 'var(--text-primary)', fontWeight: stCampaignId === c.id ? 600 : 400 }}
+                                      onMouseEnter={e => { if (stCampaignId !== c.id) e.currentTarget.style.background='var(--surface-2)' }}
+                                      onMouseLeave={e => { if (stCampaignId !== c.id) e.currentTarget.style.background='transparent' }}>
+                                      {c.name}
+                                    </div>
+                                  ))}
+                                {stCampaigns.filter(c => c.name.toLowerCase().includes(campSearch.toLowerCase())).length === 0 && (
+                                  <div style={{ padding:'9px 12px', fontSize:12, color:'var(--text-muted)', fontStyle:'italic' }}>No results</div>
+                                )}
+                              </div>
+                            </div>
+                          )}
                         </div>
                         {/* Membership add-on checkbox */}
                         <label style={{ display:'flex', alignItems:'center', gap:10, padding:'10px 12px', background: alsoMembership ? '#EFF6FF' : 'var(--surface)', border:`1.5px solid ${alsoMembership ? '#3b82f6' : 'var(--border)'}`, borderRadius:'var(--radius)', cursor:'pointer', transition:'all .1s' }}>
