@@ -270,6 +270,77 @@ app.get('/api/st/businessunits', async (req, res) => {
   }
 })
 
+// ── ST: Search customers by name, phone, or address
+app.get('/api/st/search', async (req, res) => {
+  try {
+    const { q } = req.query
+    if (!q || q.trim().length < 3) return res.json({ data: [] })
+    const query = q.trim()
+    const digits = query.replace(/\D/g, '')
+    const results = new Map()
+
+    const addResults = (arr) => {
+      (arr || []).forEach(cust => { if (cust?.id && !results.has(cust.id)) results.set(cust.id, cust) })
+    }
+
+    // Phone search (if it looks like a phone number)
+    if (digits.length >= 7) {
+      try {
+        const byPhone = await stGet(`/crm/v2/tenant/${ST_TENANT_ID}/customers?phone=${digits.slice(-10)}&pageSize=10`)
+        addResults(byPhone?.data)
+      } catch (e) {}
+      // Also check contacts index
+      try {
+        const contactHits = await stGet(`/crm/v2/tenant/${ST_TENANT_ID}/contacts?phone=${digits.slice(-10)}&pageSize=10`)
+        const ids = [...new Set((contactHits?.data || []).map(ct => ct.customerId).filter(Boolean))]
+        for (const cid of ids.slice(0, 5)) {
+          if (results.has(cid)) continue
+          try { const cust = await stGet(`/crm/v2/tenant/${ST_TENANT_ID}/customers/${cid}`); addResults([cust]) } catch (e) {}
+        }
+      } catch (e) {}
+    }
+
+    // Name search
+    if (digits.length < 7 || results.size === 0) {
+      try {
+        const byName = await stGet(`/crm/v2/tenant/${ST_TENANT_ID}/customers?name=${encodeURIComponent(query)}&pageSize=10`)
+        addResults(byName?.data)
+      } catch (e) {}
+    }
+
+    // Address / street search
+    if (results.size === 0) {
+      try {
+        const byStreet = await stGet(`/crm/v2/tenant/${ST_TENANT_ID}/customers?street=${encodeURIComponent(query)}&pageSize=10`)
+        addResults(byStreet?.data)
+      } catch (e) {}
+      try {
+        const locHits = await stGet(`/crm/v2/tenant/${ST_TENANT_ID}/locations?street=${encodeURIComponent(query)}&pageSize=10`)
+        const ids = [...new Set((locHits?.data || []).map(l => l.customerId).filter(Boolean))]
+        for (const cid of ids.slice(0, 5)) {
+          if (results.has(cid)) continue
+          try { const cust = await stGet(`/crm/v2/tenant/${ST_TENANT_ID}/customers/${cid}`); addResults([cust]) } catch (e) {}
+        }
+      } catch (e) {}
+    }
+
+    const data = [...results.values()].slice(0, 10).map(cust => ({
+      id: cust.id,
+      name: cust.name,
+      phone: cust.phoneSettings?.phoneNumber || cust.phoneNumber || null,
+      email: cust.email || null,
+      address: cust.address?.street || null,
+      city: cust.address?.city || null,
+      state: cust.address?.state || null,
+      zip: cust.address?.zip || null,
+    }))
+    res.json({ data })
+  } catch (err) {
+    console.error('ST search error:', err.message)
+    res.status(500).json({ error: err.message, data: [] })
+  }
+})
+
 // ── ST: Look up a customer by phone number (for inbound call pop)
 app.get('/api/st/lookup', async (req, res) => {
   try {
@@ -479,6 +550,26 @@ app.post('/api/twilio/token', async (req, res) => {
   }
 })
 
+// ── Send SMS
+app.post('/api/twilio/sms', async (req, res) => {
+  try {
+    const { to, body, repName, contactId } = req.body
+    if (!to || !body) return res.status(400).json({ error: 'to and body required' })
+    const msg = await twilioClient.messages.create({ to, from: twilioPhone, body })
+    // Log it
+    await supabase.from('call_logs').insert({
+      contact_id: contactId || null,
+      rep: repName || 'CSR',
+      outcome: 'Text Sent',
+      notes: body,
+    }).catch(() => {})
+    res.json({ ok: true, sid: msg.sid })
+  } catch (err) {
+    console.error('SMS error:', err.message)
+    res.status(500).json({ error: err.message })
+  }
+})
+
 // ── Outbound call
 app.post('/api/twilio/call', async (req, res) => {
   try {
@@ -545,35 +636,29 @@ app.post('/api/twilio/inbound', async (req, res) => {
     started_at: new Date().toISOString(),
   })
 
-  // Find online/available reps to ring
-  const { data: onlineReps } = await supabase
+  // Only ring reps who are set to "Inbound" status
+  const { data: inboundReps } = await supabase
     .from('profiles')
     .select('name, email, status')
-    .in('status', ['Available', 'Wrap Up', 'Online'])
+    .eq('status', 'Inbound')
     .not('name', 'is', null)
 
   const twiml = new VoiceResponse()
+
+  if (!inboundReps || inboundReps.length === 0) {
+    // Nobody is taking inbound calls
+    twiml.say({ voice: 'alice' }, 'Thank you for calling Awesome Home Services. All of our representatives are currently unavailable. Please leave a message after the tone and we will return your call shortly.')
+    twiml.record({ maxLength: 120, action: `${appUrl}/api/twilio/inbound/complete`, transcribe: false })
+    res.type('text/xml')
+    return res.send(twiml.toString())
+  }
+
   twiml.say({ voice: 'alice' }, 'Please hold while we connect you.')
   const dial = twiml.dial({ timeout: 30, action: `${appUrl}/api/twilio/inbound/complete` })
-
-  if (onlineReps && onlineReps.length > 0) {
-    // Ring all available reps simultaneously
-    onlineReps.forEach(rep => {
-      const identity = (rep.name || rep.email || '').replace(/[^a-zA-Z0-9_]/g, '_')
-      if (identity) dial.client(identity)
-    })
-  } else {
-    // Fallback — try to ring anyone with a profile
-    const { data: allReps } = await supabase.from('profiles').select('name, email').limit(5)
-    if (allReps?.length) {
-      allReps.forEach(rep => {
-        const identity = (rep.name || rep.email || '').replace(/[^a-zA-Z0-9_]/g, '_')
-        if (identity) dial.client(identity)
-      })
-    } else {
-      dial.client('andi-csr') // last resort fallback
-    }
-  }
+  inboundReps.forEach(rep => {
+    const identity = (rep.name || rep.email || '').replace(/[^a-zA-Z0-9_]/g, '_')
+    if (identity) dial.client(identity)
+  })
 
   res.type('text/xml')
   res.send(twiml.toString())
