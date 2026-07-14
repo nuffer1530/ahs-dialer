@@ -586,8 +586,9 @@ export default function DialerPage() {
     const c = selectedContact
     const notes = notesVal.trim()
     if (selectedOutcome === 'Booked' && !notes) { alert('Please add notes before booking.'); return }
-    const newAttempts = (c.attempts || 0) + 1
-    const isFinal = DONE_OUTCOMES.includes(selectedOutcome) || newAttempts >= MAX_ATTEMPTS
+    const isCampaignContact = !!c.campaign_id
+    const newAttempts = isCampaignContact ? (c.attempts || 0) + 1 : (c.attempts || 0)
+    const isFinal = DONE_OUTCOMES.includes(selectedOutcome) || (isCampaignContact && newAttempts >= MAX_ATTEMPTS)
     const newStatus = isFinal ? (DONE_OUTCOMES.includes(selectedOutcome) ? selectedOutcome : 'Max Attempts') : selectedOutcome
 
     setSaving(true)
@@ -756,8 +757,9 @@ export default function DialerPage() {
   }
 
   const c = selectedContact
-  const isMe = c?.claimed_by === currentRep
-  const isOther = c?.claimed_by && !isMe
+  const isOutbound = !!c?.campaign_id
+  const isMe = isOutbound ? (c?.claimed_by === currentRep) : true
+  const isOther = isOutbound && c?.claimed_by && c.claimed_by !== currentRep
   const done = c ? (isDone(c) || c.status === 'Max Attempts') : false
   const isDNC = c ? dncSet.has(normPhone(c.phone || '')) : false
   const isDup = c ? dupSet.has(c.id) : false
@@ -998,7 +1000,7 @@ export default function DialerPage() {
                       <div style={{ fontSize:10, color:'var(--text-muted)' }}>{contact.phone || 'No phone'}</div>
                     </div>
                     <div style={{ display:'flex', gap:2 }}>
-                      {Array.from({length:MAX_ATTEMPTS},(_,i) => <div key={i} style={{width:4,height:4,borderRadius:'50%',background:i<(contact.attempts||0)?'var(--accent)':'var(--border)'}}></div>)}
+                      {contact.campaign_id && Array.from({length:MAX_ATTEMPTS},(_,i) => <div key={i} style={{width:4,height:4,borderRadius:'50%',background:i<(contact.attempts||0)?'var(--accent)':'var(--border)'}}></div>)}
                     </div>
                   </div>
                 </div>
@@ -1057,7 +1059,7 @@ export default function DialerPage() {
                       <span key={i} style={{ fontSize:11, color:'var(--text-secondary)' }}>{v}</span>
                     ))}
                     <span style={{ fontSize:11, color:'var(--text-secondary)' }}>ST: {c.external_id || '--'}</span>
-                    <span style={{ fontSize:11, color:'var(--text-secondary)' }}>Attempts: {c.attempts||0}/{MAX_ATTEMPTS}</span>
+                    {isOutbound && <span style={{ fontSize:11, color:'var(--text-secondary)' }}>Attempts: {c.attempts||0}/{MAX_ATTEMPTS}</span>}
                   </div>
                 </div>
                 {/* Action buttons */}
@@ -1085,8 +1087,8 @@ export default function DialerPage() {
                     Email
                   </button>
                   <button onClick={() => openInST(c)} style={{ padding:'7px 12px', border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface-2)', cursor:'pointer', fontSize:12, color:'var(--text-primary)' }}>Open in ST</button>
-                  {!c.claimed_by && !done && <button className="btn sm primary" onClick={claimContact}>Claim</button>}
-                  {isMe && !done && <button className="btn sm" onClick={() => releaseContact(c.id)}>Release</button>}
+                  {isOutbound && !c.claimed_by && !done && <button className="btn sm primary" onClick={claimContact}>Claim</button>}
+                  {isOutbound && isMe && c.claimed_by && !done && <button className="btn sm" onClick={() => releaseContact(c.id)}>Release</button>}
                   {isOther && <span style={{ fontSize:11, color:'var(--text-muted)' }}>Claimed by {c.claimed_by}</span>}
                 </div>
               </div>
