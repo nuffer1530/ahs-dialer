@@ -120,6 +120,8 @@ export default function DialerPage() {
   const [availWeekOffset, setAvailWeekOffset] = useState(0)
   const [stLoading, setStLoading] = useState(false)
 
+  // Twilio
+  const deviceRef = useRef(null)
   const [incomingCall, setIncomingCall] = useState(null) // { call, from, contactName }
   const callRef = useRef(null)
   const [twilioReady, setTwilioReady] = useState(false)
@@ -323,6 +325,8 @@ export default function DialerPage() {
     incomingCall.call.reject()
     setIncomingCall(null)
   }
+
+  const makeCall = async (number) => {
     if (!deviceRef.current) { alert('Twilio not ready yet'); return }
     try {
       const params = { To: number, identity: currentRep.replace(/[^a-zA-Z0-9_]/g, '_'), contactId: selectedId || '', contactName: selectedContact?.name || '' }
