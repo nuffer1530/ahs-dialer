@@ -772,26 +772,19 @@ export default function DialerPage() {
   const [stJobHistory, setStJobHistory] = useState([])
   const [stJobHistoryLoading, setStJobHistoryLoading] = useState(false)
   const [stCustomerInfo, setStCustomerInfo] = useState(null)
-  const [stCalls, setStCalls] = useState([])
-  const [playingCall, setPlayingCall] = useState(null)
-  const audioRef = useRef(null)
 
-  const playRecording = (id, url) => {
-    if (playingCall === id) { audioRef.current?.pause(); setPlayingCall(null); return }
-    audioRef.current?.pause()
-    const sid = url?.includes('api.twilio.com') ? url.split('/').pop()?.replace('.mp3','') : null
-    const src = sid ? `/api/twilio/recording/${sid}` : url
-    const audio = new Audio(src)
-    audioRef.current = audio
-    audio.onended = () => setPlayingCall(null)
-    audio.onerror = () => { setPlayingCall(null); alert('Could not load recording.') }
-    audio.play().then(() => setPlayingCall(id)).catch(() => setPlayingCall(null))
-  }
-  useEffect(() => () => audioRef.current?.pause(), [])
+  // Customer intelligence brief (AI synthesis of ST history)
+  const [brief, setBrief] = useState(null)
+  const [briefFacts, setBriefFacts] = useState(null)
+  const [briefLoading, setBriefLoading] = useState(false)
 
-  // Fetch ST customer info + job history + calls when contact changes
+  // Fetch ST customer info + job history + intelligence brief when contact changes
   useEffect(() => {
-    if (!c?.external_id) { setStJobHistory([]); setStCustomerInfo(null); setStCalls([]); return }
+    if (!c?.external_id) {
+      setStJobHistory([]); setStCustomerInfo(null)
+      setBrief(null); setBriefFacts(null); setBriefLoading(false)
+      return
+    }
     setStJobHistoryLoading(true)
     fetch(`/api/st/customer/${c.external_id}`)
       .then(r => r.ok ? r.json() : null)
@@ -799,13 +792,25 @@ export default function DialerPage() {
       .catch(() => {})
     fetch(`/api/st/jobs?customerId=${c.external_id}`)
       .then(r => r.ok ? r.json() : null)
-      .then(data => { setStJobHistory(data?.data?.slice(0,3) || []); setStJobHistoryLoading(false) })
+      .then(data => { setStJobHistory(data?.data?.slice(0,5) || []); setStJobHistoryLoading(false) })
       .catch(() => setStJobHistoryLoading(false))
-    fetch(`/api/st/calls?customerId=${c.external_id}&limit=5`)
+
+    setBrief(null); setBriefFacts(null); setBriefLoading(true)
+    fetch(`/api/st/intelligence/${c.external_id}`)
       .then(r => r.ok ? r.json() : null)
-      .then(data => setStCalls(data?.data || []))
-      .catch(() => setStCalls([]))
+      .then(data => { setBrief(data?.brief || null); setBriefFacts(data?.facts || null); setBriefLoading(false) })
+      .catch(() => setBriefLoading(false))
   }, [c?.external_id])
+
+  const refreshBrief = () => {
+    if (!c?.external_id || briefLoading) return
+    setBriefLoading(true); setBrief(null)
+    fetch(`/api/st/intelligence/${c.external_id}?refresh=1`)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => { setBrief(data?.brief || null); setBriefFacts(data?.facts || null); setBriefLoading(false) })
+      .catch(() => setBriefLoading(false))
+  }
+
 
   // SearchSelect component
 
@@ -1128,13 +1133,77 @@ export default function DialerPage() {
                     </div>
                   </div>
 
-                  {/* Job history */}
-                  <div style={{ ...sectionCard, marginTop:1 }}>
+                  {/* Intelligence brief — AI synthesis of ST customer history */}
+                  <div style={{ ...sectionCard, marginTop:1, borderLeft:'3px solid var(--accent)' }}>
+                    <div style={sectionHeader}>
+                      <span style={sectionTitle}>Intelligence brief</span>
+                      {c.external_id && (
+                        <span onClick={refreshBrief}
+                          title="Regenerate"
+                          style={{ fontSize:10, color: briefLoading ? 'var(--text-muted)' : 'var(--accent)', cursor: briefLoading ? 'default' : 'pointer', display:'flex', alignItems:'center', gap:3 }}>
+                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>
+                          Refresh
+                        </span>
+                      )}
+                    </div>
+                    <div style={{ padding:'12px 14px' }}>
+                      {!c.external_id ? (
+                        <div style={{ fontSize:12, color:'var(--text-muted)' }}>No ST ID -- no history to analyze.</div>
+                      ) : briefLoading ? (
+                        <div style={{ display:'flex', alignItems:'center', gap:10, color:'var(--text-muted)', fontSize:12 }}>
+                          <div className="spinner" style={{ width:16, height:16 }} />
+                          Analyzing customer history...
+                        </div>
+                      ) : brief ? (
+                        <>
+                          {Array.isArray(briefFacts?.pinnedNotes) && briefFacts.pinnedNotes.length > 0 && (
+                            <div style={{ marginBottom:10, display:'flex', flexDirection:'column', gap:6 }}>
+                              {briefFacts.pinnedNotes.map((note, i) => (
+                                <div key={i} style={{ background:'#FFFBEB', border:'1px solid #FCD34D', borderRadius:'var(--radius)', padding:'8px 10px', display:'flex', gap:7, alignItems:'flex-start' }}>
+                                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#B45309" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink:0, marginTop:1 }}><path d="m12 2 1.5 6.5L20 10l-6.5 1.5L12 18l-1.5-6.5L4 10l6.5-1.5z"/></svg>
+                                  <div style={{ fontSize:12, lineHeight:1.5, color:'#78350F', fontWeight:500 }}>{note}</div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                          <div style={{ fontSize:13, lineHeight:1.65, color:'var(--text-primary)' }}>{brief}</div>
+                          {briefFacts && (() => {
+                            const chips = []
+                            if (typeof briefFacts.lifetimeValue === 'number' && briefFacts.lifetimeValue > 0)
+                              chips.push({ label:'LTV', value:`$${Math.round(briefFacts.lifetimeValue).toLocaleString()}` })
+                            if (Array.isArray(briefFacts.equipment) && briefFacts.equipment.length) {
+                              const oldest = briefFacts.equipment.filter(e => e.ageYears != null).sort((a,b) => b.ageYears - a.ageYears)[0]
+                              if (oldest) chips.push({ label:oldest.name, value:`${oldest.ageYears}yr` })
+                            }
+                            if (briefFacts.openEstimates?.count)
+                              chips.push({ label:'Open est.', value: briefFacts.openEstimates.total ? `${briefFacts.openEstimates.count} ($${Math.round(briefFacts.openEstimates.total).toLocaleString()})` : String(briefFacts.openEstimates.count) })
+                            if (briefFacts.membership && briefFacts.membership !== 'Non-member')
+                              chips.push({ label:'Member', value: briefFacts.membership })
+                            if (!chips.length) return null
+                            return (
+                              <div style={{ display:'flex', flexWrap:'wrap', gap:6, marginTop:10 }}>
+                                {chips.map((ch, i) => (
+                                  <span key={i} style={{ fontSize:10, fontWeight:600, background:'var(--surface-2)', border:'1px solid var(--border)', borderRadius:99, padding:'3px 9px', color:'var(--text-secondary)' }}>
+                                    <span style={{ color:'var(--text-muted)', fontWeight:500 }}>{ch.label}: </span>{ch.value}
+                                  </span>
+                                ))}
+                              </div>
+                            )
+                          })()}
+                        </>
+                      ) : (
+                        <div style={{ fontSize:12, color:'var(--text-muted)' }}>No brief available. Tap Refresh to generate one.</div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Recent jobs — last 5 */}
+                  <div style={{ ...sectionCard, marginTop:1, flex:1, display:'flex', flexDirection:'column', minHeight:0 }}>
                     <div style={sectionHeader}>
                       <span style={sectionTitle}>Recent jobs</span>
                       {c.external_id && <span onClick={() => openInST(c)} style={{ fontSize:10, color:'var(--accent)', cursor:'pointer' }}>View all in ST</span>}
                     </div>
-                    <div style={{ padding:0 }}>
+                    <div style={{ padding:0, overflowY:'auto', flex:1 }}>
                       {!c.external_id ? (
                         <div style={{ padding:'14px', fontSize:12, color:'var(--text-muted)', textAlign:'center' }}>No ST ID -- can't load history</div>
                       ) : stJobHistoryLoading ? (
@@ -1171,95 +1240,6 @@ export default function DialerPage() {
                           </div>
                         )
                       })}
-                    </div>
-                  </div>
-
-                  {/* Call activity — Andi logs + ST calls merged */}
-                  <div style={{ ...sectionCard, marginTop:1, flex:1, display:'flex', flexDirection:'column', minHeight:0 }}>
-                    <div style={sectionHeader}>
-                      <span style={sectionTitle}>Call activity</span>
-                      {contactLogs.length > 0 && <button className="btn sm" style={{ fontSize:10, padding:'2px 7px' }} onClick={openCorrectModal}>Correct last</button>}
-                    </div>
-                    <div style={{ overflowY:'auto', flex:1 }}>
-                      {(() => {
-                        // Merge Andi call logs + ST calls into one timeline, newest first, cap at 5
-                        const andiItems = contactLogs.map(l => ({
-                          key: `andi-${l.id}`,
-                          source: 'andi',
-                          when: l.created_at,
-                          outcome: l.outcome,
-                          notes: l.notes,
-                          rep: l.rep,
-                          duration: l.recording_duration,
-                          recordingUrl: l.recording_url,
-                        }))
-                        const stItems = stCalls.map(sc => ({
-                          key: `st-${sc.id}`,
-                          source: 'st',
-                          when: sc.receivedOn || sc.createdOn,
-                          outcome: sc.reason || (sc.direction === 'Inbound' ? 'Inbound call' : 'Outbound call'),
-                          notes: [sc.campaign, sc.direction].filter(Boolean).join(' . '),
-                          rep: sc.agent,
-                          duration: sc.duration ? (() => {
-                            const p = String(sc.duration).split(':')
-                            return p.length === 3 ? (+p[0])*3600 + (+p[1])*60 + Math.round(+p[2]) : null
-                          })() : null,
-                          recordingUrl: sc.recordingUrl || sc.voiceMailUrl,
-                        }))
-                        const all = [...andiItems, ...stItems]
-                          .filter(x => x.when)
-                          .sort((a, b) => new Date(b.when) - new Date(a.when))
-                        const shown = all.slice(0, 5)
-                        const more = all.length - shown.length
-
-                        if (logsLoading) return <div style={{ padding:14, display:'flex', justifyContent:'center' }}><div className="spinner" /></div>
-                        if (shown.length === 0) return <div style={{ padding:'14px', fontSize:12, color:'var(--text-muted)', textAlign:'center' }}>No call activity yet</div>
-
-                        return (
-                          <>
-                            {shown.map(item => {
-                              const oc = OUTCOME_CONFIG[item.outcome] || {}
-                              const isPlaying = playingCall === item.key
-                              return (
-                                <div key={item.key} style={{ padding:'9px 12px', borderBottom:'1px solid var(--border)', borderLeft:`3px solid ${oc.border || (item.source === 'st' ? '#3b82f6' : 'var(--border)')}` }}>
-                                  <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:6, marginBottom:2 }}>
-                                    <div style={{ display:'flex', alignItems:'center', gap:5, minWidth:0 }}>
-                                      {item.recordingUrl && (
-                                        <button onClick={() => playRecording(item.key, item.recordingUrl)}
-                                          title={isPlaying ? 'Pause' : 'Play recording'}
-                                          style={{ width:20, height:20, borderRadius:'50%', flexShrink:0, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center',
-                                            background: isPlaying ? '#16A34A' : 'var(--surface-2)', border:`1px solid ${isPlaying ? '#16A34A' : 'var(--border)'}` }}>
-                                          {isPlaying
-                                            ? <svg width="7" height="7" viewBox="0 0 12 12" fill="#fff"><rect x="2" y="1" width="3" height="10" rx="1"/><rect x="7" y="1" width="3" height="10" rx="1"/></svg>
-                                            : <svg width="7" height="7" viewBox="0 0 12 12" fill="var(--text-secondary)"><path d="M3 1.5v9l7-4.5-7-4.5z"/></svg>}
-                                        </button>
-                                      )}
-                                      <span style={{ fontSize:11, fontWeight:600, color: oc.color || 'var(--text-primary)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
-                                        {item.outcome}
-                                      </span>
-                                      {item.source === 'st' && (
-                                        <span style={{ fontSize:9, fontWeight:600, background:'#EFF6FF', color:'#1D4ED8', border:'1px solid #BFDBFE', borderRadius:99, padding:'0 5px', flexShrink:0 }}>ST</span>
-                                      )}
-                                    </div>
-                                    <span style={{ fontSize:10, color:'var(--text-muted)', flexShrink:0 }}>{fmtShort(item.when)}</span>
-                                  </div>
-                                  {item.notes && <div style={{ fontSize:11, color:'var(--text-secondary)', lineHeight:1.5 }}>{item.notes.length > 80 ? item.notes.slice(0,80)+'...' : item.notes}</div>}
-                                  <div style={{ fontSize:10, color:'var(--text-muted)', marginTop:2, display:'flex', gap:8 }}>
-                                    {item.rep && <span>by {item.rep}</span>}
-                                    {item.duration != null && <span>{Math.floor(item.duration/60)}:{String(item.duration%60).padStart(2,'0')}</span>}
-                                  </div>
-                                </div>
-                              )
-                            })}
-                            {(more > 0 || c.external_id) && (
-                              <div onClick={() => c.external_id && window.open(`https://go.servicetitan.com/#/Customer/${c.external_id}`, '_blank')}
-                                style={{ padding:'9px 12px', fontSize:11, color:'var(--accent)', textAlign:'center', cursor: c.external_id ? 'pointer' : 'default', fontWeight:600 }}>
-                                {more > 0 ? `View ${more} more in ServiceTitan` : 'View all in ServiceTitan'}
-                              </div>
-                            )}
-                          </>
-                        )
-                      })()}
                     </div>
                   </div>
                 </div>
