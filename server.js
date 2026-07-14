@@ -636,11 +636,11 @@ app.post('/api/twilio/inbound', async (req, res) => {
     started_at: new Date().toISOString(),
   })
 
-  // Only ring reps who are set to "Inbound" status
+  // Only ring reps who are set to "Available"
   const { data: inboundReps } = await supabase
     .from('profiles')
     .select('name, email, status')
-    .eq('status', 'Inbound')
+    .eq('status', 'Available')
     .not('name', 'is', null)
 
   const twiml = new VoiceResponse()
