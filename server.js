@@ -154,54 +154,46 @@ app.get('/api/st/availability', async (req, res) => {
     const data = await stPost(`/dispatch/v2/tenant/${ST_TENANT_ID}/capacity`, body)
     console.log('ST capacity response:', JSON.stringify(data).slice(0, 500))
 
-    // ST returns times in UTC — convert to Mountain Time
-    // MDT = UTC-6 (Mar-Nov), MST = UTC-7 (Nov-Mar)
-    const now = new Date()
-    const jan = new Date(now.getFullYear(), 0, 1)
-    const jul = new Date(now.getFullYear(), 6, 1)
-    const stdOffset = Math.max(jan.getTimezoneOffset(), jul.getTimezoneOffset())
-    const isDST = now.getTimezoneOffset() < stdOffset
-    // Server is likely UTC, so detect Mountain Time manually
-    const mtOffsetHours = -6  // MDT (summer). Change to -7 for MST (winter)
-
-    const toMT = (isoString) => {
-      if (!isoString) return isoString
-      const d = new Date(isoString)
-      const localMs = d.getTime() + (mtOffsetHours * 60 * 60 * 1000)
-      const local = new Date(localMs)
-      // Return as local ISO string without Z
-      const pad = (n) => String(n).padStart(2, '0')
-      return `${local.getUTCFullYear()}-${pad(local.getUTCMonth()+1)}-${pad(local.getUTCDate())}T${pad(local.getUTCHours())}:${pad(local.getUTCMinutes())}:${pad(local.getUTCSeconds())}`
-    }
-
-    // Known AHS arrival windows in Mountain Time (local HH:MM after UTC-6 conversion)
-    const VALID_WINDOWS = [
-      { start: '08:00', end: '12:00' },
-      { start: '10:00', end: '14:00' },
-      { start: '12:00', end: '16:00' },
-      { start: '14:00', end: '18:00' },
-      { start: '16:00', end: '20:00' },
-      { start: '18:00', end: '22:00' },
+    // ST returns UTC times. Filter to known AHS arrival windows by their UTC equivalents (MDT = UTC+6 ahead)
+    // e.g. 8:00 AM MDT = 14:00 UTC, 12:00 PM MDT = 18:00 UTC
+    const VALID_WINDOWS_UTC = [
+      { start: '14:00', end: '18:00' },  // 8:00 AM - 12:00 PM MDT
+      { start: '16:00', end: '20:00' },  // 10:00 AM - 2:00 PM MDT
+      { start: '18:00', end: '22:00' },  // 12:00 PM - 4:00 PM MDT
+      { start: '20:00', end: '00:00' },  // 2:00 PM - 6:00 PM MDT
+      { start: '22:00', end: '02:00' },  // 4:00 PM - 8:00 PM MDT
+      { start: '00:00', end: '04:00' },  // 6:00 PM - 10:00 PM MDT
     ]
 
-    const toHHMM = (isoLocal) => isoLocal.slice(11, 16)
+    const toHHMM = (isoString) => {
+      if (!isoString) return ''
+      return isoString.slice(11, 16)
+    }
 
-    const converted = (data?.availabilities || data?.data || []).map(slot => ({
-      ...slot,
-      start: toMT(slot.start),
-      end: toMT(slot.end),
-    }))
+    // Convert UTC ISO to MT display string for the frontend
+    const toMTDisplay = (isoString) => {
+      if (!isoString) return isoString
+      const d = new Date(isoString)
+      const localMs = d.getTime() + (-6 * 60 * 60 * 1000)
+      const local = new Date(localMs)
+      const pad = (n) => String(n).padStart(2, '0')
+      return `${local.getUTCFullYear()}-${pad(local.getUTCMonth()+1)}-${pad(local.getUTCDate())}T${pad(local.getUTCHours())}:${pad(local.getUTCMinutes())}:00`
+    }
 
-    // Log unique start/end pairs to diagnose what ST is actually returning
-    const uniqueWindows = [...new Set(converted.map(s => `${toHHMM(s.start)}-${toHHMM(s.end)}`))]
-    console.log('ST availability windows (local MT):', uniqueWindows)
+    const rawSlots = data?.availabilities || data?.data || []
+    console.log('ST raw UTC windows:', [...new Set(rawSlots.map(s => `${toHHMM(s.start)}-${toHHMM(s.end)}`))].sort())
 
-    const availabilities = converted
+    const availabilities = rawSlots
       .filter(slot => {
-        const startHHMM = toHHMM(slot.start)
-        const endHHMM = toHHMM(slot.end)
-        return VALID_WINDOWS.some(w => w.start === startHHMM && w.end === endHHMM)
+        const startHH = toHHMM(slot.start)
+        const endHH = toHHMM(slot.end)
+        return VALID_WINDOWS_UTC.some(w => w.start === startHH && w.end === endHH)
       })
+      .map(slot => ({
+        ...slot,
+        start: toMTDisplay(slot.start),
+        end: toMTDisplay(slot.end),
+      }))
       .sort((a, b) => a.start.localeCompare(b.start))
 
     res.json({ availabilities })
