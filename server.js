@@ -154,27 +154,27 @@ app.get('/api/st/availability', async (req, res) => {
     const data = await stPost(`/dispatch/v2/tenant/${ST_TENANT_ID}/capacity`, body)
     console.log('ST capacity response:', JSON.stringify(data).slice(0, 500))
 
-    // ST returns times in UTC — convert to Mountain Time (MDT = UTC-6, MST = UTC-7)
-    // Use dynamic offset based on whether DST is active
-    const getMDTOffset = (date) => {
-      // MDT (UTC-6) runs approx March second Sunday to November first Sunday
-      const d = new Date(date)
-      const year = d.getUTCFullYear()
-      const marchSecondSun = new Date(Date.UTC(year, 2, 1))
-      marchSecondSun.setUTCDate(1 + (7 - marchSecondSun.getUTCDay() + 0) % 7 + 7)
-      const novFirstSun = new Date(Date.UTC(year, 10, 1))
-      novFirstSun.setUTCDate(1 + (7 - novFirstSun.getUTCDay()) % 7)
-      return d >= marchSecondSun && d < novFirstSun ? -6 : -7
-    }
+    // ST returns times in UTC — convert to Mountain Time
+    // MDT = UTC-6 (Mar-Nov), MST = UTC-7 (Nov-Mar)
+    const now = new Date()
+    const jan = new Date(now.getFullYear(), 0, 1)
+    const jul = new Date(now.getFullYear(), 6, 1)
+    const stdOffset = Math.max(jan.getTimezoneOffset(), jul.getTimezoneOffset())
+    const isDST = now.getTimezoneOffset() < stdOffset
+    // Server is likely UTC, so detect Mountain Time manually
+    const mtOffsetHours = -6  // MDT (summer). Change to -7 for MST (winter)
 
     const toMT = (isoString) => {
       if (!isoString) return isoString
       const d = new Date(isoString)
-      const offset = getMDTOffset(d)
-      return new Date(d.getTime() + offset * 60 * 60 * 1000).toISOString().replace('Z', offset === -6 ? '-06:00' : '-07:00')
+      const localMs = d.getTime() + (mtOffsetHours * 60 * 60 * 1000)
+      const local = new Date(localMs)
+      // Return as local ISO string without Z
+      const pad = (n) => String(n).padStart(2, '0')
+      return `${local.getUTCFullYear()}-${pad(local.getUTCMonth()+1)}-${pad(local.getUTCDate())}T${pad(local.getUTCHours())}:${pad(local.getUTCMinutes())}:${pad(local.getUTCSeconds())}`
     }
 
-    // Known AHS arrival windows (local MT times): filter to only these
+    // Known AHS arrival windows in Mountain Time (local HH:MM after UTC-6 conversion)
     const VALID_WINDOWS = [
       { start: '08:00', end: '12:00' },
       { start: '10:00', end: '14:00' },
