@@ -186,12 +186,17 @@ app.get('/api/st/availability', async (req, res) => {
 
     const toHHMM = (isoLocal) => isoLocal.slice(11, 16)
 
-    const availabilities = (data?.availabilities || data?.data || [])
-      .map(slot => ({
-        ...slot,
-        start: toMT(slot.start),
-        end: toMT(slot.end),
-      }))
+    const converted = (data?.availabilities || data?.data || []).map(slot => ({
+      ...slot,
+      start: toMT(slot.start),
+      end: toMT(slot.end),
+    }))
+
+    // Log unique start/end pairs to diagnose what ST is actually returning
+    const uniqueWindows = [...new Set(converted.map(s => `${toHHMM(s.start)}-${toHHMM(s.end)}`))]
+    console.log('ST availability windows (local MT):', uniqueWindows)
+
+    const availabilities = converted
       .filter(slot => {
         const startHHMM = toHHMM(slot.start)
         const endHHMM = toHHMM(slot.end)
