@@ -43,6 +43,7 @@ export default function AdminPage() {
   const [adjSaving, setAdjSaving] = useState(false)
   // Status customization
   const [customStatuses, setCustomStatuses] = useState([
+    { id:'Inbound', label:'Inbound', color:'#16a34a', locked:true },
     { id:'Available', label:'Available', color:'#22c55e', locked:true },
     { id:'On Call', label:'On Call', color:'#3b82f6', locked:true },
     { id:'Wrap Up', label:'Wrap Up', color:'#f59e0b', locked:true },
