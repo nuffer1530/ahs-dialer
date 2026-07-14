@@ -154,15 +154,15 @@ app.get('/api/st/availability', async (req, res) => {
     const data = await stPost(`/dispatch/v2/tenant/${ST_TENANT_ID}/capacity`, body)
     console.log('ST capacity response:', JSON.stringify(data).slice(0, 500))
 
-    // ST returns UTC times. Filter to known AHS arrival windows by their UTC equivalents (MDT = UTC+6 ahead)
-    // e.g. 8:00 AM MDT = 14:00 UTC, 12:00 PM MDT = 18:00 UTC
+    // AHS arrival windows mapped to their UTC equivalents (MDT = UTC-6)
+    // Source: actual ST API response logs
     const VALID_WINDOWS_UTC = [
-      { start: '14:00', end: '18:00' },  // 8:00 AM - 12:00 PM MDT
-      { start: '16:00', end: '20:00' },  // 10:00 AM - 2:00 PM MDT
-      { start: '18:00', end: '22:00' },  // 12:00 PM - 4:00 PM MDT
-      { start: '20:00', end: '00:00' },  // 2:00 PM - 6:00 PM MDT
-      { start: '22:00', end: '02:00' },  // 4:00 PM - 8:00 PM MDT
-      { start: '00:00', end: '04:00' },  // 6:00 PM - 10:00 PM MDT
+      { start: '02:00', end: '06:00' },  // 8:00 AM - 12:00 PM MDT
+      { start: '04:00', end: '08:00' },  // 10:00 AM - 2:00 PM MDT
+      { start: '06:00', end: '10:00' },  // 12:00 PM - 4:00 PM MDT
+      { start: '08:00', end: '12:00' },  // 2:00 PM - 6:00 PM MDT
+      { start: '10:00', end: '14:00' },  // 4:00 PM - 8:00 PM MDT
+      { start: '12:00', end: '16:00' },  // 6:00 PM - 10:00 PM MDT
     ]
 
     const toHHMM = (isoString) => {
