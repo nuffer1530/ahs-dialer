@@ -248,6 +248,60 @@ app.get('/api/st/businessunits', async (req, res) => {
   }
 })
 
+// ── ST: Look up a customer by phone number (for inbound call pop)
+app.get('/api/st/lookup', async (req, res) => {
+  try {
+    const { phone } = req.query
+    if (!phone) return res.status(400).json({ error: 'phone required' })
+    const digits = phone.replace(/\D/g, '').slice(-10)
+    if (digits.length < 10) return res.json({ found: false })
+
+    // ST stores phones in various formats — try the contacts endpoint which indexes them
+    let customerId = null
+    try {
+      const contactData = await stGet(`/crm/v2/tenant/${ST_TENANT_ID}/contacts?phone=${digits}&pageSize=5`)
+      customerId = contactData?.data?.[0]?.customerId || null
+    } catch (e) {
+      console.warn('ST contacts lookup failed:', e.message)
+    }
+
+    // Fallback: search customers directly
+    if (!customerId) {
+      try {
+        const custData = await stGet(`/crm/v2/tenant/${ST_TENANT_ID}/customers?phone=${digits}&pageSize=5`)
+        customerId = custData?.data?.[0]?.id || null
+      } catch (e) {
+        console.warn('ST customers lookup failed:', e.message)
+      }
+    }
+
+    if (!customerId) return res.json({ found: false })
+
+    // Pull the full customer record + primary location
+    const customer = await stGet(`/crm/v2/tenant/${ST_TENANT_ID}/customers/${customerId}`)
+    let location = null
+    try {
+      const locData = await stGet(`/crm/v2/tenant/${ST_TENANT_ID}/locations?customerId=${customerId}&pageSize=1`)
+      location = locData?.data?.[0] || null
+    } catch (e) {}
+
+    res.json({
+      found: true,
+      customerId,
+      name: customer?.name || null,
+      email: customer?.email || null,
+      address: location?.address?.street || customer?.address?.street || null,
+      city: location?.address?.city || customer?.address?.city || null,
+      state: location?.address?.state || customer?.address?.state || null,
+      zip: location?.address?.zip || customer?.address?.zip || null,
+      customer,
+    })
+  } catch (err) {
+    console.error('ST lookup error:', err.message)
+    res.status(500).json({ error: err.message, found: false })
+  }
+})
+
 // ── ST: Get jobs for a customer (job history)
 app.get('/api/st/jobs', async (req, res) => {
   try {
