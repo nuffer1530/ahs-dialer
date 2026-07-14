@@ -270,6 +270,49 @@ app.get('/api/st/businessunits', async (req, res) => {
   }
 })
 
+// ── ST: Probe which API endpoints this tenant/app can reach
+app.get('/api/st/probe', async (req, res) => {
+  const paths = {
+    bookings:            `/crm/v2/tenant/${ST_TENANT_ID}/bookings?pageSize=3`,
+    bookingProviderTags: `/crm/v2/tenant/${ST_TENANT_ID}/booking-provider-tags?pageSize=3`,
+    leads:               `/crm/v2/tenant/${ST_TENANT_ID}/leads?pageSize=3`,
+    calls:               `/telecom/v2/tenant/${ST_TENANT_ID}/calls?pageSize=3`,
+    callsV3:             `/telecom/v3/tenant/${ST_TENANT_ID}/calls?pageSize=3`,
+    chats:               `/chat/v2/tenant/${ST_TENANT_ID}/chats?pageSize=3`,
+    customerInteractions:`/customer-interactions/v2/tenant/${ST_TENANT_ID}/interactions?pageSize=3`,
+    schedulingProBookings:`/scheduling-pro/v2/tenant/${ST_TENANT_ID}/bookings?pageSize=3`,
+    tasks:               `/taskmanagement/v2/tenant/${ST_TENANT_ID}/tasks?pageSize=3`,
+    memberships:         `/memberships/v2/tenant/${ST_TENANT_ID}/memberships?pageSize=3`,
+    equipment:           `/equipmentsystems/v2/tenant/${ST_TENANT_ID}/installed-equipment?pageSize=3`,
+  }
+
+  const results = {}
+  for (const [name, path] of Object.entries(paths)) {
+    try {
+      const data = await stGet(path)
+      const count = Array.isArray(data?.data) ? data.data.length : (data ? 1 : 0)
+      results[name] = {
+        ok: true,
+        count,
+        totalCount: data?.totalCount ?? null,
+        sampleKeys: data?.data?.[0] ? Object.keys(data.data[0]).slice(0, 15) : null,
+        sample: data?.data?.[0] || null,
+      }
+    } catch (err) {
+      const msg = err.message || ''
+      results[name] = {
+        ok: false,
+        error: msg.includes('403') ? 'FORBIDDEN - scope not enabled'
+             : msg.includes('404') ? 'NOT FOUND - endpoint does not exist'
+             : msg.includes('401') ? 'UNAUTHORIZED'
+             : msg.slice(0, 160),
+      }
+    }
+  }
+
+  res.json({ tenant: ST_TENANT_ID, results })
+})
+
 // ── ST: Search customers by name, phone, or address
 app.get('/api/st/search', async (req, res) => {
   try {
