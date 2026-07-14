@@ -431,12 +431,16 @@ app.post('/api/twilio/inbound', async (req, res) => {
   const { From, CallSid, To } = req.body
   console.log(`Inbound call from ${From}, SID: ${CallSid}`)
   const normalizedPhone = From.replace(/\D/g, '').slice(-10)
+
+  // Look up contact by phone
   const { data: contact } = await supabase
     .from('contacts')
     .select('*')
     .ilike('phone', `%${normalizedPhone}%`)
     .limit(1)
     .single()
+
+  // Log the call
   await supabase.from('active_calls').insert({
     call_sid: CallSid,
     direction: 'inbound',
@@ -447,10 +451,37 @@ app.post('/api/twilio/inbound', async (req, res) => {
     status: 'ringing',
     started_at: new Date().toISOString(),
   })
+
+  // Find online/available reps to ring
+  const { data: onlineReps } = await supabase
+    .from('profiles')
+    .select('name, email, status')
+    .in('status', ['Available', 'Wrap Up', 'Online'])
+    .not('name', 'is', null)
+
   const twiml = new VoiceResponse()
   twiml.say({ voice: 'alice' }, 'Please hold while we connect you.')
   const dial = twiml.dial({ timeout: 30, action: `${appUrl}/api/twilio/inbound/complete` })
-  dial.client('andi-csr')
+
+  if (onlineReps && onlineReps.length > 0) {
+    // Ring all available reps simultaneously
+    onlineReps.forEach(rep => {
+      const identity = (rep.name || rep.email || '').replace(/[^a-zA-Z0-9_]/g, '_')
+      if (identity) dial.client(identity)
+    })
+  } else {
+    // Fallback — try to ring anyone with a profile
+    const { data: allReps } = await supabase.from('profiles').select('name, email').limit(5)
+    if (allReps?.length) {
+      allReps.forEach(rep => {
+        const identity = (rep.name || rep.email || '').replace(/[^a-zA-Z0-9_]/g, '_')
+        if (identity) dial.client(identity)
+      })
+    } else {
+      dial.client('andi-csr') // last resort fallback
+    }
+  }
+
   res.type('text/xml')
   res.send(twiml.toString())
 })
