@@ -840,6 +840,7 @@ async function gatherCustomerFacts(id) {
   try {
     const jobsRes = await stGet(`/jpm/v2/tenant/${ST_TENANT_ID}/jobs?customerId=${id}&pageSize=10&sort=-modifiedOn`)
     const jobs = jobsRes?.data || []
+    jobIds = jobs.map(j => j.id).filter(Boolean)
     facts.totalJobs = jobs.length
     if (jobs[0]) {
       const j = jobs[0]
@@ -872,17 +873,25 @@ async function gatherCustomerFacts(id) {
     }
   } catch (e) { console.warn('facts equipment:', e.message) }
 
-  // Open estimates (unsold work = opportunity)
+  // Open estimates — ST's estimates endpoint filters by jobId (NOT customerId),
+  // so we look up estimates across this customer's jobs. No jobs = no estimates.
   try {
-    const estRes = await stGet(`/sales/v2/tenant/${ST_TENANT_ID}/estimates?customerId=${id}&pageSize=50`)
-    const open = (estRes?.data || []).filter(e => {
-      const s = (e.status?.name || e.status || '').toLowerCase()
-      return s === 'open' || s === '' || (!e.soldOn && s !== 'dismissed')
-    })
-    if (open.length) {
-      facts.openEstimates = {
-        count: open.length,
-        total: open.reduce((sum, e) => sum + (e.total || e.subtotal || 0), 0),
+    if (jobIds.length) {
+      const perJob = await Promise.all(jobIds.slice(0, 10).map(jid =>
+        stGet(`/sales/v2/tenant/${ST_TENANT_ID}/estimates?jobId=${jid}&pageSize=50`)
+          .then(r => r?.data || [])
+          .catch(() => [])
+      ))
+      const all = perJob.flat()
+      const open = all.filter(e => {
+        const s = (e.status?.name || e.status || '').toLowerCase()
+        return s === 'open' || (!e.soldOn && s !== 'dismissed' && s !== 'sold')
+      })
+      if (open.length) {
+        facts.openEstimates = {
+          count: open.length,
+          total: open.reduce((sum, e) => sum + (e.total || e.subtotal || 0), 0),
+        }
       }
     }
   } catch (e) { console.warn('facts estimates:', e.message) }
@@ -915,7 +924,7 @@ async function gatherCustomerFacts(id) {
 
 async function generateBrief(facts) {
   if (!ANTHROPIC_KEY) return null
-  const sys = "You write a punchy pre-call intelligence brief for a home-services call-center rep at Awesome Home Services (HVAC, plumbing, electrical, garage doors). You are given structured ServiceTitan data about a customer. Write 2-3 short sentences of plain prose: first what stands out about their history (age of equipment, time since last service, membership, open estimates, lifetime value), then one tactical line on how to approach the call. If the data includes pinnedNotes, treat them as high-priority operational flags from staff and account for them in your tactical line (do not contradict or soften them). No greeting, no bullet points, no markdown, no preamble. Reference concrete numbers. If data is sparse, say so in one line rather than inventing anything."
+  const sys = "You write a punchy pre-call intelligence brief for a home-services call-center rep at Awesome Home Services (HVAC, plumbing, electrical, garage doors). You are given structured ServiceTitan data about a customer. Write 2-3 short sentences of plain prose: first what stands out about their history (age of equipment, time since last service, membership, open estimates, lifetime value), then one tactical line on how to approach the call. If the data includes pinnedNotes, treat them as high-priority operational flags from staff and account for them in your tactical line (do not contradict or soften them). CRITICAL: only state what the data explicitly supports. If a field is absent or zero, that means the data is simply not present in ServiceTitan — it does NOT imply non-payment, debt, collections risk, a bad customer, or anything negative. Never infer unpaid work, financial trouble, or risk from a missing or zero lifetimeValue; if there's no lifetime value, just omit it rather than explaining why. No greeting, no bullet points, no markdown, no preamble. Reference concrete numbers you were given. If the data is genuinely sparse, say so in one neutral line rather than inventing a narrative."
   try {
     const r = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
