@@ -248,6 +248,19 @@ app.get('/api/st/businessunits', async (req, res) => {
   }
 })
 
+// ── ST: Get jobs for a customer (job history)
+app.get('/api/st/jobs', async (req, res) => {
+  try {
+    const { customerId } = req.query
+    if (!customerId) return res.status(400).json({ error: 'customerId required' })
+    const data = await stGet(`/jpm/v2/tenant/${ST_TENANT_ID}/jobs?customerId=${customerId}&pageSize=5&orderBy=modifiedOn&orderByDirection=Descending&active=true`)
+    res.json(data)
+  } catch (err) {
+    console.error('ST jobs error:', err.message)
+    res.status(500).json({ error: err.message })
+  }
+})
+
 // ── ST: Get campaigns (for booking)
 app.get('/api/st/campaigns', async (req, res) => {
   try {
