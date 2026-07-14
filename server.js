@@ -156,13 +156,16 @@ app.get('/api/st/availability', async (req, res) => {
 
     // AHS arrival windows mapped to their UTC equivalents (MDT = UTC-6)
     // Source: actual ST API response logs
+    // ST stores local MT times with Z suffix (confirmed from raw response logs)
+    // e.g. "2026-07-14T07:59:00Z" = 7:59 AM MT in ST UI
+    // Filter to AHS valid windows by matching HH:MM directly
     const VALID_WINDOWS_UTC = [
-      { start: '02:00', end: '06:00' },  // 8:00 AM - 12:00 PM MDT
-      { start: '04:00', end: '08:00' },  // 10:00 AM - 2:00 PM MDT
-      { start: '06:00', end: '10:00' },  // 12:00 PM - 4:00 PM MDT
-      { start: '08:00', end: '12:00' },  // 2:00 PM - 6:00 PM MDT
-      { start: '10:00', end: '14:00' },  // 4:00 PM - 8:00 PM MDT
-      { start: '12:00', end: '16:00' },  // 6:00 PM - 10:00 PM MDT
+      { start: '08:00', end: '12:00' },
+      { start: '10:00', end: '14:00' },
+      { start: '12:00', end: '16:00' },
+      { start: '14:00', end: '18:00' },
+      { start: '16:00', end: '20:00' },
+      { start: '18:00', end: '22:00' },
     ]
 
     const toHHMM = (isoString) => {
@@ -170,18 +173,13 @@ app.get('/api/st/availability', async (req, res) => {
       return isoString.slice(11, 16)
     }
 
-    // Convert UTC ISO to MT display string for the frontend
-    const toMTDisplay = (isoString) => {
+    const toLocal = (isoString) => {
       if (!isoString) return isoString
-      const d = new Date(isoString)
-      const localMs = d.getTime() + (-6 * 60 * 60 * 1000)
-      const local = new Date(localMs)
-      const pad = (n) => String(n).padStart(2, '0')
-      return `${local.getUTCFullYear()}-${pad(local.getUTCMonth()+1)}-${pad(local.getUTCDate())}T${pad(local.getUTCHours())}:${pad(local.getUTCMinutes())}:00`
+      return isoString.replace('Z', '').slice(0, 19)
     }
 
     const rawSlots = data?.availabilities || data?.data || []
-    console.log('ST raw UTC windows:', [...new Set(rawSlots.map(s => `${toHHMM(s.start)}-${toHHMM(s.end)}`))].sort())
+    console.log('ST raw windows:', [...new Set(rawSlots.map(s => `${toHHMM(s.start)}-${toHHMM(s.end)}`))].sort())
 
     const availabilities = rawSlots
       .filter(slot => {
@@ -191,8 +189,8 @@ app.get('/api/st/availability', async (req, res) => {
       })
       .map(slot => ({
         ...slot,
-        start: toMTDisplay(slot.start),
-        end: toMTDisplay(slot.end),
+        start: toLocal(slot.start),
+        end: toLocal(slot.end),
       }))
       .sort((a, b) => a.start.localeCompare(b.start))
 
