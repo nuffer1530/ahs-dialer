@@ -16,6 +16,7 @@ import MyPage from './MyPage'
 import WinCelebration from '../components/WinCelebration'
 
 const DEFAULT_STATUS_OPTIONS = [
+  { value: 'Inbound',   color: '#16a34a' },
   { value: 'Available', color: '#22c55e' },
   { value: 'On Call',   color: '#3b82f6' },
   { value: 'Wrap Up',   color: '#f59e0b' },
