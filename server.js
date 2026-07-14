@@ -644,13 +644,127 @@ app.post('/api/twilio/call', async (req, res) => {
   }
 })
 
-// ── TwiML for outbound
+// ── TwiML for outbound (recorded)
 app.post('/api/twilio/twiml/outbound', (req, res) => {
   const twiml = new VoiceResponse()
-  const dial = twiml.dial({ callerId: twilioPhone, timeout: 30 })
+  const dial = twiml.dial({
+    callerId: twilioPhone,
+    timeout: 30,
+    record: 'record-from-answer-dual',
+    recordingStatusCallback: `${appUrl}/api/twilio/recording`,
+    recordingStatusCallbackEvent: 'completed',
+  })
   dial.number(req.query.to || req.body.To)
   res.type('text/xml')
   res.send(twiml.toString())
+})
+
+// ── Twilio recording webhook — save the recording URL onto the call log
+app.post('/api/twilio/recording', async (req, res) => {
+  try {
+    const { CallSid, RecordingSid, RecordingUrl, RecordingDuration } = req.body
+    if (!CallSid || !RecordingUrl) return res.sendStatus(200)
+    const mp3 = `${RecordingUrl}.mp3`
+
+    await supabase.from('active_calls').update({
+      recording_url: mp3,
+      recording_sid: RecordingSid,
+      recording_duration: RecordingDuration ? parseInt(RecordingDuration) : null,
+    }).eq('call_sid', CallSid)
+
+    // Attach to the matching call log if one exists
+    const { data: ac } = await supabase.from('active_calls').select('*').eq('call_sid', CallSid).maybeSingle()
+    if (ac?.contact_id) {
+      const { data: recentLog } = await supabase
+        .from('call_logs')
+        .select('id')
+        .eq('contact_id', ac.contact_id)
+        .is('recording_url', null)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+      if (recentLog) {
+        await supabase.from('call_logs').update({
+          recording_url: mp3,
+          recording_duration: RecordingDuration ? parseInt(RecordingDuration) : null,
+          call_sid: CallSid,
+        }).eq('id', recentLog.id)
+      }
+    }
+    res.sendStatus(200)
+  } catch (err) {
+    console.error('Recording webhook error:', err.message)
+    res.sendStatus(200)
+  }
+})
+
+// ── Proxy a Twilio recording (authenticated) so the browser can play/download it
+app.get('/api/twilio/recording/:sid', async (req, res) => {
+  try {
+    const url = `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Recordings/${req.params.sid}.mp3`
+    const auth = Buffer.from(`${accountSid}:${authToken}`).toString('base64')
+    const twRes = await fetch(url, { headers: { Authorization: `Basic ${auth}` } })
+    if (!twRes.ok) return res.status(404).json({ error: 'Recording not found' })
+    res.setHeader('Content-Type', 'audio/mpeg')
+    if (req.query.download) res.setHeader('Content-Disposition', `attachment; filename="call-${req.params.sid}.mp3"`)
+    const buf = Buffer.from(await twRes.arrayBuffer())
+    res.send(buf)
+  } catch (err) {
+    console.error('Recording proxy error:', err.message)
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// ── List call recordings (for the Recordings page)
+app.get('/api/recordings', async (req, res) => {
+  try {
+    const { rep, from, to, limit = 100 } = req.query
+    let q = supabase
+      .from('call_logs')
+      .select('*, contacts(name, phone, external_id)')
+      .not('recording_url', 'is', null)
+      .order('created_at', { ascending: false })
+      .limit(parseInt(limit))
+    if (rep) q = q.eq('rep', rep)
+    if (from) q = q.gte('created_at', from)
+    if (to) q = q.lte('created_at', to)
+    const { data, error } = await q
+    if (error) throw error
+    res.json({ data: data || [] })
+  } catch (err) {
+    console.error('Recordings list error:', err.message)
+    res.status(500).json({ error: err.message, data: [] })
+  }
+})
+
+// ── ST: Recent calls for a customer
+app.get('/api/st/calls', async (req, res) => {
+  try {
+    const { customerId, limit = 5 } = req.query
+    if (!customerId) return res.status(400).json({ error: 'customerId required' })
+    const data = await stGet(`/telecom/v2/tenant/${ST_TENANT_ID}/calls?customerId=${customerId}&pageSize=${limit}&sort=-createdOn`)
+    const calls = (data?.data || []).map(c => {
+      const lc = c.leadCall || c
+      return {
+        id: lc.id || c.id,
+        createdOn: lc.createdOn || c.createdOn,
+        receivedOn: lc.receivedOn || c.receivedOn,
+        duration: lc.duration || null,
+        from: lc.from || null,
+        to: lc.to || null,
+        direction: lc.direction || null,
+        reason: lc.reason?.name || lc.reason || null,
+        agent: lc.agent?.name || null,
+        campaign: lc.campaign?.name || null,
+        recordingUrl: lc.recordingUrl || null,
+        voiceMailUrl: lc.voiceMailUrl || null,
+      }
+    })
+    res.json({ data: calls })
+  } catch (err) {
+    console.error('ST calls error:', err.message)
+    res.status(500).json({ error: err.message, data: [] })
+  }
 })
 
 // ── Inbound call webhook
@@ -696,8 +810,14 @@ app.post('/api/twilio/inbound', async (req, res) => {
     return res.send(twiml.toString())
   }
 
-  twiml.say({ voice: 'alice' }, 'Please hold while we connect you.')
-  const dial = twiml.dial({ timeout: 30, action: `${appUrl}/api/twilio/inbound/complete` })
+  twiml.say({ voice: 'alice' }, 'Thank you for calling Awesome Home Services. This call may be recorded for quality purposes. Please hold while we connect you.')
+  const dial = twiml.dial({
+    timeout: 30,
+    action: `${appUrl}/api/twilio/inbound/complete`,
+    record: 'record-from-answer-dual',
+    recordingStatusCallback: `${appUrl}/api/twilio/recording`,
+    recordingStatusCallbackEvent: 'completed',
+  })
   inboundReps.forEach(rep => {
     const identity = (rep.name || rep.email || '').replace(/[^a-zA-Z0-9_]/g, '_')
     if (identity) dial.client(identity)
