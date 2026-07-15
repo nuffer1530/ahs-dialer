@@ -775,6 +775,7 @@ export default function DialerPage() {
 
   // Customer intelligence brief (AI synthesis of ST history)
   const [brief, setBrief] = useState(null)
+  const [briefData, setBriefData] = useState(null)
   const [briefFacts, setBriefFacts] = useState(null)
   const [briefLoading, setBriefLoading] = useState(false)
 
@@ -782,7 +783,7 @@ export default function DialerPage() {
   useEffect(() => {
     if (!c?.external_id) {
       setStJobHistory([]); setStCustomerInfo(null)
-      setBrief(null); setBriefFacts(null); setBriefLoading(false)
+      setBrief(null); setBriefData(null); setBriefFacts(null); setBriefLoading(false)
       return
     }
     setStJobHistoryLoading(true)
@@ -795,16 +796,16 @@ export default function DialerPage() {
       .then(data => { setStJobHistory(data?.data?.slice(0,5) || []); setStJobHistoryLoading(false) })
       .catch(() => setStJobHistoryLoading(false))
 
-    setBrief(null); setBriefFacts(null); setBriefLoading(true)
+    setBrief(null); setBriefData(null); setBriefFacts(null); setBriefLoading(true)
     fetch(`/api/st/intelligence/${c.external_id}`)
       .then(r => r.ok ? r.json() : null)
-      .then(data => { setBrief(data?.brief || null); setBriefFacts(data?.facts || null); setBriefLoading(false) })
+      .then(data => { setBrief(data?.brief || null); setBriefData(data?.brief_data || null); setBriefFacts(data?.facts || null); setBriefLoading(false) })
       .catch(() => setBriefLoading(false))
   }, [c?.external_id])
 
   const refreshBrief = () => {
     if (!c?.external_id || briefLoading) return
-    setBriefLoading(true); setBrief(null)
+    setBriefLoading(true); setBrief(null); setBriefData(null)
     fetch(`/api/st/intelligence/${c.external_id}?refresh=1`)
       .then(r => r.ok ? r.json() : null)
       .then(data => { setBrief(data?.brief || null); setBriefFacts(data?.facts || null); setBriefLoading(false) })
@@ -1154,9 +1155,10 @@ export default function DialerPage() {
                           <div className="spinner" style={{ width:16, height:16 }} />
                           Analyzing customer history...
                         </div>
-                      ) : brief ? (
+                      ) : (briefData || brief) ? (
                         <>
-                          {Array.isArray(briefFacts?.pinnedNotes) && briefFacts.pinnedNotes.length > 0 && (
+                          {/* Pinned staff notes verbatim (highest priority); else the model's flag */}
+                          {Array.isArray(briefFacts?.pinnedNotes) && briefFacts.pinnedNotes.length > 0 ? (
                             <div style={{ marginBottom:10, display:'flex', flexDirection:'column', gap:6 }}>
                               {briefFacts.pinnedNotes.map((note, i) => (
                                 <div key={i} style={{ background:'#FFFBEB', border:'1px solid #FCD34D', borderRadius:'var(--radius)', padding:'8px 10px', display:'flex', gap:7, alignItems:'flex-start' }}>
@@ -1165,8 +1167,34 @@ export default function DialerPage() {
                                 </div>
                               ))}
                             </div>
+                          ) : briefData?.flag ? (
+                            <div style={{ marginBottom:10, background:'#FFFBEB', border:'1px solid #FCD34D', borderRadius:'var(--radius)', padding:'8px 10px', display:'flex', gap:7, alignItems:'flex-start' }}>
+                              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#B45309" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink:0, marginTop:1 }}><path d="m12 2 1.5 6.5L20 10l-6.5 1.5L12 18l-1.5-6.5L4 10l6.5-1.5z"/></svg>
+                              <div style={{ fontSize:12, lineHeight:1.5, color:'#78350F', fontWeight:500 }}>{briefData.flag}</div>
+                            </div>
+                          ) : null}
+
+                          {/* Structured brief: glanceable headline + prioritized actions */}
+                          {briefData ? (
+                            <>
+                              {briefData.headline && (
+                                <div style={{ fontSize:14, fontWeight:700, lineHeight:1.4, color:'var(--text-primary)' }}>{briefData.headline}</div>
+                              )}
+                              {Array.isArray(briefData.actions) && briefData.actions.length > 0 && (
+                                <div style={{ display:'flex', flexDirection:'column', gap:8, marginTop: briefData.headline ? 11 : 0 }}>
+                                  {briefData.actions.map((a, i) => (
+                                    <div key={i} style={{ display:'flex', gap:9, alignItems:'flex-start' }}>
+                                      <div style={{ width:17, height:17, borderRadius:5, background: i === 0 ? 'var(--accent)' : 'var(--accent-bg)', color: i === 0 ? '#fff' : 'var(--accent)', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0, marginTop:1, fontSize:10, fontWeight:700 }}>{i + 1}</div>
+                                      <div style={{ fontSize:13, lineHeight:1.45, color:'var(--text-primary)', fontWeight: i === 0 ? 600 : 500 }}>{a}</div>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </>
+                          ) : (
+                            <div style={{ fontSize:13, lineHeight:1.65, color:'var(--text-primary)', whiteSpace:'pre-line' }}>{brief}</div>
                           )}
-                          <div style={{ fontSize:13, lineHeight:1.65, color:'var(--text-primary)' }}>{brief}</div>
+
                           {briefFacts && (() => {
                             const chips = []
                             if (typeof briefFacts.lifetimeValue === 'number' && briefFacts.lifetimeValue > 0)
@@ -1179,12 +1207,16 @@ export default function DialerPage() {
                               chips.push({ label:'Open est.', value: briefFacts.openEstimates.total ? `${briefFacts.openEstimates.count} ($${Math.round(briefFacts.openEstimates.total).toLocaleString()})` : String(briefFacts.openEstimates.count) })
                             if (briefFacts.membership && briefFacts.membership !== 'Non-member')
                               chips.push({ label:'Member', value: briefFacts.membership })
+                            if (briefFacts.maintenanceVisits?.dueCount > 0)
+                              chips.push({ label:'Visits due', value: String(briefFacts.maintenanceVisits.dueCount), accent:true })
+                            if (!briefFacts.isMember && briefFacts.memberSavings?.upTo > 0)
+                              chips.push({ label:'Save up to', value:`$${Math.round(briefFacts.memberSavings.upTo).toLocaleString()}`, accent:true })
                             if (!chips.length) return null
                             return (
-                              <div style={{ display:'flex', flexWrap:'wrap', gap:6, marginTop:10 }}>
+                              <div style={{ display:'flex', flexWrap:'wrap', gap:6, marginTop:12 }}>
                                 {chips.map((ch, i) => (
-                                  <span key={i} style={{ fontSize:10, fontWeight:600, background:'var(--surface-2)', border:'1px solid var(--border)', borderRadius:99, padding:'3px 9px', color:'var(--text-secondary)' }}>
-                                    <span style={{ color:'var(--text-muted)', fontWeight:500 }}>{ch.label}: </span>{ch.value}
+                                  <span key={i} style={{ fontSize:10, fontWeight:600, background: ch.accent ? 'var(--accent-bg)' : 'var(--surface-2)', border:`1px solid ${ch.accent ? 'var(--accent)' : 'var(--border)'}`, borderRadius:99, padding:'3px 9px', color: ch.accent ? 'var(--accent)' : 'var(--text-secondary)' }}>
+                                    <span style={{ color: ch.accent ? 'var(--accent)' : 'var(--text-muted)', fontWeight:500, opacity: ch.accent ? .85 : 1 }}>{ch.label}: </span>{ch.value}
                                   </span>
                                 ))}
                               </div>
