@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { sb } from '../lib/supabase'
 import { useAuth } from '../lib/AuthContext'
 
@@ -108,7 +109,10 @@ const RATING_COLORS = {
 
 export default function MyPage() {
   const { profile } = useAuth()
-  const [tab, setTab] = useState('my-schedule')
+  const [searchParams, setSearchParams] = useSearchParams()
+  const VALID_TABS = ['my-schedule', 'team-schedule', 'stats', 'commissions', 'scorecard']
+  const initialTab = VALID_TABS.includes(searchParams.get('tab')) ? searchParams.get('tab') : 'my-schedule'
+  const [tab, setTab] = useState(initialTab)
   const [weekBase, setWeekBase] = useState(getTodayMonday)
   const [schedules, setSchedules] = useState([])
   const [profiles, setProfiles] = useState([])
@@ -195,6 +199,14 @@ export default function MyPage() {
         if (data?.weights) { try { setScWeights(data.weights) } catch (e) {} }
       })
   }, [profile?.id, scorecardMonth, tab])
+
+  // Keep the active tab in sync with the ?tab= URL param, so navigating here
+  // from the top-right menu (e.g. ?tab=commissions) opens the right tab even
+  // when MyPage is already mounted.
+  useEffect(() => {
+    const t = searchParams.get('tab')
+    if (t && VALID_TABS.includes(t) && t !== tab) setTab(t)
+  }, [searchParams])
 
   const getSched = (profileId, date) => schedules.find(s => s.profile_id === profileId && s.date === date)
 
@@ -317,7 +329,7 @@ export default function MyPage() {
               const isHov = hoveredTab === t.id && !isActive
               return (
                 <button key={t.id}
-                  onClick={() => setTab(t.id)}
+                  onClick={() => { setTab(t.id); setSearchParams(t.id === 'my-schedule' ? {} : { tab: t.id }, { replace: true }) }}
                   onMouseEnter={() => setHoveredTab(t.id)}
                   onMouseLeave={() => setHoveredTab(null)}
                   style={{
