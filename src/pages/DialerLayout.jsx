@@ -146,6 +146,20 @@ const NAV_ITEMS = [
 
 const MY_PAGE_ITEM = { to:'/mypage', label:'My Page', iconKey:'mypage' }
 
+// Top-bar contextual header per route — title + one-line descriptor.
+const PAGE_META = {
+  '/':            { title: 'Dialer',                subtitle: 'Work your call queue' },
+  '/live':        { title: 'Live Dashboard',        subtitle: 'Real-time floor activity' },
+  '/analytics':   { title: 'Analytics',             subtitle: 'Performance and pipeline' },
+  '/recordings':  { title: 'Recordings',            subtitle: 'Call playback and review' },
+  '/leaderboard': { title: 'Leaderboard',           subtitle: 'Team rankings' },
+  '/attendance':  { title: 'Workforce Management',  subtitle: 'Schedule, adherence, and points' },
+  '/notes':       { title: 'Notes',                 subtitle: 'Shared team notes' },
+  '/warroom':     { title: 'Call Center TV',        subtitle: 'Big-screen floor view' },
+  '/mypage':      { title: 'My Page',               subtitle: 'Your schedule, commissions, and scorecard' },
+  '/settings':    { title: 'Settings',              subtitle: 'Admin and configuration' },
+}
+
 const SETTINGS_ITEMS = [
   { to:'/settings', label:'Settings', icon:'⚙️' },
 ]
@@ -510,8 +524,20 @@ export default function DialerLayout() {
 
       {/* ── MAIN CONTENT (with a real top bar so the profile menu never overlaps pages) ── */}
       <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden', minWidth:0 }}>
-        {/* Top bar — reserves its own height; every page renders below it */}
-        <div style={{ height:53, minHeight:53, boxSizing:'border-box', flexShrink:0, borderBottom:'1px solid var(--border)', background:'var(--surface)', display:'flex', alignItems:'center', justifyContent:'flex-end', padding:'0 16px', position:'relative', zIndex:100 }}>
+        {/* Top bar — reserves its own height; hidden on the War Room (full-screen TV) route */}
+        {location.pathname !== '/warroom' && (
+        <div style={{ height:53, minHeight:53, boxSizing:'border-box', flexShrink:0, borderBottom:'1px solid var(--border)', background:'var(--surface)', display:'flex', alignItems:'center', justifyContent:'space-between', padding:'0 16px', position:'relative', zIndex:100 }}>
+          {/* Contextual page header */}
+          <div style={{ display:'flex', flexDirection:'column', lineHeight:1.2, minWidth:0 }}>
+            <span style={{ fontSize:15, fontWeight:700, color:'var(--text-primary)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+              {(PAGE_META[location.pathname] || {}).title || 'andi'}
+            </span>
+            {(PAGE_META[location.pathname] || {}).subtitle && (
+              <span style={{ fontSize:11, color:'var(--text-muted)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                {PAGE_META[location.pathname].subtitle}
+              </span>
+            )}
+          </div>
           <div ref={menuRef} style={{ position:'relative' }}>
         <button onClick={() => setShowStatusMenu(v => !v)}
           title={`${currentStatusObj.value} · ${fmtDur(statusDuration)}`}
@@ -587,6 +613,7 @@ export default function DialerLayout() {
       </div>
 
         </div>
+        )}
         <Routes>
           <Route path="/" element={<DialerPage />} />
           <Route path="/live" element={<LivePage />} />
