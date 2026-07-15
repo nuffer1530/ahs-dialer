@@ -823,6 +823,7 @@ const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY
 // or endpoint fails, that fact is simply omitted and the brief adapts.
 async function gatherCustomerFacts(id) {
   const facts = {}
+  let jobIds = []
 
   // Customer + membership (reuse the same shape as /api/st/customer)
   try {
