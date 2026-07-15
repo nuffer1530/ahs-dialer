@@ -186,6 +186,7 @@ export default function DialerPage() {
   const deviceRef = useRef(null)
   const [incomingCall, setIncomingCall] = useState(null) // { call, from, contactName }
   const callRef = useRef(null)
+  const connectingRef = useRef(false)
   const [twilioReady, setTwilioReady] = useState(false)
   const [callStatus, setCallStatus] = useState(null)
   const [callDuration, setCallDuration] = useState(0)
@@ -391,8 +392,8 @@ export default function DialerPage() {
     setCallStatus('connected')
     startCallTimer()
     updateAgentStatus('On Call')
-    call.on('disconnect', () => { setCallStatus('ended'); stopCallTimer(); setTimeout(() => setCallStatus(null), 3000); updateAgentStatus('Wrap Up') })
-    call.on('error', () => { setCallStatus('ended'); stopCallTimer(); setTimeout(() => setCallStatus(null), 2000) })
+    call.on('disconnect', () => { callRef.current = null; setCallStatus('ended'); stopCallTimer(); setTimeout(() => setCallStatus(null), 3000); updateAgentStatus('Wrap Up') })
+    call.on('error', () => { callRef.current = null; setCallStatus('ended'); stopCallTimer(); setTimeout(() => setCallStatus(null), 2000) })
     call.accept()
     setIncomingCall(null)
 
@@ -545,7 +546,15 @@ export default function DialerPage() {
 
   const makeCall = async (number) => {
     if (!deviceRef.current) { alert('Twilio not ready yet'); return }
+    // Only one live call at a time. Block if a call is already active or mid-connect.
+    if (callRef.current || connectingRef.current) {
+      console.warn('Call already in progress — ignoring new dial')
+      return
+    }
+    connectingRef.current = true
     try {
+      // Belt-and-suspenders: drop any lingering connections the Device may hold
+      try { deviceRef.current.disconnectAll?.() } catch {}
       const params = { To: number, identity: currentRep.replace(/[^a-zA-Z0-9_]/g, '_'), contactId: selectedId || '', contactName: selectedContact?.name || '' }
       const call = await deviceRef.current.connect({ params })
       callRef.current = call
@@ -553,9 +562,10 @@ export default function DialerPage() {
       updateAgentStatus('On Call')
       call.on('ringing', () => setCallStatus('ringing'))
       call.on('accept', () => { setCallStatus('connected'); startCallTimer() })
-      call.on('disconnect', () => { setCallStatus('ended'); stopCallTimer(); setTimeout(() => setCallStatus(null), 3000); updateAgentStatus('Wrap Up') })
-      call.on('error', () => { setCallStatus('ended'); stopCallTimer(); setTimeout(() => setCallStatus(null), 2000) })
+      call.on('disconnect', () => { callRef.current = null; setCallStatus('ended'); stopCallTimer(); setTimeout(() => setCallStatus(null), 3000); updateAgentStatus('Wrap Up') })
+      call.on('error', () => { callRef.current = null; setCallStatus('ended'); stopCallTimer(); setTimeout(() => setCallStatus(null), 2000) })
     } catch (err) { console.error('makeCall error:', err); setCallStatus(null) }
+    finally { connectingRef.current = false }
   }
 
   const hangUp = () => {
