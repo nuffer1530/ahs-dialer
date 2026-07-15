@@ -757,12 +757,12 @@ export default function DialerPage() {
     return byDay
   }
 
-  // ST Direct Booking
+  // ST Direct Booking — returns true on success, false otherwise
   const bookInST = async () => {
     const c = selectedContact
-    if (!c?.external_id) { alert('No ST Customer ID on this contact. Please link to ST first.'); return }
-    if (!selectedJobType || !selectedBU) { alert('Please select a job type and business unit.'); return }
-    if (!stCampaignId) { alert('Please select a marketing campaign — it is required to book.'); return }
+    if (!c?.external_id) { alert('No ST Customer ID on this contact. Please link to ST first.'); return false }
+    if (!selectedJobType || !selectedBU) { alert('Please select a job type and business unit.'); return false }
+    if (!stCampaignId) { alert('Please select a marketing campaign — it is required to book.'); return false }
     const notes = notesVal.trim()
     setBooking(true); setBookingResult(null)
     try {
@@ -780,9 +780,18 @@ export default function DialerPage() {
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Booking failed')
       setBookingResult({ ok: true, jobId: data.jobId, jobNumber: data.jobNumber })
+      return true
     } catch (e) {
       setBookingResult({ ok: false, error: e.message })
+      return false
     } finally { setBooking(false) }
+  }
+
+  // Booked flow: create the ST job, then log the call (stays on customer).
+  const bookAndLog = async () => {
+    if (!notesVal.trim()) { alert('Please add call notes before booking.'); return }
+    const ok = await bookInST()
+    if (ok) await logOutcome(true)
   }
 
   const openCallbackModal = () => {
@@ -1430,8 +1439,8 @@ export default function DialerPage() {
                             </div>
                           </div>
 
-                          {/* ST Booking panel — always visible */}
-                          {true && (
+                          {/* ST Booking panel — only when "Booked" is the outcome */}
+                          {selectedOutcome === 'Booked' && (
                             <div style={{ background:'var(--success-bg)', border:'1px solid var(--success)', borderRadius:'var(--radius)', padding:12, display:'flex', flexDirection:'column', gap:10 }}>
                               <div style={{ fontSize:11, fontWeight:700, color:'var(--success)' }}>ServiceTitan booking details</div>
                               <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8 }}>
@@ -1466,31 +1475,33 @@ export default function DialerPage() {
                                 </div>
                               )}
 
-                              <button onClick={bookInST} disabled={!c.external_id || !selectedJobType || !selectedBU || !stCampaignId || booking}
-                                style={{ width:'100%', padding:'10px 0', border:'none', borderRadius:'var(--radius)', background: c.external_id && selectedJobType && selectedBU ? '#16A34A' : 'var(--border)', color:'#fff', fontSize:13, fontWeight:700, cursor: c.external_id && selectedJobType && selectedBU ? 'pointer' : 'not-allowed', display:'flex', alignItems:'center', justifyContent:'center', gap:6 }}>
-                                {booking ? <><div className="spinner" style={{width:13,height:13,borderWidth:2,borderTopColor:'#fff'}}></div> Booking...</> :
-                                  selectedSlot ? `Book ${new Date(selectedSlot.start).toLocaleDateString('en-US', { weekday:'short', month:'short', day:'numeric' })} ${new Date(selectedSlot.start).toLocaleTimeString('en-US', { hour:'numeric', minute:'2-digit' })}` :
-                                  'Book in ServiceTitan (Unscheduled)'}
-                              </button>
                               {!c.external_id && <div style={{ fontSize:10, color:'var(--warning)', textAlign:'center' }}>No ST Customer ID on this contact</div>}
-                              {bookingResult && (
-                                <div style={{ padding:'7px 10px', borderRadius:'var(--radius)', fontSize:11, fontWeight:500, background: bookingResult.ok ? '#DCFCE7' : '#FEE2E2', border:`1px solid ${bookingResult.ok ? '#16A34A' : '#DC2626'}`, color: bookingResult.ok ? '#15803D' : '#DC2626' }}>
-                                  {bookingResult.ok ? `Job #${bookingResult.jobNumber||bookingResult.jobId} created!` : bookingResult.error}
-                                </div>
-                              )}
                             </div>
                           )}
 
-                          {/* Log actions */}
-                          <div style={{ display:'flex', gap:6, justifyContent:'space-between', paddingTop:2 }}>
-                            <button className="btn" disabled={!isMe} onClick={openCallbackModal} style={{fontSize:12}}>Callback</button>
-                            <div style={{ display:'flex', gap:6 }}>
-                              <button className="btn" disabled={!isMe || !selectedOutcome || saving} onClick={() => logOutcome(true)} style={{fontSize:12}}>{saving ? 'Saving...' : 'Log & stay'}</button>
-                              <button className="btn" disabled={!isMe || !selectedOutcome || saving} onClick={() => logOutcome(false)}
-                                style={{ background:'#16A34A', borderColor:'#16A34A', color:'#fff', fontWeight:600, fontSize:12 }}>
-                                {saving ? 'Saving...' : 'Log & next'}
-                              </button>
+                          {/* Booking confirmation (persists after the panel closes on log) */}
+                          {bookingResult && (
+                            <div style={{ padding:'7px 10px', borderRadius:'var(--radius)', fontSize:11, fontWeight:500, background: bookingResult.ok ? '#DCFCE7' : '#FEE2E2', border:`1px solid ${bookingResult.ok ? '#16A34A' : '#DC2626'}`, color: bookingResult.ok ? '#15803D' : '#DC2626' }}>
+                              {bookingResult.ok ? `Job #${bookingResult.jobNumber||bookingResult.jobId} created in ServiceTitan` : bookingResult.error}
                             </div>
+                          )}
+
+                          {/* One contextual action: Booked → book & log; otherwise → log. Stays on customer. */}
+                          <div style={{ display:'flex', gap:8, justifyContent:'space-between', alignItems:'center', paddingTop:2 }}>
+                            <button className="btn" disabled={!isMe} onClick={openCallbackModal} style={{fontSize:12}}>Callback</button>
+                            {selectedOutcome === 'Booked' ? (
+                              <button onClick={bookAndLog} disabled={!isMe || !c.external_id || !selectedJobType || !selectedBU || !stCampaignId || booking || saving}
+                                style={{ padding:'10px 22px', border:'none', borderRadius:'var(--radius)', background: (c.external_id && selectedJobType && selectedBU && stCampaignId) ? '#16A34A' : 'var(--border)', color:'#fff', fontSize:13, fontWeight:700, cursor: (c.external_id && selectedJobType && selectedBU && stCampaignId && !booking && !saving) ? 'pointer' : 'not-allowed', display:'flex', alignItems:'center', justifyContent:'center', gap:6 }}>
+                                {(booking || saving) ? <><div className="spinner" style={{width:13,height:13,borderWidth:2,borderTopColor:'#fff'}}></div> Booking...</> :
+                                  selectedSlot ? `Book ${new Date(selectedSlot.start).toLocaleDateString('en-US', { weekday:'short', month:'short', day:'numeric' })} ${new Date(selectedSlot.start).toLocaleTimeString('en-US', { hour:'numeric', minute:'2-digit' })} & log` :
+                                  'Book in ServiceTitan & log'}
+                              </button>
+                            ) : (
+                              <button onClick={() => logOutcome(true)} disabled={!isMe || !selectedOutcome || saving}
+                                style={{ padding:'10px 22px', border:'none', borderRadius:'var(--radius)', background: selectedOutcome ? '#16A34A' : 'var(--border)', color:'#fff', fontSize:13, fontWeight:600, cursor: (selectedOutcome && !saving) ? 'pointer' : 'not-allowed' }}>
+                                {saving ? 'Saving...' : selectedOutcome ? 'Log outcome' : 'Pick an outcome'}
+                              </button>
+                            )}
                           </div>
                         </div>
                       </div>
