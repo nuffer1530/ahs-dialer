@@ -139,13 +139,6 @@ export default function LivePage() {
         </div>
       )}
 
-      {/* Header */}
-      <div style={{ display:'flex', alignItems:'center', gap:10 }}>
-        <h1 style={{ fontSize:20, fontWeight:600 }}>Live Rep Activity</h1>
-        <div className="live-dot"></div>
-        <span style={{ fontSize:11, color:'var(--text-muted)' }}>Real-time · Updates instantly</span>
-      </div>
-
       {/* Agent Status Board */}
       <div className="card">
         <div className="card-header">
