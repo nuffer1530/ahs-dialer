@@ -128,6 +128,7 @@ export default function DialerPage() {
   const [commissionRates, setCommissionRates] = useState({ booking: 2.00, membership: 2.00 })
   const [dailyEarnings, setDailyEarnings] = useState(0)
   const [weeklyEarnings, setWeeklyEarnings] = useState(0)
+  const [showCommPop, setShowCommPop] = useState(false)
   const [showEarningsDetail, setShowEarningsDetail] = useState(false)
 
   // Modals
@@ -223,7 +224,7 @@ export default function DialerPage() {
       setStBusinessUnits(buData?.data || [])
       const camps = campData?.data || []
       setStCampaigns(camps)
-      if (camps[0]?.id) setStCampaignId(camps[0].id)
+      // No auto-default: campaign stays blank until the CSR selects one (required to book)
 
       setStLoading(false)
     }
@@ -692,6 +693,7 @@ export default function DialerPage() {
     const c = selectedContact
     if (!c?.external_id) { alert('No ST Customer ID on this contact. Please link to ST first.'); return }
     if (!selectedJobType || !selectedBU) { alert('Please select a job type and business unit.'); return }
+    if (!stCampaignId) { alert('Please select a marketing campaign — it is required to book.'); return }
     const notes = notesVal.trim()
     setBooking(true); setBookingResult(null)
     try {
@@ -1370,7 +1372,7 @@ export default function DialerPage() {
                                 </div>
                               )}
 
-                              <button onClick={bookInST} disabled={!c.external_id || !selectedJobType || !selectedBU || booking}
+                              <button onClick={bookInST} disabled={!c.external_id || !selectedJobType || !selectedBU || !stCampaignId || booking}
                                 style={{ width:'100%', padding:'10px 0', border:'none', borderRadius:'var(--radius)', background: c.external_id && selectedJobType && selectedBU ? '#16A34A' : 'var(--border)', color:'#fff', fontSize:13, fontWeight:700, cursor: c.external_id && selectedJobType && selectedBU ? 'pointer' : 'not-allowed', display:'flex', alignItems:'center', justifyContent:'center', gap:6 }}>
                                 {booking ? <><div className="spinner" style={{width:13,height:13,borderWidth:2,borderTopColor:'#fff'}}></div> Booking...</> :
                                   selectedSlot ? `Book ${new Date(selectedSlot.start).toLocaleDateString('en-US', { weekday:'short', month:'short', day:'numeric' })} ${new Date(selectedSlot.start).toLocaleTimeString('en-US', { hour:'numeric', minute:'2-digit' })}` :
@@ -1417,12 +1419,34 @@ export default function DialerPage() {
                         { l:'Booked', v:myStats.booked, col:'#16A34A' },
                         { l:'Booking rate', v:todayLogs.length ? Math.round((myStats.booked/todayLogs.length)*100)+'%' : '--', col:'#7C3AED' },
                         { l:'Commission', v:'$'+dailyEarnings.toFixed(2), col:'#2563eb' },
-                      ].map(({ l, v, col }) => (
-                        <div key={l} style={{ background:'var(--surface-2)', borderRadius:'var(--radius)', padding:'8px 10px' }}>
-                          <div style={{ fontSize:9, textTransform:'uppercase', letterSpacing:.5, color:'var(--text-muted)', marginBottom:2 }}>{l}</div>
-                          <div style={{ fontSize:16, fontWeight:700, color:col }}>{v}</div>
-                        </div>
-                      ))}
+                      ].map(({ l, v, col }) => {
+                        const isComm = l === 'Commission'
+                        return (
+                          <div key={l}
+                            onClick={isComm ? () => setShowCommPop(s => !s) : undefined}
+                            style={{ background:'var(--surface-2)', borderRadius:'var(--radius)', padding:'8px 10px', position:'relative', cursor: isComm ? 'pointer' : 'default' }}>
+                            <div style={{ fontSize:9, textTransform:'uppercase', letterSpacing:.5, color:'var(--text-muted)', marginBottom:2, display:'flex', alignItems:'center', gap:3 }}>
+                              {l}
+                              {isComm && (
+                                <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" style={{ opacity:.5, transform: showCommPop ? 'rotate(180deg)' : 'none' }}><path d="m6 9 6 6 6-6"/></svg>
+                              )}
+                            </div>
+                            <div style={{ fontSize:16, fontWeight:700, color:col }}>{v}</div>
+                            {isComm && showCommPop && (
+                              <div style={{ position:'absolute', top:'calc(100% + 4px)', left:0, right:0, zIndex:60, background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius)', boxShadow:'0 8px 24px rgba(0,0,0,.15)', padding:'6px 10px' }}>
+                                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', fontSize:11, padding:'3px 0' }}>
+                                  <span style={{ color:'var(--text-muted)' }}>Today</span>
+                                  <span style={{ fontWeight:700, color:'#2563eb' }}>${dailyEarnings.toFixed(2)}</span>
+                                </div>
+                                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', fontSize:11, padding:'3px 0', borderTop:'1px solid var(--border)' }}>
+                                  <span style={{ color:'var(--text-muted)' }}>This week</span>
+                                  <span style={{ fontWeight:700, color:'var(--text-primary)' }}>${weeklyEarnings.toFixed(2)}</span>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })}
                     </div>
                   </div>
 
