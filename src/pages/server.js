@@ -877,6 +877,7 @@ async function gatherCustomerFacts(id) {
   // so we look up estimates across this customer's jobs. No jobs = no estimates.
   // Per the salestech spec: amount = subtotal + tax; status is {value,name};
   // the response also carries customerId, which we use as a safety filter.
+  facts._debug = { jobIds, rawEstimates: 0, afterCustomerFilter: 0, openCount: 0 }
   try {
     if (jobIds.length) {
       const perJob = await Promise.all(jobIds.slice(0, 10).map(jid =>
@@ -884,11 +885,15 @@ async function gatherCustomerFacts(id) {
           .then(r => r?.data || [])
           .catch(() => [])
       ))
-      const all = perJob.flat().filter(e => String(e.customerId) === String(id))
+      const raw = perJob.flat()
+      const all = raw.filter(e => String(e.customerId) === String(id))
       const open = all.filter(e => {
         const s = (e.status?.name || '').toLowerCase()
         return s === 'open' || (s === '' && e.active !== false && !e.soldOn)
       })
+      facts._debug.rawEstimates = raw.length
+      facts._debug.afterCustomerFilter = all.length
+      facts._debug.openCount = open.length
       if (open.length) {
         facts.openEstimates = {
           count: open.length,
@@ -896,7 +901,7 @@ async function gatherCustomerFacts(id) {
         }
       }
     }
-  } catch (e) { console.warn('facts estimates:', e.message) }
+  } catch (e) { console.warn('facts estimates:', e.message); facts._debug.error = e.message }
 
   // Lifetime value — sum of invoice totals
   try {
@@ -966,12 +971,14 @@ app.get('/api/st/intelligence/:id', async (req, res) => {
       if (cached?.generated_at) {
         const ageHrs = (Date.now() - new Date(cached.generated_at)) / 36e5
         if (ageHrs < BRIEF_TTL_HOURS) {
-          return res.json({ brief: cached.brief, facts: cached.facts, generated_at: cached.generated_at, cached: true })
+          return res.json({ brief: cached.brief, facts: cached.facts, generated_at: cached.generated_at, cached: true, _version: 'intel-v3-jobid' })
         }
       }
     }
 
     const facts = await gatherCustomerFacts(id)
+    const debug = facts._debug || null
+    delete facts._debug   // keep debug out of Claude prompt + cache
     const brief = await generateBrief(facts)
     const generated_at = new Date().toISOString()
 
@@ -981,7 +988,7 @@ app.get('/api/st/intelligence/:id', async (req, res) => {
         .upsert({ customer_id: id, brief, facts, generated_at }, { onConflict: 'customer_id' })
     } catch (e) { console.warn('brief cache upsert:', e.message) }
 
-    res.json({ brief, facts, generated_at, cached: false })
+    res.json({ brief, facts, generated_at, cached: false, _version: 'intel-v3-jobid', _debug: debug })
   } catch (err) {
     console.error('Intelligence brief error:', err.message)
     res.status(500).json({ error: err.message })
