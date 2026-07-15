@@ -164,6 +164,22 @@ export default function DialerLayout() {
   const [alerts, setAlerts] = useState([])
   const menuRef = useRef(null)
   const sidebarStatusRef = useRef(null)
+  const sidebarBtnRef = useRef(null)
+  const [sbPopupStyle, setSbPopupStyle] = useState({})
+
+  // Open the sidebar status popup as a fixed-position element anchored to the
+  // button, so it escapes the sidebar's overflow:hidden (which was clipping it
+  // when collapsed).
+  const toggleSidebarStatus = () => {
+    setShowSidebarStatus(v => {
+      const next = !v
+      if (next && sidebarBtnRef.current) {
+        const r = sidebarBtnRef.current.getBoundingClientRect()
+        setSbPopupStyle({ position:'fixed', left: Math.round(r.left), bottom: Math.round(window.innerHeight - r.top + 6), width: 200 })
+      }
+      return next
+    })
+  }
   const currentEventRef = useRef(null)
   const [navCollapsed, setNavCollapsed] = useState(false)
   const [statusOptions, setStatusOptions] = useState(DEFAULT_STATUS_OPTIONS)
@@ -365,7 +381,7 @@ export default function DialerLayout() {
       }}>
 
         {/* Logo + collapse toggle */}
-        <div style={{ display:'flex', alignItems:'center', justifyContent: navCollapsed ? 'center' : 'space-between', padding: navCollapsed ? '14px 0' : '14px 14px 14px 16px', borderBottom:'1px solid var(--border)', flexShrink:0, minHeight:52 }}>
+        <div style={{ display:'flex', alignItems:'center', justifyContent: navCollapsed ? 'center' : 'space-between', padding: navCollapsed ? '0' : '0 14px 0 16px', borderBottom:'1px solid var(--border)', flexShrink:0, height:53, minHeight:53, boxSizing:'border-box' }}>
           {!navCollapsed && (
             <div style={{ display:'flex', alignItems:'center', gap:8 }}>
               <svg width="24" height="24" viewBox="-2 0 112 100" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -448,7 +464,7 @@ export default function DialerLayout() {
         <div style={{ borderTop:'1px solid var(--border)', padding:'10px 8px', flexShrink:0, display:'flex', flexDirection:'column', gap:8 }}>
           {/* Status changer — primary place to set status */}
           <div ref={sidebarStatusRef} style={{ position:'relative' }}>
-            <button onClick={() => setShowSidebarStatus(v => !v)}
+            <button ref={sidebarBtnRef} onClick={toggleSidebarStatus}
               title={navCollapsed ? `${currentStatusObj.value} · ${fmtDur(statusDuration)}` : undefined}
               style={{ width:'100%', padding: navCollapsed ? '8px 0' : '7px 10px', background:'var(--surface-2)', border:'1px solid var(--border)', borderRadius:'var(--radius)', cursor:'pointer', display:'flex', alignItems:'center', justifyContent: navCollapsed ? 'center' : 'space-between', gap:8 }}>
               <span style={{ display:'flex', alignItems:'center', gap:8, minWidth:0 }}>
@@ -464,7 +480,7 @@ export default function DialerLayout() {
             </button>
 
             {showSidebarStatus && (
-              <div style={{ position:'absolute', bottom:'calc(100% + 6px)', left:0, right: navCollapsed ? 'auto' : 0, minWidth: navCollapsed ? 160 : undefined, background:'var(--surface)', border:'1px solid var(--border)', borderRadius:10, boxShadow:'0 8px 32px rgba(0,0,0,.18)', overflow:'hidden', zIndex:200 }}>
+              <div style={{ ...sbPopupStyle, background:'var(--surface)', border:'1px solid var(--border)', borderRadius:10, boxShadow:'0 8px 32px rgba(0,0,0,.18)', overflow:'hidden', zIndex:9999 }}>
                 <div style={{ fontSize:9, fontWeight:700, textTransform:'uppercase', letterSpacing:.7, color:'var(--text-muted)', padding:'10px 14px 6px' }}>Set status</div>
                 {statusOptions.map(s => (
                   <button key={s.value} onClick={() => { updateStatus(s.value); setShowSidebarStatus(false) }}
@@ -495,7 +511,7 @@ export default function DialerLayout() {
       {/* ── MAIN CONTENT (with a real top bar so the profile menu never overlaps pages) ── */}
       <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden', minWidth:0 }}>
         {/* Top bar — reserves its own height; every page renders below it */}
-        <div style={{ height:52, flexShrink:0, borderBottom:'1px solid var(--border)', background:'var(--surface)', display:'flex', alignItems:'center', justifyContent:'flex-end', padding:'0 16px', position:'relative', zIndex:100 }}>
+        <div style={{ height:53, minHeight:53, boxSizing:'border-box', flexShrink:0, borderBottom:'1px solid var(--border)', background:'var(--surface)', display:'flex', alignItems:'center', justifyContent:'flex-end', padding:'0 16px', position:'relative', zIndex:100 }}>
           <div ref={menuRef} style={{ position:'relative' }}>
         <button onClick={() => setShowStatusMenu(v => !v)}
           title={`${currentStatusObj.value} · ${fmtDur(statusDuration)}`}
