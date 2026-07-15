@@ -818,12 +818,14 @@ app.get('/api/st/recording', async (req, res) => {
 
 const BRIEF_TTL_HOURS = 6
 const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY
+const MEMBERSHIP_INFO = 'Awesome Club Membership: $29.95/mo or $399/yr. Includes 2 annual HVAC inspections, 1 plumbing inspection, 1 electrical inspection on request, and 2 garage door inspections; a discounted $49 service fee; 15% off all repairs; 10% off indoor-air-quality products, replacements, and garage door replacements; transferable if they move.'
 
 // Gather structured facts from ST. Every sub-fetch is best-effort: if a scope
 // or endpoint fails, that fact is simply omitted and the brief adapts.
 async function gatherCustomerFacts(id) {
   const facts = {}
   let jobIds = []
+  let locIds = []
 
   // Customer + membership (reuse the same shape as /api/st/customer)
   try {
@@ -834,6 +836,8 @@ async function gatherCustomerFacts(id) {
       const memb = await stGet(`/memberships/v2/tenant/${ST_TENANT_ID}/memberships?customerIds=${id}&pageSize=10`)
       const active = (memb?.data || []).find(m => m.status === 'Active')
       facts.membership = active ? (active.membershipTypeName || active.type?.name || 'Member') : 'Non-member'
+      facts.isMember = !!active
+      if (active) facts._membership = { id: active.id, from: active.from, to: active.to }
     } catch {}
   } catch (e) { console.warn('facts customer:', e.message) }
 
@@ -858,7 +862,7 @@ async function gatherCustomerFacts(id) {
   // Installed equipment — age is the install date
   try {
     const locRes = await stGet(`/crm/v2/tenant/${ST_TENANT_ID}/locations?customerId=${id}&pageSize=5`)
-    const locIds = (locRes?.data || []).map(l => l.id).filter(Boolean)
+    locIds = (locRes?.data || []).map(l => l.id).filter(Boolean)
     if (locIds.length) {
       const eqRes = await stGet(`/equipmentsystems/v2/tenant/${ST_TENANT_ID}/installed-equipment?locationIds=${locIds.join(',')}&pageSize=50`)
       const eq = (eqRes?.data || []).map(e => ({
@@ -873,6 +877,34 @@ async function gatherCustomerFacts(id) {
       }
     }
   } catch (e) { console.warn('facts equipment:', e.message) }
+
+  // Membership maintenance visits — which inspections are booked vs still owed.
+  // recurring-service-events has no customerId filter; scope by the customer's
+  // location(s), then (when known) to their active membership.
+  try {
+    if (facts.isMember && locIds.length) {
+      const evRes = await Promise.all(locIds.slice(0, 5).map(lid =>
+        stGet(`/memberships/v2/tenant/${ST_TENANT_ID}/recurring-service-events?locationId=${lid}&pageSize=100`)
+          .then(r => r?.data || []).catch(() => [])
+      ))
+      const mId = facts._membership?.id
+      const events = evRes.flat().filter(e => !mId || String(e.membershipId) === String(mId))
+      const isBooked = e => !!e.jobId || e.status === 'Won'
+      const horizon = Date.now() + 90 * 864e5
+      const due = events.filter(e => !isBooked(e) && e.status !== 'Dismissed' && e.date && new Date(e.date).getTime() <= horizon)
+      const booked = events.filter(isBooked)
+      if (events.length) {
+        facts.maintenanceVisits = {
+          booked: booked.length,
+          dueCount: due.length,
+          due: due
+            .sort((a, b) => new Date(a.date) - new Date(b.date))
+            .slice(0, 6)
+            .map(e => ({ name: e.locationRecurringServiceName || 'Inspection', date: e.date })),
+        }
+      }
+    }
+  } catch (e) { console.warn('facts recurring events:', e.message) }
 
   // Open estimates — ST's estimates endpoint filters by jobId (NOT customerId),
   // so we look up estimates across this customer's jobs. No jobs = no estimates.
@@ -914,6 +946,21 @@ async function gatherCustomerFacts(id) {
     }
   } catch (e) { console.warn('facts invoices:', e.message) }
 
+  // Membership savings estimate — conservative 10% blended "up to" figure on
+  // open estimates + lifetime spend. Only surfaced for non-members.
+  try {
+    const estTotal = facts.openEstimates?.total || 0
+    const ltv = facts.lifetimeValue || 0
+    if (!facts.isMember && (estTotal + ltv) > 0) {
+      facts.memberSavings = {
+        onOpenEstimates: Math.round(estTotal * 0.10),
+        onHistory: Math.round(ltv * 0.10),
+        upTo: Math.round((estTotal + ltv) * 0.10),
+        basis: 'Conservative 10% blended (repairs 15% / replacements & IAQ 10%); actual varies by job type.',
+      }
+    }
+  } catch {}
+
   // Customer notes — pinned notes are high-signal operational flags the rep
   // must see. Surface pinned verbatim; include a couple recent ones as context.
   try {
@@ -927,12 +974,20 @@ async function gatherCustomerFacts(id) {
     if (recent.length) facts.recentNotes = recent
   } catch (e) { console.warn('facts notes:', e.message) }
 
+  delete facts._membership
   return facts
 }
 
 async function generateBrief(facts) {
   if (!ANTHROPIC_KEY) return null
-  const sys = "You write a punchy pre-call intelligence brief for a home-services call-center rep at Awesome Home Services (HVAC, plumbing, electrical, garage doors). You are given structured ServiceTitan data about a customer. Write 2-3 short sentences of plain prose: first what stands out about their history (age of equipment, time since last service, membership, open estimates, lifetime value), then one tactical line on how to approach the call. If the data includes pinnedNotes, treat them as high-priority operational flags from staff and account for them in your tactical line (do not contradict or soften them). CRITICAL: only state what the data explicitly supports. If a field is absent or zero, that means the data is simply not present in ServiceTitan — it does NOT imply non-payment, debt, collections risk, a bad customer, or anything negative. Never infer unpaid work, financial trouble, or risk from a missing or zero lifetimeValue; if there's no lifetime value, just omit it rather than explaining why. No greeting, no bullet points, no markdown, no preamble. Reference concrete numbers you were given. If the data is genuinely sparse, say so in one neutral line rather than inventing a narrative."
+  const sys = `You write a punchy pre-call intelligence brief for a home-services call-center rep at Awesome Home Services (HVAC, plumbing, electrical, garage doors). You are given structured ServiceTitan data about a customer. Write 2-4 short sentences of plain prose: first what stands out about their history (age of equipment, time since last service, membership, open estimates, lifetime value), then a tactical line on how to approach the call. If the data includes pinnedNotes, treat them as high-priority operational flags from staff and account for them (do not contradict or soften them).
+
+MEMBERSHIP PLAYS — ${MEMBERSHIP_INFO}
+- If the customer IS a member (isMember true): briefly thank them for being an Awesome Club member. If maintenanceVisits.due lists inspections, tell the rep to book those specific visit(s) on THIS call, naming them, since they are included in the membership; if maintenanceVisits.dueCount is 0, note their inspections are on track. If they have openEstimates, remind the rep those qualify for the 15% member repair discount.
+- If the customer is NOT a member: work membership in as an opportunity in the tactical line. If memberSavings is present, cite it with "up to" language (e.g., "up to ~$X across their open estimates and past work") and mention the $49 service fee and included inspections as the hook. Keep it natural and genuinely helpful, not pushy — one line the rep can actually say.
+- Only use a play when the relevant data is present. Never invent visit names, dates, or savings figures not in the data.
+
+CRITICAL: only state what the data explicitly supports. If a field is absent or zero, the data is simply not present in ServiceTitan — it does NOT imply non-payment, debt, collections risk, or anything negative. Never infer unpaid work or financial trouble from a missing or zero lifetimeValue; if there is no lifetime value, omit it. No greeting, no bullet points, no markdown, no preamble. Reference concrete numbers you were given. If the data is genuinely sparse, say so in one neutral line rather than inventing a narrative.`
   try {
     const r = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -943,7 +998,7 @@ async function generateBrief(facts) {
       },
       body: JSON.stringify({
         model: 'claude-haiku-4-5-20251001',
-        max_tokens: 250,
+        max_tokens: 320,
         system: sys,
         messages: [{ role: 'user', content: `Customer data (JSON):\n${JSON.stringify(facts, null, 2)}` }],
       }),
