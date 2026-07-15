@@ -978,16 +978,50 @@ async function gatherCustomerFacts(id) {
   return facts
 }
 
+// Render a structured brief to a single plain-text string (used for the DB
+// text column + backward-compatible `brief` field in the response).
+function briefToText(bd) {
+  if (!bd) return ''
+  if (typeof bd === 'string') return bd
+  const parts = []
+  if (bd.headline) parts.push(bd.headline)
+  if (Array.isArray(bd.actions)) bd.actions.forEach(a => a && parts.push('- ' + a))
+  if (bd.flag) parts.push('Flag: ' + bd.flag)
+  return parts.join('\n')
+}
+
+// Normalize whatever the model returned into { headline, actions[], flag }.
+function normalizeBrief(parsed, rawText) {
+  if (!parsed || !parsed.headline) {
+    return rawText ? { headline: rawText, actions: [], flag: null } : null
+  }
+  return {
+    headline: String(parsed.headline || '').trim(),
+    actions: Array.isArray(parsed.actions)
+      ? parsed.actions.map(a => String(a).trim()).filter(Boolean).slice(0, 3)
+      : [],
+    flag: parsed.flag ? String(parsed.flag).trim() : null,
+  }
+}
+
 async function generateBrief(facts) {
   if (!ANTHROPIC_KEY) return null
-  const sys = `You write a punchy pre-call intelligence brief for a home-services call-center rep at Awesome Home Services (HVAC, plumbing, electrical, garage doors). You are given structured ServiceTitan data about a customer. Write 2-4 short sentences of plain prose: first what stands out about their history (age of equipment, time since last service, membership, open estimates, lifetime value), then a tactical line on how to approach the call. If the data includes pinnedNotes, treat them as high-priority operational flags from staff and account for them (do not contradict or soften them).
+  const sys = `You produce a pre-call cheat sheet for a call-center rep at Awesome Home Services (HVAC, plumbing, electrical, garage doors) who is LIVE on the phone and can only glance for a second. Optimize every word for customer experience, booking the job, and revenue. You are given ServiceTitan data (JSON).
 
-MEMBERSHIP PLAYS — ${MEMBERSHIP_INFO}
-- If the customer IS a member (isMember true): briefly thank them for being an Awesome Club member. If maintenanceVisits.due lists inspections, tell the rep to book those specific visit(s) on THIS call, naming them, since they are included in the membership; if maintenanceVisits.dueCount is 0, note their inspections are on track. If they have openEstimates, remind the rep those qualify for the 15% member repair discount.
-- If the customer is NOT a member: work membership in as an opportunity in the tactical line. If memberSavings is present, cite it with "up to" language (e.g., "up to ~$X across their open estimates and past work") and mention the $49 service fee and included inspections as the hook. Keep it natural and genuinely helpful, not pushy — one line the rep can actually say.
-- Only use a play when the relevant data is present. Never invent visit names, dates, or savings figures not in the data.
+Return ONLY a JSON object — no markdown, no backticks, no preamble:
+{
+  "headline": "at most 12 words: who they are plus the single most important thing",
+  "actions": ["1 to 3 items, each a short verb-first instruction, highest booking/revenue impact first"],
+  "flag": "one critical staff pinned-note warning the rep must not miss, or an empty string"
+}
 
-CRITICAL: only state what the data explicitly supports. If a field is absent or zero, the data is simply not present in ServiceTitan — it does NOT imply non-payment, debt, collections risk, or anything negative. Never infer unpaid work or financial trouble from a missing or zero lifetimeValue; if there is no lifetime value, omit it. No greeting, no bullet points, no markdown, no preamble. Reference concrete numbers you were given. If the data is genuinely sparse, say so in one neutral line rather than inventing a narrative.`
+Writing rules:
+- headline is glanceable, not a full sentence with filler. Include the sharpest number or status (e.g. equipment age, unresolved issue, open-estimate total, member vs non-member).
+- each action is what to DO on THIS call and at most 14 words: book a specific due inspection by name, move a named open estimate forward with its dollar amount, raise the unresolved problem, or offer membership. Concrete over generic.
+- MEMBERSHIP — ${MEMBERSHIP_INFO} If isMember is true: one action can thank them and book any maintenanceVisits.due (name it, it's included), and note open estimates get the 15% member discount. If not a member and memberSavings is present: one action offers membership using "up to ~$X" language plus the $49 service fee / included inspections hook. Natural and helpful, never pushy.
+- flag: if pinnedNotes exist, put the most important one here; otherwise empty string.
+
+CRITICAL: only use what the data supports. Never invent visit names, dates, or savings figures. A missing or zero lifetimeValue is just absent data — never imply non-payment, debt, or anything negative; omit it. If data is sparse, say so in the headline and give one sensible action.`
   try {
     const r = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -998,7 +1032,7 @@ CRITICAL: only state what the data explicitly supports. If a field is absent or 
       },
       body: JSON.stringify({
         model: 'claude-haiku-4-5-20251001',
-        max_tokens: 320,
+        max_tokens: 400,
         system: sys,
         messages: [{ role: 'user', content: `Customer data (JSON):\n${JSON.stringify(facts, null, 2)}` }],
       }),
@@ -1009,7 +1043,11 @@ CRITICAL: only state what the data explicitly supports. If a field is absent or 
       return null
     }
     const data = await r.json()
-    return (data.content || []).filter(b => b.type === 'text').map(b => b.text).join('').trim() || null
+    let text = (data.content || []).filter(b => b.type === 'text').map(b => b.text).join('').trim()
+    text = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim()
+    let parsed = null
+    try { parsed = JSON.parse(text) } catch {}
+    return normalizeBrief(parsed, text)
   } catch (e) {
     console.error('generateBrief error:', e.message)
     return null
@@ -1027,7 +1065,11 @@ app.get('/api/st/intelligence/:id', async (req, res) => {
       if (cached?.generated_at) {
         const ageHrs = (Date.now() - new Date(cached.generated_at)) / 36e5
         if (ageHrs < BRIEF_TTL_HOURS) {
-          return res.json({ brief: cached.brief, facts: cached.facts, generated_at: cached.generated_at, cached: true, _version: 'intel-v3-jobid' })
+          let bd = null
+          try { bd = JSON.parse(cached.brief) } catch {}
+          if (bd && !bd.headline) bd = null        // legacy plain-text cache row
+          const briefText = bd ? briefToText(bd) : cached.brief
+          return res.json({ brief: briefText, brief_data: bd, facts: cached.facts, generated_at: cached.generated_at, cached: true, _version: 'intel-v4-structured' })
         }
       }
     }
@@ -1035,16 +1077,17 @@ app.get('/api/st/intelligence/:id', async (req, res) => {
     const facts = await gatherCustomerFacts(id)
     const debug = facts._debug || null
     delete facts._debug   // keep debug out of Claude prompt + cache
-    const brief = await generateBrief(facts)
+    const briefData = await generateBrief(facts)
+    const briefText = briefToText(briefData)
     const generated_at = new Date().toISOString()
 
-    // Cache (best-effort — don't fail the response if the upsert errors)
+    // Cache (best-effort — store the structured brief as JSON in the text column)
     try {
       await supabase.from('customer_briefs')
-        .upsert({ customer_id: id, brief, facts, generated_at }, { onConflict: 'customer_id' })
+        .upsert({ customer_id: id, brief: briefData ? JSON.stringify(briefData) : null, facts, generated_at }, { onConflict: 'customer_id' })
     } catch (e) { console.warn('brief cache upsert:', e.message) }
 
-    res.json({ brief, facts, generated_at, cached: false, _version: 'intel-v3-jobid', _debug: debug })
+    res.json({ brief: briefText, brief_data: briefData, facts, generated_at, cached: false, _version: 'intel-v4-structured', _debug: debug })
   } catch (err) {
     console.error('Intelligence brief error:', err.message)
     res.status(500).json({ error: err.message })
