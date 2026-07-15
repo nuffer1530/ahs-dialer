@@ -300,11 +300,7 @@ export default function AttendancePage() {
       {/* ── HEADER BAR ── */}
       <div style={{ background:'var(--surface)', borderBottom:'1px solid var(--border)', flexShrink:0 }}>
         {/* Title + week nav row */}
-        <div style={{ padding:'16px 24px 0', display:'flex', alignItems:'flex-start', justifyContent:'space-between', gap:16 }}>
-          <div>
-            <div style={{ fontSize:18, fontWeight:600, color:'var(--text-primary)' }}>Workforce Management</div>
-            <div style={{ fontSize:12, color:'var(--text-muted)', marginTop:2 }}>Schedule, track adherence, and manage your team</div>
-          </div>
+        <div style={{ padding:'16px 24px 0', display:'flex', alignItems:'flex-start', justifyContent:'flex-end', gap:16 }}>
           {(tab === 'schedule' || tab === 'adherence') && (
             <div style={{ display:'flex', alignItems:'center', gap:10, marginTop:2 }}>
               <button onClick={prevWeek}
