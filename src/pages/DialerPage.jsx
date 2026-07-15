@@ -112,6 +112,8 @@ export default function DialerPage() {
 
   // Queue & contact state
   const [selectedId, setSelectedId] = useState(null)
+  const [openTabIds, setOpenTabIds] = useState([])
+  const MAX_TABS = 3
   const [selectedOutcome, setSelectedOutcome] = useState(null)
   const [filter, setFilter] = useState('active')
   const [campFilter, setCampFilter] = useState('')
@@ -277,6 +279,32 @@ export default function DialerPage() {
   }, [selectedId])
 
   useEffect(() => { setNotesVal(''); setBookingResult(null); setAlsoMembership(false) }, [selectedId])
+
+  // Restore open tabs + active tab on mount (survives refresh)
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem('andi_open_tabs')
+      const active = sessionStorage.getItem('andi_active_tab')
+      if (raw) {
+        const ids = JSON.parse(raw)
+        if (Array.isArray(ids) && ids.length) {
+          const trimmed = ids.slice(0, MAX_TABS)
+          setOpenTabIds(trimmed)
+          const act = trimmed.find(x => String(x) === String(active))
+          setSelectedId(act ?? trimmed[0])
+        }
+      }
+    } catch {}
+  }, [])
+
+  // Persist tabs whenever they change
+  useEffect(() => {
+    try {
+      sessionStorage.setItem('andi_open_tabs', JSON.stringify(openTabIds))
+      if (selectedId != null) sessionStorage.setItem('andi_active_tab', String(selectedId))
+      else sessionStorage.removeItem('andi_active_tab')
+    } catch {}
+  }, [openTabIds, selectedId])
 
   useEffect(() => {
     if (!currentRep) return
@@ -575,10 +603,41 @@ export default function DialerPage() {
     updateAgentStatus('Wrap Up')
   }
 
-  const selectContact = (id) => { setSelectedId(id); setSelectedOutcome(null) }
+  // Tabs: open/focus a customer in a tab (max 3). At max, replace the active tab.
+  const openTab = (id) => {
+    if (!id) return
+    setOpenTabIds(prev => {
+      if (prev.includes(id)) return prev
+      if (prev.length < MAX_TABS) return [...prev, id]
+      return prev.map(x => x === selectedId ? id : x)
+    })
+    setSelectedId(id); setSelectedOutcome(null)
+  }
+  // Queue navigation: replace the ACTIVE tab's customer in place (no new tab).
+  const navigateActiveTo = (id) => {
+    if (!id) return
+    setOpenTabIds(prev => {
+      if (!prev.length) return [id]
+      if (prev.includes(id)) return prev
+      return prev.map(x => x === selectedId ? id : x)
+    })
+    setSelectedId(id); setSelectedOutcome(null)
+  }
+  const closeTab = (id, e) => {
+    if (e) e.stopPropagation()
+    const idx = openTabIds.indexOf(id)
+    const next = openTabIds.filter(x => x !== id)
+    setOpenTabIds(next)
+    if (id === selectedId) {
+      const neighbor = next[idx] ?? next[idx - 1] ?? next[0] ?? null
+      setSelectedId(neighbor); setSelectedOutcome(null)
+    }
+  }
+  // Explicit selection (queue click, search, inbound pop) opens/focuses a tab.
+  const selectContact = (id) => openTab(id)
   const navNextPending = () => {
     const next = filtered.find(x => !isDone(x) && x.status !== 'Max Attempts' && !x.claimed_by)
-    if (next) selectContact(next.id)
+    if (next) navigateActiveTo(next.id)
   }
 
   const claimContact = async () => {
@@ -649,8 +708,8 @@ export default function DialerPage() {
 
       if (!stay) {
         const nextContact = filtered.slice(selectedIdx + 1).find(x => !isDone(x) && x.status !== 'Max Attempts')
-        if (nextContact) selectContact(nextContact.id)
-        else { setSelectedId(null) }
+        if (nextContact) navigateActiveTo(nextContact.id)
+        else { closeTab(selectedId) }
       }
     } finally { setSaving(false) }
   }
@@ -904,8 +963,8 @@ export default function DialerPage() {
           style={{ width:28, height:28, border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface-2)', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', fontSize:12, color:'var(--text-muted)', flexShrink:0 }}>
           {queueCollapsed ? '>' : '<'}
         </button>
-        <button className="btn" disabled={selectedIdx <= 0} onClick={() => { const p = filtered[selectedIdx-1]; if(p) selectContact(p.id) }} style={{fontSize:11,padding:'4px 9px'}}>Prev</button>
-        <button className="btn" disabled={selectedIdx >= filtered.length-1} onClick={() => { const n = filtered[selectedIdx+1]; if(n) selectContact(n.id) }} style={{fontSize:11,padding:'4px 9px'}}>Next</button>
+        <button className="btn" disabled={selectedIdx <= 0} onClick={() => { const p = filtered[selectedIdx-1]; if(p) navigateActiveTo(p.id) }} style={{fontSize:11,padding:'4px 9px'}}>Prev</button>
+        <button className="btn" disabled={selectedIdx >= filtered.length-1} onClick={() => { const n = filtered[selectedIdx+1]; if(n) navigateActiveTo(n.id) }} style={{fontSize:11,padding:'4px 9px'}}>Next</button>
         <button className="btn primary" onClick={navNextPending} style={{fontSize:11,padding:'4px 11px',fontWeight:600}}>Next pending</button>
         <button onClick={() => setShowDialpad(true)}
           style={{ display:'flex', alignItems:'center', gap:5, padding:'5px 12px', background: twilioReady ? '#16A34A' : 'var(--border)', border:'none', borderRadius:'var(--radius)', cursor: twilioReady ? 'pointer' : 'not-allowed', fontSize:11, fontWeight:600, color:'#fff' }}>
@@ -1023,6 +1082,31 @@ export default function DialerPage() {
 
         {/* == MAIN WORKSPACE == */}
         <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden', minWidth:0 }}>
+
+          {/* Customer tabs (up to 3 open at once) */}
+          {openTabIds.length > 0 && (
+            <div style={{ display:'flex', alignItems:'stretch', background:'var(--surface-2)', borderBottom:'1px solid var(--border)', flexShrink:0, overflowX:'auto' }}>
+              {openTabIds.map(tid => {
+                const tc = contacts.find(x => x.id === tid)
+                const isActive = tid === selectedId
+                return (
+                  <div key={tid} onClick={() => { setSelectedId(tid); setSelectedOutcome(null) }}
+                    style={{ display:'flex', alignItems:'center', gap:8, padding:'7px 10px 7px 13px', cursor:'pointer', minWidth:120, maxWidth:200, flexShrink:0,
+                      background: isActive ? 'var(--surface)' : 'transparent',
+                      borderRight:'1px solid var(--border)',
+                      borderTop: isActive ? '2px solid var(--accent)' : '2px solid transparent' }}>
+                    <span style={{ fontSize:12, fontWeight: isActive ? 600 : 500, color: isActive ? 'var(--text-primary)' : 'var(--text-muted)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
+                      {tc?.name || 'Customer'}
+                    </span>
+                    <button onClick={(e) => closeTab(tid, e)} title="Close tab"
+                      style={{ display:'flex', alignItems:'center', justifyContent:'center', width:16, height:16, borderRadius:4, border:'none', background:'transparent', cursor:'pointer', color:'var(--text-muted)', flexShrink:0, padding:0 }}>
+                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+                    </button>
+                  </div>
+                )
+              })}
+            </div>
+          )}
 
           {/* EMPTY STATE */}
           {!c && (
