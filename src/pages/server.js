@@ -875,6 +875,8 @@ async function gatherCustomerFacts(id) {
 
   // Open estimates — ST's estimates endpoint filters by jobId (NOT customerId),
   // so we look up estimates across this customer's jobs. No jobs = no estimates.
+  // Per the salestech spec: amount = subtotal + tax; status is {value,name};
+  // the response also carries customerId, which we use as a safety filter.
   try {
     if (jobIds.length) {
       const perJob = await Promise.all(jobIds.slice(0, 10).map(jid =>
@@ -882,15 +884,15 @@ async function gatherCustomerFacts(id) {
           .then(r => r?.data || [])
           .catch(() => [])
       ))
-      const all = perJob.flat()
+      const all = perJob.flat().filter(e => String(e.customerId) === String(id))
       const open = all.filter(e => {
-        const s = (e.status?.name || e.status || '').toLowerCase()
-        return s === 'open' || (!e.soldOn && s !== 'dismissed' && s !== 'sold')
+        const s = (e.status?.name || '').toLowerCase()
+        return s === 'open' || (s === '' && e.active !== false && !e.soldOn)
       })
       if (open.length) {
         facts.openEstimates = {
           count: open.length,
-          total: open.reduce((sum, e) => sum + (e.total || e.subtotal || 0), 0),
+          total: open.reduce((sum, e) => sum + (Number(e.subtotal) || 0) + (Number(e.tax) || 0), 0),
         }
       }
     }
