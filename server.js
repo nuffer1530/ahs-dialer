@@ -39,6 +39,19 @@ const ST_API_BASE      = `https://api.servicetitan.io`
 
 let stTokenCache = null
 
+// Wrap fetch with a hard timeout so a slow/hung ServiceTitan call returns a
+// clean error instead of hanging until the browser/edge drops the connection
+// (which surfaces to the user as "Failed to fetch").
+async function fetchWithTimeout(url, opts = {}, ms = 25000) {
+  const ctrl = new AbortController()
+  const timer = setTimeout(() => ctrl.abort(), ms)
+  try {
+    return await fetch(url, { ...opts, signal: ctrl.signal })
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 async function getSTToken() {
   // Return cached token if still valid (with 60s buffer)
   if (stTokenCache && stTokenCache.expiresAt > Date.now() + 60000) {
@@ -49,11 +62,11 @@ async function getSTToken() {
     client_id: ST_CLIENT_ID,
     client_secret: ST_CLIENT_SECRET,
   })
-  const res = await fetch(ST_AUTH_URL, {
+  const res = await fetchWithTimeout(ST_AUTH_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: params.toString(),
-  })
+  }, 15000)
   if (!res.ok) {
     const err = await res.text()
     throw new Error(`ST auth failed: ${err}`)
@@ -66,14 +79,20 @@ async function getSTToken() {
   return stTokenCache.token
 }
 
-async function stGet(path) {
+async function stGet(path, _retry = true) {
   const token = await getSTToken()
-  const res = await fetch(`${ST_API_BASE}${path}`, {
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'ST-App-Key': process.env.ST_APP_KEY,
-    },
-  })
+  let res
+  try {
+    res = await fetchWithTimeout(`${ST_API_BASE}${path}`, {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'ST-App-Key': process.env.ST_APP_KEY,
+      },
+    })
+  } catch (e) {
+    if (_retry) return stGet(path, false)   // one retry on timeout/network blip
+    throw new Error(e.name === 'AbortError' ? `ST GET ${path} timed out` : `ST GET ${path} network error: ${e.message}`)
+  }
   if (!res.ok) {
     const err = await res.text()
     throw new Error(`ST GET ${path} failed: ${err}`)
@@ -81,17 +100,23 @@ async function stGet(path) {
   return res.json()
 }
 
-async function stPost(path, body) {
+async function stPost(path, body, _retry = true) {
   const token = await getSTToken()
-  const res = await fetch(`${ST_API_BASE}${path}`, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'ST-App-Key': process.env.ST_APP_KEY,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(body),
-  })
+  let res
+  try {
+    res = await fetchWithTimeout(`${ST_API_BASE}${path}`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'ST-App-Key': process.env.ST_APP_KEY,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    })
+  } catch (e) {
+    if (_retry) return stPost(path, body, false)   // one retry on timeout/network blip
+    throw new Error(e.name === 'AbortError' ? `ST POST ${path} timed out` : `ST POST ${path} network error: ${e.message}`)
+  }
   if (!res.ok) {
     const err = await res.text()
     throw new Error(`ST POST ${path} failed: ${err}`)
