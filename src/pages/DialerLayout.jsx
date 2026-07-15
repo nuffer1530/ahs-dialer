@@ -492,17 +492,24 @@ export default function DialerLayout() {
         </div>
       </aside>
 
-      {/* ── FLOATING PROFILE / STATUS MENU (top-right, all pages) ── */}
-      <div ref={menuRef} style={{ position:'fixed', top:12, right:14, zIndex:9998 }}>
+      {/* ── MAIN CONTENT (with a real top bar so the profile menu never overlaps pages) ── */}
+      <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden', minWidth:0 }}>
+        {/* Top bar — reserves its own height; every page renders below it */}
+        <div style={{ height:52, flexShrink:0, borderBottom:'1px solid var(--border)', background:'var(--surface)', display:'flex', alignItems:'center', justifyContent:'flex-end', padding:'0 16px', position:'relative', zIndex:100 }}>
+          <div ref={menuRef} style={{ position:'relative' }}>
         <button onClick={() => setShowStatusMenu(v => !v)}
           title={`${currentStatusObj.value} · ${fmtDur(statusDuration)}`}
-          style={{ display:'flex', alignItems:'center', justifyContent:'center', padding:0, background:'transparent', border:'none', cursor:'pointer' }}>
-          {/* Avatar with status ring — compact so it never collides with page headers */}
+          style={{ display:'flex', alignItems:'center', gap:8, padding:'4px 10px 4px 5px', background:'var(--surface-2)', border:'1px solid var(--border)', borderRadius:99, cursor:'pointer' }}>
+          {/* Avatar with status ring */}
           <div style={{ position:'relative', flexShrink:0 }}>
-            <div style={{ width:34, height:34, borderRadius:'50%', background:'var(--accent-bg)', color:'var(--accent)', display:'flex', alignItems:'center', justifyContent:'center', fontSize: profile?.avatar ? 18 : 13, fontWeight:700, border:`2px solid ${currentStatusObj.color}`, boxShadow:'0 1px 6px rgba(0,0,0,.12)' }}>
+            <div style={{ width:30, height:30, borderRadius:'50%', background:'var(--accent-bg)', color:'var(--accent)', display:'flex', alignItems:'center', justifyContent:'center', fontSize: profile?.avatar ? 16 : 12, fontWeight:700, border:`2px solid ${currentStatusObj.color}` }}>
               {profile?.avatar || (profile?.name || profile?.email || '?')[0].toUpperCase()}
             </div>
-            <div style={{ position:'absolute', bottom:-1, right:-1, width:10, height:10, borderRadius:'50%', background:currentStatusObj.color, border:'2px solid var(--surface)' }} />
+            <div style={{ position:'absolute', bottom:-1, right:-1, width:9, height:9, borderRadius:'50%', background:currentStatusObj.color, border:'2px solid var(--surface)' }} />
+          </div>
+          <div style={{ textAlign:'left', lineHeight:1.2 }}>
+            <div style={{ fontSize:11, fontWeight:700, color:'var(--text-primary)', whiteSpace:'nowrap' }}>{currentStatusObj.value}</div>
+            <div style={{ fontSize:10, color:'var(--text-muted)', fontVariantNumeric:'tabular-nums' }}>{fmtDur(statusDuration)}</div>
           </div>
         </button>
 
@@ -563,8 +570,7 @@ export default function DialerLayout() {
         )}
       </div>
 
-      {/* ── MAIN CONTENT ── */}
-      <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden', minWidth:0 }}>
+        </div>
         <Routes>
           <Route path="/" element={<DialerPage />} />
           <Route path="/live" element={<LivePage />} />
