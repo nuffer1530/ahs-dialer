@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { Routes, Route, NavLink, useNavigate } from 'react-router-dom'
+import { Routes, Route, NavLink, useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../lib/AuthContext'
 import { useData } from '../lib/DataContext'
 import { sb } from '../lib/supabase'
@@ -154,13 +154,16 @@ export default function DialerLayout() {
   const { profile, isAdmin } = useAuth()
   const { contacts, syncStatus, reload } = useData()
   const navigate = useNavigate()
+  const location = useLocation()
   const [agentStatus, setAgentStatus] = useState('Offline')
   const [showStatusMenu, setShowStatusMenu] = useState(false)
+  const [showSidebarStatus, setShowSidebarStatus] = useState(false)
   const [statusDuration, setStatusDuration] = useState(0)
   const statusTimerRef = useRef(null)
   const statusStartRef = useRef(null)
   const [alerts, setAlerts] = useState([])
   const menuRef = useRef(null)
+  const sidebarStatusRef = useRef(null)
   const currentEventRef = useRef(null)
   const [navCollapsed, setNavCollapsed] = useState(false)
   const [statusOptions, setStatusOptions] = useState(DEFAULT_STATUS_OPTIONS)
@@ -231,10 +234,18 @@ export default function DialerLayout() {
   useEffect(() => {
     const handleClick = (e) => {
       if (menuRef.current && !menuRef.current.contains(e.target)) setShowStatusMenu(false)
+      if (sidebarStatusRef.current && !sidebarStatusRef.current.contains(e.target)) setShowSidebarStatus(false)
     }
     document.addEventListener('mousedown', handleClick)
     return () => document.removeEventListener('mousedown', handleClick)
   }, [])
+
+  // Close both status/profile menus whenever the route changes so nothing
+  // stays open and overlays the next page.
+  useEffect(() => {
+    setShowStatusMenu(false)
+    setShowSidebarStatus(false)
+  }, [location.pathname, location.search])
 
   useEffect(() => {
     if (!isAdmin) return
@@ -433,8 +444,43 @@ export default function DialerLayout() {
           )}
         </div>
 
-        {/* Bottom: theme toggle only — status/profile now lives in the top-right menu */}
-        <div style={{ borderTop:'1px solid var(--border)', padding:'10px 8px', flexShrink:0 }}>
+        {/* Bottom: status changer (primary) + theme toggle */}
+        <div style={{ borderTop:'1px solid var(--border)', padding:'10px 8px', flexShrink:0, display:'flex', flexDirection:'column', gap:8 }}>
+          {/* Status changer — primary place to set status */}
+          <div ref={sidebarStatusRef} style={{ position:'relative' }}>
+            <button onClick={() => setShowSidebarStatus(v => !v)}
+              title={navCollapsed ? `${currentStatusObj.value} · ${fmtDur(statusDuration)}` : undefined}
+              style={{ width:'100%', padding: navCollapsed ? '8px 0' : '7px 10px', background:'var(--surface-2)', border:'1px solid var(--border)', borderRadius:'var(--radius)', cursor:'pointer', display:'flex', alignItems:'center', justifyContent: navCollapsed ? 'center' : 'space-between', gap:8 }}>
+              <span style={{ display:'flex', alignItems:'center', gap:8, minWidth:0 }}>
+                <span style={{ width:10, height:10, borderRadius:'50%', background:currentStatusObj.color, flexShrink:0, border:'1px solid rgba(0,0,0,.1)' }} />
+                {!navCollapsed && (
+                  <span style={{ display:'flex', flexDirection:'column', lineHeight:1.25, minWidth:0, textAlign:'left' }}>
+                    <span style={{ fontSize:12, fontWeight:700, color:'var(--text-primary)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{currentStatusObj.value}</span>
+                    <span style={{ fontSize:10, color:'var(--text-muted)', fontVariantNumeric:'tabular-nums' }}>{fmtDur(statusDuration)}</span>
+                  </span>
+                )}
+              </span>
+              {!navCollapsed && <span style={{ fontSize:9, color:'var(--text-muted)' }}>{'\u25B2'}</span>}
+            </button>
+
+            {showSidebarStatus && (
+              <div style={{ position:'absolute', bottom:'calc(100% + 6px)', left:0, right: navCollapsed ? 'auto' : 0, minWidth: navCollapsed ? 160 : undefined, background:'var(--surface)', border:'1px solid var(--border)', borderRadius:10, boxShadow:'0 8px 32px rgba(0,0,0,.18)', overflow:'hidden', zIndex:200 }}>
+                <div style={{ fontSize:9, fontWeight:700, textTransform:'uppercase', letterSpacing:.7, color:'var(--text-muted)', padding:'10px 14px 6px' }}>Set status</div>
+                {statusOptions.map(s => (
+                  <button key={s.value} onClick={() => { updateStatus(s.value); setShowSidebarStatus(false) }}
+                    onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
+                    onMouseLeave={e => e.currentTarget.style.background = agentStatus === s.value ? 'var(--accent-bg)' : 'transparent'}
+                    style={{ display:'flex', alignItems:'center', gap:9, width:'100%', padding:'8px 14px', background: agentStatus === s.value ? 'var(--accent-bg)' : 'transparent', border:'none', cursor:'pointer', fontSize:12, fontWeight: agentStatus === s.value ? 600 : 400, color: agentStatus === s.value ? 'var(--accent)' : 'var(--text-primary)', textAlign:'left' }}>
+                    <div style={{ width:9, height:9, borderRadius:'50%', background:s.color, flexShrink:0 }}></div>
+                    {s.value}
+                    {agentStatus === s.value && <span style={{ marginLeft:'auto', fontSize:11 }}>{'\u2713'}</span>}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Theme toggle */}
           <button onClick={toggleTheme}
             style={{ width:'100%', padding: navCollapsed ? '8px 0' : '7px 10px', background:'transparent', border:'1px solid var(--border)', borderRadius:'var(--radius)', cursor:'pointer', fontSize:12, color:'var(--text-muted)', display:'flex', alignItems:'center', justifyContent: navCollapsed ? 'center' : 'flex-start', gap:8 }}
             onMouseEnter={e => { e.currentTarget.style.background = 'var(--surface-2)'; e.currentTarget.style.color = 'var(--text-primary)' }}
@@ -447,21 +493,17 @@ export default function DialerLayout() {
       </aside>
 
       {/* ── FLOATING PROFILE / STATUS MENU (top-right, all pages) ── */}
-      <div ref={menuRef} style={{ position:'fixed', top:10, right:14, zIndex:9998 }}>
+      <div ref={menuRef} style={{ position:'fixed', top:12, right:14, zIndex:9998 }}>
         <button onClick={() => setShowStatusMenu(v => !v)}
-          style={{ display:'flex', alignItems:'center', gap:8, padding:'5px 10px 5px 6px', background:'var(--surface)', border:'1px solid var(--border)', borderRadius:99, cursor:'pointer', boxShadow:'0 1px 6px rgba(0,0,0,.08)' }}>
-          {/* Avatar with status ring */}
+          title={`${currentStatusObj.value} · ${fmtDur(statusDuration)}`}
+          style={{ display:'flex', alignItems:'center', justifyContent:'center', padding:0, background:'transparent', border:'none', cursor:'pointer' }}>
+          {/* Avatar with status ring — compact so it never collides with page headers */}
           <div style={{ position:'relative', flexShrink:0 }}>
-            <div style={{ width:30, height:30, borderRadius:'50%', background:'var(--accent-bg)', color:'var(--accent)', display:'flex', alignItems:'center', justifyContent:'center', fontSize: profile?.avatar ? 16 : 12, fontWeight:700, border:`2px solid ${currentStatusObj.color}` }}>
+            <div style={{ width:34, height:34, borderRadius:'50%', background:'var(--accent-bg)', color:'var(--accent)', display:'flex', alignItems:'center', justifyContent:'center', fontSize: profile?.avatar ? 18 : 13, fontWeight:700, border:`2px solid ${currentStatusObj.color}`, boxShadow:'0 1px 6px rgba(0,0,0,.12)' }}>
               {profile?.avatar || (profile?.name || profile?.email || '?')[0].toUpperCase()}
             </div>
-            <div style={{ position:'absolute', bottom:-1, right:-1, width:9, height:9, borderRadius:'50%', background:currentStatusObj.color, border:'2px solid var(--surface)' }} />
+            <div style={{ position:'absolute', bottom:-1, right:-1, width:10, height:10, borderRadius:'50%', background:currentStatusObj.color, border:'2px solid var(--surface)' }} />
           </div>
-          <div style={{ textAlign:'left', lineHeight:1.25 }}>
-            <div style={{ fontSize:11, fontWeight:700, color:'var(--text-primary)', whiteSpace:'nowrap' }}>{currentStatusObj.value}</div>
-            <div style={{ fontSize:10, color:'var(--text-muted)', fontVariantNumeric:'tabular-nums' }}>{fmtDur(statusDuration)}</div>
-          </div>
-          <span style={{ fontSize:9, color:'var(--text-muted)' }}>v</span>
         </button>
 
         {showStatusMenu && (
@@ -497,7 +539,8 @@ export default function DialerLayout() {
             <div style={{ padding:'6px 0', borderBottom:'1px solid var(--border)' }}>
               {[
                 { to:'/mypage', label:'My Page' },
-                { to:'/mypage?tab=my-schedule', label:'My Schedule' },
+                { to:'/mypage?tab=commissions', label:'Commissions' },
+                { to:'/mypage?tab=scorecard', label:'Scorecard' },
                 ...(isAdmin ? [{ to:'/settings', label:'Settings' }] : []),
               ].map(({ to, label }) => (
                 <button key={label} onClick={() => { navigate(to); setShowStatusMenu(false) }}
