@@ -64,29 +64,62 @@ const OUTCOME_CONFIG = {
 function SearchSelect({ label, value, onChange, options, placeholder, disabled }) {
   const [open, setOpen] = useState(false)
   const [q, setQ] = useState('')
+  const [menuStyle, setMenuStyle] = useState({})
   const ref = useRef(null)
+  const triggerRef = useRef(null)
   useEffect(() => {
     const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false) }
+    // Close on outside scroll/resize so the fixed menu never detaches from its field.
+    const onScrollOrResize = (e) => { if (ref.current && e && e.target && ref.current.contains(e.target)) return; setOpen(false) }
     document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
+    window.addEventListener('scroll', onScrollOrResize, true)
+    window.addEventListener('resize', onScrollOrResize)
+    return () => {
+      document.removeEventListener('mousedown', handler)
+      window.removeEventListener('scroll', onScrollOrResize, true)
+      window.removeEventListener('resize', onScrollOrResize)
+    }
   }, [])
+  const positionMenu = () => {
+    if (!triggerRef.current) return
+    const r = triggerRef.current.getBoundingClientRect()
+    const spaceBelow = window.innerHeight - r.bottom
+    const spaceAbove = r.top
+    const openUp = spaceBelow < 260 && spaceAbove > spaceBelow
+    const maxHeight = Math.max(140, Math.min(260, (openUp ? spaceAbove : spaceBelow) - 12))
+    setMenuStyle({
+      position: 'fixed',
+      left: Math.round(r.left),
+      width: Math.round(r.width),
+      maxHeight,
+      ...(openUp ? { bottom: Math.round(window.innerHeight - r.top + 4) } : { top: Math.round(r.bottom + 4) }),
+    })
+  }
+  const toggle = () => {
+    if (disabled) return
+    setOpen(v => {
+      const next = !v
+      if (next) positionMenu()
+      return next
+    })
+  }
   const hits = options.filter(o => o.label.toLowerCase().includes(q.toLowerCase()))
   const sel = options.find(o => String(o.value) === String(value))
   return (
     <div ref={ref} style={{ position:'relative' }}>
       {label && <div style={{ fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color:'var(--text-muted)', marginBottom:4 }}>{label}</div>}
-      <div onClick={() => !disabled && setOpen(v => !v)}
+      <div ref={triggerRef} onClick={toggle}
         style={{ border:`1px solid ${open ? 'var(--accent)' : 'var(--border)'}`, borderRadius:'var(--radius)', padding:'7px 10px', fontSize:12, background:'var(--surface)', color: sel ? 'var(--text-primary)' : 'var(--text-muted)', cursor: disabled ? 'default' : 'pointer', display:'flex', justifyContent:'space-between', alignItems:'center', userSelect:'none', opacity: disabled ? .5 : 1 }}>
         <span style={{ overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{sel?.label || placeholder}</span>
         <span style={{ fontSize:10, marginLeft:4, color:'var(--text-muted)', flexShrink:0 }}>v</span>
       </div>
       {open && (
-        <div style={{ position:'absolute', top:'100%', left:0, right:0, zIndex:400, background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius)', boxShadow:'0 4px 20px rgba(0,0,0,.15)', marginTop:2 }}>
-          <div style={{ padding:'5px 8px', borderBottom:'1px solid var(--border)' }}>
+        <div style={{ ...menuStyle, zIndex:4000, background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius)', boxShadow:'0 4px 20px rgba(0,0,0,.15)', display:'flex', flexDirection:'column', overflow:'hidden' }}>
+          <div style={{ padding:'5px 8px', borderBottom:'1px solid var(--border)', flexShrink:0 }}>
             <input autoFocus value={q} onChange={e => setQ(e.target.value)} onClick={e => e.stopPropagation()}
               placeholder="Search..." style={{ width:'100%', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'4px 8px', fontSize:11, background:'var(--surface-2)', color:'var(--text-primary)' }} />
           </div>
-          <div style={{ maxHeight:200, overflowY:'auto' }}>
+          <div style={{ overflowY:'auto', flex:1 }}>
             {hits.length === 0
               ? <div style={{ padding:'9px 12px', fontSize:12, color:'var(--text-muted)', fontStyle:'italic' }}>No results</div>
               : hits.map(o => (
