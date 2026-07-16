@@ -10,7 +10,17 @@ export default function LeaderboardPage() {
   const { contacts } = useData()
   const [tf, setTf] = useState('today')
   const [logs, setLogs] = useState([])
+  const [removedReps, setRemovedReps] = useState(new Set())
   const [loading, setLoading] = useState(true)
+
+  // call_logs.rep is a display-name string, not a profile id, so removed users
+  // keep appearing here unless their names are excluded explicitly. Match the
+  // name AND email, since DialerPage falls back to email when name is unset.
+  useEffect(() => {
+    sb.from('profiles').select('name, email').eq('active', false).then(({ data }) => {
+      setRemovedReps(new Set((data || []).flatMap(p => [p.name, p.email]).filter(Boolean)))
+    })
+  }, [])
 
   useEffect(() => {
     setLoading(true)
@@ -23,6 +33,7 @@ export default function LeaderboardPage() {
   const repStats = {}
   logs.forEach(l => {
     if (!l.rep) return
+    if (removedReps.has(l.rep)) return
     if (!repStats[l.rep]) repStats[l.rep] = { calls: 0, booked: 0, voicemail: 0, noAnswer: 0, notInterested: 0, dnc: 0 }
     repStats[l.rep].calls++
     if (l.outcome === 'Booked') repStats[l.rep].booked++

@@ -148,7 +148,7 @@ export default function MyPage() {
       const fromStr = toYMD(from), toStr = toYMD(to)
 
       const [{ data: profs }, { data: scheds }, { data: events }, { data: pts }, { data: wts }, { data: thr }] = await Promise.all([
-        sb.from('profiles').select('id, name, email, avatar, role').order('name'),
+        sb.from('profiles').select('id, name, email, avatar, role').eq('active', true).order('name'),
         sb.from('schedules').select('*').gte('date', fromStr).lte('date', toStr),
         sb.from('status_events').select('*').eq('profile_id', profile.id).gte('started_at', fromStr + 'T00:00:00').order('started_at', { ascending: false }),
         sb.from('attendance_points').select('*').eq('profile_id', profile.id).gte('date', fromStr),

@@ -197,6 +197,8 @@ export default function AdminPage() {
   const [saving, setSaving] = useState(false)
   // Password change
   const [pwModal, setPwModal] = useState(null) // { profileId, name } or 'me'
+  const [busyUser, setBusyUser] = useState(null) // profile id mid deactivate/reactivate
+  const [showRemoved, setShowRemoved] = useState(false)
   const [newPw, setNewPw] = useState('')
   const [pwMsg, setPwMsg] = useState('')
   const [savingPw, setSavingPw] = useState(false)
@@ -501,10 +503,42 @@ export default function AdminPage() {
     }
   }
 
-  const deleteUser = async (id) => {
-    if (!confirm('Remove this user? They will no longer be able to log in.')) return
-    await sb.from('profiles').delete().eq('id', id)
-    setProfiles(prev => prev.filter(p => p.id !== id))
+  // User removal runs server-side: revoking a login and releasing leads needs
+  // the service key, and the anon key has no delete/deactivate rights on
+  // profiles by design.
+  const setUserActive = async (p, active) => {
+    const label = p.name || p.email
+    if (active) {
+      if (!confirm(`Restore access for ${label}? They'll be able to log in again. Campaign assignments were cleared when they were removed and need to be set again.`)) return
+    } else {
+      if (!confirm(`Remove ${label}?\n\nThey'll be signed out and blocked from logging in, and will disappear from Live, Attendance, Leaderboard and campaign assignment. Any leads they've claimed go back into the pool.\n\nTheir call history and commissions are kept, and you can restore them later.`)) return
+    }
+
+    setBusyUser(p.id)
+    try {
+      const { data: { session } } = await sb.auth.getSession()
+      const res = await fetch(`/api/admin/user/${active ? 'reactivate' : 'deactivate'}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session?.access_token}` },
+        body: JSON.stringify({ userId: p.id }),
+      })
+      const out = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(out.error || `Request failed (${res.status})`)
+
+      setProfiles(prev => prev.map(x => x.id === p.id ? { ...x, active, deactivated_at: active ? null : new Date().toISOString() } : x))
+      if (!active) {
+        setCsrCampaigns(prev => prev.filter(c => c.profile_id !== p.id))
+        setMsg(`✓ ${label} removed${out.released ? ` — ${out.released} claimed lead${out.released === 1 ? '' : 's'} released` : ''}`)
+      } else {
+        setMsg(`✓ ${label} restored — reassign their campaigns`)
+      }
+      setTimeout(() => setMsg(''), 5000)
+    } catch (e) {
+      setMsg(`Error: ${e.message}`)
+      setTimeout(() => setMsg(''), 6000)
+    } finally {
+      setBusyUser(null)
+    }
   }
 
   const openEdit = (p) => {
@@ -537,6 +571,11 @@ export default function AdminPage() {
   const getProfileCampaigns = (profileId) => {
     return csrCampaigns.filter(c => c.profile_id === profileId && c.active).sort((a, b) => a.priority - b.priority).map(c => campaigns.find(camp => camp.id === c.campaign_id)?.name).filter(Boolean)
   }
+
+  // Removed users are kept in the table (behind a toggle) so they can be
+  // restored; every other screen filters them out at the query.
+  const removedProfiles = profiles.filter(p => p.active === false)
+  const visibleProfiles = showRemoved ? profiles : profiles.filter(p => p.active !== false)
 
   // Scorecard KPIs — single source of truth
   const SC_KPIS = [
@@ -1028,26 +1067,35 @@ export default function AdminPage() {
           {/* ADMIN ONLY — User Management */}
           {isAdmin && (
             <>
-              {msg && <div style={{ background:'var(--success-bg)', color:'var(--success)', padding:'10px 14px', borderRadius:'var(--radius)', fontSize:13 }}>{msg}</div>}
+              {msg && <div style={{ background: msg.startsWith('Error') ? 'var(--danger-bg)' : 'var(--success-bg)', color: msg.startsWith('Error') ? 'var(--danger)' : 'var(--success)', padding:'10px 14px', borderRadius:'var(--radius)', fontSize:13 }}>{msg}</div>}
               <div className="card">
                 <div className="card-header">
                   <div className="card-title">User Management</div>
-                  <span style={{ fontSize:11, color:'var(--text-muted)' }}>New reps sign up at the login page — set their role and campaigns here</span>
+                  <div style={{ display:'flex', alignItems:'center', gap:12 }}>
+                    <span style={{ fontSize:11, color:'var(--text-muted)' }}>New reps sign up at the login page — set their role and campaigns here</span>
+                    {removedProfiles.length > 0 && (
+                      <button className="btn sm" onClick={() => setShowRemoved(v => !v)}>
+                        {showRemoved ? 'Hide' : `Show removed (${removedProfiles.length})`}
+                      </button>
+                    )}
+                  </div>
                 </div>
                 {loading ? <div className="card-body"><div className="spinner"></div></div> : (
                   <table className="data-table">
                     <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Active Campaigns</th><th>Actions</th></tr></thead>
                     <tbody>
-                      {profiles.map(p => {
+                      {visibleProfiles.map(p => {
                         const activeCamps = getProfileCampaigns(p.id)
+                        const removed = p.active === false
                         return (
-                          <tr key={p.id}>
+                          <tr key={p.id} style={removed ? { opacity:.55 } : undefined}>
                             <td style={{ padding:'10px 12px', fontWeight:500 }}>
                               <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-                                <div style={{ width:28, height:28, borderRadius:'50%', background:'var(--accent-bg)', display:'flex', alignItems:'center', justifyContent:'center', fontSize: p.avatar ? 18 : 11, fontWeight:600, flexShrink:0 }}>
+                                <div style={{ width:28, height:28, borderRadius:'50%', background:'var(--accent-bg)', display:'flex', alignItems:'center', justifyContent:'center', fontSize: p.avatar ? 18 : 11, fontWeight:600, flexShrink:0, filter: removed ? 'grayscale(1)' : undefined }}>
                                   {p.avatar || (p.name || p.email || '?')[0].toUpperCase()}
                                 </div>
                                 {p.name || '—'}
+                                {removed && <span style={{ fontSize:9, fontWeight:700, textTransform:'uppercase', letterSpacing:.5, padding:'2px 6px', borderRadius:99, background:'var(--surface-2)', color:'var(--text-muted)' }}>Removed</span>}
                               </div>
                             </td>
                             <td style={{ padding:'10px 12px', color:'var(--text-secondary)', fontSize:12 }}>{p.email}</td>
@@ -1067,10 +1115,22 @@ export default function AdminPage() {
                             </td>
                             <td style={{ padding:'10px 12px' }}>
                               <div style={{ display:'flex', gap:6 }}>
-                                <button className="btn sm" onClick={() => openEdit(p)}>Edit</button>
-                                <button className="btn sm" onClick={() => { setPwModal({ profileId: p.id, name: p.name || p.email }); setNewPw(''); setPwMsg('') }}>Password</button>
-                                <button className="btn sm" onClick={() => { setCommAdjModal({ profileId: p.id, name: p.name || p.email }); setCommAdjAmount(''); setCommAdjNote('') }}>Adjust</button>
-                                <button className="btn sm danger" onClick={() => deleteUser(p.id)}>Remove</button>
+                                {removed ? (
+                                  <button className="btn sm" disabled={busyUser === p.id} onClick={() => setUserActive(p, true)}>
+                                    {busyUser === p.id ? 'Restoring…' : 'Restore'}
+                                  </button>
+                                ) : (
+                                  <>
+                                    <button className="btn sm" onClick={() => openEdit(p)}>Edit</button>
+                                    <button className="btn sm" onClick={() => { setPwModal({ profileId: p.id, name: p.name || p.email }); setNewPw(''); setPwMsg('') }}>Password</button>
+                                    <button className="btn sm" onClick={() => { setCommAdjModal({ profileId: p.id, name: p.name || p.email }); setCommAdjAmount(''); setCommAdjNote('') }}>Adjust</button>
+                                    {p.id !== profile?.id && (
+                                      <button className="btn sm danger" disabled={busyUser === p.id} onClick={() => setUserActive(p, false)}>
+                                        {busyUser === p.id ? 'Removing…' : 'Remove'}
+                                      </button>
+                                    )}
+                                  </>
+                                )}
                               </div>
                             </td>
                           </tr>

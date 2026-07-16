@@ -538,7 +538,7 @@ app.get('/api/commission/config', async (req, res) => {
       supabase.from('job_type_spiffs').select('*'),
       supabase.from('csr_st_users').select('*'),
       supabase.from('membership_type_spiffs').select('*'),
-      supabase.from('profiles').select('id, name, email, role').order('name'),
+      supabase.from('profiles').select('id, name, email, role').eq('active', true).order('name'),
     ])
     res.json({
       stJobTypes: jt.map(j => ({ id: j.id, name: j.name })),
@@ -701,6 +701,123 @@ app.get('/api/st/health', async (req, res) => {
     res.json({ ok: true, tenant: ST_TENANT_ID })
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message })
+  }
+})
+
+// ─────────────────────────────────────────────
+// ── ADMIN: USER MANAGEMENT
+// ─────────────────────────────────────────────
+
+// Resolve the caller from their Supabase access token and confirm they're an
+// admin. These routes use the service key, which bypasses RLS entirely, so the
+// check here is the ONLY thing standing between the anon internet and the
+// user table. Never mount an /api/admin route without it.
+async function requireAdmin(req, res) {
+  const token = (req.headers.authorization || '').replace(/^Bearer\s+/i, '')
+  if (!token) { res.status(401).json({ error: 'Not signed in' }); return null }
+
+  const { data: { user }, error } = await supabase.auth.getUser(token)
+  if (error || !user) { res.status(401).json({ error: 'Invalid session' }); return null }
+
+  const { data: prof } = await supabase
+    .from('profiles').select('id, role, active').eq('id', user.id).maybeSingle()
+  if (prof?.role !== 'admin' || prof?.active === false) {
+    res.status(403).json({ error: 'Admins only' }); return null
+  }
+  return prof
+}
+
+// Ban for ~100 years. Supabase has no "ban forever", so this is the idiom.
+const FOREVER = '876000h'
+
+// ── Deactivate a user: revoke login, hide them app-wide, free their leads.
+// Their call_logs and commissions are intentionally left untouched — they're
+// historical pay records. Reversible via /reactivate.
+app.post('/api/admin/user/deactivate', async (req, res) => {
+  const admin = await requireAdmin(req, res)
+  if (!admin) return
+
+  const { userId } = req.body
+  if (!userId) return res.status(400).json({ error: 'userId required' })
+  if (userId === admin.id) return res.status(400).json({ error: "You can't deactivate yourself" })
+
+  try {
+    const { data: target } = await supabase
+      .from('profiles').select('id, name, email, role').eq('id', userId).maybeSingle()
+    if (!target) return res.status(404).json({ error: 'User not found' })
+
+    // Don't allow removing the last admin — it would lock everyone out of /settings.
+    if (target.role === 'admin') {
+      const { count } = await supabase
+        .from('profiles').select('id', { count: 'exact', head: true }).eq('role', 'admin').eq('active', true)
+      if ((count ?? 0) <= 1) return res.status(400).json({ error: 'Cannot deactivate the last admin' })
+    }
+
+    // 1. Kill the login. Existing access tokens stay valid until they expire,
+    //    so AuthContext also signs out any profile with active === false.
+    const { error: banErr } = await supabase.auth.admin.updateUserById(userId, { ban_duration: FOREVER })
+    if (banErr) throw new Error(`Could not revoke login: ${banErr.message}`)
+
+    // 2. Hide from Live/Attendance/Leaderboard and stop status tracking.
+    const { error: profErr } = await supabase.from('profiles').update({
+      active: false,
+      deactivated_at: new Date().toISOString(),
+      status: 'Offline',
+      status_since: new Date().toISOString(),
+    }).eq('id', userId)
+    if (profErr) throw new Error(`Could not update profile: ${profErr.message}`)
+
+    // 3. Release their claimed leads back into the pool. contacts.claimed_by is
+    //    a display-name string (DialerPage: profile.name || profile.email), so
+    //    match on both — a rep who was renamed may have leads under either.
+    const claimNames = [target.name, target.email].filter(Boolean)
+    let released = 0
+    for (const claimName of claimNames) {
+      const { data, error } = await supabase.from('contacts')
+        .update({ claimed_by: null, claimed_at: null })
+        .eq('claimed_by', claimName).select('id')
+      if (error) throw new Error(`Could not release leads: ${error.message}`)
+      released += data?.length || 0
+    }
+
+    // 4. Drop campaign assignments so the lead router skips them.
+    await supabase.from('csr_campaigns').delete().eq('profile_id', userId)
+
+    // 5. Close any open status event so Attendance doesn't show an endless shift.
+    await supabase.from('status_events')
+      .update({ ended_at: new Date().toISOString() })
+      .eq('profile_id', userId).is('ended_at', null)
+
+    console.log(`Admin ${admin.id} deactivated user ${userId} (${released} leads released)`)
+    res.json({ ok: true, released })
+  } catch (err) {
+    console.error('Deactivate user error:', err.message)
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// ── Reactivate: restore login and visibility. Campaign assignments were
+// dropped on deactivate and must be reassigned by hand.
+app.post('/api/admin/user/reactivate', async (req, res) => {
+  const admin = await requireAdmin(req, res)
+  if (!admin) return
+
+  const { userId } = req.body
+  if (!userId) return res.status(400).json({ error: 'userId required' })
+
+  try {
+    const { error: banErr } = await supabase.auth.admin.updateUserById(userId, { ban_duration: 'none' })
+    if (banErr) throw new Error(`Could not restore login: ${banErr.message}`)
+
+    const { error: profErr } = await supabase.from('profiles')
+      .update({ active: true, deactivated_at: null }).eq('id', userId)
+    if (profErr) throw new Error(`Could not update profile: ${profErr.message}`)
+
+    console.log(`Admin ${admin.id} reactivated user ${userId}`)
+    res.json({ ok: true })
+  } catch (err) {
+    console.error('Reactivate user error:', err.message)
+    res.status(500).json({ error: err.message })
   }
 })
 

@@ -135,7 +135,7 @@ export default function AttendancePage() {
   useEffect(() => {
     const load = async () => {
       const [{ data: p }, { data: s }, { data: ev }, { data: t }, { data: ap }] = await Promise.all([
-        sb.from('profiles').select('id, name, email, avatar').order('name'),
+        sb.from('profiles').select('id, name, email, avatar').eq('active', true).order('name'),
         sb.from('schedules').select('*').gte('date', (() => { const d = new Date(); d.setDate(d.getDate()-30); return d.toISOString().split('T')[0] })()).lte('date', (() => { const d = new Date(); d.setDate(d.getDate()+30); return d.toISOString().split('T')[0] })()),
         sb.from('status_events').select('*').gte('started_at', weekDates[0] + 'T00:00:00').lte('started_at', weekDates[6] + 'T23:59:59'),
         sb.from('shift_templates').select('*').order('name'),

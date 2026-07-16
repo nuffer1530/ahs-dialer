@@ -46,7 +46,7 @@ export default function RecordingsPage() {
   const audioRef = useRef(null)
 
   useEffect(() => {
-    sb.from('profiles').select('id, name, email').order('name').then(({ data }) => setProfiles(data || []))
+    sb.from('profiles').select('id, name, email').eq('active', true).order('name').then(({ data }) => setProfiles(data || []))
   }, [])
 
   useEffect(() => {

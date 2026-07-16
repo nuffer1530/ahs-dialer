@@ -280,7 +280,7 @@ export default function DialerLayout() {
   useEffect(() => {
     if (!isAdmin) return
     const checkAlerts = async () => {
-      const { data: profiles } = await sb.from('profiles').select('id, name, status, status_since').neq('status', 'Offline')
+      const { data: profiles } = await sb.from('profiles').select('id, name, status, status_since').eq('active', true).neq('status', 'Offline')
       if (!profiles) return
       const { data: schedules } = await sb.from('schedules').select('*').eq('date', new Date().toISOString().slice(0,10))
       const now = Date.now()

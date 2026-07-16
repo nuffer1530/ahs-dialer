@@ -62,7 +62,7 @@ export default function LivePage() {
     const since = new Date(Date.now() - 24*60*60*1000).toISOString()
     Promise.all([
       sb.from('call_logs').select('*').gte('created_at', since).order('created_at', { ascending: false }),
-      sb.from('profiles').select('*').order('name'),
+      sb.from('profiles').select('*').eq('active', true).order('name'),
     ]).then(([{ data: logsData }, { data: profilesData }]) => {
       setLogs(logsData || [])
       setProfiles(profilesData || [])

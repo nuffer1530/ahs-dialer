@@ -24,6 +24,17 @@ export function AuthProvider({ children }) {
 
   const fetchProfile = async (userId) => {
     const { data } = await sb.from('profiles').select('*').eq('id', userId).single()
+
+    // A removed user is banned in Supabase auth, but any access token issued
+    // before removal stays valid until it expires — so shut the door here too.
+    if (data?.active === false) {
+      await sb.auth.signOut()
+      setUser(null)
+      setProfile(null)
+      setLoading(false)
+      return
+    }
+
     setProfile(data)
     setLoading(false)
   }

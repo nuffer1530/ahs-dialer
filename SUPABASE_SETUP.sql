@@ -39,3 +39,17 @@ alter table profiles enable row level security;
 create policy "Users can view all profiles" on profiles for select using (true);
 create policy "Users can update own profile" on profiles for update using (auth.uid() = id);
 create policy "Service can insert profiles" on profiles for insert with check (true);
+
+-- ─────────────────────────────────────────────
+-- USER DEACTIVATION (run this on an existing database)
+-- ─────────────────────────────────────────────
+-- Users are deactivated, never deleted: call_logs and commissions are pay
+-- records and must survive. `active = false` hides them everywhere in the app
+-- and the server bans their auth.users login. Deactivation is done server-side
+-- with the service key (POST /api/admin/user/deactivate) — there is
+-- deliberately no RLS delete/deactivate policy for the anon key.
+alter table profiles add column if not exists active boolean not null default true;
+alter table profiles add column if not exists deactivated_at timestamptz;
+
+-- Partial index: every screen filters on active users.
+create index if not exists profiles_active_idx on profiles (active) where active;
