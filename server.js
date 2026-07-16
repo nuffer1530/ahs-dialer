@@ -504,6 +504,105 @@ app.get('/api/st/campaigns', async (req, res) => {
   }
 })
 
+// ── ST: employees (for CSR ↔ ST user mapping in the commission engine)
+app.get('/api/st/employees', async (req, res) => {
+  try {
+    const data = await stGet(`/settings/v2/tenant/${ST_TENANT_ID}/employees?active=true&pageSize=500`)
+    res.json(data)
+  } catch (err) {
+    console.error('ST employees error:', err.message)
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// ── ST: membership types (for spiff amount mapping)
+app.get('/api/st/membership-types', async (req, res) => {
+  try {
+    const data = await stGet(`/memberships/v2/tenant/${ST_TENANT_ID}/membership-types?active=true&pageSize=200`)
+    res.json(data)
+  } catch (err) {
+    console.error('ST membership types error:', err.message)
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// ── Commission mapping: everything the mapping UI needs in one call
+app.get('/api/commission/config', async (req, res) => {
+  try {
+    const [jt, emp, mt] = await Promise.all([
+      stGet(`/jpm/v2/tenant/${ST_TENANT_ID}/job-types?active=true&pageSize=500`).then(r => r?.data || []).catch(() => []),
+      stGet(`/settings/v2/tenant/${ST_TENANT_ID}/employees?active=true&pageSize=500`).then(r => r?.data || []).catch(() => []),
+      stGet(`/memberships/v2/tenant/${ST_TENANT_ID}/membership-types?active=true&pageSize=200`).then(r => r?.data || []).catch(() => []),
+    ])
+    const [jobTypeSpiffs, csrUsers, membershipTypeSpiffs, profiles] = await Promise.all([
+      supabase.from('job_type_spiffs').select('*'),
+      supabase.from('csr_st_users').select('*'),
+      supabase.from('membership_type_spiffs').select('*'),
+      supabase.from('profiles').select('id, name, email, role').order('name'),
+    ])
+    res.json({
+      stJobTypes: jt.map(j => ({ id: j.id, name: j.name })),
+      stEmployees: emp.map(e => ({ id: e.id, name: e.name, email: e.email })).sort((a,b)=>(a.name||'').localeCompare(b.name||'')),
+      stMembershipTypes: mt.map(m => ({ id: m.id, name: m.name })),
+      jobTypeSpiffs: jobTypeSpiffs.data || [],
+      csrUsers: csrUsers.data || [],
+      membershipTypeSpiffs: membershipTypeSpiffs.data || [],
+      profiles: profiles.data || [],
+    })
+  } catch (err) {
+    console.error('commission config error:', err.message)
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// Save job-type → category/amount
+app.post('/api/commission/job-types', async (req, res) => {
+  try {
+    const rows = (req.body?.rows || []).map(r => ({
+      st_job_type_id: r.st_job_type_id, name: r.name || null,
+      category: r.category || 'other',
+      amount: (r.amount === '' || r.amount == null) ? null : Number(r.amount),
+      updated_at: new Date().toISOString(),
+    }))
+    if (rows.length) {
+      const { error } = await supabase.from('job_type_spiffs').upsert(rows, { onConflict: 'st_job_type_id' })
+      if (error) throw new Error(error.message)
+    }
+    res.json({ ok: true, count: rows.length })
+  } catch (err) { res.status(500).json({ error: err.message }) }
+})
+
+// Save CSR ↔ ST user map (replace-all)
+app.post('/api/commission/csr-users', async (req, res) => {
+  try {
+    const rows = (req.body?.rows || []).filter(r => r.st_user_id && r.profile_id).map(r => ({
+      profile_id: r.profile_id, st_user_id: Number(r.st_user_id), st_user_name: r.st_user_name || null,
+    }))
+    await supabase.from('csr_st_users').delete().neq('st_user_id', 0)
+    if (rows.length) {
+      const { error } = await supabase.from('csr_st_users').upsert(rows, { onConflict: 'st_user_id' })
+      if (error) throw new Error(error.message)
+    }
+    res.json({ ok: true, count: rows.length })
+  } catch (err) { res.status(500).json({ error: err.message }) }
+})
+
+// Save membership-type → payout
+app.post('/api/commission/membership-types', async (req, res) => {
+  try {
+    const rows = (req.body?.rows || []).map(r => ({
+      st_membership_type_id: r.st_membership_type_id, name: r.name || null,
+      amount: (r.amount === '' || r.amount == null) ? 20 : Number(r.amount),
+      updated_at: new Date().toISOString(),
+    }))
+    if (rows.length) {
+      const { error } = await supabase.from('membership_type_spiffs').upsert(rows, { onConflict: 'st_membership_type_id' })
+      if (error) throw new Error(error.message)
+    }
+    res.json({ ok: true, count: rows.length })
+  } catch (err) { res.status(500).json({ error: err.message }) }
+})
+
 // ── ST: Create booking (direct to dispatch board, unscheduled)
 app.post('/api/st/book', async (req, res) => {
   try {
@@ -568,6 +667,25 @@ app.post('/api/st/book', async (req, res) => {
       text: `[Andi - ${repName || 'CSR'}] Booked: ${notes || 'Outbound call booking'}`,
       pinToTop: false,
     }).catch(e => console.warn('Note post failed:', e.message))
+
+    // Record attribution for the commission engine (best-effort; never blocks booking)
+    try {
+      if (jobId) {
+        let profileId = null
+        if (repName) {
+          const { data: prof } = await supabase.from('profiles').select('id').eq('name', repName).maybeSingle()
+          profileId = prof?.id || null
+        }
+        await supabase.from('andi_bookings').upsert({
+          st_job_id: jobId,
+          profile_id: profileId,
+          csr_name: repName || null,
+          customer_name: contactName || null,
+          st_job_type_id: jobTypeId || null,
+          booked_at: new Date().toISOString(),
+        }, { onConflict: 'st_job_id' })
+      }
+    } catch (e) { console.warn('andi_bookings insert:', e.message) }
 
     res.json({ ok: true, jobId, jobNumber, locationId: location.id })
   } catch (err) {
