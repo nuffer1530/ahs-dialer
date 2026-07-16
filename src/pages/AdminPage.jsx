@@ -16,10 +16,178 @@ const EMOJIS = {
   '🌈 Vibes': ['🌈','🌙','☀️','🌊','🍀','🦄','🌸','🦋','✨','🔮','🪄','🧿','💫','🌺','🎆','🪩'],
 }
 
+const JOB_CATEGORIES = [
+  { value:'non_commissionable', label:'Non-commissionable' },
+  { value:'maintenance',        label:'Maintenance — $5 on complete' },
+  { value:'free_estimate',      label:'Free estimate (from-list) — $5 on sold' },
+  { value:'other',              label:'Sold estimate / follow-up — $1 on sold' },
+]
+
+function CommissionMapping() {
+  const [cfg, setCfg] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [err, setErr] = useState('')
+  const [csrMap, setCsrMap] = useState({})    // profile_id -> st_user_id
+  const [jobCats, setJobCats] = useState({})  // st_job_type_id -> category
+  const [memAmts, setMemAmts] = useState({})  // st_membership_type_id -> amount
+  const [jobSearch, setJobSearch] = useState('')
+  const [busy, setBusy] = useState('')        // which section is saving
+  const [savedMsg, setSavedMsg] = useState('')
+
+  useEffect(() => { load() }, [])
+  const load = async () => {
+    setLoading(true); setErr('')
+    try {
+      const r = await fetch('/api/commission/config')
+      const d = await r.json()
+      if (!r.ok) throw new Error(d.error || 'Failed to load config')
+      setCfg(d)
+      // CSR map: saved first, then auto-match unmapped by name
+      const cm = {}
+      ;(d.csrUsers || []).forEach(u => { if (u.profile_id) cm[u.profile_id] = u.st_user_id })
+      ;(d.profiles || []).forEach(p => {
+        if (!cm[p.id]) {
+          const m = (d.stEmployees || []).find(e => e.name && p.name && e.name.toLowerCase() === p.name.toLowerCase())
+          if (m) cm[p.id] = m.id
+        }
+      })
+      setCsrMap(cm)
+      const jc = {}; (d.jobTypeSpiffs || []).forEach(j => { jc[j.st_job_type_id] = j.category }); setJobCats(jc)
+      const ma = {}; (d.membershipTypeSpiffs || []).forEach(m => { ma[m.st_membership_type_id] = m.amount }); setMemAmts(ma)
+    } catch (e) { setErr(e.message) }
+    setLoading(false)
+  }
+
+  const flash = (m) => { setSavedMsg(m); setTimeout(() => setSavedMsg(''), 2500) }
+
+  const saveCsrs = async () => {
+    setBusy('csr')
+    try {
+      const rows = Object.entries(csrMap).filter(([, uid]) => uid).map(([pid, uid]) => {
+        const emp = cfg.stEmployees.find(e => String(e.id) === String(uid))
+        return { profile_id: pid, st_user_id: uid, st_user_name: emp?.name || null }
+      })
+      const r = await fetch('/api/commission/csr-users', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ rows }) })
+      if (!r.ok) throw new Error((await r.json()).error || 'Save failed')
+      flash('CSR mapping saved')
+    } catch (e) { setErr(e.message) }
+    setBusy('')
+  }
+
+  const saveJobs = async () => {
+    setBusy('jobs')
+    try {
+      const rows = cfg.stJobTypes.map(j => ({ st_job_type_id: j.id, name: j.name, category: jobCats[j.id] || 'non_commissionable' }))
+      const r = await fetch('/api/commission/job-types', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ rows }) })
+      if (!r.ok) throw new Error((await r.json()).error || 'Save failed')
+      flash('Job-type categories saved')
+    } catch (e) { setErr(e.message) }
+    setBusy('')
+  }
+
+  const saveMems = async () => {
+    setBusy('mems')
+    try {
+      const rows = cfg.stMembershipTypes.map(m => ({ st_membership_type_id: m.id, name: m.name, amount: memAmts[m.id] ?? 20 }))
+      const r = await fetch('/api/commission/membership-types', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ rows }) })
+      if (!r.ok) throw new Error((await r.json()).error || 'Save failed')
+      flash('Membership payouts saved')
+    } catch (e) { setErr(e.message) }
+    setBusy('')
+  }
+
+  if (loading) return <div style={{ padding:40, textAlign:'center', color:'var(--text-muted)' }}>Loading ServiceTitan data…</div>
+  if (err && !cfg) return <div style={{ padding:20, color:'#DC2626' }}>{err} <button onClick={load} className="btn sm" style={{ marginLeft:8 }}>Retry</button></div>
+
+  const csrProfiles = (cfg.profiles || []).filter(p => p.role !== 'admin' || true) // show all; admins can be CSRs too
+  const jobHits = cfg.stJobTypes.filter(j => j.name?.toLowerCase().includes(jobSearch.toLowerCase()))
+  const secStyle = { background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius-lg)', padding:18, marginBottom:18 }
+  const hStyle = { fontSize:14, fontWeight:700, marginBottom:2 }
+  const subStyle = { fontSize:12, color:'var(--text-muted)', marginBottom:14 }
+  const selStyle = { padding:'6px 8px', border:'1px solid var(--border)', borderRadius:'var(--radius)', fontSize:12, background:'var(--surface)', color:'var(--text-primary)' }
+  const saveBtn = (onClick, key) => (
+    <button onClick={onClick} disabled={busy===key} className="btn sm"
+      style={{ background:'var(--accent)', borderColor:'var(--accent)', color:'#fff', fontWeight:600 }}>
+      {busy===key ? 'Saving…' : 'Save'}
+    </button>
+  )
+
+  return (
+    <div style={{ maxWidth:900 }}>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:6 }}>
+        <div style={{ fontSize:12, color:'var(--text-muted)' }}>Map ServiceTitan data to commission rules. The reconciler uses these to attribute and pay spiffs.</div>
+        {savedMsg && <span style={{ fontSize:12, color:'#16A34A', fontWeight:600 }}>{savedMsg}</span>}
+      </div>
+      {err && <div style={{ fontSize:12, color:'#DC2626', marginBottom:10 }}>{err}</div>}
+
+      {/* CSR ↔ ST user */}
+      <div style={secStyle}>
+        <div style={hStyle}>CSRs → ServiceTitan users</div>
+        <div style={subStyle}>Match each CSR to their ST login so jobs they book directly in ServiceTitan get attributed. Auto-matched by name where possible.</div>
+        <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+          {csrProfiles.map(p => (
+            <div key={p.id} style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:12 }}>
+              <span style={{ fontSize:13, fontWeight:500 }}>{p.name || p.email}</span>
+              <select value={csrMap[p.id] || ''} onChange={e => setCsrMap(m => ({ ...m, [p.id]: e.target.value ? Number(e.target.value) : '' }))} style={{ ...selStyle, minWidth:240 }}>
+                <option value="">— not mapped —</option>
+                {cfg.stEmployees.map(e => <option key={e.id} value={e.id}>{e.name}{e.email ? ` (${e.email})` : ''}</option>)}
+              </select>
+            </div>
+          ))}
+        </div>
+        <div style={{ marginTop:14, textAlign:'right' }}>{saveBtn(saveCsrs, 'csr')}</div>
+      </div>
+
+      {/* Job type → category */}
+      <div style={secStyle}>
+        <div style={hStyle}>Job types → spiff category</div>
+        <div style={subStyle}>Tag each ST job type. Anything left non-commissionable never pays. Maintenance pays on completion; estimate categories pay when the estimate sells.</div>
+        <input value={jobSearch} onChange={e => setJobSearch(e.target.value)} placeholder="Search job types…"
+          style={{ width:'100%', padding:'7px 10px', border:'1px solid var(--border)', borderRadius:'var(--radius)', fontSize:12, marginBottom:10, background:'var(--surface-2)', color:'var(--text-primary)' }} />
+        <div style={{ maxHeight:340, overflowY:'auto', display:'flex', flexDirection:'column', gap:6, paddingRight:4 }}>
+          {jobHits.map(j => (
+            <div key={j.id} style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:12 }}>
+              <span style={{ fontSize:12.5 }}>{j.name}</span>
+              <select value={jobCats[j.id] || 'non_commissionable'} onChange={e => setJobCats(c => ({ ...c, [j.id]: e.target.value }))}
+                style={{ ...selStyle, minWidth:280, color: (jobCats[j.id] && jobCats[j.id]!=='non_commissionable') ? 'var(--accent)' : 'var(--text-muted)', fontWeight: (jobCats[j.id] && jobCats[j.id]!=='non_commissionable') ? 600 : 400 }}>
+                {JOB_CATEGORIES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+              </select>
+            </div>
+          ))}
+          {jobHits.length === 0 && <div style={{ fontSize:12, color:'var(--text-muted)', padding:8 }}>No job types match.</div>}
+        </div>
+        <div style={{ marginTop:14, textAlign:'right' }}>{saveBtn(saveJobs, 'jobs')}</div>
+      </div>
+
+      {/* Membership type → amount */}
+      <div style={secStyle}>
+        <div style={hStyle}>Membership types → payout</div>
+        <div style={subStyle}>Set the spiff for each ST membership type (e.g. Full $20, HVAC-only $10).</div>
+        <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+          {cfg.stMembershipTypes.map(m => (
+            <div key={m.id} style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:12 }}>
+              <span style={{ fontSize:13 }}>{m.name}</span>
+              <div style={{ display:'flex', alignItems:'center', gap:4 }}>
+                <span style={{ fontSize:13, color:'var(--text-muted)' }}>$</span>
+                <input type="number" step="0.01" value={memAmts[m.id] ?? ''} placeholder="0.00"
+                  onChange={e => setMemAmts(a => ({ ...a, [m.id]: e.target.value === '' ? '' : Number(e.target.value) }))}
+                  style={{ width:90, padding:'6px 8px', border:'1px solid var(--border)', borderRadius:'var(--radius)', fontSize:12, background:'var(--surface)', color:'var(--text-primary)' }} />
+              </div>
+            </div>
+          ))}
+          {cfg.stMembershipTypes.length === 0 && <div style={{ fontSize:12, color:'var(--text-muted)' }}>No membership types returned from ServiceTitan.</div>}
+        </div>
+        <div style={{ marginTop:14, textAlign:'right' }}>{saveBtn(saveMems, 'mems')}</div>
+      </div>
+    </div>
+  )
+}
+
 export default function AdminPage() {
   const { profile, isAdmin, refreshProfile } = useAuth()
   const { campaigns } = useData()
   const [settingsTab, setSettingsTab] = useState('users')
+  const [showMapping, setShowMapping] = useState(false)
   const [hoveredTab, setHoveredTab] = useState(null)
   const [profiles, setProfiles] = useState([])
   const [loading, setLoading] = useState(true)
@@ -545,6 +713,7 @@ export default function AdminPage() {
       {settingsTab === 'campaigns' && <CampaignsPage />}
 
 
+
       {/* Statuses tab — admin only */}
       {settingsTab === 'statuses' && isAdmin && (
         <div style={{ flex:1, overflowY:'auto', padding:24, display:'flex', flexDirection:'column', gap:20 }}>
@@ -756,6 +925,18 @@ export default function AdminPage() {
                 )}
               </div>
             </>
+          )}
+
+          {/* Commission engine setup / mapping (collapsible) */}
+          {isAdmin && (
+            <div style={{ borderTop:'1px solid var(--border)', marginTop:20, paddingTop:16 }}>
+              <button onClick={() => setShowMapping(v => !v)} style={{ display:'flex', alignItems:'center', gap:8, background:'none', border:'none', cursor:'pointer', padding:0, fontSize:14, fontWeight:700, color:'var(--text-primary)' }}>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ transform: showMapping ? 'rotate(90deg)' : 'none', transition:'transform .15s' }}><path d="m9 18 6-6-6-6"/></svg>
+                Commission engine setup
+              </button>
+              <div style={{ fontSize:12, color:'var(--text-muted)', marginTop:2, marginLeft:20 }}>Map ServiceTitan users, job types, and membership types to spiff rules.</div>
+              {showMapping && <div style={{ marginTop:16 }}><CommissionMapping /></div>}
+            </div>
           )}
         </div>
       )}
