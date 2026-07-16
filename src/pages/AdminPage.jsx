@@ -19,6 +19,7 @@ const EMOJIS = {
 const JOB_CATEGORIES = [
   { value:'non_commissionable', label:'Non-commissionable' },
   { value:'maintenance',        label:'Maintenance — $5 on complete' },
+  { value:'repair',             label:'Booked repair call — $2 on complete' },
   { value:'free_estimate',      label:'Free estimate (from-list) — $5 on sold' },
   { value:'other',              label:'Sold estimate / follow-up — $1 on sold' },
 ]
