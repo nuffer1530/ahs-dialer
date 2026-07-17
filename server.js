@@ -615,15 +615,21 @@ app.post('/api/commission/csr-users', async (req, res) => {
 // ServiceTitan calls Pricebook items "tasks" in the sale/invoice APIs, which is
 // why POST /memberships/sale wants a saleTaskId. Nothing in the API says which
 // service sells which membership type, so an admin picks it from this list.
+// The pricebook has ~1,600 services, so this is ALWAYS a search — an unfiltered
+// list silently returns an arbitrary first page and the item you want (e.g. the
+// membership sale tasks) simply isn't in it. totalCount is returned so the UI
+// can say when results are truncated rather than pretending it showed you
+// everything. Paging the whole book here would be ~9 sequential ST calls and
+// blow the request timeout.
 app.get('/api/st/pricebook-services', async (req, res) => {
   try {
     const q = (req.query.q || '').trim()
     const search = q ? `&searchText=${encodeURIComponent(q)}` : ''
-    const data = await stGet(`/pricebook/v2/tenant/${ST_TENANT_ID}/services?active=True&pageSize=200${search}`)
+    const data = await stGet(`/pricebook/v2/tenant/${ST_TENANT_ID}/services?active=True&pageSize=200&includeTotal=true${search}`)
     const rows = (data?.data || []).map(s => ({
       id: s.id, code: s.code, name: s.displayName || s.description || s.code, price: s.price,
     })).sort((a, b) => (a.name || '').localeCompare(b.name || ''))
-    res.json({ data: rows })
+    res.json({ data: rows, totalCount: data?.totalCount ?? null, truncated: (data?.totalCount ?? 0) > rows.length })
   } catch (err) {
     console.error('ST pricebook services error:', err.message)
     res.status(500).json({ error: err.message })

@@ -37,12 +37,37 @@ function CommissionMapping() {
   const [memAmts, setMemAmts] = useState({})  // st_membership_type_id -> amount
   const [memSale, setMemSale] = useState({})  // st_membership_type_id -> { sale_task_id, sale_task_name, duration_billing_id }
   const [services, setServices] = useState([])   // pricebook items, the sale-task candidates
+  const [svcQuery, setSvcQuery] = useState('membership') // the pricebook is ~1600 items; always search it
+  const [svcMeta, setSvcMeta] = useState({ total: null, truncated: false })
+  const [svcLoading, setSvcLoading] = useState(false)
   const [durations, setDurations] = useState({}) // st_membership_type_id -> duration/billing options
   const [jobSearch, setJobSearch] = useState('')
   const [busy, setBusy] = useState('')        // which section is saving
   const [savedMsg, setSavedMsg] = useState('')
 
   useEffect(() => { load() }, [])
+
+  // Search the pricebook for sale-task candidates. Defaults to "membership",
+  // which surfaces the ACMP items; an unfiltered list would return an arbitrary
+  // 200 of ~1600 and hide the very items you're looking for.
+  useEffect(() => {
+    const q = svcQuery.trim()
+    if (!q) { setServices([]); setSvcMeta({ total: null, truncated: false }); return }
+    let cancelled = false
+    setSvcLoading(true)
+    const t = setTimeout(() => {
+      fetch(`/api/st/pricebook-services?q=${encodeURIComponent(q)}`)
+        .then(r => r.json())
+        .then(d => {
+          if (cancelled) return
+          setServices(d.data || [])
+          setSvcMeta({ total: d.totalCount ?? null, truncated: !!d.truncated })
+        })
+        .catch(e => console.warn('pricebook search failed:', e))
+        .finally(() => { if (!cancelled) setSvcLoading(false) })
+    }, 350)
+    return () => { cancelled = true; clearTimeout(t) }
+  }, [svcQuery])
 
   // Duration/billing options are one ST call per membership type, so fetch them
   // lazily when the admin actually opens a term dropdown.
@@ -62,12 +87,8 @@ function CommissionMapping() {
       const d = await r.json()
       if (!r.ok) throw new Error(d.error || 'Failed to load config')
       setCfg(d)
-      // Pricebook items for the sale-task picker. Non-fatal: without it the
-      // payout mapping still works, you just can't set up selling.
-      fetch('/api/st/pricebook-services')
-        .then(res => res.json())
-        .then(sd => setServices(sd.data || []))
-        .catch(e => console.warn('pricebook services load failed:', e))
+      // Sale-task candidates load via the search effect below, not here — the
+      // pricebook is far too big to list unfiltered.
       // CSR map: saved first, then auto-match unmapped by name
       const cm = {}
       ;(d.csrUsers || []).forEach(u => { if (u.profile_id) cm[u.profile_id] = u.st_user_id })
@@ -273,6 +294,20 @@ function CommissionMapping() {
           ServiceTitan can't tell us which pricebook item sells which membership, so it has to be set here once.
           <strong> Selling creates a real invoice for the customer.</strong>
         </div>
+
+        <div style={{ marginBottom:12 }}>
+          <div style={{ fontSize:10, color:'var(--text-muted)', marginBottom:3, fontWeight:600 }}>SEARCH PRICEBOOK FOR SALE TASKS</div>
+          <input value={svcQuery} onChange={e => setSvcQuery(e.target.value)} placeholder="e.g. membership, ACMP…"
+            style={{ width:'100%', padding:'7px 10px', border:'1px solid var(--border)', borderRadius:'var(--radius)', fontSize:12, background:'var(--surface-2)', color:'var(--text-primary)' }} />
+          <div style={{ fontSize:10, color:'var(--text-muted)', marginTop:4 }}>
+            {svcLoading ? 'Searching…'
+              : svcMeta.truncated
+                ? `Showing ${services.length} of ${svcMeta.total} matches — narrow the search to see the rest.`
+                : `${services.length} match${services.length === 1 ? '' : 'es'}. Your pricebook has ~1,600 services, so this list is always filtered.`}
+            {' '}Beware the <strong>Renewal</strong> variants — those renew an existing member rather than sell a new one.
+          </div>
+        </div>
+
         <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
           {cfg.stMembershipTypes.map(m => {
             const sellable = memSale[m.id]?.sale_task_id && memSale[m.id]?.duration_billing_id
@@ -305,6 +340,13 @@ function CommissionMapping() {
                       }}
                       style={{ width:'100%', padding:'6px 8px', border:'1px solid var(--border)', borderRadius:'var(--radius)', fontSize:12, background:'var(--surface)', color:'var(--text-primary)' }}>
                       <option value="">— not sellable from Andi —</option>
+                      {/* A saved task may not be in the current search results —
+                          keep it listed so selecting elsewhere can't wipe it. */}
+                      {memSale[m.id]?.sale_task_id && !services.some(s => String(s.id) === String(memSale[m.id].sale_task_id)) && (
+                        <option value={memSale[m.id].sale_task_id}>
+                          {memSale[m.id].sale_task_name || `Task ${memSale[m.id].sale_task_id}`} (saved)
+                        </option>
+                      )}
                       {services.map(s => (
                         <option key={s.id} value={s.id}>{s.code ? `${s.code} — ` : ''}{s.name}{s.price ? ` ($${s.price})` : ''}</option>
                       ))}
