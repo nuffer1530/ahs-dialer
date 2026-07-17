@@ -1,213 +1,321 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { sb } from '../lib/supabase'
 import { useData } from '../lib/DataContext'
-import { isDone, fmtShort } from '../lib/utils'
+import { inboundStats, outboundStats, fmtSecs, SERVICE_LEVEL_SECONDS, SERVICE_LEVEL_TARGET } from '../lib/analytics'
+
+// Call-centre wallboard — a modern "Simon board" for the floor TV. Everything
+// real-time: inbound queue health, live calls, the leaderboard (rows slide when
+// someone takes the lead), agent presence, and a live activity feed.
+
+// TV-bright dark palette.
+const C = {
+  bg:'#0B0F14', panel:'#141A21', panel2:'#1B222B', border:'#252E38',
+  text:'#E6EDF3', muted:'#8B949E', dim:'#6E7681',
+  green:'#3FB950', blue:'#58A6FF', amber:'#D29922', red:'#F85149', purple:'#BC8CFF', orange:'#F0883E',
+}
+const STATUS_COLORS = {
+  'Available':C.green, 'On Call':C.blue, 'Wrap Up':C.amber,
+  'Break':C.purple, 'Lunch':C.orange, 'Offline':C.dim, 'Huddle':C.purple,
+}
+const STATUS_ORDER = { 'On Call':0, 'Available':1, 'Wrap Up':2, 'Break':3, 'Lunch':4, 'Huddle':5, 'Offline':9 }
+const OUTCOME_COLORS = {
+  'Booked':C.green, 'No Answer':C.amber, 'Voicemail':C.purple,
+  'Not Interested':C.red, 'DNC':'#8B2E24', 'Bad Data':C.dim,
+}
+const ROW_H = 74
+
+const startOfToday = () => { const d = new Date(); d.setHours(0,0,0,0); return d }
+const fmtWait = (s) => s == null ? '—' : s < 60 ? `${s}s` : `${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}`
+const timeSince = (iso) => {
+  if (!iso) return '—'
+  const s = Math.floor((Date.now() - new Date(iso)) / 1000)
+  if (s < 60) return `${s}s`
+  if (s < 3600) return `${Math.floor(s/60)}m`
+  return `${Math.floor(s/3600)}h ${Math.floor((s%3600)/60)}m`
+}
+const initials = (n) => (n||'?').split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase()
+
+function Kpi({ label, value, sub, color = C.text, glow }) {
+  return (
+    <div style={{ background:C.panel, border:`1px solid ${C.border}`, borderRadius:14, padding:'14px 18px',
+      borderTop:`3px solid ${color}`, boxShadow: glow ? `0 0 24px ${color}44` : 'none', minWidth:0 }}>
+      <div style={{ fontSize:11, fontWeight:700, textTransform:'uppercase', letterSpacing:.8, color:C.muted, marginBottom:6 }}>{label}</div>
+      <div style={{ fontSize:40, fontWeight:800, color, letterSpacing:-1.5, lineHeight:1, fontVariantNumeric:'tabular-nums' }}>{value}</div>
+      {sub && <div style={{ fontSize:11, color:C.muted, marginTop:5 }}>{sub}</div>}
+    </div>
+  )
+}
+
+function Panel({ title, icon, live, children, style }) {
+  return (
+    <div style={{ background:C.panel, border:`1px solid ${C.border}`, borderRadius:14, overflow:'hidden', display:'flex', flexDirection:'column', ...style }}>
+      <div style={{ padding:'13px 18px', borderBottom:`1px solid ${C.border}`, display:'flex', alignItems:'center', gap:8, flexShrink:0 }}>
+        <span style={{ fontSize:16 }}>{icon}</span>
+        <span style={{ fontSize:13, fontWeight:700, letterSpacing:.5, color:C.text }}>{title}</span>
+        {live && <div style={{ marginLeft:'auto', width:7, height:7, borderRadius:'50%', background:C.green, animation:'wr-pulse 1.5s infinite' }} />}
+      </div>
+      <div style={{ flex:1, overflow:'hidden', position:'relative' }}>{children}</div>
+    </div>
+  )
+}
 
 export default function WarRoomPage() {
   const { contacts, campaigns } = useData()
   const [logs, setLogs] = useState([])
+  const [tasks, setTasks] = useState([])
+  const [liveCalls, setLiveCalls] = useState([])
+  const [profiles, setProfiles] = useState([])
   const [time, setTime] = useState(new Date())
 
   useEffect(() => {
-    // Load today's logs
-    const today = new Date(); today.setHours(0,0,0,0)
-    sb.from('call_logs').select('*').gte('created_at', today.toISOString()).order('created_at', { ascending: false })
-      .then(({ data }) => setLogs(data || []))
+    const since = startOfToday().toISOString()
+    Promise.all([
+      sb.from('call_logs').select('*').gte('created_at', since).order('created_at', { ascending:false }),
+      sb.from('call_tasks').select('*').gte('queued_at', since).order('queued_at', { ascending:false }),
+      sb.from('active_calls').select('*').is('ended_at', null),
+      sb.from('profiles').select('id, name, email, avatar, status, status_since').eq('active', true),
+    ]).then(([l, t, a, p]) => {
+      setLogs(l.data || []); setTasks(t.data || []); setLiveCalls(a.data || []); setProfiles(p.data || [])
+    })
 
-    // Real-time updates
-    const channel = sb.channel('warroom')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'call_logs' }, payload => {
-        setLogs(prev => [payload.new, ...prev])
-      })
+    const upsert = (setter, key) => (payload) => setter(prev => {
+      if (payload.eventType === 'DELETE') return prev.filter(x => x[key] !== payload.old[key])
+      const i = prev.findIndex(x => x[key] === payload.new[key])
+      if (i === -1) return [payload.new, ...prev]
+      const next = [...prev]; next[i] = { ...next[i], ...payload.new }; return next
+    })
+
+    const ch = sb.channel('warroom')
+      .on('postgres_changes', { event:'INSERT', schema:'public', table:'call_logs' }, p => setLogs(prev => [p.new, ...prev]))
+      .on('postgres_changes', { event:'*', schema:'public', table:'call_tasks' }, upsert(setTasks, 'task_sid'))
+      .on('postgres_changes', { event:'*', schema:'public', table:'active_calls' }, upsert(setLiveCalls, 'call_sid'))
+      .on('postgres_changes', { event:'UPDATE', schema:'public', table:'profiles' }, p =>
+        setProfiles(prev => prev.map(x => x.id === p.new.id ? { ...x, ...p.new } : x)))
       .subscribe()
 
-    // Clock
-    const clockTimer = setInterval(() => setTime(new Date()), 1000)
-
-    return () => { sb.removeChannel(channel); clearInterval(clockTimer) }
+    const clock = setInterval(() => setTime(new Date()), 1000)
+    return () => { sb.removeChannel(ch); clearInterval(clock) }
   }, [])
 
-  const now = new Date()
-  const todayStr = now.toDateString()
+  const inbound = useMemo(() => inboundStats(tasks), [tasks])
+  const outbound = useMemo(() => outboundStats(logs), [logs])
 
-  // Stats
-  const totalContacts = contacts.length
-  const totalDone = contacts.filter(isDone).length
-  const totalBooked = contacts.filter(c => c.status === 'Booked').length
-  const totalActive = contacts.filter(c => !isDone(c) && c.status !== 'Max Attempts').length
-  const todayLogs = logs.filter(l => new Date(l.created_at).toDateString() === todayStr)
-  const todayCalls = todayLogs.length
-  const todayBooked = todayLogs.filter(l => l.outcome === 'Booked').length
-  const todayConv = todayCalls ? Math.round((todayBooked / todayCalls) * 100) : 0
+  const queued = tasks.filter(t => t.state === 'queued' && !t.ended_at)
+  const longestWait = queued.length ? Math.max(...queued.map(t => Math.round((Date.now() - new Date(t.queued_at)) / 1000))) : 0
+  const liveInbound = tasks.filter(t => t.state === 'answered' && !t.ended_at).length
+  const liveOutbound = liveCalls.filter(c => c.direction === 'outbound' && !c.ended_at && ['in-progress','answered','initiated','ringing'].includes(c.status)).length
+  const agentsAvailable = profiles.filter(p => p.status === 'Available').length
 
-  // Rep leaderboard - today
+  // Leaderboard — bookings drive the ranking (the live motivational number),
+  // then total calls. Rows are keyed by rep and positioned by rank so they
+  // slide when the order changes.
+  const byName = {}
+  profiles.forEach(p => { byName[p.name || p.email] = p })
   const repStats = {}
-  todayLogs.forEach(l => {
+  logs.forEach(l => {
     if (!l.rep) return
-    if (!repStats[l.rep]) repStats[l.rep] = { calls: 0, booked: 0, lastCall: null }
-    repStats[l.rep].calls++
-    if (l.outcome === 'Booked') repStats[l.rep].booked++
-    if (!repStats[l.rep].lastCall || new Date(l.created_at) > new Date(repStats[l.rep].lastCall)) {
-      repStats[l.rep].lastCall = l.created_at
-    }
+    const r = repStats[l.rep] || (repStats[l.rep] = { rep:l.rep, calls:0, booked:0, lastCall:null })
+    r.calls++
+    if (l.outcome === 'Booked') r.booked++
+    if (!r.lastCall || new Date(l.created_at) > new Date(r.lastCall)) r.lastCall = l.created_at
   })
-  const leaderboard = Object.entries(repStats).sort((a, b) => b[1].booked - a[1].booked || b[1].calls - a[1].calls)
+  tasks.forEach(t => {
+    if (t.state !== 'answered' || !t.agent_name) return
+    const r = repStats[t.agent_name] || (repStats[t.agent_name] = { rep:t.agent_name, calls:0, booked:0, lastCall:null })
+    r.inbound = (r.inbound || 0) + 1
+  })
+  const leaderboard = Object.values(repStats).sort((a, b) => b.booked - a.booked || b.calls - a.calls)
 
-  // Campaign progress
-  const campStats = campaigns.map(camp => {
-    const cc = contacts.filter(c => c.campaign_id === camp.id)
-    const done = cc.filter(isDone).length
-    const booked = cc.filter(c => c.status === 'Booked').length
-    const pct = cc.length ? Math.round((done / cc.length) * 100) : 0
-    return { ...camp, total: cc.length, done, booked, pct }
-  }).filter(c => c.total > 0).sort((a, b) => b.booked - a.booked)
+  const agents = [...profiles].sort((a, b) =>
+    (STATUS_ORDER[a.status] ?? 6) - (STATUS_ORDER[b.status] ?? 6) || (a.name||'').localeCompare(b.name||''))
 
-  // Recent activity feed
-  const recentActivity = logs.slice(0, 12)
+  // Live feed: bookings pop, everything else scrolls under.
+  const feed = logs.slice(0, 14)
 
-  const OUTCOME_COLORS = {
-    'Booked': '#2E7D52', 'No Answer': '#8A5A00', 'Voicemail': '#5B3FA0',
-    'Not Interested': '#B5341A', 'DNC': '#5F1C0A', 'Bad Data': '#9E9B96',
-  }
+  const slColor = inbound.serviceLevel == null ? C.dim : inbound.serviceLevel >= SERVICE_LEVEL_TARGET ? C.green : inbound.serviceLevel >= 60 ? C.amber : C.red
+  const abColor = inbound.abandonRate == null ? C.dim : inbound.abandonRate <= 5 ? C.green : inbound.abandonRate <= 10 ? C.amber : C.red
+  const queueColor = queued.length === 0 ? C.green : longestWait > 60 ? C.red : C.amber
 
   return (
-    <div style={{
-      minHeight: '100vh', background: '#0D1117', color: '#E6EDF3',
-      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif',
-      padding: 24, display: 'flex', flexDirection: 'column', gap: 20,
-    }}>
+    <div style={{ minHeight:'100vh', height:'100vh', background:C.bg, color:C.text,
+      fontFamily:'-apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif',
+      padding:20, display:'flex', flexDirection:'column', gap:14, overflow:'hidden', boxSizing:'border-box' }}>
+
       {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <span style={{ background: '#1A5C8A', color: '#fff', fontSize: 16, fontWeight: 800, padding: '4px 12px', borderRadius: 6, letterSpacing: .5 }}>AHS</span>
-          <span style={{ fontSize: 22, fontWeight: 700 }}>Dialer War Room</span>
-          <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#2E7D52', animation: 'pulse 1.5s infinite' }}></div>
-          <span style={{ fontSize: 12, color: '#8B949E' }}>LIVE</span>
+      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', flexShrink:0 }}>
+        <div style={{ display:'flex', alignItems:'center', gap:12 }}>
+          <span style={{ background:'#1A5C8A', color:'#fff', fontSize:15, fontWeight:800, padding:'4px 11px', borderRadius:6, letterSpacing:.5 }}>AHS</span>
+          <span style={{ fontSize:21, fontWeight:800, letterSpacing:.3 }}>Call Center</span>
+          <div style={{ width:8, height:8, borderRadius:'50%', background:C.green, animation:'wr-pulse 1.5s infinite' }} />
+          <span style={{ fontSize:12, color:C.muted, letterSpacing:1 }}>LIVE</span>
         </div>
-        <div style={{ textAlign: 'right' }}>
-          <div style={{ fontSize: 28, fontWeight: 700, letterSpacing: -1, color: '#58A6FF' }}>
-            {time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+        <div style={{ textAlign:'right' }}>
+          <div style={{ fontSize:30, fontWeight:800, letterSpacing:-1, color:C.blue, fontVariantNumeric:'tabular-nums' }}>
+            {time.toLocaleTimeString([], { hour:'2-digit', minute:'2-digit', second:'2-digit' })}
           </div>
-          <div style={{ fontSize: 12, color: '#8B949E' }}>{time.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' })}</div>
+          <div style={{ fontSize:12, color:C.muted }}>{time.toLocaleDateString([], { weekday:'long', month:'long', day:'numeric' })}</div>
         </div>
       </div>
 
-      {/* Top stats */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 12 }}>
-        {[
-          { label: "Today's Calls", value: todayCalls, color: '#58A6FF', big: true },
-          { label: "Booked Today", value: todayBooked, color: '#2E7D52', big: true },
-          { label: "Conv. Rate", value: todayConv + '%', color: todayConv >= 10 ? '#2E7D52' : todayConv >= 5 ? '#C87800' : '#B5341A', big: true },
-          { label: "Total Booked", value: totalBooked, color: '#2E7D52' },
-          { label: "Remaining", value: totalActive.toLocaleString(), color: '#C87800' },
-          { label: "Completed", value: totalDone.toLocaleString(), color: '#8B949E' },
-        ].map(({ label, value, color, big }) => (
-          <div key={label} style={{ background: '#161B22', border: '1px solid #30363D', borderRadius: 12, padding: '16px 20px', borderTop: `3px solid ${color}` }}>
-            <div style={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: .8, color: '#8B949E', marginBottom: 6 }}>{label}</div>
-            <div style={{ fontSize: big ? 36 : 28, fontWeight: 800, color, letterSpacing: -1 }}>{value}</div>
-          </div>
-        ))}
+      {/* KPI strip */}
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(8, 1fr)', gap:12, flexShrink:0 }}>
+        <Kpi label="In Queue" value={queued.length} color={queueColor} glow={queued.length > 0}
+          sub={queued.length ? `longest ${fmtWait(longestWait)}` : 'clear'} />
+        <Kpi label="Live Calls" value={liveInbound + liveOutbound} color={C.blue}
+          sub={`${liveInbound} in · ${liveOutbound} out`} />
+        <Kpi label={`Service Lvl ${SERVICE_LEVEL_SECONDS}s`} value={inbound.serviceLevel == null ? '—' : `${Math.round(inbound.serviceLevel)}%`} color={slColor} sub={`target ${SERVICE_LEVEL_TARGET}%`} />
+        <Kpi label="Abandon" value={inbound.abandonRate == null ? '—' : `${Math.round(inbound.abandonRate)}%`} color={abColor} sub={`${inbound.abandoned} lost`} />
+        <Kpi label="Calls Offered" value={inbound.offered} color={C.text} sub={`${inbound.handled} handled`} />
+        <Kpi label="Avg Answer" value={fmtSecs(inbound.asa)} color={C.text} sub="speed to answer" />
+        <Kpi label="Booked Today" value={outbound.booked} color={C.green} glow={outbound.booked > 0} sub={`${outbound.calls} calls`} />
+        <Kpi label="Agents Ready" value={agentsAvailable} color={agentsAvailable ? C.green : C.red} sub={`of ${profiles.length} on`} />
       </div>
 
       {/* Main grid */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr 1fr', gap: 16, flex: 1 }}>
+      <div style={{ display:'grid', gridTemplateColumns:'1.25fr 1fr 1fr', gap:14, flex:1, minHeight:0 }}>
 
-        {/* Leaderboard */}
-        <div style={{ background: '#161B22', border: '1px solid #30363D', borderRadius: 12, overflow: 'hidden' }}>
-          <div style={{ padding: '14px 20px', borderBottom: '1px solid #30363D', display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ fontSize: 16 }}>🏆</span>
-            <span style={{ fontSize: 14, fontWeight: 700, letterSpacing: .3 }}>TODAY'S LEADERBOARD</span>
-          </div>
-          <div style={{ padding: '8px 0' }}>
-            {leaderboard.length === 0 ? (
-              <div style={{ padding: '24px 20px', color: '#8B949E', fontSize: 13, textAlign: 'center' }}>No calls logged yet today</div>
-            ) : leaderboard.map(([rep, d], i) => {
+        {/* Leaderboard — animated */}
+        <Panel title="TODAY'S LEADERBOARD" icon="🏆">
+          <div style={{ position:'relative', height: Math.max(leaderboard.length * ROW_H, 40), padding:'6px 0' }}>
+            {leaderboard.length === 0 && (
+              <div style={{ padding:'30px 20px', color:C.muted, fontSize:14, textAlign:'center' }}>No calls logged yet today</div>
+            )}
+            {leaderboard.map((d, i) => {
               const conv = d.calls ? Math.round((d.booked / d.calls) * 100) : 0
-              const isActive = d.lastCall && (now - new Date(d.lastCall)) < 30 * 60 * 1000
-              const medals = ['🥇', '🥈', '🥉']
+              const active = d.lastCall && (Date.now() - new Date(d.lastCall)) < 15 * 60 * 1000
+              const p = byName[d.rep]
+              const isLeader = i === 0 && d.booked > 0
+              const medal = ['🥇','🥈','🥉'][i]
               return (
-                <div key={rep} style={{ padding: '12px 20px', borderBottom: '1px solid #21262D', display: 'flex', alignItems: 'center', gap: 12 }}>
-                  <div style={{ fontSize: 20, width: 28, flexShrink: 0 }}>{medals[i] || `#${i+1}`}</div>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <div style={{ fontSize: 14, fontWeight: 600 }}>{rep}</div>
-                      {isActive && <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#2E7D52', animation: 'pulse 1.5s infinite' }}></div>}
+                <div key={d.rep} style={{ position:'absolute', left:0, right:0, top:i * ROW_H + 6, height:ROW_H - 8,
+                  transition:'top .6s cubic-bezier(.22,1,.36,1)', padding:'0 16px', display:'flex', alignItems:'center', gap:12 }}>
+                  <div style={{ width:34, textAlign:'center', fontSize:medal ? 24 : 16, fontWeight:800, color: medal ? undefined : C.dim, flexShrink:0 }}>
+                    {medal || `#${i+1}`}
+                  </div>
+                  <div style={{ width:42, height:42, borderRadius:'50%', flexShrink:0,
+                    background: isLeader ? 'linear-gradient(135deg,#D29922,#F0883E)' : C.panel2,
+                    border:`2px solid ${isLeader ? C.amber : C.border}`, color: isLeader ? '#000' : C.text,
+                    display:'flex', alignItems:'center', justifyContent:'center', fontSize: p?.avatar ? 22 : 14, fontWeight:800,
+                    boxShadow: isLeader ? `0 0 18px ${C.amber}66` : 'none' }}>
+                    {p?.avatar || initials(d.rep)}
+                  </div>
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                      <span style={{ fontSize:16, fontWeight:700, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{d.rep}</span>
+                      {active && <div style={{ width:7, height:7, borderRadius:'50%', background:C.green, animation:'wr-pulse 1.5s infinite', flexShrink:0 }} />}
                     </div>
-                    <div style={{ display: 'flex', gap: 12, marginTop: 4 }}>
-                      <span style={{ fontSize: 11, color: '#8B949E' }}>{d.calls} calls</span>
-                      <span style={{ fontSize: 11, color: conv >= 10 ? '#2E7D52' : '#8B949E' }}>{conv}% conv</span>
+                    <div style={{ display:'flex', gap:12, marginTop:3, fontSize:12, color:C.muted }}>
+                      <span>{d.calls} calls</span>
+                      {d.inbound ? <span>{d.inbound} inbound</span> : null}
+                      <span style={{ color: conv >= 15 ? C.green : C.muted }}>{conv}% conv</span>
                     </div>
                   </div>
-                  <div style={{ textAlign: 'right' }}>
-                    <div style={{ fontSize: 24, fontWeight: 800, color: '#2E7D52' }}>{d.booked}</div>
-                    <div style={{ fontSize: 10, color: '#8B949E', textTransform: 'uppercase' }}>Booked</div>
+                  <div style={{ textAlign:'right', flexShrink:0 }}>
+                    <div style={{ fontSize:30, fontWeight:800, color:C.green, lineHeight:1, fontVariantNumeric:'tabular-nums' }}>{d.booked}</div>
+                    <div style={{ fontSize:10, color:C.muted, textTransform:'uppercase', letterSpacing:.5 }}>Booked</div>
                   </div>
                 </div>
               )
             })}
           </div>
-        </div>
+        </Panel>
 
-        {/* Campaign progress */}
-        <div style={{ background: '#161B22', border: '1px solid #30363D', borderRadius: 12, overflow: 'hidden' }}>
-          <div style={{ padding: '14px 20px', borderBottom: '1px solid #30363D', display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ fontSize: 16 }}>📋</span>
-            <span style={{ fontSize: 14, fontWeight: 700, letterSpacing: .3 }}>CAMPAIGN PROGRESS</span>
-          </div>
-          <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 14 }}>
-            {campStats.map(camp => (
-              <div key={camp.id}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-                  <span style={{ fontSize: 13, fontWeight: 600 }}>{camp.name}</span>
-                  <span style={{ fontSize: 12, color: '#8B949E' }}>{camp.pct}%</span>
-                </div>
-                <div style={{ height: 8, background: '#21262D', borderRadius: 99, overflow: 'hidden', marginBottom: 4 }}>
-                  <div style={{ height: '100%', width: `${camp.pct}%`, background: 'linear-gradient(90deg, #1A5C8A, #2E7D52)', borderRadius: 99, transition: 'width 1s ease' }} />
-                </div>
-                <div style={{ display: 'flex', gap: 12, fontSize: 11, color: '#8B949E' }}>
-                  <span>{camp.total.toLocaleString()} total</span>
-                  <span style={{ color: '#C87800' }}>{(camp.total - camp.done).toLocaleString()} left</span>
-                  <span style={{ color: '#2E7D52' }}>{camp.booked} booked</span>
-                </div>
+        {/* Agents + queue */}
+        <Panel title="THE FLOOR" icon="🎧" live>
+          <div style={{ overflowY:'auto', height:'100%' }}>
+            {queued.length > 0 && (
+              <div style={{ padding:'10px 16px', background:`${C.red}18`, borderBottom:`1px solid ${C.border}` }}>
+                <div style={{ fontSize:11, fontWeight:700, color:C.red, letterSpacing:.5, marginBottom:6 }}>WAITING IN QUEUE · {queued.length}</div>
+                {[...queued].sort((a,b) => new Date(a.queued_at) - new Date(b.queued_at)).slice(0,4).map(t => {
+                  const w = Math.round((Date.now() - new Date(t.queued_at)) / 1000)
+                  return (
+                    <div key={t.task_sid} style={{ display:'flex', justifyContent:'space-between', fontSize:13, padding:'2px 0' }}>
+                      <span style={{ color:C.text }}>{t.contact_name || t.from_number || 'Caller'}</span>
+                      <span style={{ fontWeight:700, color: w > 60 ? C.red : C.amber, fontVariantNumeric:'tabular-nums' }}>{fmtWait(w)}</span>
+                    </div>
+                  )
+                })}
               </div>
-            ))}
-            {campStats.length === 0 && <div style={{ color: '#8B949E', fontSize: 13, textAlign: 'center', padding: 20 }}>No campaigns yet</div>}
-          </div>
-        </div>
-
-        {/* Live activity feed */}
-        <div style={{ background: '#161B22', border: '1px solid #30363D', borderRadius: 12, overflow: 'hidden' }}>
-          <div style={{ padding: '14px 20px', borderBottom: '1px solid #30363D', display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ fontSize: 16 }}>⚡</span>
-            <span style={{ fontSize: 14, fontWeight: 700, letterSpacing: .3 }}>LIVE ACTIVITY</span>
-            <div style={{ marginLeft: 'auto', width: 6, height: 6, borderRadius: '50%', background: '#2E7D52', animation: 'pulse 1.5s infinite' }}></div>
-          </div>
-          <div style={{ overflow: 'hidden' }}>
-            {recentActivity.length === 0 ? (
-              <div style={{ padding: '24px 20px', color: '#8B949E', fontSize: 13, textAlign: 'center' }}>Waiting for activity…</div>
-            ) : recentActivity.map((l, i) => {
-              const color = OUTCOME_COLORS[l.outcome] || '#8B949E'
-              const c = contacts.find(x => x.id === l.contact_id)
+            )}
+            {agents.map(p => {
+              const color = STATUS_COLORS[p.status] || C.dim
+              const onCall = p.status === 'On Call'
               return (
-                <div key={l.id} style={{ padding: '10px 20px', borderBottom: '1px solid #21262D', display: 'flex', alignItems: 'center', gap: 10, opacity: i > 8 ? 0.5 : 1 }}>
-                  <div style={{ width: 8, height: 8, borderRadius: '50%', background: color, flexShrink: 0 }}></div>
-                  <div style={{ flex: 1, overflow: 'hidden' }}>
-                    <div style={{ fontSize: 12, fontWeight: 600, color: l.outcome === 'Booked' ? '#2E7D52' : '#E6EDF3', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                      {l.outcome === 'Booked' ? '🎉 ' : ''}{c?.name || '—'}
-                    </div>
-                    <div style={{ fontSize: 11, color: '#8B949E' }}>{l.rep} · {fmtShort(l.created_at)}</div>
+                <div key={p.id} style={{ padding:'11px 16px', borderBottom:`1px solid ${C.panel2}`, display:'flex', alignItems:'center', gap:11,
+                  opacity: p.status === 'Offline' ? 0.5 : 1 }}>
+                  <div style={{ width:36, height:36, borderRadius:'50%', background:C.panel2, border:`2px solid ${color}`,
+                    display:'flex', alignItems:'center', justifyContent:'center', fontSize: p.avatar ? 18 : 12, fontWeight:800, flexShrink:0,
+                    boxShadow: onCall ? `0 0 12px ${color}77` : 'none' }}>
+                    {p.avatar || initials(p.name || p.email)}
                   </div>
-                  <div style={{ fontSize: 11, fontWeight: 600, color, flexShrink: 0 }}>{l.outcome}</div>
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <div style={{ fontSize:14, fontWeight:600, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{p.name || p.email}</div>
+                    <div style={{ fontSize:11, color:C.muted }}>in status {timeSince(p.status_since)}</div>
+                  </div>
+                  <span style={{ fontSize:11, fontWeight:700, color, background:`${color}1f`, padding:'4px 10px', borderRadius:99, flexShrink:0,
+                    display:'flex', alignItems:'center', gap:5 }}>
+                    {onCall && <span style={{ width:6, height:6, borderRadius:'50%', background:color, animation:'wr-pulse 1.2s infinite' }} />}
+                    {p.status || 'Offline'}
+                  </span>
+                </div>
+              )
+            })}
+            {agents.length === 0 && <div style={{ padding:'30px 20px', color:C.muted, fontSize:14, textAlign:'center' }}>No agents on</div>}
+          </div>
+        </Panel>
+
+        {/* Live activity */}
+        <Panel title="LIVE ACTIVITY" icon="⚡" live>
+          <div style={{ overflowY:'auto', height:'100%' }}>
+            {feed.length === 0 ? (
+              <div style={{ padding:'30px 20px', color:C.muted, fontSize:14, textAlign:'center' }}>Waiting for activity…</div>
+            ) : feed.map((l, i) => {
+              const color = OUTCOME_COLORS[l.outcome] || C.dim
+              const c = contacts.find(x => x.id === l.contact_id)
+              const booked = l.outcome === 'Booked'
+              return (
+                <div key={l.id} style={{ padding:'11px 16px', borderBottom:`1px solid ${C.panel2}`, display:'flex', alignItems:'center', gap:11,
+                  opacity: i > 9 ? 0.45 : 1, background: booked ? `${C.green}12` : 'transparent' }}>
+                  <div style={{ width:9, height:9, borderRadius:'50%', background:color, flexShrink:0, boxShadow: booked ? `0 0 10px ${color}` : 'none' }} />
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <div style={{ fontSize:14, fontWeight:600, color: booked ? C.green : C.text, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
+                      {booked ? '🎉 ' : ''}{c?.name || l.contact_name || '—'}
+                    </div>
+                    <div style={{ fontSize:11, color:C.muted }}>{l.rep} · {new Date(l.created_at).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' })}</div>
+                  </div>
+                  <span style={{ fontSize:12, fontWeight:700, color, flexShrink:0 }}>{l.outcome}</span>
                 </div>
               )
             })}
           </div>
-        </div>
+        </Panel>
       </div>
 
-      <style>{`
-        @keyframes pulse { 0%,100%{opacity:1;}50%{opacity:.3;} }
-      `}</style>
+      {/* Campaign progress strip */}
+      {campaigns.length > 0 && (
+        <div style={{ display:'flex', gap:14, flexShrink:0 }}>
+          {campaigns.map(camp => {
+            const cc = contacts.filter(c => c.campaign_id === camp.id)
+            if (!cc.length) return null
+            const done = cc.filter(c => ['Booked','Not Interested','DNC','Bad Data','Max Attempts'].includes(c.status)).length
+            const booked = cc.filter(c => c.status === 'Booked').length
+            const pct = cc.length ? Math.round((done / cc.length) * 100) : 0
+            return (
+              <div key={camp.id} style={{ flex:1, background:C.panel, border:`1px solid ${C.border}`, borderRadius:12, padding:'10px 16px' }}>
+                <div style={{ display:'flex', justifyContent:'space-between', marginBottom:6, fontSize:13 }}>
+                  <span style={{ fontWeight:700 }}>{camp.name}</span>
+                  <span style={{ color:C.muted }}>{booked} booked · {pct}%</span>
+                </div>
+                <div style={{ height:7, background:C.panel2, borderRadius:99, overflow:'hidden' }}>
+                  <div style={{ height:'100%', width:`${pct}%`, background:`linear-gradient(90deg,${C.blue},${C.green})`, borderRadius:99, transition:'width 1s ease' }} />
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      <style>{`@keyframes wr-pulse { 0%,100%{opacity:1} 50%{opacity:.25} }`}</style>
     </div>
   )
 }
