@@ -12,7 +12,6 @@ import LivePage from './LivePage'
 import NotesPage from './NotesPage'
 import AdminPage from './AdminPage'
 import WarRoomPage from './WarRoomPage'
-import LeaderboardPage from './LeaderboardPage'
 import AttendancePage from './AttendancePage'
 import RecordingsPage from './RecordingsPage'
 import MyPage from './MyPage'
@@ -60,16 +59,6 @@ const NAV_ICONS = {
         <rect x="10" y="8" width="4" height="13" rx="1" fill={c} opacity=".75"/>
         <rect x="17" y="3" width="4" height="18" rx="1" fill={c}/>
         <path d="M3 21h18" stroke={c} strokeWidth="1.5" strokeLinecap="round"/>
-      </svg>
-    )
-  },
-  leaderboard: (active) => {
-    const c = active ? ICON_COLOR : ICON_MUTED
-    return (
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <path d="M8 6H5a1 1 0 00-1 1v3a4 4 0 004 4h.5M16 6h3a1 1 0 011 1v3a4 4 0 01-4 4h-.5" stroke={c} strokeWidth="1.8" strokeLinecap="round" fill="none"/>
-        <path d="M12 2l1.5 4.5h4L14 9l1.5 4.5L12 11l-3.5 2.5L10 9 6.5 6.5h4L12 2z" fill={c}/>
-        <path d="M9 17h6M12 14v7" stroke={c} strokeWidth="1.8" strokeLinecap="round"/>
       </svg>
     )
   },
@@ -140,7 +129,6 @@ const NAV_ITEMS = [
   { to:'/live', label:'Live Dashboard', iconKey:'live' },
   { to:'/analytics', label:'Analytics', iconKey:'analytics' },
   { to:'/recordings', label:'Recordings', iconKey:'recordings' },
-  { to:'/leaderboard', label:'Leaderboard', iconKey:'leaderboard' },
   { to:'/attendance', label:'WFM', iconKey:'wfm' },
   { to:'/notes', label:'Notes', iconKey:'notes' },
   { to:'/warroom', label:'Call Center TV', iconKey:'tv' },
@@ -154,7 +142,6 @@ const PAGE_META = {
   '/live':        { title: 'Live Dashboard',        subtitle: 'Real-time floor activity' },
   '/analytics':   { title: 'Analytics',             subtitle: 'Performance and pipeline' },
   '/recordings':  { title: 'Recordings',            subtitle: 'Call playback and review' },
-  '/leaderboard': { title: 'Leaderboard',           subtitle: 'Team rankings' },
   '/attendance':  { title: 'Workforce Management',  subtitle: 'Schedule, adherence, and points' },
   '/notes':       { title: 'Notes',                 subtitle: 'Shared team notes' },
   '/warroom':     { title: 'Call Center TV',        subtitle: 'Big-screen floor view' },
@@ -686,7 +673,6 @@ function DialerLayoutInner() {
           <Route path="/live" element={<LivePage />} />
           <Route path="/analytics" element={<DashboardPage />} />
           <Route path="/recordings" element={<RecordingsPage />} />
-          <Route path="/leaderboard" element={<LeaderboardPage />} />
           <Route path="/attendance" element={<AttendancePage />} />
           <Route path="/notes" element={<NotesPage />} />
           <Route path="/warroom" element={<WarRoomPage />} />

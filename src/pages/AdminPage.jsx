@@ -875,7 +875,7 @@ export default function AdminPage() {
     if (active) {
       if (!confirm(`Restore access for ${label}? They'll be able to log in again. Campaign assignments were cleared when they were removed and need to be set again.`)) return
     } else {
-      if (!confirm(`Remove ${label}?\n\nThey'll be signed out and blocked from logging in, and will disappear from Live, Attendance, Leaderboard and campaign assignment. Any leads they've claimed go back into the pool.\n\nTheir call history and commissions are kept, and you can restore them later.`)) return
+      if (!confirm(`Remove ${label}?\n\nThey'll be signed out and blocked from logging in, and will disappear from Live, Attendance and campaign assignment. Any leads they've claimed go back into the pool.\n\nTheir call history and commissions are kept, and you can restore them later.`)) return
     }
 
     setBusyUser(p.id)
