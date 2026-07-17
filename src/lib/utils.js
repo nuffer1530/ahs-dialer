@@ -94,6 +94,19 @@ export const exportToCSV = (rows, headers, filename) => {
   a.click()
 }
 
+// Tell TaskRouter whether this rep should receive queued calls. The inbound
+// queue only routes to workers whose activity is Available, so a rep who looks
+// Available in Andi but wasn't synced will silently never get a call.
+// Fire-and-forget: their Andi status must still update if Twilio is down.
+export const syncWorkerActivity = (profileId, status) => {
+  if (!profileId) return
+  fetch('/api/twilio/worker-activity', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ profileId, status }),
+  }).catch(e => console.warn('worker activity sync failed:', e))
+}
+
 export const getTimeframeBounds = (tf) => {
   const now = new Date()
   const s0 = d => new Date(d.getFullYear(), d.getMonth(), d.getDate())

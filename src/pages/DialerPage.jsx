@@ -4,7 +4,7 @@ import { useAuth } from '../lib/AuthContext'
 import { sb } from '../lib/supabase'
 import Badge from '../components/Badge'
 import Modal from '../components/Modal'
-import { isDone, isCallbackDueToday, getDupSet, normPhone, getInitials, fmtDate, fmtShort } from '../lib/utils'
+import { isDone, isCallbackDueToday, getDupSet, normPhone, getInitials, fmtDate, fmtShort, syncWorkerActivity } from '../lib/utils'
 import { OUTCOMES, MAX_ATTEMPTS, DONE_OUTCOMES } from '../lib/constants'
 
 const PAGE_SIZE = 50
@@ -449,6 +449,7 @@ export default function DialerPage() {
   const updateAgentStatus = async (status) => {
     if (!profile?.id) return
     await sb.from('profiles').update({ status, status_since: new Date().toISOString() }).eq('id', profile.id)
+    syncWorkerActivity(profile.id, status)
   }
 
   const acceptIncomingCall = async () => {

@@ -3,6 +3,7 @@ import { Routes, Route, NavLink, useNavigate, useLocation } from 'react-router-d
 import { useAuth } from '../lib/AuthContext'
 import { useData } from '../lib/DataContext'
 import { sb } from '../lib/supabase'
+import { syncWorkerActivity } from '../lib/utils'
 import DialerPage from './DialerPage'
 import CampaignsPage from './CampaignsPage'
 import DashboardPage from './DashboardPage'
@@ -325,6 +326,7 @@ export default function DialerLayout() {
       currentEventRef.current = null
     }
     await sb.from('profiles').update({ status: newStatus, status_since: now }).eq('id', profile.id)
+    syncWorkerActivity(profile.id, newStatus)
     const { data: evt } = await sb.from('status_events').insert({
       profile_id: profile.id, status: newStatus, started_at: now
     }).select().single()
@@ -334,6 +336,7 @@ export default function DialerLayout() {
   const signOut = async () => {
     const now = new Date().toISOString()
     await sb.from('profiles').update({ status: 'Offline', status_since: now }).eq('id', profile.id)
+    syncWorkerActivity(profile.id, 'Offline')
     if (currentEventRef.current) {
       await sb.from('status_events').update({ ended_at: now }).eq('id', currentEventRef.current)
       currentEventRef.current = null

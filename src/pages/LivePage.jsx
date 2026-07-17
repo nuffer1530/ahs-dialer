@@ -3,7 +3,7 @@ import { useData } from '../lib/DataContext'
 import { useAuth } from '../lib/AuthContext'
 import { sb } from '../lib/supabase'
 import Badge from '../components/Badge'
-import { isDone, fmtShort } from '../lib/utils'
+import { isDone, fmtShort, syncWorkerActivity } from '../lib/utils'
 
 const DEFAULT_STATUS_OPTIONS = [
   { value: 'Available', color: '#22c55e' },
@@ -22,11 +22,42 @@ function timeSince(isoString) {
   return `${Math.floor(secs/3600)}h ${Math.floor((secs%3600)/60)}m`
 }
 
+// Service level: answered within this many seconds of entering the queue.
+const SERVICE_LEVEL_SECONDS = 30
+
+function fmtWait(secs) {
+  if (secs == null) return '—'
+  if (secs < 60) return `${secs}s`
+  return `${Math.floor(secs / 60)}m ${secs % 60}s`
+}
+
+// One KPI tile. `tone` drives the accent so a queue building up reads red at a
+// glance from across the room.
+function Kpi({ label, value, sub, tone = 'default', big = false }) {
+  const tones = {
+    default: 'var(--text-primary)',
+    good:    '#16A34A',
+    warn:    '#C87800',
+    bad:     '#DC2626',
+    accent:  'var(--accent)',
+  }
+  return (
+    <div style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius-lg)',
+      padding:'14px 16px', display:'flex', flexDirection:'column', gap:2, minWidth:0 }}>
+      <div style={{ fontSize:10, fontWeight:700, letterSpacing:.6, textTransform:'uppercase', color:'var(--text-muted)' }}>{label}</div>
+      <div style={{ fontSize: big ? 34 : 26, fontWeight:700, lineHeight:1.1, color: tones[tone], fontVariantNumeric:'tabular-nums' }}>{value}</div>
+      {sub && <div style={{ fontSize:11, color:'var(--text-muted)' }}>{sub}</div>}
+    </div>
+  )
+}
+
 export default function LivePage() {
   const { contacts } = useData()
   const { isAdmin } = useAuth()
   const [logs, setLogs] = useState([])
   const [profiles, setProfiles] = useState([])
+  const [tasks, setTasks] = useState([])        // today's inbound queue tasks
+  const [liveCalls, setLiveCalls] = useState([]) // calls in progress right now
   const [loading, setLoading] = useState(true)
   const [tick, setTick] = useState(0)
   const [overrideTarget, setOverrideTarget] = useState(null)
@@ -49,24 +80,40 @@ export default function LivePage() {
   const adminSetStatus = async (profileId, val) => {
     setOverrideTarget(null)
     await sb.from('profiles').update({ status: val, status_since: new Date().toISOString() }).eq('id', profileId)
+    syncWorkerActivity(profileId, val)
     setProfiles(prev => prev.map(p => p.id === profileId ? { ...p, status: val, status_since: new Date().toISOString() } : p))
   }
 
-  // Tick every 30s to update "time in status"
+  // 1s tick: the queue timers ("longest wait") are the whole point of a
+  // wallboard and must actually count. Cheap — it only re-renders this page.
   useEffect(() => {
-    const t = setInterval(() => setTick(v => v + 1), 30000)
+    const t = setInterval(() => setTick(v => v + 1), 1000)
     return () => clearInterval(t)
   }, [])
+
+  const midnight = () => { const d = new Date(); d.setHours(0,0,0,0); return d.toISOString() }
 
   useEffect(() => {
     const since = new Date(Date.now() - 24*60*60*1000).toISOString()
     Promise.all([
       sb.from('call_logs').select('*').gte('created_at', since).order('created_at', { ascending: false }),
       sb.from('profiles').select('*').eq('active', true).order('name'),
-    ]).then(([{ data: logsData }, { data: profilesData }]) => {
+      // Today's queue activity drives every KPI.
+      sb.from('call_tasks').select('*').gte('queued_at', midnight()).order('queued_at', { ascending: false }),
+      sb.from('active_calls').select('*').is('ended_at', null).order('started_at', { ascending: false }),
+    ]).then(([{ data: logsData }, { data: profilesData }, { data: taskData }, { data: callData }]) => {
       setLogs(logsData || [])
       setProfiles(profilesData || [])
+      setTasks(taskData || [])
+      setLiveCalls(callData || [])
       setLoading(false)
+    })
+
+    const upsert = (setter, key) => (payload) => setter(prev => {
+      if (payload.eventType === 'DELETE') return prev.filter(x => x[key] !== payload.old[key])
+      const i = prev.findIndex(x => x[key] === payload.new[key])
+      if (i === -1) return [payload.new, ...prev]
+      const next = [...prev]; next[i] = { ...next[i], ...payload.new }; return next
     })
 
     const logChannel = sb.channel('live-logs')
@@ -79,7 +126,19 @@ export default function LivePage() {
         setProfiles(prev => prev.map(p => p.id === payload.new.id ? { ...p, ...payload.new } : p))
       }).subscribe()
 
-    return () => { sb.removeChannel(logChannel); sb.removeChannel(profileChannel) }
+    // The wallboard's live pulse: every queue state change lands here.
+    const taskChannel = sb.channel('live-tasks')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'call_tasks' },
+        upsert(setTasks, 'task_sid')).subscribe()
+
+    const callChannel = sb.channel('live-calls')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'active_calls' },
+        upsert(setLiveCalls, 'call_sid')).subscribe()
+
+    return () => {
+      sb.removeChannel(logChannel); sb.removeChannel(profileChannel)
+      sb.removeChannel(taskChannel); sb.removeChannel(callChannel)
+    }
   }, [])
 
   const now = new Date()
@@ -109,6 +168,41 @@ export default function LivePage() {
     return found ? found.color : '#6b7280'
   }
 
+  // ── Telephony KPIs. All of today, from call_tasks; `tick` keeps the live
+  // timers honest without re-querying.
+  const queued = tasks.filter(t => t.state === 'queued' && !t.ended_at)
+  const waitOf = (t) => Math.max(0, Math.round((Date.now() - new Date(t.queued_at).getTime()) / 1000))
+  const longestWait = queued.length ? Math.max(...queued.map(waitOf)) : 0
+
+  // Live calls come from two places and neither alone is the truth: inbound
+  // lives in call_tasks (TaskRouter dequeues the caller, so no active_calls row
+  // is written), outbound lives in active_calls via the TwiML app.
+  const liveInbound = tasks.filter(t => t.state === 'answered' && !t.ended_at)
+  const liveOutbound = liveCalls.filter(c =>
+    c.direction === 'outbound' && !c.ended_at && ['in-progress', 'answered', 'initiated', 'ringing'].includes(c.status))
+  const onCall = [...liveInbound, ...liveOutbound]
+  const agentsAvailable = profiles.filter(p => p.status === 'Available').length
+
+  // Denominator excludes calls still waiting and sub-grace misdials ('missed'),
+  // so a caller who hung up in 2 seconds neither counts as handled nor against you.
+  const settled = tasks.filter(t => t.state === 'answered' || t.state === 'abandoned')
+  const answered = settled.filter(t => t.state === 'answered')
+  const abandoned = settled.filter(t => t.state === 'abandoned')
+  const abandonRate = settled.length ? (abandoned.length / settled.length) * 100 : 0
+
+  // Service level: of everything that reached a conclusion, what share was
+  // answered inside the target. Abandons count against it — that's the point.
+  const withinSL = answered.filter(t => (t.wait_seconds ?? 9999) <= SERVICE_LEVEL_SECONDS)
+  const serviceLevel = settled.length ? (withinSL.length / settled.length) * 100 : null
+
+  const avgWait = answered.length
+    ? Math.round(answered.reduce((s, t) => s + (t.wait_seconds || 0), 0) / answered.length)
+    : null
+
+  const queueTone = queued.length === 0 ? 'good' : longestWait > 60 ? 'bad' : 'warn'
+  const slTone = serviceLevel == null ? 'default' : serviceLevel >= 80 ? 'good' : serviceLevel >= 60 ? 'warn' : 'bad'
+  const abTone = !settled.length ? 'default' : abandonRate <= 5 ? 'good' : abandonRate <= 10 ? 'warn' : 'bad'
+
   return (
     <div style={{ flex:1, overflowY:'auto', padding:24, display:'flex', flexDirection:'column', gap:20 }}>
 
@@ -136,6 +230,50 @@ export default function LivePage() {
             </div>
             <button onClick={() => setOverrideTarget(null)} className="btn sm" style={{ marginTop:16, width:'100%' }}>Cancel</button>
           </div>
+        </div>
+      )}
+
+      {/* ── Telephony KPIs — always first, this is what a floor lead scans ── */}
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(150px, 1fr))', gap:12 }}>
+        <Kpi label="In queue" value={queued.length} tone={queueTone} big
+          sub={queued.length ? `longest ${fmtWait(longestWait)}` : 'nobody waiting'} />
+        <Kpi label="Live calls" value={onCall.length} tone={onCall.length ? 'accent' : 'default'} big
+          sub={`${liveInbound.length} in · ${liveOutbound.length} out`} />
+        <Kpi label="Agents available" value={agentsAvailable} big
+          tone={agentsAvailable === 0 ? 'bad' : 'good'}
+          sub={`of ${profiles.length} on the floor`} />
+        <Kpi label={`Service level (${SERVICE_LEVEL_SECONDS}s)`}
+          value={serviceLevel == null ? '—' : `${serviceLevel.toFixed(0)}%`} tone={slTone}
+          sub={settled.length ? `${withinSL.length}/${settled.length} today` : 'no calls yet'} />
+        <Kpi label="Abandon rate" value={settled.length ? `${abandonRate.toFixed(0)}%` : '—'} tone={abTone}
+          sub={settled.length ? `${abandoned.length} of ${settled.length} today` : 'no calls yet'} />
+        <Kpi label="Avg wait" value={avgWait == null ? '—' : fmtWait(avgWait)}
+          sub={answered.length ? `${answered.length} answered today` : 'no calls yet'} />
+      </div>
+
+      {/* Who's actually waiting, oldest first — the queue itself */}
+      {queued.length > 0 && (
+        <div className="card">
+          <div className="card-header">
+            <div className="card-title">Waiting now</div>
+            <span style={{ fontSize:11, color:'var(--text-muted)' }}>{queued.length} caller{queued.length === 1 ? '' : 's'}</span>
+          </div>
+          <table className="data-table">
+            <thead><tr><th>Caller</th><th>Number</th><th>Waiting</th></tr></thead>
+            <tbody>
+              {[...queued].sort((a, b) => new Date(a.queued_at) - new Date(b.queued_at)).map(t => {
+                const w = waitOf(t)
+                return (
+                  <tr key={t.task_sid}>
+                    <td style={{ padding:'10px 12px', fontWeight:600 }}>{t.contact_name || 'Unknown caller'}</td>
+                    <td style={{ padding:'10px 12px', fontSize:12, color:'var(--text-secondary)' }}>{t.from_number || '—'}</td>
+                    <td style={{ padding:'10px 12px', fontWeight:700, fontVariantNumeric:'tabular-nums',
+                      color: w > 60 ? '#DC2626' : w > 30 ? '#C87800' : 'var(--text-primary)' }}>{fmtWait(w)}</td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
         </div>
       )}
 

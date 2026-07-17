@@ -140,3 +140,51 @@ create table if not exists andi_membership_sales (
 );
 create index if not exists andi_membership_sales_customer_idx
   on andi_membership_sales (st_customer_id, created_at desc);
+
+-- ─────────────────────────────────────────────
+-- TELEPHONY: inbound queue (Twilio TaskRouter)
+-- ─────────────────────────────────────────────
+-- Inbound used to be a ring-all <Dial> blast with no queue, and nothing
+-- recorded when a call was answered — so queue depth, wait time, abandon rate
+-- and service level were all uncomputable. Callers now enter a TaskRouter
+-- queue and every state change lands here via the events webhook.
+--
+-- One row per inbound call. The Live wallboard reads only this table.
+create table if not exists call_tasks (
+  task_sid text primary key,
+  call_sid text,
+  from_number text,
+  contact_id uuid,
+  contact_name text,
+  -- queued -> assigned -> answered | abandoned | missed
+  state text not null default 'queued',
+  queued_at timestamptz not null default now(),
+  answered_at timestamptz,          -- reservation.accepted: the caller reached a human
+  ended_at timestamptz,
+  wait_seconds int,                 -- queued_at -> answered_at (or -> hangup if abandoned)
+  talk_seconds int,
+  agent_profile_id uuid references profiles(id),
+  agent_name text,
+  -- Abandoned = caller hung up before an agent answered, EXCLUDING hangups
+  -- inside ABANDON_GRACE_SECONDS (misdials). Stored, not derived, so changing
+  -- the cutoff later doesn't silently rewrite history.
+  abandoned boolean not null default false,
+  created_at timestamptz default now()
+);
+
+-- The wallboard queries "today" constantly; these two carry it.
+create index if not exists call_tasks_queued_at_idx on call_tasks (queued_at desc);
+create index if not exists call_tasks_live_idx on call_tasks (state) where ended_at is null;
+
+alter table call_tasks enable row level security;
+drop policy if exists "Signed-in users can read call_tasks" on call_tasks;
+create policy "Signed-in users can read call_tasks" on call_tasks
+  for select using (auth.role() = 'authenticated');
+
+-- Realtime for the wallboard. Wrapped: erroring if it's already a member would
+-- abort the rest of this file.
+do $$
+begin
+  alter publication supabase_realtime add table call_tasks;
+exception when duplicate_object then null;
+end $$;

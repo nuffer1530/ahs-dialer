@@ -27,6 +27,20 @@ const supabase = createClient(
 const twilioClient = twilio(accountSid, authToken)
 const VoiceResponse = twilio.twiml.VoiceResponse
 
+// ── TaskRouter (inbound queue). Provisioned once; SIDs live in Railway env.
+const TWILIO_WORKSPACE_SID = process.env.TWILIO_WORKSPACE_SID
+const TWILIO_WORKFLOW_SID  = process.env.TWILIO_WORKFLOW_SID
+const TWILIO_TASKQUEUE_SID = process.env.TWILIO_TASKQUEUE_SID
+
+// Default activity SIDs from the workspace. Overridable via env if the
+// workspace is ever rebuilt.
+const TWILIO_ACTIVITY_AVAILABLE = process.env.TWILIO_ACTIVITY_AVAILABLE || 'WA73533af658a7fc3d61ce68abc3198f1f'
+const TWILIO_ACTIVITY_OFFLINE   = process.env.TWILIO_ACTIVITY_OFFLINE   || 'WA8f3951f7b7549d73745f66b6aca848a2'
+
+// A caller who hangs up faster than this is a misdial, not an abandon. Stored
+// on the row when the task is canceled, so changing it never rewrites history.
+const ABANDON_GRACE_SECONDS = Number(process.env.ABANDON_GRACE_SECONDS ?? 10)
+
 // ─────────────────────────────────────────────
 // ── SERVICETITAN API LAYER
 // ─────────────────────────────────────────────
@@ -1255,6 +1269,38 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', phone: twilioPhone })
 })
 
+// ── Rep status → TaskRouter Worker Activity.
+//
+// The queue only routes to workers whose activity is Available. If this doesn't
+// fire, a rep can show "Available" in Andi and still never get a call — so it's
+// called from the client whenever status changes, and is safe to call often.
+app.post('/api/twilio/worker-activity', async (req, res) => {
+  try {
+    if (!TWILIO_WORKSPACE_SID) return res.json({ ok: false, skipped: 'no workspace configured' })
+    const { profileId, status } = req.body
+    if (!profileId) return res.status(400).json({ error: 'profileId required' })
+
+    const workers = await twilioClient.taskrouter.v1.workspaces(TWILIO_WORKSPACE_SID).workers.list({ limit: 100 })
+    const worker = workers.find(w => {
+      try { return JSON.parse(w.attributes || '{}').profile_id === profileId } catch { return false }
+    })
+    if (!worker) return res.json({ ok: false, skipped: 'no worker for this profile' })
+
+    // Only 'Available' takes calls. Every other status (Break, Lunch, On Call,
+    // Wrap Up, Offline…) means don't route to them.
+    const target = status === 'Available' ? TWILIO_ACTIVITY_AVAILABLE : TWILIO_ACTIVITY_OFFLINE
+    if (worker.activitySid === target) return res.json({ ok: true, unchanged: true })
+
+    await twilioClient.taskrouter.v1.workspaces(TWILIO_WORKSPACE_SID)
+      .workers(worker.sid).update({ activitySid: target })
+    res.json({ ok: true, activitySid: target })
+  } catch (err) {
+    // Never block the UI on this — the rep's Andi status still updates.
+    console.warn('worker-activity sync failed:', err.message)
+    res.status(500).json({ error: err.message })
+  }
+})
+
 // ── Generate Twilio Access Token for browser SDK
 app.post('/api/twilio/token', async (req, res) => {
   try {
@@ -1331,6 +1377,28 @@ app.post('/api/twilio/call', async (req, res) => {
 
 // ── TwiML for outbound (recorded)
 app.post('/api/twilio/twiml/outbound', (req, res) => {
+  const p = { ...req.query, ...req.body }
+  const to = p.to || p.To
+
+  // Record the outbound leg. The dialer places calls through the Voice SDK →
+  // TwiML app → here, NOT through /api/twilio/call — so without this, outbound
+  // calls never reached active_calls at all and the Live board only ever saw
+  // inbound. Fire-and-forget: never delay the TwiML response for a log write.
+  if (p.CallSid) {
+    supabase.from('active_calls').upsert({
+      call_sid: p.CallSid,
+      direction: 'outbound',
+      rep_identity: p.identity || null,
+      contact_id: p.contactId || null,
+      contact_name: p.contactName || null,
+      to_number: to,
+      from_number: twilioPhone,
+      status: 'initiated',
+      started_at: new Date().toISOString(),
+    }, { onConflict: 'call_sid' })
+      .then(({ error }) => { if (error) console.warn('outbound active_calls:', error.message) })
+  }
+
   const twiml = new VoiceResponse()
   const dial = twiml.dial({
     callerId: twilioPhone,
@@ -1339,7 +1407,13 @@ app.post('/api/twilio/twiml/outbound', (req, res) => {
     recordingStatusCallback: `${appUrl}/api/twilio/recording`,
     recordingStatusCallbackEvent: 'completed',
   })
-  dial.number(req.query.to || req.body.To)
+  // statusCallback closes the row out — otherwise it sticks at 'initiated'
+  // forever, exactly the stale-row bug inbound had.
+  dial.number({
+    statusCallback: `${appUrl}/api/twilio/status`,
+    statusCallbackEvent: 'initiated ringing answered completed',
+    statusCallbackMethod: 'POST',
+  }, to)
   res.type('text/xml')
   res.send(twiml.toString())
 })
@@ -1779,64 +1853,173 @@ app.get('/api/st/intelligence/:id', async (req, res) => {
   }
 })
 
-// ── Inbound call webhook
+// ── Inbound call webhook: put the caller in the TaskRouter queue.
+//
+// This used to be a ring-all <Dial> to every Available rep. That meant there was
+// no queue to measure: no wait time, no answer timestamp, and a caller who hung
+// up mid-ring left a row stuck at 'ringing' forever. Callers now enter a real
+// queue, and /taskrouter/events records every state change into call_tasks.
+//
+// Agents still answer through the Voice SDK exactly as before — the assignment
+// callback below dequeues the task to client:<identity>.
 app.post('/api/twilio/inbound', async (req, res) => {
-  const { From, CallSid, To } = req.body
+  const { From, CallSid } = req.body
   console.log(`Inbound call from ${From}, SID: ${CallSid}`)
-  const normalizedPhone = From.replace(/\D/g, '').slice(-10)
+  const normalizedPhone = (From || '').replace(/\D/g, '').slice(-10)
 
-  // Look up contact by phone
-  const { data: contact } = await supabase
-    .from('contacts')
-    .select('*')
-    .ilike('phone', `%${normalizedPhone}%`)
-    .limit(1)
-    .single()
-
-  // Log the call
-  await supabase.from('active_calls').insert({
-    call_sid: CallSid,
-    direction: 'inbound',
-    from_number: From,
-    to_number: To,
-    contact_id: contact?.id || null,
-    contact_name: contact?.name || null,
-    status: 'ringing',
-    started_at: new Date().toISOString(),
-  })
-
-  // Only ring reps who are set to "Available"
-  const { data: inboundReps } = await supabase
-    .from('profiles')
-    .select('name, email, status')
-    .eq('status', 'Available')
-    .not('name', 'is', null)
+  let contact = null
+  if (normalizedPhone) {
+    const { data } = await supabase.from('contacts').select('id, name')
+      .ilike('phone', `%${normalizedPhone}%`).limit(1).maybeSingle()
+    contact = data
+  }
 
   const twiml = new VoiceResponse()
 
-  if (!inboundReps || inboundReps.length === 0) {
-    // Nobody is taking inbound calls
-    twiml.say({ voice: 'alice' }, 'Thank you for calling Awesome Home Services. All of our representatives are currently unavailable. Please leave a message after the tone and we will return your call shortly.')
+  // No workflow configured — fall back to voicemail rather than dropping the
+  // caller into a queue that can never route them.
+  if (!TWILIO_WORKFLOW_SID) {
+    console.error('TWILIO_WORKFLOW_SID not set — inbound call cannot be queued')
+    twiml.say({ voice: 'alice' }, 'Thank you for calling Awesome Home Services. Please leave a message after the tone.')
     twiml.record({ maxLength: 120, action: `${appUrl}/api/twilio/inbound/complete`, transcribe: false })
     res.type('text/xml')
     return res.send(twiml.toString())
   }
 
   twiml.say({ voice: 'alice' }, 'Thank you for calling Awesome Home Services. This call may be recorded for quality purposes. Please hold while we connect you.')
-  const dial = twiml.dial({
-    timeout: 30,
-    action: `${appUrl}/api/twilio/inbound/complete`,
-    record: 'record-from-answer-dual',
-    recordingStatusCallback: `${appUrl}/api/twilio/recording`,
-    recordingStatusCallbackEvent: 'completed',
+  const enqueue = twiml.enqueue({
+    workflowSid: TWILIO_WORKFLOW_SID,
+    waitUrl: `${appUrl}/api/twilio/queue/wait`,
+    waitUrlMethod: 'POST',
   })
-  inboundReps.forEach(rep => {
-    const identity = (rep.name || rep.email || '').replace(/[^a-zA-Z0-9_]/g, '_')
-    if (identity) dial.client(identity)
-  })
+  // Attributes ride along to the assignment callback and the events webhook, so
+  // we know who's calling without a second lookup.
+  enqueue.task(JSON.stringify({
+    call_sid: CallSid,
+    from_number: From,
+    contact_id: contact?.id || null,
+    contact_name: contact?.name || null,
+  }))
 
   res.type('text/xml')
   res.send(twiml.toString())
+})
+
+// Hold music while queued. Twilio re-requests this as it loops.
+app.post('/api/twilio/queue/wait', (req, res) => {
+  const twiml = new VoiceResponse()
+  twiml.play({ loop: 0 }, 'http://com.twilio.music.classical.s3.amazonaws.com/BusyStrings.mp3')
+  res.type('text/xml')
+  res.send(twiml.toString())
+})
+
+// ── TaskRouter assignment: send the queued caller to the reserved agent.
+//
+// The dequeue instruction dials the worker's contact_uri (client:<identity>),
+// which is the same Voice SDK identity the browser already registers — so reps
+// answer exactly as they do today and no worker SDK is needed in the browser.
+app.post('/api/twilio/taskrouter/assignment', async (req, res) => {
+  try {
+    const workerAttrs = JSON.parse(req.body.WorkerAttributes || '{}')
+    const contactUri = workerAttrs.contact_uri
+    if (!contactUri) {
+      console.error('TaskRouter assignment: worker has no contact_uri —', req.body.WorkerSid)
+      return res.json({ instruction: 'reject' })
+    }
+    res.json({
+      instruction: 'dequeue',
+      to: contactUri,
+      from: twilioPhone,
+      post_work_activity_sid: TWILIO_ACTIVITY_AVAILABLE || undefined,
+      record: 'record-from-answer-dual',
+      recording_status_callback: `${appUrl}/api/twilio/recording`,
+      recording_status_callback_event: 'completed',
+    })
+  } catch (err) {
+    console.error('TaskRouter assignment error:', err.message)
+    res.json({ instruction: 'reject' })
+  }
+})
+
+// ── TaskRouter events: the only place queue metrics come from.
+//
+// task.created        -> caller entered the queue        (queued_at)
+// reservation.accepted-> an agent picked up              (answered_at, wait_seconds)
+// task.canceled       -> caller hung up while waiting    (abandoned, unless inside the grace window)
+// task.completed      -> call finished                   (ended_at, talk_seconds)
+app.post('/api/twilio/taskrouter/events', async (req, res) => {
+  // Always 200: Twilio retries on failure, and a retry storm helps nobody.
+  res.sendStatus(200)
+  try {
+    const type = req.body.EventType
+    const taskSid = req.body.TaskSid
+    if (!taskSid || !type) return
+
+    let attrs = {}
+    try { attrs = JSON.parse(req.body.TaskAttributes || '{}') } catch {}
+    const now = new Date().toISOString()
+
+    if (type === 'task.created') {
+      await supabase.from('call_tasks').upsert({
+        task_sid: taskSid,
+        call_sid: attrs.call_sid || null,
+        from_number: attrs.from_number || null,
+        contact_id: attrs.contact_id || null,
+        contact_name: attrs.contact_name || null,
+        state: 'queued',
+        queued_at: now,
+      }, { onConflict: 'task_sid' })
+      return
+    }
+
+    if (type === 'reservation.accepted') {
+      let wattrs = {}
+      try { wattrs = JSON.parse(req.body.WorkerAttributes || '{}') } catch {}
+      const { data: task } = await supabase.from('call_tasks')
+        .select('queued_at').eq('task_sid', taskSid).maybeSingle()
+      const wait = task?.queued_at
+        ? Math.max(0, Math.round((Date.now() - new Date(task.queued_at).getTime()) / 1000))
+        : null
+      await supabase.from('call_tasks').update({
+        state: 'answered',
+        answered_at: now,
+        wait_seconds: wait,
+        agent_profile_id: wattrs.profile_id || null,
+        agent_name: wattrs.name || req.body.WorkerName || null,
+      }).eq('task_sid', taskSid)
+      return
+    }
+
+    if (type === 'task.canceled') {
+      // Caller hung up while waiting. Only an abandon if they waited longer than
+      // the grace window — anything shorter is a misdial, not a service failure.
+      const { data: task } = await supabase.from('call_tasks')
+        .select('queued_at, answered_at').eq('task_sid', taskSid).maybeSingle()
+      const waited = task?.queued_at
+        ? Math.max(0, Math.round((Date.now() - new Date(task.queued_at).getTime()) / 1000))
+        : 0
+      const isAbandon = !task?.answered_at && waited >= ABANDON_GRACE_SECONDS
+      await supabase.from('call_tasks').update({
+        state: task?.answered_at ? 'answered' : (isAbandon ? 'abandoned' : 'missed'),
+        abandoned: isAbandon,
+        wait_seconds: waited,
+        ended_at: now,
+      }).eq('task_sid', taskSid)
+      return
+    }
+
+    if (type === 'task.completed' || type === 'task.deleted' || type === 'task.wrapup') {
+      const { data: task } = await supabase.from('call_tasks')
+        .select('answered_at, ended_at').eq('task_sid', taskSid).maybeSingle()
+      if (task?.ended_at) return   // already closed by task.canceled
+      const talk = task?.answered_at
+        ? Math.max(0, Math.round((Date.now() - new Date(task.answered_at).getTime()) / 1000))
+        : null
+      await supabase.from('call_tasks').update({ ended_at: now, talk_seconds: talk }).eq('task_sid', taskSid)
+    }
+  } catch (err) {
+    console.error('TaskRouter events error:', err.message)
+  }
 })
 
 // ── Inbound complete
