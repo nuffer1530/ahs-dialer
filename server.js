@@ -1286,9 +1286,19 @@ app.post('/api/twilio/worker-activity', async (req, res) => {
     })
     if (!worker) return res.json({ ok: false, skipped: 'no worker for this profile' })
 
-    // Only 'Available' takes calls. Every other status (Break, Lunch, On Call,
-    // Wrap Up, Offline…) means don't route to them.
-    const target = status === 'Available' ? TWILIO_ACTIVITY_AVAILABLE : TWILIO_ACTIVITY_OFFLINE
+    // Read the skill state from the DB rather than trusting only the passed
+    // status, so this is correct whether it's poked by a status change or a
+    // queue-availability toggle.
+    const { data: prof } = await supabase
+      .from('profiles').select('status, inbound_skill, inbound_available').eq('id', profileId).maybeSingle()
+    const effStatus = status || prof?.status
+
+    // A rep takes inbound only while their status is Available AND — if they've
+    // been granted the inbound skill — they've toggled that queue on. Reps with
+    // no inbound skill granted keep the pre-skills behavior (Available → inbound)
+    // so nothing changes until the admin starts assigning skills.
+    const takesInbound = effStatus === 'Available' && (prof?.inbound_skill ? prof.inbound_available : true)
+    const target = takesInbound ? TWILIO_ACTIVITY_AVAILABLE : TWILIO_ACTIVITY_OFFLINE
     if (worker.activitySid === target) return res.json({ ok: true, unchanged: true })
 
     await twilioClient.taskrouter.v1.workspaces(TWILIO_WORKSPACE_SID)
