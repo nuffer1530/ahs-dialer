@@ -626,23 +626,30 @@ export default function DialerPage() {
   }
   // Explicit selection (queue click, search, inbound pop) opens/focuses a tab.
   const selectContact = (id) => openTab(id)
+  // Serve a lead and, when it was routed to the rep by skills, claim it to them
+  // automatically — an auto-served outbound lead is theirs, no Claim click.
+  const serveLead = (contact, claim) => {
+    if (!contact) return false
+    navigateActiveTo(contact.id)
+    if (claim && !contact.claimed_by) claimContactById(contact.id)
+    return true
+  }
+
   const navNextPending = () => {
-    const next = skillsMode
-      ? nextSkillLead()
-      : filtered.find(x => !isDone(x) && x.status !== 'Max Attempts' && !x.claimed_by)
+    if (skillsMode) { serveLead(nextSkillLead(), true); return }
+    const next = filtered.find(x => !isDone(x) && x.status !== 'Max Attempts' && !x.claimed_by)
     if (next) navigateActiveTo(next.id)
   }
 
   // Auto-progressive: when a skills-routed rep is free and nothing's loaded,
-  // pull their next lead automatically. Inbound wins — never advance while an
-  // inbound call is ringing or in progress.
+  // pull their next lead automatically and claim it. Inbound wins — never
+  // advance while an inbound call is ringing or in progress.
   useEffect(() => {
     if (!skillsMode) return
     if (incomingCall || callStatus) return
     if (profile?.status !== 'Available') return
     if (selectedContact && !isDone(selectedContact)) return
-    const next = nextSkillLead()
-    if (next) navigateActiveTo(next.id)
+    serveLead(nextSkillLead(), true)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [skillsMode, incomingCall, callStatus, profile?.status, selectedContact, nextSkillLead])
 
@@ -707,7 +714,7 @@ export default function DialerPage() {
         const nextContact = skillsMode
           ? nextSkillLead()
           : filtered.slice(selectedIdx + 1).find(x => !isDone(x) && x.status !== 'Max Attempts')
-        if (nextContact) navigateActiveTo(nextContact.id)
+        if (nextContact) serveLead(nextContact, skillsMode)   // claim only under skills routing
         else { closeTab(selectedId) }
       }
     } finally { setSaving(false) }
