@@ -59,7 +59,9 @@ The flow: `/api/st/book` writes an `andi_bookings` row (`st_job_id → profile_i
 
 Every category pays on job completion, including the estimate ones — a completed free estimate pays out even if it sold nothing (confirmed with Brandyn, Jul 2026; earlier UI copy promised "on sold", which was never implemented). A category with no amount leaves the job **unsettled** rather than paying $0, so setting the amount later still pays out; a deliberate $0 settles without writing a row.
 
-**Attribution is local, deliberately.** `Job.soldById` is the *technician* who ran the call, not the CSR who booked it — `andi_bookings` is the source of truth. Memberships are the exception: they have no `andi_bookings` anchor, so the sync pages `GET /memberships?createdOnOrAfter=` from a `sync_state` watermark and attributes via `soldById → csr_st_users → profile`. Note `Membership.soldById` is a *user* id while `csr_st_users` is populated from `/settings/v2/employees` — whether those id spaces match is **unverified**.
+**Attribution is local, deliberately.** `Job.soldById` is the *technician* who ran the call, not the CSR who booked it — `andi_bookings` is the source of truth. Memberships are the exception: they have no `andi_bookings` anchor, so the sync pages `GET /memberships?createdOnOrAfter=` from a `sync_state` watermark and attributes via `soldById → csr_st_users → profile`.
+
+`Membership.soldById` is documented as a "user" id while `csr_st_users` is populated from `/settings/v2/employees`, which looks like a mismatch but isn't: **employees and technicians share one id space** and `soldById` points into it (verified Jul 2026 against live data — of 16 distinct sellers in the last 50 memberships, 12 were technicians, 4 were employees, none were in neither). Office staff really do sell memberships, which is what the CSR mapping is for.
 
 Idempotency lives in the database: unique partial indexes on `commissions.st_job_id` and `st_membership_id` mean a job can't be paid twice even if two Railway replicas sync at once. Every write is an upsert on those keys. `COMMISSION_SYNC_MINUTES` sets the interval (default 15, `0` disables).
 
