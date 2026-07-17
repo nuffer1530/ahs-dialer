@@ -58,7 +58,8 @@ export default function ScheduleAlerts() {
   const { profile } = useAuth()
   const [alerts, setAlerts] = useState([])
   const eventsRef = useRef([])
-  const firedRef = useRef(new Set())   // `${eventId}:${phase}` we've already handled
+  const firedRef = useRef(new Set())   // `${eventId}:${phase}:${time}` we've already handled
+  const checkRef = useRef(null)        // lets a realtime reload re-evaluate at once
 
   // Load today's schedule for this rep. A realtime subscription reloads the
   // instant an admin edits this rep's schedule or blocks; a slow interval is
@@ -92,6 +93,9 @@ export default function ScheduleAlerts() {
         }
       })
       eventsRef.current = evs.filter(e => e.at)
+      // Evaluate straight away so a just-changed break (possibly already inside
+      // the 15-min window) alerts now, not on the next 20s tick.
+      checkRef.current?.()
     }
 
     load()
@@ -112,10 +116,11 @@ export default function ScheduleAlerts() {
   useEffect(() => {
     if (!profile?.id) return
 
-    const fire = (ev, phase) => {
+    const fire = (ev, phase, minsLeft) => {
       const msg = phase === 'lead'
-        ? (ev.isEnd ? 'Your shift ends in 15 minutes' : `${ev.label} in 15 minutes`)
-        : (ev.isEnd ? 'Your shift has ended'          : `${ev.label} — starting now`)
+        ? (ev.isEnd ? `Your shift ends in ${minsLeft} minute${minsLeft === 1 ? '' : 's'}`
+                    : `${ev.label} in ${minsLeft} minute${minsLeft === 1 ? '' : 's'}`)
+        : (ev.isEnd ? 'Your shift has ended' : `${ev.label} — starting now`)
       const id = `${ev.id}:${phase}:${Date.now()}`
       setAlerts(prev => [...prev, { id, msg, phase }])
       playChime()
@@ -126,23 +131,39 @@ export default function ScheduleAlerts() {
       const now = Date.now()
       for (const ev of eventsRef.current) {
         const base = ev.at.getTime()
-        const points = [
-          { phase: 'lead', at: base - LEAD_MIN * 60_000 },
-          { phase: 'now',  at: base },
-        ]
-        for (const p of points) {
-          const key = `${ev.id}:${p.phase}`
-          if (firedRef.current.has(key)) continue
-          if (now >= p.at && now <= p.at + FIRE_WINDOW_MS) {
-            firedRef.current.add(key)
-            fire(ev, p.phase)
-          } else if (now > p.at + FIRE_WINDOW_MS) {
-            firedRef.current.add(key)   // window passed while app was closed — don't fire stale
+        // Keys carry the event TIME, so moving a break to a new time re-arms both
+        // alerts for the new time rather than staying suppressed from the old one.
+        const leadKey = `${ev.id}:lead:${base}`
+        const nowKey = `${ev.id}:now:${base}`
+
+        // Lead (heads-up): fire ONCE any time we're inside the 15-min window and
+        // the event hasn't started — including when a break is set/moved to a
+        // time that's already within 15 minutes. The minute count is the real
+        // time remaining, so a break set 8 min out reads "in 8 minutes".
+        if (!firedRef.current.has(leadKey)) {
+          if (now >= base) {
+            firedRef.current.add(leadKey)                 // already started; heads-up is moot
+          } else if (now >= base - LEAD_MIN * 60_000) {
+            firedRef.current.add(leadKey)
+            fire(ev, 'lead', Math.max(1, Math.round((base - now) / 60_000)))
+          }
+        }
+
+        // At start: fire when the event begins; skip if the app only opened well
+        // after it started (stale).
+        if (!firedRef.current.has(nowKey)) {
+          if (now >= base && now <= base + FIRE_WINDOW_MS) {
+            firedRef.current.add(nowKey)
+            fire(ev, 'now')
+          } else if (now > base + FIRE_WINDOW_MS) {
+            firedRef.current.add(nowKey)
           }
         }
       }
     }
 
+    // Expose check so a realtime reload can fire it immediately, not on the next tick.
+    checkRef.current = check
     check()
     const t = setInterval(check, 20_000)
     return () => clearInterval(t)
