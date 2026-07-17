@@ -188,3 +188,16 @@ begin
   alter publication supabase_realtime add table call_tasks;
 exception when duplicate_object then null;
 end $$;
+
+-- Realtime for schedules so the schedule-alert banner reflects an admin's edits
+-- instantly instead of on a 5-minute poll.
+do $$
+begin
+  alter publication supabase_realtime add table schedules;
+exception when duplicate_object then null;
+end $$;
+do $$
+begin
+  alter publication supabase_realtime add table schedule_blocks;
+exception when duplicate_object then null;
+end $$;

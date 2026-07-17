@@ -60,9 +60,10 @@ export default function ScheduleAlerts() {
   const eventsRef = useRef([])
   const firedRef = useRef(new Set())   // `${eventId}:${phase}` we've already handled
 
-  // Load today's schedule for this rep, and refresh every 5 min so a mid-day
-  // schedule edit is picked up. firedRef is intentionally NOT reset on refresh,
-  // so an already-fired alert doesn't repeat.
+  // Load today's schedule for this rep. A realtime subscription reloads the
+  // instant an admin edits this rep's schedule or blocks; a slow interval is
+  // only a backstop if the socket drops. firedRef is intentionally NOT reset on
+  // reload, so an already-fired alert doesn't repeat.
   useEffect(() => {
     if (!profile?.id) return
     let stopped = false
@@ -94,8 +95,17 @@ export default function ScheduleAlerts() {
     }
 
     load()
+
+    // Instant updates: reload on any change to this rep's rows. The filter keeps
+    // it to their own schedule so one rep's edit doesn't wake every browser.
+    const channel = sb.channel(`sched-alerts-${profile.id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'schedules', filter: `profile_id=eq.${profile.id}` }, load)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'schedule_blocks', filter: `profile_id=eq.${profile.id}` }, load)
+      .subscribe()
+
+    // Backstop only — if realtime drops, still catch an edit within 5 min.
     const reload = setInterval(load, 5 * 60_000)
-    return () => { stopped = true; clearInterval(reload) }
+    return () => { stopped = true; clearInterval(reload); sb.removeChannel(channel) }
   }, [profile?.id])
 
   // Tick: fire the 15-min-ahead and at-start alerts as their moments pass.
