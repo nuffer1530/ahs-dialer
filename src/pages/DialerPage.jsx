@@ -496,6 +496,18 @@ export default function DialerPage() {
     if (data) setContacts(prev => prev.map(c => c.id === id ? data : c))
   }
 
+  // Claim a lead AND release any others this rep still holds — a CSR works one
+  // outbound lead at a time, so being auto-served the next one drops the last.
+  // Without this, auto-claim accumulates locked leads the rep isn't working.
+  const claimExclusive = async (id) => {
+    const now = new Date().toISOString()
+    setContacts(prev => prev.map(c =>
+      c.id === id ? { ...c, claimed_by: currentRep, claimed_at: now }
+      : (c.claimed_by === currentRep ? { ...c, claimed_by: null, claimed_at: null } : c)))
+    await sb.from('contacts').update({ claimed_by: currentRep, claimed_at: now }).eq('id', id)
+    await sb.from('contacts').update({ claimed_by: null, claimed_at: null }).eq('claimed_by', currentRep).neq('id', id)
+  }
+
 
   // ── ST global search (debounced)
   useEffect(() => {
@@ -631,7 +643,8 @@ export default function DialerPage() {
   const serveLead = (contact, claim) => {
     if (!contact) return false
     navigateActiveTo(contact.id)
-    if (claim && !contact.claimed_by) claimContactById(contact.id)
+    // Exclusive: claiming the served lead releases any the rep was still holding.
+    if (claim && contact.claimed_by !== currentRep) claimExclusive(contact.id)
     return true
   }
 
