@@ -138,6 +138,46 @@ export function PhoneProvider({ children }) {
     }
   }, [profile?.id, currentRep, stopCallTimer])
 
+  // Reconcile TaskRouter with reality, on a timer.
+  //
+  // Worker activity used to be driven only by status-change events, which is
+  // one missed fetch away from broken: a rep shows Available in Andi, their
+  // worker is still Offline, and TaskRouter silently never routes to them —
+  // the caller just waits. Workers are also provisioned Offline, so a rep who
+  // never touches the status pill would never receive a call at all.
+  //
+  // This reads the rep's real status and pushes it, so any drift self-heals
+  // within a minute regardless of what did or didn't fire.
+  useEffect(() => {
+    if (!profile?.id || !twilioReady) return
+    let stopped = false
+
+    const reconcile = async () => {
+      const { data } = await sb.from('profiles').select('status').eq('id', profile.id).maybeSingle()
+      if (stopped || !data) return
+      syncWorkerActivity(profile.id, data.status || 'Offline')
+    }
+    reconcile()                                   // immediately on register
+    const t = setInterval(reconcile, 60_000)      // and keep it honest
+
+    // A closed tab is an unreachable agent. Without this the worker stays
+    // Available in TaskRouter and the queue keeps handing callers to a browser
+    // that isn't there — they'd wait through a reservation timeout for nothing.
+    // sendBeacon because a normal fetch is killed on unload.
+    const goOffline = () => {
+      try {
+        navigator.sendBeacon?.('/api/twilio/worker-activity',
+          new Blob([JSON.stringify({ profileId: profile.id, status: 'Offline' })],
+            { type: 'application/json' }))
+      } catch {}
+    }
+    window.addEventListener('pagehide', goOffline)
+    return () => {
+      stopped = true; clearInterval(t)
+      window.removeEventListener('pagehide', goOffline)
+    }
+  }, [profile?.id, twilioReady])
+
   const makeCall = useCallback(async (number, meta = {}) => {
     if (!deviceRef.current) { alert('Phone not ready yet'); return }
     if (callRef.current || connectingRef.current) {
