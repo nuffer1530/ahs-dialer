@@ -88,6 +88,7 @@ export default function DashboardPage() {
   const [profiles, setProfiles] = useState([])
   const [loading, setLoading] = useState(true)
   const [exporting, setExporting] = useState(false)
+  const [hoveredTab, setHoveredTab] = useState(null)
 
   // One definition of the window, so every query, KPI and export sheet agree.
   const range = useMemo(() => {
@@ -163,35 +164,65 @@ export default function DashboardPage() {
   }
 
   return (
-    <div style={{ flex:1, overflowY:'auto', padding:24, display:'flex', flexDirection:'column', gap:16 }}>
+    <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden', minWidth:0 }}>
 
-      {/* Timeframe + exports */}
-      <div style={{ display:'flex', alignItems:'center', gap:6, flexWrap:'wrap' }}>
-        <span style={{ fontSize:10, fontWeight:700, letterSpacing:.5, color:'var(--text-muted)', marginRight:2 }}>TIMEFRAME:</span>
-        {TF_OPTIONS.map(o => (
-          <button key={o} className={`btn sm${!custom.on && tf === o ? ' primary' : ''}`}
-            onClick={() => { setTf(o); setCustom(c => ({ ...c, on:false })) }}>{TF_LABELS[o]}</button>
-        ))}
-        <button className={`btn sm${custom.on ? ' primary' : ''}`} onClick={() => setCustom(c => ({ ...c, on:!c.on }))}>Custom</button>
-        {custom.on && (
-          <>
-            <input type="date" value={custom.start} onChange={e => setCustom(c => ({ ...c, start:e.target.value }))}
-              style={{ padding:'4px 8px', border:'1px solid var(--border)', borderRadius:'var(--radius)', fontSize:12, background:'var(--surface)', color:'var(--text-primary)' }} />
-            <span style={{ fontSize:12, color:'var(--text-muted)' }}>→</span>
-            <input type="date" value={custom.end} onChange={e => setCustom(c => ({ ...c, end:e.target.value }))}
-              style={{ padding:'4px 8px', border:'1px solid var(--border)', borderRadius:'var(--radius)', fontSize:12, background:'var(--surface)', color:'var(--text-primary)' }} />
-          </>
-        )}
-        <div style={{ marginLeft:'auto', display:'flex', gap:6 }}>
-          <button className="btn sm success" onClick={doExport} disabled={exporting || loading}>
-            {exporting ? 'Building…' : '⬇ Export to Excel'}
-          </button>
-          <button className="btn sm" onClick={() => exportContacts('all')}>⬇ Contacts</button>
-          <button className="btn sm" onClick={() => exportContacts('booked')}>⬇ Booked</button>
-          <button className="btn sm" onClick={() => exportContacts('dnc')}>⬇ DNC</button>
+      {/* -- HEADER BAR (matches WFM / My Page) -- */}
+      <div style={{ background:'var(--surface)', borderBottom:'1px solid var(--border)', flexShrink:0 }}>
+        {/* Timeframe + exports row */}
+        <div style={{ display:'flex', alignItems:'center', gap:6, flexWrap:'wrap', padding:'14px 24px 0' }}>
+          <span style={{ fontSize:10, fontWeight:700, letterSpacing:.5, color:'var(--text-muted)', marginRight:2 }}>TIMEFRAME</span>
+          {TF_OPTIONS.map(o => (
+            <button key={o} className={`btn sm${!custom.on && tf === o ? ' primary' : ''}`}
+              onClick={() => { setTf(o); setCustom(c => ({ ...c, on:false })) }}>{TF_LABELS[o]}</button>
+          ))}
+          <button className={`btn sm${custom.on ? ' primary' : ''}`} onClick={() => setCustom(c => ({ ...c, on:!c.on }))}>Custom</button>
+          {custom.on && (
+            <>
+              <input type="date" value={custom.start} onChange={e => setCustom(c => ({ ...c, start:e.target.value }))}
+                style={{ padding:'4px 8px', border:'1px solid var(--border)', borderRadius:'var(--radius)', fontSize:12, background:'var(--surface-2)', color:'var(--text-primary)' }} />
+              <span style={{ fontSize:12, color:'var(--text-muted)' }}>→</span>
+              <input type="date" value={custom.end} onChange={e => setCustom(c => ({ ...c, end:e.target.value }))}
+                style={{ padding:'4px 8px', border:'1px solid var(--border)', borderRadius:'var(--radius)', fontSize:12, background:'var(--surface-2)', color:'var(--text-primary)' }} />
+            </>
+          )}
+          <div style={{ marginLeft:'auto', display:'flex', gap:6 }}>
+            <button className="btn sm success" onClick={doExport} disabled={exporting || loading}>
+              {exporting ? 'Building…' : '⬇ Export to Excel'}
+            </button>
+            <button className="btn sm" onClick={() => exportContacts('all')}>⬇ Contacts</button>
+            <button className="btn sm" onClick={() => exportContacts('booked')}>⬇ Booked</button>
+            <button className="btn sm" onClick={() => exportContacts('dnc')}>⬇ DNC</button>
+          </div>
+        </div>
+
+        {/* Tab bar — underline style, matching WFM / My Page */}
+        <div style={{ display:'flex', alignItems:'center', padding:'0 24px', marginTop:10 }}>
+          {TABS.map(t => {
+            const isActive = tab === t.id
+            const isHov = hoveredTab === t.id && !isActive
+            return (
+              <button key={t.id}
+                onClick={() => setTab(t.id)}
+                onMouseEnter={() => setHoveredTab(t.id)}
+                onMouseLeave={() => setHoveredTab(null)}
+                style={{
+                  padding:'10px 16px', fontSize:13, fontWeight: isActive ? 600 : 400,
+                  border:'none', cursor:'pointer',
+                  borderRadius:'var(--radius) var(--radius) 0 0',
+                  background: isHov ? 'var(--surface-2)' : 'transparent',
+                  color: isActive ? 'var(--accent)' : isHov ? 'var(--text-primary)' : 'var(--text-muted)',
+                  borderBottom: isActive ? '2px solid var(--accent)' : '2px solid transparent',
+                  transition:'color .1s, background .1s',
+                }}>
+                {t.label}
+              </button>
+            )
+          })}
         </div>
       </div>
 
+      {/* -- CONTENT -- */}
+      <div style={{ flex:1, overflow:'auto', padding:24, background:'var(--bg)', display:'flex', flexDirection:'column', gap:16 }}>
       {loading ? <div className="spinner lg" style={{ margin:'60px auto' }} /> : (
         <>
           {/* Headline KPIs — visible on every tab */}
@@ -212,12 +243,6 @@ export default function DashboardPage() {
               a low number here means missing history, not poor service.
             </div>
           )}
-
-          <div style={{ display:'flex', gap:6 }}>
-            {TABS.map(t => (
-              <button key={t.id} className={`btn sm${tab === t.id ? ' primary' : ''}`} onClick={() => setTab(t.id)}>{t.label}</button>
-            ))}
-          </div>
 
           {tab === 'inbound' && (
             <>
@@ -333,6 +358,7 @@ export default function DashboardPage() {
           )}
         </>
       )}
+      </div>
     </div>
   )
 }
