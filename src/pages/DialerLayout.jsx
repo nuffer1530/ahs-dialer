@@ -16,6 +16,7 @@ import AttendancePage from './AttendancePage'
 import RecordingsPage from './RecordingsPage'
 import MyPage from './MyPage'
 import WinCelebration from '../components/WinCelebration'
+import ScheduleAlerts from '../components/ScheduleAlerts'
 
 const DEFAULT_STATUS_OPTIONS = [
   { value: 'Inbound',   color: '#16a34a' },
@@ -668,6 +669,7 @@ function DialerLayoutInner() {
         </div>
         )}
         <GlobalIncomingCall />
+        <ScheduleAlerts />
         <Routes>
           <Route path="/" element={<DialerPage />} />
           <Route path="/live" element={<LivePage />} />
