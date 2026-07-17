@@ -4,6 +4,7 @@ import { useAuth } from '../lib/AuthContext'
 import { useData } from '../lib/DataContext'
 import { sb } from '../lib/supabase'
 import { syncWorkerActivity } from '../lib/utils'
+import { PhoneProvider, usePhone } from '../lib/PhoneContext'
 import DialerPage from './DialerPage'
 import CampaignsPage from './CampaignsPage'
 import DashboardPage from './DashboardPage'
@@ -165,7 +166,69 @@ const SETTINGS_ITEMS = [
   { to:'/settings', label:'Settings', icon:'⚙️' },
 ]
 
+// A ringing phone must interrupt you wherever you are. Previously the only
+// incoming-call UI was inside DialerPage, so a rep on any other screen had no
+// idea a customer was waiting.
+function GlobalIncomingCall() {
+  const { incomingCall, acceptIncoming, rejectIncoming } = usePhone()
+  const navigate = useNavigate()
+  const location = useLocation()
+  if (!incomingCall) return null
+
+  const st = incomingCall.stLookup
+  const known = incomingCall.contactName
+    || (st && st !== 'loading' && st !== 'none' && st.found ? st.name : null)
+
+  const answer = () => {
+    acceptIncoming()
+    // The dialer resolves the caller into a tab, so go there to take the call.
+    if (location.pathname !== '/') navigate('/')
+  }
+
+  return (
+    <div style={{
+      position:'fixed', top:16, left:'50%', transform:'translateX(-50%)', zIndex:2000,
+      background:'var(--surface)', border:'2px solid #16A34A', borderRadius:'var(--radius-lg)',
+      boxShadow:'0 12px 40px rgba(0,0,0,.28)', padding:'14px 18px',
+      display:'flex', alignItems:'center', gap:16, minWidth:420,
+      animation:'pulse-ring 1.4s ease-in-out infinite',
+    }}>
+      <style>{`@keyframes pulse-ring{0%,100%{box-shadow:0 12px 40px rgba(0,0,0,.28),0 0 0 0 rgba(22,163,74,.45)}50%{box-shadow:0 12px 40px rgba(0,0,0,.28),0 0 0 10px rgba(22,163,74,0)}}`}</style>
+      <div style={{ width:38, height:38, borderRadius:'50%', background:'#16A34A22', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+          <path d="M5.4 11.1C6.8 13.9 9.1 16.1 12 17.5l2.3-2.3c.3-.3.7-.4 1-.2 1.1.4 2.3.6 3.7.6.6 0 1 .4 1 1v3.6c0 .6-.4 1-1 1C9.6 21.2 2.8 14.4 2.8 6c0-.6.4-1 1-1H7.4c.6 0 1 .4 1 1 0 1.4.2 2.6.6 3.7.1.4 0 .7-.3 1L5.4 11.1z" fill="#16A34A"/>
+        </svg>
+      </div>
+      <div style={{ minWidth:0, flex:1 }}>
+        <div style={{ fontSize:10, fontWeight:700, letterSpacing:.5, textTransform:'uppercase', color:'#16A34A' }}>Incoming call</div>
+        <div style={{ fontSize:15, fontWeight:700, color:'var(--text-primary)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
+          {known || (st === 'loading' ? 'Looking up…' : 'Unknown caller')}
+        </div>
+        <div style={{ fontSize:12, color:'var(--text-muted)' }}>{incomingCall.from}</div>
+      </div>
+      <button onClick={rejectIncoming}
+        style={{ padding:'8px 14px', borderRadius:'var(--radius)', border:'1px solid var(--border)', background:'var(--surface-2)', color:'var(--text-secondary)', fontSize:13, fontWeight:600, cursor:'pointer' }}>
+        Decline
+      </button>
+      <button onClick={answer}
+        style={{ padding:'8px 18px', borderRadius:'var(--radius)', border:'none', background:'#16A34A', color:'#fff', fontSize:13, fontWeight:700, cursor:'pointer' }}>
+        Answer
+      </button>
+    </div>
+  )
+}
+
+// The phone must be registered on every route, not just the dialer, so the
+// provider wraps the whole shell and the layout consumes it.
 export default function DialerLayout() {
+  return (
+    <PhoneProvider>
+      <DialerLayoutInner />
+    </PhoneProvider>
+  )
+}
+
+function DialerLayoutInner() {
   const { profile, isAdmin } = useAuth()
   const { contacts, syncStatus, reload } = useData()
   const navigate = useNavigate()
@@ -617,6 +680,7 @@ export default function DialerLayout() {
 
         </div>
         )}
+        <GlobalIncomingCall />
         <Routes>
           <Route path="/" element={<DialerPage />} />
           <Route path="/live" element={<LivePage />} />

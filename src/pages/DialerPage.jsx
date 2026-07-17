@@ -5,6 +5,7 @@ import { sb } from '../lib/supabase'
 import Badge from '../components/Badge'
 import Modal from '../components/Modal'
 import { isDone, isCallbackDueToday, getDupSet, normPhone, getInitials, fmtDate, fmtShort, syncWorkerActivity } from '../lib/utils'
+import { usePhone } from '../lib/PhoneContext'
 import { OUTCOMES, MAX_ATTEMPTS, DONE_OUTCOMES } from '../lib/constants'
 
 const PAGE_SIZE = 50
@@ -219,15 +220,14 @@ export default function DialerPage() {
   const [stNoteSending, setStNoteSending] = useState(false)
   const [stNoteResult, setStNoteResult] = useState(null)
 
-  // Twilio
-  const deviceRef = useRef(null)
-  const [incomingCall, setIncomingCall] = useState(null) // { call, from, contactName }
-  const callRef = useRef(null)
-  const connectingRef = useRef(false)
-  const [twilioReady, setTwilioReady] = useState(false)
-  const [callStatus, setCallStatus] = useState(null)
-  const [callDuration, setCallDuration] = useState(0)
-  const callTimerRef = useRef(null)
+  // Twilio — the phone lives in PhoneContext (mounted in DialerLayout) so it
+  // survives navigation. It used to be created here, which meant leaving the
+  // dialer destroyed the Device and inbound calls could not be answered.
+  const {
+    twilioReady, incomingCall, callStatus, callDuration,
+    makeCall: phoneMakeCall, acceptIncoming, rejectIncoming, hangUp,
+    pendingInbound, setPendingInbound,
+  } = usePhone()
 
   // Load ST job types + business units + campaigns on mount
   useEffect(() => {
@@ -393,57 +393,7 @@ export default function DialerPage() {
       })
   }, [profile?.id])
 
-  // Init Twilio
-  useEffect(() => {
-    if (!currentRep || currentRep === 'Unknown') return
-    let device = null
-    const init = async () => {
-      try {
-        const { Device } = await import('@twilio/voice-sdk')
-        const res = await fetch('/api/twilio/token', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ identity: currentRep.replace(/[^a-zA-Z0-9_]/g, '_') })
-        })
-        const { token } = await res.json()
-        if (!token) return
-        device = new Device(token, { logLevel: 1, codecPreferences: ['opus', 'pcmu'] })
-        device.on('registered', () => { setTwilioReady(true) })
-        device.on('error', (err) => console.error('Twilio error:', err))
-        device.on('incoming', async (call) => {
-          const from = call.parameters?.From || call.parameters?.from || 'Unknown'
-          const normalizedPhone = from.replace(/\D/g, '').slice(-10)
-          // First check local contacts
-          const matchedContact = contacts.find(c => c.phone && c.phone.replace(/\D/g,'').slice(-10) === normalizedPhone)
-          setIncomingCall({
-            call,
-            from,
-            contactName: matchedContact?.name || null,
-            contactId: matchedContact?.id || null,
-            stLookup: matchedContact ? null : 'loading',
-          })
-          // If no local match, look up in ServiceTitan
-          if (!matchedContact && normalizedPhone.length === 10) {
-            try {
-              const res = await fetch(`/api/st/lookup?phone=${normalizedPhone}`)
-              const data = await res.json()
-              setIncomingCall(prev => prev && prev.call === call
-                ? { ...prev, stLookup: data.found ? data : 'none', contactName: data.found ? data.name : null }
-                : prev)
-            } catch (e) {
-              setIncomingCall(prev => prev && prev.call === call ? { ...prev, stLookup: 'none' } : prev)
-            }
-          }
-        })
-        await device.register()
-        deviceRef.current = device
-      } catch (err) { console.error('Twilio init error:', err) }
-    }
-    init()
-    return () => { if (deviceRef.current) { deviceRef.current.destroy(); deviceRef.current = null }; stopCallTimer() }
-  }, [currentRep])
 
-  const startCallTimer = () => { setCallDuration(0); callTimerRef.current = setInterval(() => setCallDuration(d => d + 1), 1000) }
-  const stopCallTimer = () => { if (callTimerRef.current) { clearInterval(callTimerRef.current); callTimerRef.current = null } }
   const fmtDuration = (s) => `${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}`
 
   const updateAgentStatus = async (status) => {
@@ -452,19 +402,20 @@ export default function DialerPage() {
     syncWorkerActivity(profile.id, status)
   }
 
-  const acceptIncomingCall = async () => {
-    if (!incomingCall?.call) return
-    const call = incomingCall.call
-    const inc = incomingCall
-    callRef.current = call
-    setCallStatus('connected')
-    startCallTimer()
-    updateAgentStatus('On Call')
-    call.on('disconnect', () => { callRef.current = null; setCallStatus('ended'); stopCallTimer(); setTimeout(() => setCallStatus(null), 3000); updateAgentStatus('Wrap Up') })
-    call.on('error', () => { callRef.current = null; setCallStatus('ended'); stopCallTimer(); setTimeout(() => setCallStatus(null), 2000) })
-    call.accept()
-    setIncomingCall(null)
+  // Answering is PhoneContext's job (it works from any page). This turns the
+  // answered caller into an open tab, which needs the dialer's own state — so
+  // the provider hands the call off here via pendingInbound.
+  const acceptIncomingCall = () => acceptIncoming()
 
+  useEffect(() => {
+    if (!pendingInbound) return
+    const inc = pendingInbound
+    setPendingInbound(null)
+    resolveInboundContact(inc)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingInbound])
+
+  const resolveInboundContact = async (inc) => {
     // Case 1: already a local contact — just select it
     if (inc.contactId) { selectContact(inc.contactId); claimContactById(inc.contactId); return }
 
@@ -514,11 +465,7 @@ export default function DialerPage() {
     if (data) setContacts(prev => prev.map(c => c.id === id ? data : c))
   }
 
-  const rejectIncomingCall = () => {
-    if (!incomingCall?.call) return
-    incomingCall.call.reject()
-    setIncomingCall(null)
-  }
+  const rejectIncomingCall = () => rejectIncoming()
 
   // ── ST global search (debounced)
   useEffect(() => {
@@ -613,35 +560,9 @@ export default function DialerPage() {
   }
 
   const makeCall = async (number) => {
-    if (!deviceRef.current) { alert('Twilio not ready yet'); return }
-    // Only one live call at a time. Block if a call is already active or mid-connect.
-    if (callRef.current || connectingRef.current) {
-      console.warn('Call already in progress — ignoring new dial')
-      return
-    }
-    connectingRef.current = true
-    try {
-      // Belt-and-suspenders: drop any lingering connections the Device may hold
-      try { deviceRef.current.disconnectAll?.() } catch {}
-      const params = { To: number, identity: currentRep.replace(/[^a-zA-Z0-9_]/g, '_'), contactId: selectedId || '', contactName: selectedContact?.name || '' }
-      const call = await deviceRef.current.connect({ params })
-      callRef.current = call
-      setCallStatus('calling')
-      updateAgentStatus('On Call')
-      call.on('ringing', () => setCallStatus('ringing'))
-      call.on('accept', () => { setCallStatus('connected'); startCallTimer() })
-      call.on('disconnect', () => { callRef.current = null; setCallStatus('ended'); stopCallTimer(); setTimeout(() => setCallStatus(null), 3000); updateAgentStatus('Wrap Up') })
-      call.on('error', () => { callRef.current = null; setCallStatus('ended'); stopCallTimer(); setTimeout(() => setCallStatus(null), 2000) })
-    } catch (err) { console.error('makeCall error:', err); setCallStatus(null) }
-    finally { connectingRef.current = false }
+    phoneMakeCall(number, { contactId: selectedId || '', contactName: selectedContact?.name || '' })
   }
 
-  const hangUp = () => {
-    if (callRef.current) { callRef.current.disconnect(); callRef.current = null }
-    setCallStatus('ended'); stopCallTimer()
-    setTimeout(() => setCallStatus(null), 2000)
-    updateAgentStatus('Wrap Up')
-  }
 
   // Tabs: open/focus a customer in a tab (max 3). At max, replace the active tab.
   const openTab = (id) => {
