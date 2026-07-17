@@ -16,12 +16,15 @@ const EMOJIS = {
   '🌈 Vibes': ['🌈','🌙','☀️','🌊','🍀','🦄','🌸','🦋','✨','🔮','🪄','🧿','💫','🌺','🎆','🪩'],
 }
 
+// Payouts are per category and live in app_settings.job_category_payouts —
+// never hardcode an amount in a label here, it only drifts from what's paid.
+const JOB_CATEGORY_PAYOUTS_KEY = 'job_category_payouts'
 const JOB_CATEGORIES = [
   { value:'non_commissionable', label:'Non-commissionable' },
-  { value:'maintenance',        label:'Maintenance — $5 on complete' },
-  { value:'repair',             label:'Booked repair call — $2 on complete' },
-  { value:'free_estimate',      label:'Free estimate (from-list) — $5 on sold' },
-  { value:'other',              label:'Sold estimate / follow-up — $1 on sold' },
+  { value:'maintenance',        label:'Maintenance' },
+  { value:'repair',             label:'Booked repair call' },
+  { value:'free_estimate',      label:'Free estimate (from-list)' },
+  { value:'other',              label:'Sold estimate / follow-up' },
 ]
 
 function CommissionMapping() {
@@ -30,6 +33,7 @@ function CommissionMapping() {
   const [err, setErr] = useState('')
   const [csrMap, setCsrMap] = useState({})    // profile_id -> st_user_id
   const [jobCats, setJobCats] = useState({})  // st_job_type_id -> category
+  const [catAmts, setCatAmts] = useState({})  // category -> payout dollars
   const [memAmts, setMemAmts] = useState({})  // st_membership_type_id -> amount
   const [memSale, setMemSale] = useState({})  // st_membership_type_id -> { sale_task_id, sale_task_name, duration_billing_id }
   const [services, setServices] = useState([])   // pricebook items, the sale-task candidates
@@ -75,6 +79,10 @@ function CommissionMapping() {
       })
       setCsrMap(cm)
       const jc = {}; (d.jobTypeSpiffs || []).forEach(j => { jc[j.st_job_type_id] = j.category }); setJobCats(jc)
+
+      // Category payouts — the amounts the sync actually pays.
+      const { data: cp } = await sb.from('app_settings').select('value').eq('key', JOB_CATEGORY_PAYOUTS_KEY).maybeSingle()
+      if (cp?.value) { try { setCatAmts(JSON.parse(cp.value)) } catch { setCatAmts({}) } }
       const ma = {}, ms = {}
       ;(d.membershipTypeSpiffs || []).forEach(m => {
         ma[m.st_membership_type_id] = m.amount
@@ -104,6 +112,24 @@ function CommissionMapping() {
       const r = await fetch('/api/commission/csr-users', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ rows }) })
       if (!r.ok) throw new Error((await r.json()).error || 'Save failed')
       flash('CSR mapping saved')
+    } catch (e) { setErr(e.message) }
+    setBusy('')
+  }
+
+  const saveCatAmts = async () => {
+    setBusy('cats')
+    try {
+      // Store only categories that have a number — a blank must stay absent so
+      // the sync leaves those jobs unsettled rather than paying $0.
+      const clean = {}
+      JOB_CATEGORIES.forEach(c => {
+        const v = catAmts[c.value]
+        if (v !== '' && v != null && !Number.isNaN(Number(v))) clean[c.value] = Number(v)
+      })
+      const { error } = await sb.from('app_settings').upsert(
+        { key: JOB_CATEGORY_PAYOUTS_KEY, value: JSON.stringify(clean) }, { onConflict: 'key' })
+      if (error) throw error
+      flash('Category payouts saved')
     } catch (e) { setErr(e.message) }
     setBusy('')
   }
@@ -180,10 +206,43 @@ function CommissionMapping() {
         <div style={{ marginTop:14, textAlign:'right' }}>{saveBtn(saveCsrs, 'csr')}</div>
       </div>
 
+      {/* Category → payout. This is what the sync actually pays. */}
+      <div style={secStyle}>
+        <div style={hStyle}>Category payouts</div>
+        <div style={subStyle}>
+          What each category pays a rep. This is the amount the sync uses — job types themselves carry no amount,
+          only a category. A category left blank pays nothing and the job stays unsettled until you set it,
+          so no payout is lost by filling this in late.
+        </div>
+        <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+          {JOB_CATEGORIES.map(c => (
+            <div key={c.value} style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:12 }}>
+              <span style={{ fontSize:13 }}>
+                {c.label}
+                <span style={{ fontSize:11, color:'var(--text-muted)', marginLeft:8 }}>
+                  {(cfg.jobTypeSpiffs || []).filter(j => j.category === c.value).length} job types
+                </span>
+              </span>
+              <div style={{ display:'flex', alignItems:'center', gap:4 }}>
+                <span style={{ fontSize:13, color:'var(--text-muted)' }}>$</span>
+                <input type="number" step="0.01" min="0" value={catAmts[c.value] ?? ''} placeholder="—"
+                  onChange={e => setCatAmts(a => ({ ...a, [c.value]: e.target.value === '' ? '' : Number(e.target.value) }))}
+                  style={{ width:90, padding:'6px 8px', border:'1px solid var(--border)', borderRadius:'var(--radius)', fontSize:12, background:'var(--surface)', color:'var(--text-primary)' }} />
+              </div>
+            </div>
+          ))}
+        </div>
+        <div style={{ marginTop:14, textAlign:'right' }}>{saveBtn(saveCatAmts, 'cats')}</div>
+      </div>
+
       {/* Job type → category */}
       <div style={secStyle}>
         <div style={hStyle}>Job types → spiff category</div>
-        <div style={subStyle}>Tag each ST job type. Anything left non-commissionable never pays. Maintenance pays on completion; estimate categories pay when the estimate sells.</div>
+        <div style={subStyle}>
+          Tag each ST job type — the category decides the payout. Anything left non-commissionable never pays.
+          Every category pays when ServiceTitan marks the job <strong>completed</strong>, including the estimate
+          categories: a free estimate that completes pays out whether or not it sold anything.
+        </div>
         <input value={jobSearch} onChange={e => setJobSearch(e.target.value)} placeholder="Search job types…"
           style={{ width:'100%', padding:'7px 10px', border:'1px solid var(--border)', borderRadius:'var(--radius)', fontSize:12, marginBottom:10, background:'var(--surface-2)', color:'var(--text-primary)' }} />
         <div style={{ maxHeight:340, overflowY:'auto', display:'flex', flexDirection:'column', gap:6, paddingRight:4 }}>
@@ -192,7 +251,11 @@ function CommissionMapping() {
               <span style={{ fontSize:12.5 }}>{j.name}</span>
               <select value={jobCats[j.id] || 'non_commissionable'} onChange={e => setJobCats(c => ({ ...c, [j.id]: e.target.value }))}
                 style={{ ...selStyle, minWidth:280, color: (jobCats[j.id] && jobCats[j.id]!=='non_commissionable') ? 'var(--accent)' : 'var(--text-muted)', fontWeight: (jobCats[j.id] && jobCats[j.id]!=='non_commissionable') ? 600 : 400 }}>
-                {JOB_CATEGORIES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+                {JOB_CATEGORIES.map(c => (
+                  <option key={c.value} value={c.value}>
+                    {c.label}{catAmts[c.value] != null && catAmts[c.value] !== '' ? ` — $${Number(catAmts[c.value]).toFixed(2)}` : ''}
+                  </option>
+                ))}
               </select>
             </div>
           ))}

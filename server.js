@@ -688,6 +688,9 @@ app.post('/api/commission/membership-types', async (req, res) => {
 
 const JOB_TERMINAL = ['Completed', 'Canceled']
 
+// app_settings key holding { category: dollars }, e.g. { "repair": 2 }.
+const JOB_CATEGORY_PAYOUTS_KEY = 'job_category_payouts'
+
 // Jobs complete throughout the day; 15 minutes keeps reps' earnings close to
 // live without hammering ServiceTitan. COMMISSION_SYNC_MINUTES=0 disables the
 // loop (the manual sync endpoint still works).
@@ -704,9 +707,20 @@ async function syncJobCommissions() {
   if (error) throw new Error(`andi_bookings read: ${error.message}`)
   if (!open?.length) return { checked: 0, paid: 0, canceled: 0 }
 
-  const { data: spiffs } = await supabase.from('job_type_spiffs').select('*')
-  const spiffByType = {}
-  ;(spiffs || []).forEach(s => { spiffByType[String(s.st_job_type_id)] = s })
+  // Payouts are per CATEGORY, not per job type: job_type_spiffs tags each of
+  // the ~112 ST job types with a category (repair / maintenance /
+  // free_estimate / other / non_commissionable) and the amount for each
+  // category lives in app_settings. job_type_spiffs.amount is unused.
+  const { data: spiffs } = await supabase.from('job_type_spiffs').select('st_job_type_id, category')
+  const catByType = {}
+  ;(spiffs || []).forEach(s => { catByType[String(s.st_job_type_id)] = s.category })
+
+  const { data: setting } = await supabase
+    .from('app_settings').select('value').eq('key', JOB_CATEGORY_PAYOUTS_KEY).maybeSingle()
+  let payouts = {}
+  try { payouts = JSON.parse(setting?.value || '{}') } catch (e) {
+    console.error('job_category_payouts is not valid JSON — no job commissions will be paid')
+  }
 
   let paid = 0, canceled = 0, checked = 0
   for (const batch of chunk(open.filter(b => b.st_job_id), 50)) {
@@ -733,16 +747,26 @@ async function syncJobCommissions() {
         continue
       }
 
-      // Completed. Price it from the job type tagged in ServiceTitan — job.jobTypeId
-      // is authoritative, since the type can be changed after booking.
-      const spiff = spiffByType[String(job.jobTypeId)]
-      const amount = spiff?.amount == null ? null : Number(spiff.amount)
+      // Completed. Price from the completed job's category — job.jobTypeId is
+      // authoritative, since the type can be changed after booking.
+      const category = catByType[String(job.jobTypeId)]
+      const raw = category == null ? null : payouts[category]
+      const amount = raw == null || raw === '' ? null : Number(raw)
 
-      // An untagged job type pays nothing. Leave it unsettled and log it, rather
-      // than silently paying $0 — tagging the type later should still pay out.
-      if (amount == null) {
-        console.warn(`Commission sync: job ${job.id} completed but job type ${job.jobTypeId} has no spiff amount — skipping`)
+      // An unpriced category pays nothing. Leave it UNSETTLED and log it rather
+      // than silently paying $0 — setting the amount later should still pay out.
+      if (amount == null || Number.isNaN(amount)) {
+        console.warn(`Commission sync: job ${job.id} completed but category ${category || `(job type ${job.jobTypeId} untagged)`} has no payout — leaving unsettled`)
         await supabase.from('andi_bookings').update({ job_status: 'Completed' }).eq('st_job_id', job.id)
+        continue
+      }
+
+      // A deliberate $0 (non_commissionable). Settle it so it stops being
+      // polled, but don't write a payout row nobody wants to see.
+      if (amount === 0) {
+        await supabase.from('andi_bookings')
+          .update({ job_status: 'Completed', commission_synced_at: new Date().toISOString() })
+          .eq('st_job_id', job.id)
         continue
       }
 
