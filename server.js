@@ -124,6 +124,30 @@ async function stPost(path, body, _retry = true) {
   return res.json()
 }
 
+async function stPatch(path, body, _retry = true) {
+  const token = await getSTToken()
+  let res
+  try {
+    res = await fetchWithTimeout(`${ST_API_BASE}${path}`, {
+      method: 'PATCH',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'ST-App-Key': process.env.ST_APP_KEY,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    })
+  } catch (e) {
+    if (_retry) return stPatch(path, body, false)   // one retry on timeout/network blip
+    throw new Error(e.name === 'AbortError' ? `ST PATCH ${path} timed out` : `ST PATCH ${path} network error: ${e.message}`)
+  }
+  if (!res.ok) {
+    const err = await res.text()
+    throw new Error(`ST PATCH ${path} failed: ${err}`)
+  }
+  return res.json()
+}
+
 // ── ST: Add note to customer record (via primary location)
 app.post('/api/st/note', async (req, res) => {
   try {
@@ -587,12 +611,56 @@ app.post('/api/commission/csr-users', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }) }
 })
 
+// ── ST: Pricebook services — the candidate "sale tasks" for a membership.
+// ServiceTitan calls Pricebook items "tasks" in the sale/invoice APIs, which is
+// why POST /memberships/sale wants a saleTaskId. Nothing in the API says which
+// service sells which membership type, so an admin picks it from this list.
+app.get('/api/st/pricebook-services', async (req, res) => {
+  try {
+    const q = (req.query.q || '').trim()
+    const search = q ? `&searchText=${encodeURIComponent(q)}` : ''
+    const data = await stGet(`/pricebook/v2/tenant/${ST_TENANT_ID}/services?active=True&pageSize=200${search}`)
+    const rows = (data?.data || []).map(s => ({
+      id: s.id, code: s.code, name: s.displayName || s.description || s.code, price: s.price,
+    })).sort((a, b) => (a.name || '').localeCompare(b.name || ''))
+    res.json({ data: rows })
+  } catch (err) {
+    console.error('ST pricebook services error:', err.message)
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// ── ST: Duration/billing options for a membership type. These carry the id that
+// POST /memberships/sale needs — the durationBilling array on the membership
+// type itself has no ids, so it has to come from here.
+app.get('/api/st/membership-types/:id/duration-billing', async (req, res) => {
+  try {
+    const data = await stGet(`/memberships/v2/tenant/${ST_TENANT_ID}/membership-types/${req.params.id}/duration-billing-items`)
+    const rows = (Array.isArray(data) ? data : data?.data || []).map(d => ({
+      id: d.id,
+      duration: d.duration,
+      billingFrequency: typeof d.billingFrequency === 'string' ? d.billingFrequency : d.billingFrequency?.name || '',
+      salePrice: d.salePrice,
+      billingPrice: d.billingPrice,
+      active: d.active,
+    }))
+    res.json({ data: rows })
+  } catch (err) {
+    console.error('ST duration-billing error:', err.message)
+    res.status(500).json({ error: err.message })
+  }
+})
+
 // Save membership-type → payout
 app.post('/api/commission/membership-types', async (req, res) => {
   try {
     const rows = (req.body?.rows || []).map(r => ({
       st_membership_type_id: r.st_membership_type_id, name: r.name || null,
       amount: (r.amount === '' || r.amount == null) ? 20 : Number(r.amount),
+      sale_task_id: r.sale_task_id ? Number(r.sale_task_id) : null,
+      sale_task_name: r.sale_task_name || null,
+      duration_billing_id: r.duration_billing_id ? Number(r.duration_billing_id) : null,
+      business_unit_id: r.business_unit_id ? Number(r.business_unit_id) : null,
       updated_at: new Date().toISOString(),
     }))
     if (rows.length) {
@@ -601,6 +669,222 @@ app.post('/api/commission/membership-types', async (req, res) => {
     }
     res.json({ ok: true, count: rows.length })
   } catch (err) { res.status(500).json({ error: err.message }) }
+})
+
+// ─────────────────────────────────────────────
+// ── COMMISSION SYNC (ServiceTitan → commissions)
+// ─────────────────────────────────────────────
+// Reps are paid when ServiceTitan reports the job Completed, at the amount
+// tagged against the job type in job_type_spiffs.
+//
+// Attribution is LOCAL, not from ServiceTitan: andi_bookings already records
+// st_job_id → profile_id at booking time. We deliberately don't use the job's
+// soldById, which is a *technician* id (the tech who ran the call), not the
+// CSR who booked it.
+//
+// Idempotency is at the database: commissions has a unique index on st_job_id
+// and st_membership_id, and every write here is an upsert on those, so a job
+// cannot be paid twice even if two instances sync concurrently.
+
+const JOB_TERMINAL = ['Completed', 'Canceled']
+
+// Jobs complete throughout the day; 15 minutes keeps reps' earnings close to
+// live without hammering ServiceTitan. COMMISSION_SYNC_MINUTES=0 disables the
+// loop (the manual sync endpoint still works).
+const SYNC_INTERVAL_MIN = Number(process.env.COMMISSION_SYNC_MINUTES ?? 15)
+
+// ST allows 50 ids per lookup.
+const chunk = (arr, n) => Array.from({ length: Math.ceil(arr.length / n) }, (_, i) => arr.slice(i * n, i * n + n))
+
+async function syncJobCommissions() {
+  // Only bookings we haven't already settled. Once a job is Completed (paid)
+  // or Canceled (never paid), commission_synced_at is set and we stop asking.
+  const { data: open, error } = await supabase
+    .from('andi_bookings').select('*').is('commission_synced_at', null).limit(500)
+  if (error) throw new Error(`andi_bookings read: ${error.message}`)
+  if (!open?.length) return { checked: 0, paid: 0, canceled: 0 }
+
+  const { data: spiffs } = await supabase.from('job_type_spiffs').select('*')
+  const spiffByType = {}
+  ;(spiffs || []).forEach(s => { spiffByType[String(s.st_job_type_id)] = s })
+
+  let paid = 0, canceled = 0, checked = 0
+  for (const batch of chunk(open.filter(b => b.st_job_id), 50)) {
+    const ids = batch.map(b => b.st_job_id).join(',')
+    const data = await stGet(`/jpm/v2/tenant/${ST_TENANT_ID}/jobs?ids=${ids}&pageSize=50`)
+    const jobs = data?.data || []
+    checked += jobs.length
+
+    for (const job of jobs) {
+      const booking = batch.find(b => String(b.st_job_id) === String(job.id))
+      if (!booking) continue
+
+      // Not finished yet — record status for visibility and check again later.
+      if (!JOB_TERMINAL.includes(job.jobStatus)) {
+        await supabase.from('andi_bookings').update({ job_status: job.jobStatus }).eq('st_job_id', job.id)
+        continue
+      }
+
+      if (job.jobStatus === 'Canceled') {
+        await supabase.from('andi_bookings')
+          .update({ job_status: 'Canceled', commission_synced_at: new Date().toISOString() })
+          .eq('st_job_id', job.id)
+        canceled++
+        continue
+      }
+
+      // Completed. Price it from the job type tagged in ServiceTitan — job.jobTypeId
+      // is authoritative, since the type can be changed after booking.
+      const spiff = spiffByType[String(job.jobTypeId)]
+      const amount = spiff?.amount == null ? null : Number(spiff.amount)
+
+      // An untagged job type pays nothing. Leave it unsettled and log it, rather
+      // than silently paying $0 — tagging the type later should still pay out.
+      if (amount == null) {
+        console.warn(`Commission sync: job ${job.id} completed but job type ${job.jobTypeId} has no spiff amount — skipping`)
+        await supabase.from('andi_bookings').update({ job_status: 'Completed' }).eq('st_job_id', job.id)
+        continue
+      }
+
+      const { error: upErr } = await supabase.from('commissions').upsert({
+        profile_id: booking.profile_id,
+        rep_name: booking.csr_name || 'Unknown',
+        event_type: 'booking',
+        amount,
+        contact_name: booking.customer_name || 'Unknown',
+        st_job_id: job.id,
+        st_job_type_id: job.jobTypeId,
+        st_customer_id: job.customerId,
+        job_number: job.jobNumber || null,
+        booked_at: booking.booked_at || job.createdOn || null,
+        completed_at: job.completedOn || null,
+        // Earned when the work was completed, which is what the pay period keys on.
+        earned_at: job.completedOn || new Date().toISOString(),
+        also_membership: false,
+        membership_amount: 0,
+        synced_at: new Date().toISOString(),
+      }, { onConflict: 'st_job_id' })
+      if (upErr) throw new Error(`commission upsert job ${job.id}: ${upErr.message}`)
+
+      await supabase.from('andi_bookings')
+        .update({ job_status: 'Completed', commission_synced_at: new Date().toISOString() })
+        .eq('st_job_id', job.id)
+      paid++
+    }
+  }
+  return { checked, paid, canceled }
+}
+
+async function syncMembershipCommissions() {
+  // Memberships have no andi_bookings anchor, so page forward from a watermark.
+  const { data: state } = await supabase
+    .from('sync_state').select('*').eq('key', 'memberships').maybeSingle()
+  // First run: look back 30 days rather than all of history.
+  const since = state?.last_synced_at || new Date(Date.now() - 30 * 864e5).toISOString()
+
+  const { data: csrUsers } = await supabase.from('csr_st_users').select('*')
+  const profileByStUser = {}
+  ;(csrUsers || []).forEach(u => { profileByStUser[String(u.st_user_id)] = u })
+  if (!Object.keys(profileByStUser).length) return { checked: 0, paid: 0, unattributed: 0 }
+
+  const { data: spiffs } = await supabase.from('membership_type_spiffs').select('*')
+  const spiffByType = {}
+  ;(spiffs || []).forEach(s => { spiffByType[String(s.st_membership_type_id)] = s })
+
+  let page = 1, paid = 0, checked = 0, unattributed = 0, more = true
+  const startedAt = new Date().toISOString()
+
+  while (more && page <= 20) {
+    const data = await stGet(`/memberships/v2/tenant/${ST_TENANT_ID}/memberships?createdOnOrAfter=${encodeURIComponent(since)}&page=${page}&pageSize=100`)
+    const rows = data?.data || []
+    checked += rows.length
+    more = rows.length === 100
+    page++
+
+    // Only the ones we'll actually pay — no point naming customers we skip.
+    const payable = rows.filter(m => m.soldById != null && profileByStUser[String(m.soldById)])
+    unattributed += rows.length - payable.length
+
+    // "to which customer" — resolve names in one batched call per 50.
+    const nameById = {}
+    for (const ids of chunk([...new Set(payable.map(m => m.customerId).filter(Boolean))], 50)) {
+      try {
+        const cust = await stGet(`/crm/v2/tenant/${ST_TENANT_ID}/customers?ids=${ids.join(',')}&pageSize=50`)
+        ;(cust?.data || []).forEach(c => { nameById[String(c.id)] = c.name })
+      } catch (e) {
+        console.warn('Membership customer name lookup failed:', e.message)
+      }
+    }
+
+    for (const m of payable) {
+      const mapped = profileByStUser[String(m.soldById)]
+      const spiff = spiffByType[String(m.membershipTypeId)]
+      const amount = spiff?.amount == null ? 20 : Number(spiff.amount)
+
+      const { error: upErr } = await supabase.from('commissions').upsert({
+        profile_id: mapped.profile_id,
+        rep_name: mapped.st_user_name || 'Unknown',
+        event_type: 'membership',
+        amount,
+        contact_name: nameById[String(m.customerId)] || `Customer ${m.customerId}`,
+        st_membership_id: m.id,
+        st_membership_type_id: m.membershipTypeId,
+        st_customer_id: m.customerId,
+        // "when was the membership sold" — createdOn is when the sale was recorded.
+        earned_at: m.createdOn || m.from || new Date().toISOString(),
+        booked_at: m.createdOn || null,
+        also_membership: true,
+        membership_amount: amount,
+        synced_at: new Date().toISOString(),
+      }, { onConflict: 'st_membership_id' })
+      if (upErr) throw new Error(`commission upsert membership ${m.id}: ${upErr.message}`)
+      paid++
+    }
+  }
+
+  await supabase.from('sync_state').upsert(
+    { key: 'memberships', last_synced_at: startedAt, updated_at: new Date().toISOString() },
+    { onConflict: 'key' }
+  )
+  return { checked, paid, unattributed }
+}
+
+let syncRunning = false
+let lastSync = null
+
+async function syncCommissions() {
+  // ST is slow; skip rather than pile up if the previous run is still going.
+  if (syncRunning) return { skipped: true }
+  syncRunning = true
+  const startedAt = new Date().toISOString()
+  try {
+    const jobs = await syncJobCommissions()
+    const memberships = await syncMembershipCommissions()
+    lastSync = { at: startedAt, ok: true, jobs, memberships }
+    console.log(`Commission sync: ${jobs.paid} job(s) paid, ${jobs.canceled} canceled, ${memberships.paid} membership(s) paid`)
+    return lastSync
+  } catch (err) {
+    lastSync = { at: startedAt, ok: false, error: err.message }
+    console.error('Commission sync failed:', err.message)
+    return lastSync
+  } finally {
+    syncRunning = false
+  }
+}
+
+// Admin-triggered sync — also how you verify the wiring without waiting.
+app.post('/api/admin/commission/sync', async (req, res) => {
+  const admin = await requireAdmin(req, res)
+  if (!admin) return
+  const result = await syncCommissions()
+  if (result?.ok === false) return res.status(500).json(result)
+  res.json(result)
+})
+
+app.get('/api/admin/commission/sync-status', async (req, res) => {
+  const admin = await requireAdmin(req, res)
+  if (!admin) return
+  res.json({ lastSync, running: syncRunning, intervalMinutes: SYNC_INTERVAL_MIN })
 })
 
 // ── ST: Create booking (direct to dispatch board, unscheduled)
@@ -690,6 +974,117 @@ app.post('/api/st/book', async (req, res) => {
     res.json({ ok: true, jobId, jobNumber, locationId: location.id })
   } catch (err) {
     console.error('ST booking error:', err.message)
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// ── ST: Sell a membership from the dialer.
+//
+// ⚠ THIS CREATES A REAL INVOICE against a real customer in production
+// ServiceTitan — POST /memberships/sale is documented as "Creates membership
+// sale invoice" and returns { invoiceId, customerMembershipId }. It is
+// deliberately admin-only until it has been proven on a real sale; flip
+// MEMBERSHIP_SALE_ALL_REPS=1 to open it to every rep.
+//
+// saleTaskId/durationBillingId come from the per-type mapping an admin sets in
+// Commission Mapping — ServiceTitan exposes no way to derive them.
+const MEMBERSHIP_SALE_ALL_REPS = process.env.MEMBERSHIP_SALE_ALL_REPS === '1'
+
+app.post('/api/st/membership/sell', async (req, res) => {
+  const token = (req.headers.authorization || '').replace(/^Bearer\s+/i, '')
+  if (!token) return res.status(401).json({ error: 'Not signed in' })
+  const { data: { user }, error: authErr } = await supabase.auth.getUser(token)
+  if (authErr || !user) return res.status(401).json({ error: 'Invalid session' })
+
+  const { data: caller } = await supabase
+    .from('profiles').select('id, name, email, role, active').eq('id', user.id).maybeSingle()
+  if (!caller || caller.active === false) return res.status(403).json({ error: 'Inactive user' })
+  if (!MEMBERSHIP_SALE_ALL_REPS && caller.role !== 'admin') {
+    return res.status(403).json({ error: 'Selling memberships is limited to admins right now' })
+  }
+
+  const { customerId, membershipTypeId, contactId } = req.body
+  if (!customerId || !membershipTypeId) {
+    return res.status(400).json({ error: 'customerId and membershipTypeId required' })
+  }
+
+  const csrName = caller.name || caller.email
+  const audit = {
+    profile_id: caller.id, csr_name: csrName, contact_id: contactId || null,
+    st_customer_id: Number(customerId), st_membership_type_id: Number(membershipTypeId),
+  }
+
+  try {
+    const { data: spiff } = await supabase
+      .from('membership_type_spiffs').select('*')
+      .eq('st_membership_type_id', membershipTypeId).maybeSingle()
+
+    if (!spiff?.sale_task_id || !spiff?.duration_billing_id) {
+      throw new Error('This membership type has no sale task / duration billing set. An admin must map it under Settings → Commission → Commission Mapping.')
+    }
+
+    // Business unit: the mapped one, else the customer's location's.
+    let businessUnitId = spiff.business_unit_id
+    if (!businessUnitId) {
+      const locData = await stGet(`/crm/v2/tenant/${ST_TENANT_ID}/locations?customerId=${customerId}&pageSize=1`)
+      businessUnitId = locData?.data?.[0]?.businessUnitId
+      if (!businessUnitId) throw new Error('No business unit found for this customer — set one on the membership type mapping.')
+    }
+
+    audit.st_sale_task_id = spiff.sale_task_id
+    audit.st_duration_billing_id = spiff.duration_billing_id
+
+    // NOTE the explicit `false`: stPost retries once on timeout, which is fine
+    // for reads and safe-ish for jobs, but NOT here. A timeout on a request that
+    // actually succeeded would bill this customer twice. Fail loudly instead —
+    // a missing invoice is recoverable, a duplicate one is not.
+    const sale = await stPost(`/memberships/v2/tenant/${ST_TENANT_ID}/memberships/sale`, {
+      customerId: Number(customerId),
+      businessUnitId: Number(businessUnitId),
+      saleTaskId: Number(spiff.sale_task_id),
+      durationBillingId: Number(spiff.duration_billing_id),
+      // 'None' touches no recurring services — the conservative choice. ST only
+      // requires this when recurringLocationId is set, which we don't set.
+      recurringServiceAction: 'None',
+    }, false)
+
+    audit.st_customer_membership_id = sale?.customerMembershipId || null
+    audit.st_invoice_id = sale?.invoiceId || null
+
+    // Credit the CSR. soldById is what the membership commission sync reads, so
+    // without this the rep never gets paid for it. Best-effort: the sale already
+    // happened and must not be reported as failed if only the credit misses.
+    let creditWarning = null
+    const { data: stUser } = await supabase
+      .from('csr_st_users').select('st_user_id').eq('profile_id', caller.id).maybeSingle()
+
+    if (!stUser?.st_user_id) {
+      creditWarning = `${csrName} is not mapped to a ServiceTitan user, so the sale is not credited to them.`
+    } else if (sale?.customerMembershipId) {
+      try {
+        await stPatch(`/memberships/v2/tenant/${ST_TENANT_ID}/memberships/${sale.customerMembershipId}`,
+          { soldById: Number(stUser.st_user_id) })
+      } catch (e) {
+        creditWarning = `Membership sold, but crediting ${csrName} failed: ${e.message}`
+        console.warn('membership soldById patch:', e.message)
+      }
+    }
+
+    audit.ok = true
+    await supabase.from('andi_membership_sales').insert(audit)
+    console.log(`Membership sold by ${csrName}: customer ${customerId}, membership ${sale?.customerMembershipId}, invoice ${sale?.invoiceId}`)
+
+    res.json({
+      ok: true,
+      customerMembershipId: sale?.customerMembershipId,
+      invoiceId: sale?.invoiceId,
+      warning: creditWarning,
+    })
+  } catch (err) {
+    audit.ok = false
+    audit.error = err.message
+    await supabase.from('andi_membership_sales').insert(audit).catch(() => {})
+    console.error('Membership sale error:', err.message)
     res.status(500).json({ error: err.message })
   }
 })
@@ -1461,3 +1856,17 @@ if (existsSync(distPath)) {
 
 const PORT = process.env.PORT || 3001
 app.listen(PORT, '0.0.0.0', () => console.log(`Andi server running on port ${PORT}`))
+
+// ── Commission sync loop (interval configured next to the sync engine above).
+// A second Railway replica double-syncing is harmless — the upserts are
+// idempotent on the ST id — just wasteful.
+if (SYNC_INTERVAL_MIN > 0) {
+  // Wait a beat after boot so a deploy doesn't sync before the app is serving.
+  setTimeout(() => {
+    syncCommissions()
+    setInterval(syncCommissions, SYNC_INTERVAL_MIN * 60_000)
+  }, 30_000)
+  console.log(`Commission sync every ${SYNC_INTERVAL_MIN}m`)
+} else {
+  console.log('Commission sync disabled (COMMISSION_SYNC_MINUTES=0)')
+}

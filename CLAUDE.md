@@ -49,6 +49,28 @@ The anon key has no delete or deactivate rights on `profiles` by design, so this
 
 Browser uses `@twilio/voice-sdk` with a token from `POST /api/twilio/token`. Outbound calls hit the TwiML app → `/api/twilio/twiml/outbound`; inbound rings `/api/twilio/inbound`, which looks up the contact by phone. Call state is mirrored into the `active_calls` table by the server webhooks, which is how other screens (Live, War Room) see calls in progress. Recording callbacks land in `/api/twilio/recording`.
 
+### Commissions
+
+Reps are paid **when ServiceTitan marks a booked job completed**, not when they book it. `syncCommissions()` in `server.js` owns the `commissions` table — nothing else writes payout rows, and the browser must not (it used to, at a flat $2, which double-counted and ignored the tagged amounts).
+
+The flow: `/api/st/book` writes an `andi_bookings` row (`st_job_id → profile_id`). The sync polls those jobs via `GET /jpm/v2/jobs?ids=` (50 max per call), and on `jobStatus === 'Completed'` prices the payout from `job_type_spiffs[job.jobTypeId].amount` and upserts a `commissions` row. `Canceled` jobs get `commission_synced_at` set so they stop being polled; a completed job whose type has no spiff amount is left unsettled and logged, so tagging the type later still pays out.
+
+**Attribution is local, deliberately.** `Job.soldById` is the *technician* who ran the call, not the CSR who booked it — `andi_bookings` is the source of truth. Memberships are the exception: they have no `andi_bookings` anchor, so the sync pages `GET /memberships?createdOnOrAfter=` from a `sync_state` watermark and attributes via `soldById → csr_st_users → profile`. Note `Membership.soldById` is a *user* id while `csr_st_users` is populated from `/settings/v2/employees` — whether those id spaces match is **unverified**.
+
+Idempotency lives in the database: unique partial indexes on `commissions.st_job_id` and `st_membership_id` mean a job can't be paid twice even if two Railway replicas sync at once. Every write is an upsert on those keys. `COMMISSION_SYNC_MINUTES` sets the interval (default 15, `0` disables).
+
+`commission_settings` (the old flat booking/membership rates) is dead — nothing reads it.
+
+### Selling memberships (writes to ServiceTitan)
+
+`POST /api/st/membership/sell` calls ST's `POST /memberships/sale`, which is documented as **"Creates membership sale invoice"** — it bills a real customer and returns `{invoiceId, customerMembershipId}`. Then it PATCHes `soldById` so the membership sync credits the CSR. Admin-only until proven on a real sale; `MEMBERSHIP_SALE_ALL_REPS=1` opens it to everyone.
+
+**The sale POST deliberately passes `_retry = false`.** `stPost`/`stPatch` retry once on timeout, which would bill a customer twice if the first attempt actually succeeded. Never let a retry near a non-idempotent ST write.
+
+`saleTaskId` and `durationBillingId` are **not derivable from the ServiceTitan API** — the Pricebook spec never mentions memberships, and nothing maps a membership type to the SKU that sells it. ("Task" is ST's older name for a Pricebook item; Sales/Estimates confirms this by pairing `skuId` with `membershipDurationBillingId`.) So an admin maps each type by hand in Commission Mapping → stored on `membership_type_spiffs.sale_task_id` / `duration_billing_id`. Only fully-mapped types appear in the dialer's "Sell Membership?" picker. `durationBillingId` must come from `/membership-types/{id}/duration-billing-items` — the `durationBilling` array on the membership type itself carries no ids.
+
+Every attempt, success or failure, is recorded in `andi_membership_sales` — an invoice is real money, so don't rely solely on what ST echoes back.
+
 ### ServiceTitan + AI brief
 
 `server.js` holds an OAuth client-credentials token cache (`getSTToken`) and thin `stGet`/`stPost` wrappers with a 25s timeout and one retry — ST is slow and flaky, so keep new calls going through these wrappers rather than bare `fetch`.

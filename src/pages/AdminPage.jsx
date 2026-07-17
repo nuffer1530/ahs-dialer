@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { sb } from '../lib/supabase'
 import { useAuth } from '../lib/AuthContext'
 import { useData } from '../lib/DataContext'
@@ -31,11 +31,26 @@ function CommissionMapping() {
   const [csrMap, setCsrMap] = useState({})    // profile_id -> st_user_id
   const [jobCats, setJobCats] = useState({})  // st_job_type_id -> category
   const [memAmts, setMemAmts] = useState({})  // st_membership_type_id -> amount
+  const [memSale, setMemSale] = useState({})  // st_membership_type_id -> { sale_task_id, sale_task_name, duration_billing_id }
+  const [services, setServices] = useState([])   // pricebook items, the sale-task candidates
+  const [durations, setDurations] = useState({}) // st_membership_type_id -> duration/billing options
   const [jobSearch, setJobSearch] = useState('')
   const [busy, setBusy] = useState('')        // which section is saving
   const [savedMsg, setSavedMsg] = useState('')
 
   useEffect(() => { load() }, [])
+
+  // Duration/billing options are one ST call per membership type, so fetch them
+  // lazily when the admin actually opens a term dropdown.
+  const loadDurations = async (typeId) => {
+    if (durations[typeId]) return
+    try {
+      const r = await fetch(`/api/st/membership-types/${typeId}/duration-billing`)
+      const d = await r.json()
+      if (r.ok) setDurations(prev => ({ ...prev, [typeId]: d.data || [] }))
+    } catch (e) { console.warn('duration-billing load failed:', e) }
+  }
+
   const load = async () => {
     setLoading(true); setErr('')
     try {
@@ -43,6 +58,12 @@ function CommissionMapping() {
       const d = await r.json()
       if (!r.ok) throw new Error(d.error || 'Failed to load config')
       setCfg(d)
+      // Pricebook items for the sale-task picker. Non-fatal: without it the
+      // payout mapping still works, you just can't set up selling.
+      fetch('/api/st/pricebook-services')
+        .then(res => res.json())
+        .then(sd => setServices(sd.data || []))
+        .catch(e => console.warn('pricebook services load failed:', e))
       // CSR map: saved first, then auto-match unmapped by name
       const cm = {}
       ;(d.csrUsers || []).forEach(u => { if (u.profile_id) cm[u.profile_id] = u.st_user_id })
@@ -54,7 +75,19 @@ function CommissionMapping() {
       })
       setCsrMap(cm)
       const jc = {}; (d.jobTypeSpiffs || []).forEach(j => { jc[j.st_job_type_id] = j.category }); setJobCats(jc)
-      const ma = {}; (d.membershipTypeSpiffs || []).forEach(m => { ma[m.st_membership_type_id] = m.amount }); setMemAmts(ma)
+      const ma = {}, ms = {}
+      ;(d.membershipTypeSpiffs || []).forEach(m => {
+        ma[m.st_membership_type_id] = m.amount
+        ms[m.st_membership_type_id] = {
+          sale_task_id: m.sale_task_id || null,
+          sale_task_name: m.sale_task_name || null,
+          duration_billing_id: m.duration_billing_id || null,
+        }
+        // Preload terms for types already set up, so the saved value renders
+        // as a label instead of an empty select.
+        if (m.duration_billing_id) loadDurations(m.st_membership_type_id)
+      })
+      setMemAmts(ma); setMemSale(ms)
     } catch (e) { setErr(e.message) }
     setLoading(false)
   }
@@ -89,7 +122,15 @@ function CommissionMapping() {
   const saveMems = async () => {
     setBusy('mems')
     try {
-      const rows = cfg.stMembershipTypes.map(m => ({ st_membership_type_id: m.id, name: m.name, amount: memAmts[m.id] ?? 20 }))
+      const rows = cfg.stMembershipTypes.map(m => ({
+        st_membership_type_id: m.id, name: m.name, amount: memAmts[m.id] ?? 20,
+        sale_task_id: memSale[m.id]?.sale_task_id || null,
+        sale_task_name: memSale[m.id]?.sale_task_name || null,
+        duration_billing_id: memSale[m.id]?.duration_billing_id || null,
+      }))
+      // Half a mapping can't sell — refuse rather than fail at the customer.
+      const partial = rows.find(r => (r.sale_task_id && !r.duration_billing_id) || (!r.sale_task_id && r.duration_billing_id))
+      if (partial) throw new Error(`${partial.name}: set both a sale task and a term, or neither.`)
       const r = await fetch('/api/commission/membership-types', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ rows }) })
       if (!r.ok) throw new Error((await r.json()).error || 'Save failed')
       flash('Membership payouts saved')
@@ -160,25 +201,262 @@ function CommissionMapping() {
         <div style={{ marginTop:14, textAlign:'right' }}>{saveBtn(saveJobs, 'jobs')}</div>
       </div>
 
-      {/* Membership type → amount */}
+      {/* Membership type → payout + how to sell it */}
       <div style={secStyle}>
-        <div style={hStyle}>Membership types → payout</div>
-        <div style={subStyle}>Set the spiff for each ST membership type (e.g. Full $20, HVAC-only $10).</div>
-        <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
-          {cfg.stMembershipTypes.map(m => (
-            <div key={m.id} style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:12 }}>
-              <span style={{ fontSize:13 }}>{m.name}</span>
-              <div style={{ display:'flex', alignItems:'center', gap:4 }}>
-                <span style={{ fontSize:13, color:'var(--text-muted)' }}>$</span>
-                <input type="number" step="0.01" value={memAmts[m.id] ?? ''} placeholder="0.00"
-                  onChange={e => setMemAmts(a => ({ ...a, [m.id]: e.target.value === '' ? '' : Number(e.target.value) }))}
-                  style={{ width:90, padding:'6px 8px', border:'1px solid var(--border)', borderRadius:'var(--radius)', fontSize:12, background:'var(--surface)', color:'var(--text-primary)' }} />
+        <div style={hStyle}>Membership types → payout &amp; sale setup</div>
+        <div style={subStyle}>
+          Set the spiff for each ST membership type (e.g. Full $20, HVAC-only $10).
+          To let reps <strong>sell</strong> a membership from the dialer, also pick its sale task and term —
+          ServiceTitan can't tell us which pricebook item sells which membership, so it has to be set here once.
+          <strong> Selling creates a real invoice for the customer.</strong>
+        </div>
+        <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
+          {cfg.stMembershipTypes.map(m => {
+            const sellable = memSale[m.id]?.sale_task_id && memSale[m.id]?.duration_billing_id
+            return (
+              <div key={m.id} style={{ border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:12, display:'flex', flexDirection:'column', gap:10 }}>
+                <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:12 }}>
+                  <span style={{ fontSize:13, fontWeight:600 }}>
+                    {m.name}
+                    <span style={{ marginLeft:8, fontSize:9, fontWeight:700, textTransform:'uppercase', letterSpacing:.4, padding:'2px 6px', borderRadius:99,
+                      background: sellable ? 'var(--success-bg)' : 'var(--surface-2)', color: sellable ? 'var(--success)' : 'var(--text-muted)' }}>
+                      {sellable ? 'Sellable' : 'Payout only'}
+                    </span>
+                  </span>
+                  <div style={{ display:'flex', alignItems:'center', gap:4 }}>
+                    <span style={{ fontSize:13, color:'var(--text-muted)' }}>$</span>
+                    <input type="number" step="0.01" value={memAmts[m.id] ?? ''} placeholder="0.00"
+                      onChange={e => setMemAmts(a => ({ ...a, [m.id]: e.target.value === '' ? '' : Number(e.target.value) }))}
+                      style={{ width:90, padding:'6px 8px', border:'1px solid var(--border)', borderRadius:'var(--radius)', fontSize:12, background:'var(--surface)', color:'var(--text-primary)' }} />
+                  </div>
+                </div>
+
+                <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
+                  <div>
+                    <div style={{ fontSize:10, color:'var(--text-muted)', marginBottom:3, fontWeight:600 }}>SALE TASK (pricebook item)</div>
+                    <select value={memSale[m.id]?.sale_task_id || ''}
+                      onChange={e => {
+                        const id = e.target.value
+                        const svc = services.find(s => String(s.id) === String(id))
+                        setMemSale(s => ({ ...s, [m.id]: { ...s[m.id], sale_task_id: id || null, sale_task_name: svc?.name || null } }))
+                      }}
+                      style={{ width:'100%', padding:'6px 8px', border:'1px solid var(--border)', borderRadius:'var(--radius)', fontSize:12, background:'var(--surface)', color:'var(--text-primary)' }}>
+                      <option value="">— not sellable from Andi —</option>
+                      {services.map(s => (
+                        <option key={s.id} value={s.id}>{s.code ? `${s.code} — ` : ''}{s.name}{s.price ? ` ($${s.price})` : ''}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <div style={{ fontSize:10, color:'var(--text-muted)', marginBottom:3, fontWeight:600 }}>TERM / BILLING</div>
+                    <select value={memSale[m.id]?.duration_billing_id || ''}
+                      onChange={e => setMemSale(s => ({ ...s, [m.id]: { ...s[m.id], duration_billing_id: e.target.value || null } }))}
+                      onFocus={() => loadDurations(m.id)}
+                      style={{ width:'100%', padding:'6px 8px', border:'1px solid var(--border)', borderRadius:'var(--radius)', fontSize:12, background:'var(--surface)', color:'var(--text-primary)' }}>
+                      <option value="">{durations[m.id] ? '— select a term —' : 'click to load…'}</option>
+                      {(durations[m.id] || []).map(d => (
+                        <option key={d.id} value={d.id}>
+                          {d.duration ? `${d.duration}mo` : ''} {d.billingFrequency} {d.salePrice != null ? `— $${d.salePrice}` : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
               </div>
-            </div>
-          ))}
+            )
+          })}
           {cfg.stMembershipTypes.length === 0 && <div style={{ fontSize:12, color:'var(--text-muted)' }}>No membership types returned from ServiceTitan.</div>}
         </div>
         <div style={{ marginTop:14, textAlign:'right' }}>{saveBtn(saveMems, 'mems')}</div>
+      </div>
+    </div>
+  )
+}
+
+// Admin commission ledger. Rows are written by syncCommissions() in server.js
+// when ServiceTitan reports a job Completed or a membership sold — nothing here
+// computes a payout, it only reports what the sync recorded.
+const ST_JOB_URL = (jobId) => `https://go.servicetitan.com/#/Job/Index/${jobId}`
+
+const RANGES = {
+  week:    { label: 'This week',   days: null },
+  month:   { label: 'This month',  days: null },
+  last30:  { label: 'Last 30 days', days: 30 },
+  last90:  { label: 'Last 90 days', days: 90 },
+  all:     { label: 'All time',    days: null },
+}
+
+function rangeBounds(key) {
+  const now = new Date()
+  if (key === 'week') {
+    const d = now.getDay()
+    const monday = new Date(now)
+    monday.setDate(now.getDate() - (d === 0 ? 6 : d - 1))
+    monday.setHours(0, 0, 0, 0)
+    return { start: monday, end: null }
+  }
+  if (key === 'month') return { start: new Date(now.getFullYear(), now.getMonth(), 1), end: null }
+  if (key === 'all') return { start: new Date(0), end: null }
+  const s = new Date(now)
+  s.setDate(s.getDate() - RANGES[key].days)
+  return { start: s, end: null }
+}
+
+function CommissionReport() {
+  const [range, setRange] = useState('week')
+  const [rows, setRows] = useState([])
+  const [jobTypes, setJobTypes] = useState({})
+  const [membTypes, setMembTypes] = useState({})
+  const [loading, setLoading] = useState(true)
+  const [syncing, setSyncing] = useState(false)
+  const [syncMsg, setSyncMsg] = useState('')
+  const [repFilter, setRepFilter] = useState('all')
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    const { start } = rangeBounds(range)
+    const [{ data: comms }, { data: jt }, { data: mt }] = await Promise.all([
+      sb.from('commissions').select('*, profiles!profile_id(name, email)')
+        .gte('earned_at', start.toISOString()).order('earned_at', { ascending: false }).limit(2000),
+      sb.from('job_type_spiffs').select('st_job_type_id, name'),
+      sb.from('membership_type_spiffs').select('st_membership_type_id, name'),
+    ])
+    const jtMap = {}, mtMap = {}
+    ;(jt || []).forEach(x => { jtMap[String(x.st_job_type_id)] = x.name })
+    ;(mt || []).forEach(x => { mtMap[String(x.st_membership_type_id)] = x.name })
+    setJobTypes(jtMap); setMembTypes(mtMap)
+    setRows(comms || [])
+    setLoading(false)
+  }, [range])
+
+  useEffect(() => { load() }, [load])
+
+  const runSync = async () => {
+    setSyncing(true); setSyncMsg('')
+    try {
+      const { data: { session } } = await sb.auth.getSession()
+      const res = await fetch('/api/admin/commission/sync', {
+        method: 'POST', headers: { Authorization: `Bearer ${session?.access_token}` },
+      })
+      const out = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(out.error || `Sync failed (${res.status})`)
+      setSyncMsg(`✓ ${out.jobs?.paid ?? 0} job(s) paid, ${out.jobs?.canceled ?? 0} cancelled, ${out.memberships?.paid ?? 0} membership(s) paid`)
+      await load()
+    } catch (e) {
+      setSyncMsg(`Error: ${e.message}`)
+    } finally {
+      setSyncing(false)
+      setTimeout(() => setSyncMsg(''), 8000)
+    }
+  }
+
+  const repName = (r) => r.profiles?.name || r.rep_name || 'Unknown'
+  const reps = [...new Set(rows.map(repName))].sort()
+  const shown = repFilter === 'all' ? rows : rows.filter(r => repName(r) === repFilter)
+
+  const total = shown.reduce((s, r) => s + parseFloat(r.amount || 0), 0)
+  const byRep = {}
+  shown.forEach(r => { byRep[repName(r)] = (byRep[repName(r)] || 0) + parseFloat(r.amount || 0) })
+
+  const fmtDay = (ts) => ts ? new Date(ts).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' }) : '—'
+
+  const typeLabel = (r) => {
+    if (r.event_type === 'membership') return membTypes[String(r.st_membership_type_id)] || 'Membership'
+    if (r.event_type === 'adjustment') return r.notes || 'Manual adjustment'
+    return jobTypes[String(r.st_job_type_id)] || 'Job'
+  }
+
+  return (
+    <div style={{ display:'flex', flexDirection:'column', gap:20 }}>
+      <div className="card">
+        <div className="card-header">
+          <div className="card-title">Commission Payouts</div>
+          <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+            {syncMsg && <span style={{ fontSize:12, color: syncMsg.startsWith('Error') ? 'var(--danger)' : 'var(--success)' }}>{syncMsg}</span>}
+            <button className="btn sm" onClick={runSync} disabled={syncing}>
+              {syncing ? 'Syncing…' : 'Sync from ServiceTitan'}
+            </button>
+          </div>
+        </div>
+        <div className="card-body" style={{ display:'flex', flexDirection:'column', gap:14 }}>
+          <div style={{ fontSize:11, color:'var(--text-muted)' }}>
+            Reps are paid when ServiceTitan marks the job completed, at the amount tagged against the job type.
+            Syncs automatically every 15 minutes.
+          </div>
+
+          <div style={{ display:'flex', gap:8, flexWrap:'wrap', alignItems:'center' }}>
+            {Object.entries(RANGES).map(([k, v]) => (
+              <button key={k} className={`btn sm${range === k ? ' primary' : ''}`} onClick={() => setRange(k)}>{v.label}</button>
+            ))}
+            <select className="form-input" style={{ width:'auto', marginLeft:8, fontSize:12, padding:'4px 8px' }}
+              value={repFilter} onChange={e => setRepFilter(e.target.value)}>
+              <option value="all">All reps</option>
+              {reps.map(n => <option key={n} value={n}>{n}</option>)}
+            </select>
+            <div style={{ marginLeft:'auto', fontSize:13, fontWeight:700 }}>
+              Total: <span style={{ color:'var(--accent)' }}>${total.toFixed(2)}</span>
+              <span style={{ fontWeight:400, color:'var(--text-muted)', marginLeft:6 }}>({shown.length} payout{shown.length === 1 ? '' : 's'})</span>
+            </div>
+          </div>
+
+          {Object.keys(byRep).length > 1 && (
+            <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
+              {Object.entries(byRep).sort((a, b) => b[1] - a[1]).map(([name, amt]) => (
+                <span key={name} style={{ fontSize:11, padding:'3px 9px', borderRadius:99, background:'var(--surface-2)', fontWeight:600 }}>
+                  {name} <span style={{ color:'var(--accent)' }}>${amt.toFixed(2)}</span>
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {loading ? <div className="card-body"><div className="spinner" /></div> : shown.length === 0 ? (
+          <div className="card-body" style={{ color:'var(--text-muted)', fontSize:13 }}>
+            No payouts in this range. Commissions appear once ServiceTitan marks a booked job completed.
+          </div>
+        ) : (
+          <div style={{ overflowX:'auto' }}>
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Rep</th><th>Type</th><th>Customer</th><th>Job / Membership</th>
+                  <th>Booked / Sold</th><th>Completed</th><th style={{ textAlign:'right' }}>Payout</th><th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {shown.map(r => (
+                  <tr key={r.id}>
+                    <td style={{ padding:'10px 12px', fontWeight:600 }}>{repName(r)}</td>
+                    <td style={{ padding:'10px 12px' }}>
+                      <span style={{ fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:.4, padding:'2px 7px', borderRadius:99,
+                        background: r.event_type === 'membership' ? 'var(--accent-bg)' : 'var(--surface-2)',
+                        color: r.event_type === 'membership' ? 'var(--accent)' : 'var(--text-secondary)' }}>
+                        {r.event_type === 'booking' ? 'Job' : r.event_type}
+                      </span>
+                    </td>
+                    <td style={{ padding:'10px 12px' }}>{r.contact_name || '—'}</td>
+                    <td style={{ padding:'10px 12px', fontSize:12, color:'var(--text-secondary)' }}>{typeLabel(r)}</td>
+                    <td style={{ padding:'10px 12px', fontSize:12 }}>{fmtDay(r.booked_at)}</td>
+                    <td style={{ padding:'10px 12px', fontSize:12 }}>
+                      {r.event_type === 'membership'
+                        ? <span style={{ color:'var(--text-muted)' }}>—</span>
+                        : fmtDay(r.completed_at)}
+                    </td>
+                    <td style={{ padding:'10px 12px', textAlign:'right', fontWeight:700, color:'#16A34A' }}>${parseFloat(r.amount || 0).toFixed(2)}</td>
+                    <td style={{ padding:'10px 12px' }}>
+                      {r.st_job_id && (
+                        <a href={ST_JOB_URL(r.st_job_id)} target="_blank" rel="noopener noreferrer"
+                          style={{ fontSize:11, color:'var(--accent)', fontWeight:600, whiteSpace:'nowrap' }}>
+                          Job {r.job_number || r.st_job_id} ↗
+                        </a>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   )
@@ -223,7 +501,6 @@ export default function AdminPage() {
     { id:'Offline', label:'Offline', color:'#6b7280', locked:true },
   ])
   const [savingStatuses, setSavingStatuses] = useState(false)
-  const [commissionRates, setCommissionRates] = useState({ booking: 2.00, membership: 2.00 })
   const [commissionHistory, setCommissionHistory] = useState([])
 
   // Scorecard state
@@ -247,7 +524,6 @@ export default function AdminPage() {
   const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December']
   const [allRepEarnings, setAllRepEarnings] = useState([])
   const [commLoading, setCommLoading] = useState(false)
-  const [savingRates, setSavingRates] = useState(false)
   const [msg, setMsg] = useState('')
   const [myName, setMyName] = useState(profile?.name || '')
   const [myAvatar, setMyAvatar] = useState(profile?.avatar || null)
@@ -305,14 +581,8 @@ export default function AdminPage() {
     monday.setHours(0,0,1,0)
 
     Promise.all([
-      sb.from('commission_settings').select('*'),
       sb.from('commissions').select('*, profiles!profile_id(name)').gte('earned_at', monday.toISOString()).order('earned_at', { ascending: false }),
-    ]).then(([{ data: rates }, { data: history }]) => {
-      if (rates?.length) {
-        const r = {}
-        rates.forEach(x => r[x.event_type] = parseFloat(x.amount))
-        setCommissionRates(prev => ({ ...prev, ...r }))
-      }
+    ]).then(([{ data: history }]) => {
       setCommissionHistory(history || [])
 
       // Aggregate by rep for admin view
@@ -383,17 +653,6 @@ export default function AdminPage() {
       statusDebounceRef.current = setTimeout(() => saveStatuses(next), 600)
       return next
     })
-  }
-
-  const saveCommissionRates = async () => {
-    setSavingRates(true)
-    await Promise.all([
-      sb.from('commission_settings').upsert({ event_type: 'booking', amount: commissionRates.booking, updated_at: new Date().toISOString() }, { onConflict: 'event_type' }),
-      sb.from('commission_settings').upsert({ event_type: 'membership', amount: commissionRates.membership, updated_at: new Date().toISOString() }, { onConflict: 'event_type' }),
-    ])
-    setSavingRates(false)
-    setMsg('Rates saved')
-    setTimeout(() => setMsg(''), 3000)
   }
 
   const addCommissionAdjustment = async () => {
@@ -713,7 +972,7 @@ export default function AdminPage() {
   }
 
   const TABS = isAdmin
-    ? [{ id:'users', label:'Users' }, { id:'campaigns', label:'Campaigns' }, { id:'commission', label:'Commission' }, { id:'statuses', label:'Statuses' }, { id:'scorecards', label:'Scorecards' }]
+    ? [{ id:'users', label:'Users' }, { id:'campaigns', label:'Campaigns' }, { id:'commission', label:'Commission' }, { id:'payouts', label:'Payouts' }, { id:'statuses', label:'Statuses' }, { id:'scorecards', label:'Scorecards' }]
     : [{ id:'users', label:'My Profile' }, { id:'commission', label:'My Earnings' }]
 
   return (
@@ -751,6 +1010,12 @@ export default function AdminPage() {
 
       {/* Campaigns tab — full CampaignsPage */}
       {settingsTab === 'campaigns' && <CampaignsPage />}
+
+      {settingsTab === 'payouts' && isAdmin && (
+        <div style={{ flex:1, overflowY:'auto', padding:24 }}>
+          <CommissionReport />
+        </div>
+      )}
 
 
 
@@ -811,31 +1076,17 @@ export default function AdminPage() {
         <div style={{ flex:1, overflowY:'auto', padding:24, display:'flex', flexDirection:'column', gap:20 }}>
           {commLoading ? <div className="spinner" style={{ margin:'40px auto' }} /> : (
             <>
-              {/* Admin: Rate settings */}
+              {/* The old flat booking/membership rates are gone: payouts now come
+                  from the per-job-type amounts in Commission Mapping, paid when
+                  ServiceTitan marks the job completed. */}
               {isAdmin && (
                 <div className="card">
-                  <div className="card-header">
-                    <div className="card-title">Commission Rates</div>
-                    {msg && <span style={{ fontSize:12, color:'var(--success)' }}>{msg}</span>}
-                  </div>
-                  <div className="card-body" style={{ display:'flex', flexDirection:'column', gap:16 }}>
-                    <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16 }}>
-                      <div className="form-field">
-                        <label className="form-label">Booking Payout ($)</label>
-                        <input className="form-input" type="number" step="0.50" min="0" value={commissionRates.booking}
-                          onChange={e => setCommissionRates(p => ({ ...p, booking: parseFloat(e.target.value) || 0 }))} />
-                        <div style={{ fontSize:11, color:'var(--text-muted)', marginTop:4 }}>Paid when a rep books a job via Andi</div>
-                      </div>
-                      <div className="form-field">
-                        <label className="form-label">Membership Payout ($)</label>
-                        <input className="form-input" type="number" step="0.50" min="0" value={commissionRates.membership}
-                          onChange={e => setCommissionRates(p => ({ ...p, membership: parseFloat(e.target.value) || 0 }))} />
-                        <div style={{ fontSize:11, color:'var(--text-muted)', marginTop:4 }}>Added when "Also sold a membership" is checked</div>
-                      </div>
-                    </div>
-                    <button className="btn primary" onClick={saveCommissionRates} disabled={savingRates} style={{ alignSelf:'flex-start' }}>
-                      {savingRates ? 'Saving...' : 'Save rates'}
-                    </button>
+                  <div className="card-header"><div className="card-title">How payouts work</div></div>
+                  <div className="card-body" style={{ fontSize:12, color:'var(--text-secondary)', lineHeight:1.6 }}>
+                    Each job type carries its own payout — set them under <strong>Commission Mapping</strong> below.
+                    A rep is paid when ServiceTitan marks the booked job <strong>completed</strong>, not when they book it,
+                    so earnings appear after the job runs. Membership payouts come from the per-membership-type amounts.
+                    See the <strong>Payouts</strong> tab for the full ledger.
                   </div>
                 </div>
               )}

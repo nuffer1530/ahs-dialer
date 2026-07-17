@@ -160,7 +160,9 @@ export default function DialerPage() {
   const [todayLogs, setTodayLogs] = useState([])
   const [powerDialActive, setPowerDialActive] = useState(false)
   const [alsoMembership, setAlsoMembership] = useState(false)
-  const [commissionRates, setCommissionRates] = useState({ booking: 2.00, membership: 2.00 })
+  const [membershipTypeId, setMembershipTypeId] = useState('')
+  const [sellableMemberships, setSellableMemberships] = useState([])
+  const [membershipMsg, setMembershipMsg] = useState('')
   const [dailyEarnings, setDailyEarnings] = useState(0)
   const [weeklyEarnings, setWeeklyEarnings] = useState(0)
   const [showCommPop, setShowCommPop] = useState(false)
@@ -311,7 +313,12 @@ export default function DialerPage() {
       .then(({ data }) => { setContactLogs(data || []); setLogsLoading(false) })
   }, [selectedId])
 
-  useEffect(() => { setNotesVal(''); setBookingResult(null); setAlsoMembership(false) }, [selectedId])
+  // Reset per-contact: a membership selection left over from the previous
+  // customer must never carry into the next one.
+  useEffect(() => {
+    setNotesVal(''); setBookingResult(null)
+    setAlsoMembership(false); setMembershipTypeId(''); setMembershipMsg('')
+  }, [selectedId])
 
   // Restore open tabs + active tab on mount (survives refresh)
   useEffect(() => {
@@ -347,15 +354,14 @@ export default function DialerPage() {
       .then(({ data }) => setTodayLogs(data || []))
   }, [currentRep])
 
-  // Load commission rates
+  // Membership types a rep can actually sell — an admin has mapped each of
+  // these to a ServiceTitan sale task and term. Unmapped types can't be sold.
   useEffect(() => {
-    sb.from('commission_settings').select('*').then(({ data }) => {
-      if (data?.length) {
-        const rates = {}
-        data.forEach(r => rates[r.event_type] = parseFloat(r.amount))
-        setCommissionRates(prev => ({ ...prev, ...rates }))
-      }
-    })
+    sb.from('membership_type_spiffs')
+      .select('st_membership_type_id, name, sale_task_id, duration_billing_id')
+      .not('sale_task_id', 'is', null)
+      .not('duration_billing_id', 'is', null)
+      .then(({ data }) => setSellableMemberships(data || []))
   }, [])
 
   // Load daily + weekly earnings
@@ -719,21 +725,12 @@ export default function DialerPage() {
         }).catch(err => console.warn('ST note sync failed:', err))
       }
 
-      // Commission tracking for Booked outcome
-      if (selectedOutcome === 'Booked' && profile?.id) {
-        const bookingAmt = commissionRates.booking || 2
-        const membershipAmt = alsoMembership ? (commissionRates.membership || 2) : 0
-        const totalAmt = bookingAmt + membershipAmt
-        await sb.from('commissions').insert({
-          profile_id: profile.id, contact_id: c.id, event_type: 'booking',
-          amount: bookingAmt, rep_name: currentRep, contact_name: c.name || 'Unknown',
-          also_membership: alsoMembership, membership_amount: membershipAmt,
-          earned_at: new Date().toISOString(),
-        })
-        setDailyEarnings(prev => prev + totalAmt)
-        setWeeklyEarnings(prev => prev + totalAmt)
-        setAlsoMembership(false)
-      }
+      // Commissions are no longer written here. A rep is paid when ServiceTitan
+      // reports the job Completed, at the amount tagged against the job type —
+      // syncCommissions() in server.js owns the commissions table and keys off
+      // the andi_bookings row written by /api/st/book. Writing a flat rate here
+      // too would double-pay every booking.
+      if (selectedOutcome === 'Booked') { setAlsoMembership(false); setMembershipTypeId('') }
 
       setSelectedOutcome(null); setNotesVal(''); updateAgentStatus('Available')
       const { data: logs } = await sb.from('call_logs').select('*').eq('contact_id', c.id).order('created_at', { ascending: false })
@@ -820,11 +817,45 @@ export default function DialerPage() {
     } finally { setBooking(false) }
   }
 
-  // Booked flow: create the ST job, then log the call (stays on customer).
+  // Sell the membership into ServiceTitan. Separate from booking on purpose: it
+  // creates an invoice for the customer, so a failure here must not silently
+  // roll into the booking, and a booking failure must not sell a membership.
+  const sellMembership = async () => {
+    const c = selectedContact
+    if (!c?.external_id) { setMembershipMsg('Error: no ServiceTitan customer linked to this contact.'); return false }
+    const type = sellableMemberships.find(m => String(m.st_membership_type_id) === String(membershipTypeId))
+    if (!type) { setMembershipMsg('Error: pick a membership.'); return false }
+
+    if (!confirm(`Sell "${type.name}" to ${c.name || 'this customer'}?\n\nThis creates a real membership and a real invoice in ServiceTitan. It cannot be undone from Andi.`)) return false
+
+    setMembershipMsg('Selling…')
+    try {
+      const { data: { session } } = await sb.auth.getSession()
+      const res = await fetch('/api/st/membership/sell', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session?.access_token}` },
+        body: JSON.stringify({ customerId: c.external_id, membershipTypeId: type.st_membership_type_id, contactId: c.id }),
+      })
+      const out = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(out.error || `Sale failed (${res.status})`)
+      setMembershipMsg(out.warning ? `✓ Sold — ${out.warning}` : `✓ ${type.name} sold (invoice ${out.invoiceId})`)
+      return true
+    } catch (e) {
+      setMembershipMsg(`Error: ${e.message}`)
+      return false
+    }
+  }
+
+  // Booked flow: create the ST job, sell the membership if asked, then log.
   const bookAndLog = async () => {
     if (!notesVal.trim()) { alert('Please add call notes before booking.'); return }
+    if (alsoMembership && !membershipTypeId) { alert('Pick which membership, or untick "Sell Membership?".'); return }
     const ok = await bookInST()
-    if (ok) await logOutcome(true)
+    if (!ok) return
+    // Job booked. A membership failure from here shouldn't lose the booking —
+    // the message stays on screen and the call still logs.
+    if (alsoMembership && membershipTypeId) await sellMembership()
+    await logOutcome(true)
   }
 
   const openCallbackModal = () => {
@@ -1482,16 +1513,39 @@ export default function DialerPage() {
                               </div>
                               <SearchSelect label="Marketing campaign" value={String(stCampaignId||'')} onChange={v => setStCampaignId(v)} options={campOptions} placeholder="Select campaign..." />
 
-                              <label style={{ display:'flex', alignItems:'center', gap:8, padding:'8px 10px', background: alsoMembership ? '#EFF6FF' : 'var(--surface)', border:`1px solid ${alsoMembership ? '#3b82f6' : 'var(--border)'}`, borderRadius:'var(--radius)', cursor:'pointer' }}>
-                                <div onClick={() => setAlsoMembership(p => !p)}
-                                  style={{ width:18, height:18, borderRadius:4, border:`2px solid ${alsoMembership ? '#3b82f6' : 'var(--border)'}`, background: alsoMembership ? '#3b82f6' : 'transparent', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0, cursor:'pointer' }}>
-                                  {alsoMembership && <svg width="10" height="10" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+                              {/* Sell a membership into ServiceTitan. Only types an admin has
+                                  mapped to a sale task are offered — the rest can't be sold. */}
+                              {sellableMemberships.length > 0 && (
+                                <div style={{ padding:'8px 10px', background: alsoMembership ? '#EFF6FF' : 'var(--surface)', border:`1px solid ${alsoMembership ? '#3b82f6' : 'var(--border)'}`, borderRadius:'var(--radius)', display:'flex', flexDirection:'column', gap:8 }}>
+                                  <label style={{ display:'flex', alignItems:'center', gap:8, cursor:'pointer' }}>
+                                    <div onClick={() => { setAlsoMembership(p => !p); setMembershipTypeId('') }}
+                                      style={{ width:18, height:18, borderRadius:4, border:`2px solid ${alsoMembership ? '#3b82f6' : 'var(--border)'}`, background: alsoMembership ? '#3b82f6' : 'transparent', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0, cursor:'pointer' }}>
+                                      {alsoMembership && <svg width="10" height="10" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+                                    </div>
+                                    <div onClick={() => { setAlsoMembership(p => !p); setMembershipTypeId('') }}>
+                                      <span style={{ fontSize:12, fontWeight:600, color: alsoMembership ? '#1d4ed8' : 'var(--text-primary)' }}>Sell Membership?</span>
+                                    </div>
+                                  </label>
+
+                                  {alsoMembership && (
+                                    <>
+                                      <select value={membershipTypeId} onChange={e => setMembershipTypeId(e.target.value)}
+                                        style={{ width:'100%', padding:'6px 8px', border:'1px solid var(--border)', borderRadius:'var(--radius)', fontSize:12, background:'var(--surface)', color:'var(--text-primary)' }}>
+                                        <option value="">Which membership?</option>
+                                        {sellableMemberships.map(m => <option key={m.st_membership_type_id} value={m.st_membership_type_id}>{m.name}</option>)}
+                                      </select>
+                                      <div style={{ fontSize:10, color:'#B5341A', fontWeight:600 }}>
+                                        Creates a real membership and invoice in ServiceTitan for this customer.
+                                      </div>
+                                      {membershipMsg && (
+                                        <div style={{ fontSize:11, padding:'5px 8px', borderRadius:'var(--radius)',
+                                          background: membershipMsg.startsWith('Error') ? 'var(--danger-bg)' : 'var(--success-bg)',
+                                          color: membershipMsg.startsWith('Error') ? 'var(--danger)' : 'var(--success)' }}>{membershipMsg}</div>
+                                      )}
+                                    </>
+                                  )}
                                 </div>
-                                <div onClick={() => setAlsoMembership(p => !p)}>
-                                  <span style={{ fontSize:12, fontWeight:600, color: alsoMembership ? '#1d4ed8' : 'var(--text-primary)' }}>Also sold a membership</span>
-                                  <span style={{ fontSize:11, color:'var(--text-muted)', marginLeft:6 }}>+${(commissionRates.membership||2).toFixed(2)}</span>
-                                </div>
-                              </label>
+                              )}
 
                               <button onClick={checkAvailability} disabled={!selectedJobType || !selectedBU || availLoading}
                                 style={{ width:'100%', padding:'8px 0', border:'1px solid #16A34A', borderRadius:'var(--radius)', background:'var(--surface)', color:'#16A34A', fontSize:12, fontWeight:600, cursor: selectedJobType && selectedBU ? 'pointer' : 'not-allowed', opacity: selectedJobType && selectedBU ? 1 : .5, display:'flex', alignItems:'center', justifyContent:'center', gap:6 }}>
