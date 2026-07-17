@@ -30,14 +30,40 @@ function fmtDate(dateStr) {
   return new Date(dateStr + 'T12:00:00').toLocaleDateString('en-US', { weekday:'short', month:'short', day:'numeric' })
 }
 
-function adherencePct(sched, nonAdherentSeconds) {
+// A rep is "adherent" while actually working the phones. Matches the graphical
+// schedule's definition so the two views agree.
+const ADHERENT_STATUSES = ['Available', 'On Call', 'Wrap Up']
+
+const minsOfDay = (iso) => { const d = new Date(iso); return d.getHours() * 60 + d.getMinutes() }
+
+// Adherence = the share of the scheduled shift the rep actually spent in a
+// working state, within the scheduled window.
+//
+// The old version did (scheduled − flagged-bad time) / scheduled, so an absence
+// — with no bad time to subtract — scored 100%, exactly backwards. It also
+// relied on a stored `adherent` flag that isn't reliably populated. This counts
+// worked time from the status itself, so a no-show is 0% and a late login only
+// earns credit from the moment they actually came on.
+function adherencePct(sched, dayEvents) {
   if (!sched || !sched.shift_start || !sched.shift_end) return null
   const [sh, sm] = sched.shift_start.split(':').map(Number)
   const [eh, em] = sched.shift_end.split(':').map(Number)
-  const totalMins = (eh * 60 + em) - (sh * 60 + sm)
-  if (totalMins <= 0) return null
-  const nonAdherentMins = (nonAdherentSeconds || 0) / 60
-  return Math.max(0, Math.round(((totalMins - nonAdherentMins) / totalMins) * 100))
+  const winStart = sh * 60 + sm
+  const winEnd = eh * 60 + em
+  if (winEnd <= winStart) return null
+
+  let adherentMins = 0
+  for (const ev of dayEvents || []) {
+    if (!ev.started_at || !ADHERENT_STATUSES.includes(ev.status)) continue
+    const start = minsOfDay(ev.started_at)
+    // Still open (no ended_at) → assume it ran to shift end, not forever.
+    let end = ev.ended_at ? minsOfDay(ev.ended_at) : winEnd
+    if (end < start) end = winEnd   // crossed midnight; clamp to the shift
+    const s = Math.max(start, winStart)
+    const e = Math.min(end, winEnd)
+    if (e > s) adherentMins += e - s
+  }
+  return Math.max(0, Math.min(100, Math.round((adherentMins / (winEnd - winStart)) * 100)))
 }
 
 function toYMD(d) {
@@ -256,12 +282,10 @@ export default function AttendancePage() {
       const totalPoints = pPoints.reduce((sum, pt) => sum + parseFloat(pt.points), 0)
       const breakViolations = pEvents.filter(e => e.status === 'Break' && e.duration_seconds > (15 + GRACE) * 60).length
       const lunchViolations = pEvents.filter(e => e.status === 'Lunch' && e.duration_seconds > (30 + GRACE) * 60).length
-      const avgAdherence = pScheds.length > 0
-        ? Math.round(pScheds.reduce((sum, s) => {
-            const dayEvents = pEvents.filter(e => e.started_at.startsWith(s.date))
-            const late = dayEvents.filter(e => !e.adherent).reduce((a, b) => a + (b.duration_seconds || 0), 0)
-            return sum + (adherencePct(s, late) || 100)
-          }, 0) / pScheds.length) : null
+      const adhPcts = pScheds
+        .map(s => adherencePct(s, pEvents.filter(e => e.started_at?.startsWith(s.date))))
+        .filter(v => v != null)
+      const avgAdherence = adhPcts.length ? Math.round(adhPcts.reduce((a, b) => a + b, 0) / adhPcts.length) : null
       return { profile: p, daysScheduled: pScheds.length, totalPoints, breakViolations, lunchViolations, avgAdherence, pointEntries: pPoints }
     })
     setReportData(results)
@@ -469,12 +493,12 @@ export default function AttendancePage() {
               const pScheds = schedules.filter(s => s.profile_id === p.id)
               const pEvents = statusEvents.filter(e => e.profile_id === p.id)
               if (pScheds.length === 0 && pEvents.length === 0) return null
-              const avgAdh = pScheds.length > 0
-                ? Math.round(pScheds.reduce((sum, s) => {
-                    const dayEvents = pEvents.filter(e => e.started_at.startsWith(s.date))
-                    const late = dayEvents.filter(e => !e.adherent).reduce((a, b) => a + (b.duration_seconds || 0), 0)
-                    return sum + (adherencePct(s, late) || 100)
-                  }, 0) / pScheds.length) : null
+              // Average only over days with a valid schedule; a null day must
+              // not count as 100 (the old `|| 100` also turned a real 0 into 100).
+              const dayPcts = pScheds
+                .map(s => adherencePct(s, pEvents.filter(e => e.started_at?.startsWith(s.date))))
+                .filter(v => v != null)
+              const avgAdh = dayPcts.length ? Math.round(dayPcts.reduce((a, b) => a + b, 0) / dayPcts.length) : null
 
               return (
                 <div key={p.id} style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius-lg)', overflow:'hidden' }}>
@@ -506,8 +530,7 @@ export default function AttendancePage() {
                           const lunchEvent = dayEvents.find(e => e.status === 'Lunch')
                           const offlineEvent = [...dayEvents].reverse().find(e => e.status === 'Offline')
                           if (!sched && dayEvents.length === 0) return null
-                          const lateSeconds = dayEvents.filter(e => !e.adherent).reduce((a, b) => a + (b.duration_seconds || 0), 0)
-                          const pct = adherencePct(sched, lateSeconds)
+                          const pct = adherencePct(sched, dayEvents)
                           const bv = (ev, limit) => ev && ev.duration_seconds > (limit + GRACE) * 60
                           return (
                             <tr key={date}>
