@@ -225,10 +225,41 @@ export default function DialerPage() {
   // survives navigation. It used to be created here, which meant leaving the
   // dialer destroyed the Device and inbound calls could not be answered.
   const {
-    twilioReady, callStatus, callDuration,
+    twilioReady, callStatus, callDuration, incomingCall,
     makeCall: phoneMakeCall, hangUp,
     pendingInbound, setPendingInbound,
   } = usePhone()
+
+  // Skills-based outbound routing. When the rep has selected active campaigns
+  // (via the Queues selector), Next / auto-advance serve leads from those
+  // campaigns in the admin-set priority order, instead of the blended pool.
+  const [repCampPriority, setRepCampPriority] = useState([]) // [{campaign_id, priority}] granted, ordered
+  useEffect(() => {
+    if (!profile?.id) { setRepCampPriority([]); return }
+    sb.from('csr_campaigns').select('campaign_id, priority').eq('profile_id', profile.id).eq('active', true)
+      .then(({ data }) => setRepCampPriority((data || []).sort((a, b) => a.priority - b.priority)))
+  }, [profile?.id])
+
+  const activeCampOrder = useMemo(() => {
+    const ids = Array.isArray(profile?.active_campaign_ids) ? profile.active_campaign_ids : []
+    return repCampPriority.filter(p => ids.includes(p.campaign_id)).map(p => p.campaign_id)
+  }, [profile?.active_campaign_ids, repCampPriority])
+  const skillsMode = activeCampOrder.length > 0
+
+  // Next lead under skills routing: today's callbacks first, then the oldest
+  // unclaimed lead from the highest-priority active campaign.
+  const nextSkillLead = useCallback(() => {
+    const workable = c => !isDone(c) && c.status !== 'Max Attempts' && !c.claimed_by
+    const byOldest = (a, b) => new Date(a.created_at) - new Date(b.created_at)
+    const inActive = contacts.filter(c => activeCampOrder.includes(c.campaign_id) && workable(c))
+    const cb = inActive.filter(c => isCallbackDueToday(c)).sort(byOldest)
+    if (cb.length) return cb[0]
+    for (const campId of activeCampOrder) {
+      const lead = inActive.filter(c => c.campaign_id === campId).sort(byOldest)[0]
+      if (lead) return lead
+    }
+    return null
+  }, [contacts, activeCampOrder])
 
   // Load ST job types + business units + campaigns on mount
   useEffect(() => {
@@ -596,9 +627,24 @@ export default function DialerPage() {
   // Explicit selection (queue click, search, inbound pop) opens/focuses a tab.
   const selectContact = (id) => openTab(id)
   const navNextPending = () => {
-    const next = filtered.find(x => !isDone(x) && x.status !== 'Max Attempts' && !x.claimed_by)
+    const next = skillsMode
+      ? nextSkillLead()
+      : filtered.find(x => !isDone(x) && x.status !== 'Max Attempts' && !x.claimed_by)
     if (next) navigateActiveTo(next.id)
   }
+
+  // Auto-progressive: when a skills-routed rep is free and nothing's loaded,
+  // pull their next lead automatically. Inbound wins — never advance while an
+  // inbound call is ringing or in progress.
+  useEffect(() => {
+    if (!skillsMode) return
+    if (incomingCall || callStatus) return
+    if (profile?.status !== 'Available') return
+    if (selectedContact && !isDone(selectedContact)) return
+    const next = nextSkillLead()
+    if (next) navigateActiveTo(next.id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [skillsMode, incomingCall, callStatus, profile?.status, selectedContact, nextSkillLead])
 
   const claimContact = async () => {
     if (!selectedContact || selectedContact.claimed_by) return
@@ -658,7 +704,9 @@ export default function DialerPage() {
       setContactLogs(logs || [])
 
       if (!stay) {
-        const nextContact = filtered.slice(selectedIdx + 1).find(x => !isDone(x) && x.status !== 'Max Attempts')
+        const nextContact = skillsMode
+          ? nextSkillLead()
+          : filtered.slice(selectedIdx + 1).find(x => !isDone(x) && x.status !== 'Max Attempts')
         if (nextContact) navigateActiveTo(nextContact.id)
         else { closeTab(selectedId) }
       }
