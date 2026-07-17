@@ -1921,6 +1921,7 @@ app.post('/api/twilio/queue/wait', (req, res) => {
 app.post('/api/twilio/taskrouter/assignment', async (req, res) => {
   try {
     const workerAttrs = JSON.parse(req.body.WorkerAttributes || '{}')
+    const taskAttrs = JSON.parse(req.body.TaskAttributes || '{}')
     const contactUri = workerAttrs.contact_uri
     if (!contactUri) {
       console.error('TaskRouter assignment: worker has no contact_uri —', req.body.WorkerSid)
@@ -1929,7 +1930,11 @@ app.post('/api/twilio/taskrouter/assignment', async (req, res) => {
     res.json({
       instruction: 'dequeue',
       to: contactUri,
-      from: twilioPhone,
+      // The CALLER's number, not ours. The browser reads call.parameters.From to
+      // identify who's ringing (DialerPage 'incoming' handler) — passing
+      // twilioPhone here made every inbound call show up as our own number
+      // against a blank contact.
+      from: taskAttrs.from_number || twilioPhone,
       post_work_activity_sid: TWILIO_ACTIVITY_AVAILABLE || undefined,
       record: 'record-from-answer-dual',
       recording_status_callback: `${appUrl}/api/twilio/recording`,
@@ -2008,14 +2013,30 @@ app.post('/api/twilio/taskrouter/events', async (req, res) => {
       return
     }
 
+    // task.wrapup fires the moment the call ends; task.completed only fires once
+    // the task is closed out. Both must end the row — relying on task.completed
+    // alone left calls showing as live forever while the task sat in 'wrapping'.
     if (type === 'task.completed' || type === 'task.deleted' || type === 'task.wrapup') {
       const { data: task } = await supabase.from('call_tasks')
         .select('answered_at, ended_at').eq('task_sid', taskSid).maybeSingle()
-      if (task?.ended_at) return   // already closed by task.canceled
-      const talk = task?.answered_at
-        ? Math.max(0, Math.round((Date.now() - new Date(task.answered_at).getTime()) / 1000))
-        : null
-      await supabase.from('call_tasks').update({ ended_at: now, talk_seconds: talk }).eq('task_sid', taskSid)
+
+      if (!task?.ended_at) {   // may already be closed by task.canceled
+        const talk = task?.answered_at
+          ? Math.max(0, Math.round((Date.now() - new Date(task.answered_at).getTime()) / 1000))
+          : null
+        await supabase.from('call_tasks').update({ ended_at: now, talk_seconds: talk }).eq('task_sid', taskSid)
+      }
+
+      // Close the task out in TaskRouter too. Nothing else does — a task left
+      // in 'wrapping' lingers indefinitely and keeps the worker tied up.
+      if (type === 'task.wrapup' && TWILIO_WORKSPACE_SID) {
+        try {
+          await twilioClient.taskrouter.v1.workspaces(TWILIO_WORKSPACE_SID)
+            .tasks(taskSid).update({ assignmentStatus: 'completed', reason: 'call ended' })
+        } catch (e) {
+          console.warn(`could not complete task ${taskSid}:`, e.message)
+        }
+      }
     }
   } catch (err) {
     console.error('TaskRouter events error:', err.message)
