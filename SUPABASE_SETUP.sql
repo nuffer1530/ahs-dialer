@@ -35,10 +35,19 @@ create trigger on_auth_user_created
 alter table call_logs add column if not exists correction text;
 
 -- Allow public read/write on profiles (needed for role check)
+-- CREATE POLICY has no IF NOT EXISTS, so drop first — otherwise re-running this
+-- file aborts here ("policy already exists") and every statement below it,
+-- including the migrations, silently never runs.
 alter table profiles enable row level security;
+drop policy if exists "Users can view all profiles" on profiles;
 create policy "Users can view all profiles" on profiles for select using (true);
+drop policy if exists "Users can update own profile" on profiles;
 create policy "Users can update own profile" on profiles for update using (auth.uid() = id);
+drop policy if exists "Service can insert profiles" on profiles;
 create policy "Service can insert profiles" on profiles for insert with check (true);
+
+-- Note there is deliberately no delete policy on profiles: users are
+-- deactivated server-side with the service key, never deleted from the browser.
 
 -- ─────────────────────────────────────────────
 -- USER DEACTIVATION (run this on an existing database)
