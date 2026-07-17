@@ -201,3 +201,23 @@ begin
   alter publication supabase_realtime add table schedule_blocks;
 exception when duplicate_object then null;
 end $$;
+
+-- ─────────────────────────────────────────────
+-- SKILLS-BASED ROUTING (blended inbound + outbound)
+-- ─────────────────────────────────────────────
+-- Two layers:
+--   ENTITLEMENT (admin grants which queues a CSR may work)
+--     - inbound: profiles.inbound_skill
+--     - outbound: csr_campaigns rows (active = granted, priority = order) — already exists.
+--       A new campaign auto-appears as a grantable skill because the admin lists
+--       every campaign; granting is just an csr_campaigns upsert.
+--   AVAILABILITY (the CSR picks which of their granted queues they're taking now)
+--     - inbound: profiles.inbound_available
+--     - outbound: profiles.active_campaign_ids (which granted campaigns they're on)
+--
+-- Routing: inbound always outranks outbound. A CSR available for inbound only
+-- takes an outbound lead when no inbound is waiting; outbound campaigns are
+-- served in csr_campaigns.priority order among the ones they're available for.
+alter table profiles add column if not exists inbound_skill boolean not null default false;
+alter table profiles add column if not exists inbound_available boolean not null default false;
+alter table profiles add column if not exists active_campaign_ids jsonb not null default '[]';

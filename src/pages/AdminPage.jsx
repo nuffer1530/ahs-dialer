@@ -847,7 +847,7 @@ export default function AdminPage() {
     if (!editProfile) return
     setSaving(true)
     try {
-      const { error } = await sb.from('profiles').update({ name: editProfile.name, role: editProfile.role }).eq('id', editProfile.id)
+      const { error } = await sb.from('profiles').update({ name: editProfile.name, role: editProfile.role, inbound_skill: !!editProfile.inbound_skill }).eq('id', editProfile.id)
       if (error) throw error
       const { data } = await sb.from('profiles').select('*').eq('id', editProfile.id).maybeSingle()
       if (data) setProfiles(prev => prev.map(p => p.id === data.id ? data : p))
@@ -1516,8 +1516,22 @@ export default function AdminPage() {
                   </select>
                 </div>
                 <div>
-                  <label className="form-label" style={{ marginBottom:8, display:'block' }}>Campaign Access & Priority</label>
-                  <div style={{ fontSize:11, color:'var(--text-muted)', marginBottom:10 }}>Toggle campaigns on/off. Use arrows to set priority — #1 loads first when CSR goes Available.</div>
+                  <label className="form-label" style={{ marginBottom:8, display:'block' }}>Skillset</label>
+                  <div style={{ fontSize:11, color:'var(--text-muted)', marginBottom:10 }}>Grant the queues this rep may log into. They choose which of these to go available for. Inbound always outranks outbound; campaign #1 is served first.</div>
+
+                  {/* Inbound skill — the fixed, top-priority queue */}
+                  <label style={{ display:'flex', alignItems:'center', gap:10, padding:'10px 12px', marginBottom:10, borderRadius:'var(--radius)', cursor:'pointer',
+                    background: editProfile.inbound_skill ? 'var(--accent-bg)' : 'var(--surface-2)',
+                    border:`1px solid ${editProfile.inbound_skill ? 'var(--accent)' : 'var(--border)'}` }}>
+                    <input type="checkbox" checked={!!editProfile.inbound_skill}
+                      onChange={e => setEditProfile(p => ({ ...p, inbound_skill: e.target.checked }))} />
+                    <div style={{ flex:1 }}>
+                      <div style={{ fontSize:13, fontWeight:600, color: editProfile.inbound_skill ? 'var(--accent)' : 'var(--text-primary)' }}>Inbound queue</div>
+                      <div style={{ fontSize:11, color:'var(--text-muted)' }}>Takes live inbound calls from the queue — always served before outbound.</div>
+                    </div>
+                  </label>
+
+                  <div style={{ fontSize:10, fontWeight:600, textTransform:'uppercase', letterSpacing:.5, color:'var(--text-muted)', marginBottom:8 }}>Outbound campaigns</div>
                   {editProfile.campaigns.filter(c => c.active).sort((a, b) => a.priority - b.priority).length > 0 && (
                     <div style={{ marginBottom:8 }}>
                       <div style={{ fontSize:10, fontWeight:600, textTransform:'uppercase', letterSpacing:.5, color:'var(--text-muted)', marginBottom:6 }}>Active (priority order)</div>
