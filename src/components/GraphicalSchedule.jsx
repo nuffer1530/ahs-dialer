@@ -285,12 +285,13 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
     if (!block?.dbId) saveBlocksToDb(profileId, newBlocks)
   }
 
-  const addExtraBlock = async (profileId, type) => {
+  const addExtraBlock = async (profileId, type, startInterval) => {
     setAddBlockMenu(null)
     if (type === 'shift') { openShiftModal(profileId); return }
     const existing = blocks[profileId] || []
     const shiftBlock = existing.find(b => b.type === 'shift')
-    const start = shiftBlock ? shiftBlock.start + 4 : 8
+    // Start where the manager clicked; fall back to just inside the shift.
+    const start = startInterval != null ? startInterval : (shiftBlock ? shiftBlock.start + 4 : 8)
     const durations = { outbound:8, meeting:4, break:1, lunch:2, pto:TOTAL_INTERVALS, sick:TOTAL_INTERVALS, holiday:TOTAL_INTERVALS }
     const duration = durations[type] || 2
     if (['outbound','meeting'].includes(type)) {
@@ -453,11 +454,11 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
                     </div>
                     <div style={{ fontSize:11, fontWeight:600, color:'var(--text-primary)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'normal', wordBreak:'break-word', flex:1, minWidth:0, lineHeight:1.3 }}>{p.name||p.email}</div>
                     {isAdmin && (
-                      <button onClick={() => { setAddBlockMenu({ profileId:p.id }) }}
+                      <button onClick={e => { const r = e.currentTarget.getBoundingClientRect(); setAddBlockMenu({ profileId:p.id, x:r.left, y:r.bottom + 4 }) }}
                         style={{ width:22, height:22, borderRadius:'50%', border:'1px solid var(--border)', background:'var(--surface)', cursor:'pointer', fontSize:14, display:'flex', alignItems:'center', justifyContent:'center', color:'var(--text-muted)', flexShrink:0 }}
                         onMouseEnter={e => { e.currentTarget.style.background='var(--accent-bg)'; e.currentTarget.style.color='var(--accent)' }}
                         onMouseLeave={e => { e.currentTarget.style.background='var(--surface)'; e.currentTarget.style.color='var(--text-muted)' }}
-                        title="Add block">+</button>
+                        title="Add event">+</button>
                     )}
                   </div>
                   {/* Shift time + adherence below — read from live blocks so updates during drag */}
@@ -482,8 +483,17 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
                   </div>
                 </div>
 
-                {/* Track area */}
-                <div style={{ flex:1, position:'relative', overflow:'visible', minWidth: TOTAL_INTERVALS * CELL_WIDTH + 120 }}>
+                {/* Track area — right-click empty space to add an event here.
+                    Blocks stopPropagation their own context menu, so this only
+                    fires on the gaps between them. */}
+                <div style={{ flex:1, position:'relative', overflow:'visible', minWidth: TOTAL_INTERVALS * CELL_WIDTH + 120 }}
+                  onContextMenu={e => {
+                    if (!isAdmin) return
+                    e.preventDefault()
+                    const left = e.currentTarget.getBoundingClientRect().left
+                    const clicked = Math.max(0, Math.round((e.clientX - left) / CELL_WIDTH))
+                    setAddBlockMenu({ profileId:p.id, x:e.clientX, y:e.clientY, startInterval:clicked })
+                  }}>
                   {/* Grid lines */}
                   {Array.from({ length: END_HOUR - START_HOUR + 1 }, (_, i) => i).map(i => (
                     <div key={i} style={{ position:'absolute', left:i*4*CELL_WIDTH, top:0, bottom:0, width:'1px', background: i%4===0 ? 'var(--border)' : 'transparent', pointerEvents:'none' }} />
@@ -566,10 +576,29 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
                 const count = getCoverage(i)
                 const maxCount = profiles.length || 1
                 const pct = Math.min(count / maxCount, 1)
+                // A gap in coverage is the thing a manager most needs to SEE, so
+                // it can't render as empty space. Zero-coverage intervals get a
+                // red-tinted full-height column with a solid red baseline; a
+                // blank cell reads as "fine" when it's the opposite.
+                const noCoverage = count === 0
+                const barColor = pct >= 0.8 ? '#0ca30c' : pct >= 0.5 ? '#eda100' : '#d03b3b'
                 return (
-                  <div key={i} style={{ position:'absolute', left:i*CELL_WIDTH, bottom:4, width:Math.max(CELL_WIDTH-1,1), height: Math.max(pct * 20, pct > 0 ? 4 : 0),
-                    background: pct >= 0.8 ? '#0ca30c' : pct >= 0.5 ? '#eda100' : pct > 0 ? '#d03b3b' : 'transparent',
-                    borderRadius:2, transition:'height .1s' }} />
+                  <div key={i}
+                    onMouseEnter={e => {
+                      const r = e.currentTarget.getBoundingClientRect()
+                      setTooltip({ x:r.left + r.width/2, y:r.top - 8,
+                        content: `${intervalToTime(i)} — ${count} agent${count === 1 ? '' : 's'} covering${noCoverage ? ' · NO COVERAGE' : ''}` })
+                    }}
+                    onMouseLeave={() => setTooltip(null)}
+                    style={{ position:'absolute', left:i*CELL_WIDTH, top:0, bottom:0, width:Math.max(CELL_WIDTH-1,1),
+                      background: noCoverage ? 'rgba(226,75,74,.16)' : 'transparent' }}>
+                    {noCoverage ? (
+                      <div style={{ position:'absolute', bottom:0, left:0, right:0, height:6, background:'#d03b3b' }} />
+                    ) : (
+                      <div style={{ position:'absolute', bottom:4, left:0, right:0, height:Math.max(pct * 20, 4),
+                        background:barColor, borderRadius:2, transition:'height .1s' }} />
+                    )}
+                  </div>
                 )
               })}
             </div>
@@ -602,6 +631,7 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
             </div>
             {[
               { label: isShift ? 'Edit shift' : 'Edit block', action: () => { setContextMenu(null); openShiftModal(profileId) }, danger: false },
+              { label: 'Add event…', action: () => { setAddBlockMenu({ profileId, x, y }); setContextMenu(null) }, danger: false },
               { label: isShift ? 'Delete shift' : `Remove ${bt?.label||'block'}`, action: () => { setContextMenu(null); if (isScheduleRow) { if(confirm(`Remove ${bt?.label || block.type}?`)) deleteSchedule(profileId) } else removeBlock(profileId, block.id) }, danger: true },
             ].map(item => (
               <button key={item.label} onMouseDown={item.action}
@@ -618,12 +648,15 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
       {/* Add block menu */}
       {addBlockMenu && <div style={{ position:'fixed', inset:0, zIndex:199 }} onMouseDown={() => setAddBlockMenu(null)} />}
       {addBlockMenu && (
-        <div style={{ position:'fixed', left:LABEL_WIDTH - 16, top:'30%', background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius)', boxShadow:'0 4px 20px rgba(0,0,0,.2)', zIndex:200, minWidth:180, overflow:'hidden' }}>
-          <div style={{ padding:'6px 14px', fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:.5, color:'var(--text-muted)', borderBottom:'1px solid var(--border)' }}>Add Block</div>
+        <div style={{ position:'fixed',
+          left: Math.min(addBlockMenu.x ?? LABEL_WIDTH - 16, window.innerWidth - 200),
+          top: Math.min(addBlockMenu.y ?? window.innerHeight * 0.3, window.innerHeight - 340),
+          background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius)', boxShadow:'0 4px 20px rgba(0,0,0,.2)', zIndex:200, minWidth:180, overflow:'hidden' }}>
+          <div style={{ padding:'6px 14px', fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:.5, color:'var(--text-muted)', borderBottom:'1px solid var(--border)' }}>Add Event</div>
           {['shift','break','lunch','outbound','meeting','pto','sick','holiday'].map(type => {
             const bt = BLOCK_TYPES.find(b => b.id === type)
             return (
-              <button key={type} onMouseDown={() => addExtraBlock(addBlockMenu.profileId, type)}
+              <button key={type} onMouseDown={() => addExtraBlock(addBlockMenu.profileId, type, addBlockMenu.startInterval)}
                 style={{ display:'flex', alignItems:'center', gap:10, width:'100%', padding:'9px 14px', background:'transparent', border:'none', cursor:'pointer', fontSize:12, color:'var(--text-primary)', textAlign:'left' }}
                 onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
                 onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
