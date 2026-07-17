@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { sb } from '../lib/supabase'
 import { useAuth } from '../lib/AuthContext'
+import { inboundStats, outboundStats, fmtSecs, fmtPct, SERVICE_LEVEL_SECONDS, SERVICE_LEVEL_TARGET } from '../lib/analytics'
 
 const DAYS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun']
 
@@ -132,6 +133,8 @@ export default function MyPage() {
     memberships:  { exceeds: 5,   meets: 3,   improvement: 2  },
   })
   const [commissions, setCommissions] = useState([])
+  const [myTasks, setMyTasks] = useState([])   // this rep's inbound calls (call_tasks)
+  const [myLogs, setMyLogs] = useState([])     // this rep's outbound calls (call_logs)
   const [commWeekBase, setCommWeekBase] = useState(getTodayMonday)
   const [commLoading, setCommLoading] = useState(false)
 
@@ -147,18 +150,26 @@ export default function MyPage() {
       const to = new Date(); to.setDate(to.getDate() + 30)
       const fromStr = toYMD(from), toStr = toYMD(to)
 
-      const [{ data: profs }, { data: scheds }, { data: events }, { data: pts }, { data: wts }, { data: thr }] = await Promise.all([
+      // call_logs is keyed by rep display-name string, not profile_id.
+      const repName = profile.name || profile.email
+
+      const [{ data: profs }, { data: scheds }, { data: events }, { data: pts }, { data: wts }, { data: thr }, { data: tasks }, { data: cl }] = await Promise.all([
         sb.from('profiles').select('id, name, email, avatar, role').eq('active', true).order('name'),
         sb.from('schedules').select('*').gte('date', fromStr).lte('date', toStr),
         sb.from('status_events').select('*').eq('profile_id', profile.id).gte('started_at', fromStr + 'T00:00:00').order('started_at', { ascending: false }),
         sb.from('attendance_points').select('*').eq('profile_id', profile.id).gte('date', fromStr),
         sb.from('app_settings').select('value').eq('key', 'scorecard_weights').maybeSingle(),
         sb.from('app_settings').select('value').eq('key', 'scorecard_thresholds').maybeSingle(),
+        // Real telephony, same sources the Analytics page uses.
+        sb.from('call_tasks').select('*').eq('agent_profile_id', profile.id).gte('queued_at', fromStr + 'T00:00:00'),
+        sb.from('call_logs').select('*').eq('rep', repName).gte('created_at', fromStr + 'T00:00:00'),
       ])
       setProfiles(profs || [])
       setSchedules(scheds || [])
       setStatusEvents(events || [])
       setAttendancePoints(pts || [])
+      setMyTasks(tasks || [])
+      setMyLogs(cl || [])
       if (wts?.value) { try { setScWeights(JSON.parse(wts.value)) } catch (e) {} }
       if (thr?.value) { try { setScThresholds(JSON.parse(thr.value)) } catch (e) {} }
       setLoading(false)
@@ -221,10 +232,13 @@ export default function MyPage() {
   const myPoints = attendancePoints.filter(p => p.date >= monthStart)
   const totalPoints = myPoints.reduce((s, p) => s + parseFloat(p.points || 0), 0)
 
-  const myEvents = statusEvents.filter(e => e.started_at?.slice(0,10) >= monthStart)
-  const callEvents = myEvents.filter(e => e.status === 'On Call')
-  const totalCallMins = callEvents.reduce((s, e) => s + (e.duration_seconds || 0) / 60, 0)
-  const avgCallMins = callEvents.length ? (totalCallMins / callEvents.length).toFixed(1) : '--'
+  // Real month-to-date telephony, computed the same way as the Analytics page so
+  // a rep's personal numbers match what an admin sees for them. Previously
+  // "Calls Handled" counted On-Call status events, which is a proxy, not calls.
+  const monthTasks = myTasks.filter(t => t.queued_at?.slice(0,10) >= monthStart)
+  const monthLogs = myLogs.filter(l => l.created_at?.slice(0,10) >= monthStart)
+  const myInbound = inboundStats(monthTasks)
+  const myOutbound = outboundStats(monthLogs)
 
   const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December']
   const scorecardLabel = `${MONTH_NAMES[scorecardMonth.month]} ${scorecardMonth.year}`
@@ -479,10 +493,14 @@ export default function MyPage() {
                 <div style={{ fontSize:11, color:'var(--text-muted)', marginBottom:20 }}>Month to date . {new Date().toLocaleDateString('en-US', { month:'long', year:'numeric' })}</div>
 
                 <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(180px,1fr))', gap:12, marginBottom:32 }}>
+                  <StatCard label="Inbound Handled" value={myInbound.handled} sub="Calls you answered" />
+                  <StatCard label="Avg Handle Time" value={fmtSecs(myInbound.aht)} sub="Inbound talk time" />
+                  <StatCard label="Service Level" value={fmtPct(myInbound.serviceLevel)}
+                    sub={`Answered within ${SERVICE_LEVEL_SECONDS}s`}
+                    valueColor={myInbound.serviceLevel == null ? undefined : myInbound.serviceLevel >= SERVICE_LEVEL_TARGET ? 'var(--success)' : myInbound.serviceLevel >= 60 ? 'var(--warning)' : 'var(--danger)'} />
+                  <StatCard label="Outbound Calls" value={myOutbound.calls} sub="Dials you made" />
+                  <StatCard label="Booked" value={myOutbound.booked} sub={`${fmtPct(myOutbound.conversion)} conversion`} valueColor={myOutbound.booked > 0 ? 'var(--success)' : 'var(--text-primary)'} />
                   <StatCard label="Attendance Points" value={totalPoints.toFixed(1)} sub="Lower is better" valueColor={totalPoints === 0 ? 'var(--success)' : totalPoints <= 1 ? 'var(--warning)' : 'var(--danger)'} />
-                  <StatCard label="Calls Handled" value={callEvents.length} sub="This month" />
-                  <StatCard label="Avg Call Duration" value={avgCallMins === '--' ? '--' : `${avgCallMins}m`} sub="Per call" />
-                  <StatCard label="Status Events" value={myEvents.length} sub="All statuses" />
                 </div>
 
                 <div style={{ fontSize:12, fontWeight:700, color:'var(--text-secondary)', textTransform:'uppercase', letterSpacing:.6, marginBottom:12 }}>Attendance Points Log</div>
