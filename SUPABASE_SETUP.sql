@@ -202,6 +202,14 @@ begin
 exception when duplicate_object then null;
 end $$;
 
+-- Realtime for commissions so the "You Got Paid!" banner fires the moment the
+-- sync records a new payout for a rep.
+do $$
+begin
+  alter publication supabase_realtime add table commissions;
+exception when duplicate_object then null;
+end $$;
+
 -- ─────────────────────────────────────────────
 -- SKILLS-BASED ROUTING (blended inbound + outbound)
 -- ─────────────────────────────────────────────

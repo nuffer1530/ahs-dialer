@@ -169,6 +169,27 @@ export default function ScheduleAlerts() {
     return () => clearInterval(t)
   }, [profile?.id])
 
+  // "You Got Paid!" — pops when the commission sync records a new payout for
+  // this rep (a booked job ServiceTitan just marked completed). Realtime INSERT
+  // only, so old commissions don't replay on load.
+  useEffect(() => {
+    if (!profile?.id) return
+    const ch = sb.channel(`pay-${profile.id}`)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'commissions', filter: `profile_id=eq.${profile.id}` },
+        ({ new: c }) => {
+          const id = `pay:${c.id || Date.now()}`
+          setAlerts(prev => [...prev, {
+            id, kind: 'pay',
+            jobNumber: c.job_number || (c.st_job_id ? String(c.st_job_id) : null),
+            amount: Number(c.amount || 0),
+          }])
+          playChime()
+          setTimeout(() => setAlerts(prev => prev.filter(a => a.id !== id)), 15000)
+        })
+      .subscribe()
+    return () => sb.removeChannel(ch)
+  }, [profile?.id])
+
   const dismiss = (id) => setAlerts(prev => prev.filter(a => a.id !== id))
   if (alerts.length === 0) return null
 
@@ -176,6 +197,27 @@ export default function ScheduleAlerts() {
     <div style={{ position: 'fixed', top: 16, right: 16, zIndex: 1900, display: 'flex', flexDirection: 'column', gap: 10, maxWidth: 340 }}>
       <style>{`@keyframes sched-in{from{opacity:0;transform:translateX(20px)}to{opacity:1;transform:none}}`}</style>
       {alerts.map(a => {
+        if (a.kind === 'pay') {
+          const g = '#16A34A'
+          return (
+            <div key={a.id} style={{
+              background: 'var(--surface)', border: `2px solid ${g}`, borderRadius: 'var(--radius-lg)',
+              boxShadow: '0 10px 32px rgba(0,0,0,.22)', padding: '12px 14px',
+              display: 'flex', alignItems: 'center', gap: 12, animation: 'sched-in .18s ease-out',
+            }}>
+              <div style={{ width: 34, height: 34, borderRadius: '50%', background: g + '1f', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, fontSize: 18 }}>💰</div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: .5, textTransform: 'uppercase', color: g }}>You got paid!</div>
+                <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--text-primary)' }}>
+                  ${a.amount.toFixed(2)}{a.jobNumber ? <span style={{ fontWeight: 500, color: 'var(--text-muted)', fontSize: 13 }}> · Job #{a.jobNumber}</span> : null}
+                </div>
+              </div>
+              <button onClick={() => dismiss(a.id)}
+                style={{ width: 24, height: 24, borderRadius: 6, border: 'none', background: 'var(--surface-2)', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 14, flexShrink: 0 }}
+                title="Dismiss">×</button>
+            </div>
+          )
+        }
         const accent = a.phase === 'now' ? '#2a78d6' : '#C87800'
         return (
           <div key={a.id} style={{
