@@ -375,6 +375,40 @@ function DialerLayoutInner() {
     return `${m}:${String(s).padStart(2,'0')}`
   }
 
+  // Auto-tardiness: the first time a rep goes Available for the day, if it's
+  // more than the grace window past their scheduled shift start, log a 0.5
+  // attendance point with a note of when they came on vs when they were due.
+  const recordLateArrival = async (nowIso) => {
+    try {
+      const d = new Date()
+      const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+      const { data: sched } = await sb.from('schedules').select('shift_start, day_type')
+        .eq('profile_id', profile.id).eq('date', today).maybeSingle()
+      if (!sched || !sched.shift_start || ['pto', 'sick', 'holiday', 'off'].includes(sched.day_type)) return
+
+      // Only the FIRST Available of the day is their arrival — check before the
+      // new status_event is inserted below.
+      const { data: prior } = await sb.from('status_events').select('id')
+        .eq('profile_id', profile.id).eq('status', 'Available').gte('started_at', today + 'T00:00:00').limit(1)
+      if (prior && prior.length) return
+      // One auto late point per day.
+      const { data: existing } = await sb.from('attendance_points').select('id')
+        .eq('profile_id', profile.id).eq('date', today).eq('reason', 'late').limit(1)
+      if (existing && existing.length) return
+
+      const [sh, sm] = sched.shift_start.split(':').map(Number)
+      const shiftStart = new Date(today + 'T00:00:00'); shiftStart.setHours(sh, sm, 0, 0)
+      const arrival = new Date(nowIso)
+      if (arrival.getTime() <= shiftStart.getTime() + GRACE_MINUTES * 60_000) return   // within grace
+
+      const fmt = t => t.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      await sb.from('attendance_points').insert({
+        profile_id: profile.id, date: today, points: 0.5, reason: 'late', auto_generated: true, created_by: profile.id,
+        notes: `Auto: went available at ${fmt(arrival)}, scheduled ${fmt(shiftStart)} (${GRACE_MINUTES}-min grace)`,
+      })
+    } catch (e) { console.warn('late arrival check:', e.message) }
+  }
+
   const updateStatus = async (newStatus) => {
     setShowStatusMenu(false)
     setAgentStatus(newStatus)
@@ -391,6 +425,9 @@ function DialerLayoutInner() {
     }
     await sb.from('profiles').update({ status: newStatus, status_since: now }).eq('id', profile.id)
     syncWorkerActivity(profile.id, newStatus)
+    // Check tardiness before inserting the new Available event (so it's not
+    // counted as a prior arrival).
+    if (newStatus === 'Available') await recordLateArrival(now)
     const { data: evt } = await sb.from('status_events').insert({
       profile_id: profile.id, status: newStatus, started_at: now
     }).select().single()
