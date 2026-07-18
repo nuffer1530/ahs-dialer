@@ -1305,7 +1305,7 @@ let techCache = null
 async function getBoardTechs() {
   if (techCache && techCache.expires > Date.now()) return techCache.data
   const res = await stGet(`/settings/v2/tenant/${ST_TENANT_ID}/technicians?active=true&pageSize=500`)
-  const data = (res?.data || []).map(t => ({ id: t.id, name: t.name, businessUnitId: t.businessUnitId }))
+  const data = (res?.data || []).map(t => ({ id: t.id, name: t.name, businessUnitId: t.businessUnitId, team: t.team }))
   techCache = { data, expires: Date.now() + 10 * 60_000 }
   return data
 }
@@ -1325,10 +1325,12 @@ async function build3DayBoard() {
     if (c.role === 'install' && c.trade) installBU[c.trade] = Number(id)
   })
 
-  // Techs by home BU (for the Service-tech head count).
+  // Techs by home BU (for the Service-tech head count). Exclude the Leadership
+  // team — ops managers (Dale Chason, Dean Christian, Ed Acosta, Cedric
+  // Hendricks…) have a service BU as their home but aren't field capacity.
   const techs = await getBoardTechs()
   const techsByBU = {}
-  techs.forEach(t => { if (t.businessUnitId != null) (techsByBU[t.businessUnitId] ||= []).push(t.id) })
+  techs.forEach(t => { if (t.businessUnitId != null && t.team !== 'Leadership') (techsByBU[t.businessUnitId] ||= []).push(t.id) })
 
   // Time-off across the whole 3-day window, so we can prorate tech availability.
   const shiftRes = await stGet(`/dispatch/v2/tenant/${ST_TENANT_ID}/technician-shifts?shiftType=TimeOff&startsOnOrAfter=${days[0].startUtc.toISOString()}&endsOnOrBefore=${days[2].endUtc.toISOString()}&pageSize=500`)
