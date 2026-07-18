@@ -1305,10 +1305,12 @@ let techCache = null
 async function getBoardTechs() {
   if (techCache && techCache.expires > Date.now()) return techCache.data
   const res = await stGet(`/settings/v2/tenant/${ST_TENANT_ID}/technicians?active=true&pageSize=500`)
-  const data = (res?.data || []).map(t => ({ id: t.id, businessUnitId: t.businessUnitId }))
+  const data = (res?.data || []).map(t => ({ id: t.id, name: t.name, businessUnitId: t.businessUnitId }))
   techCache = { data, expires: Date.now() + 10 * 60_000 }
   return data
 }
+
+const chunkIds = (arr, n) => Array.from({ length: Math.ceil(arr.length / n) }, (_, i) => arr.slice(i * n, i * n + n))
 
 async function build3DayBoard() {
   const days = [0, 1, 2].map(boardDay)
@@ -1332,10 +1334,11 @@ async function build3DayBoard() {
   const shiftRes = await stGet(`/dispatch/v2/tenant/${ST_TENANT_ID}/technician-shifts?shiftType=TimeOff&startsOnOrAfter=${days[0].startUtc.toISOString()}&endsOnOrBefore=${days[2].endUtc.toISOString()}&pageSize=500`)
   const timeOff = (shiftRes?.data || []).map(s => ({ tech: s.technicianId, start: new Date(s.start), end: new Date(s.end) }))
 
-  // Job-type → category, to split opportunity jobs from warranty/callback.
-  const { data: spiffs } = await supabase.from('job_type_spiffs').select('st_job_type_id, category')
-  const catByType = {}
-  ;(spiffs || []).forEach(s => { catByType[String(s.st_job_type_id)] = s.category })
+  // Job-type → category (splits opportunities from warranty/callback) and name
+  // (for drill-downs).
+  const { data: spiffs } = await supabase.from('job_type_spiffs').select('st_job_type_id, category, name')
+  const catByType = {}, nameByType = {}
+  ;(spiffs || []).forEach(s => { catByType[String(s.st_job_type_id)] = s.category; nameByType[String(s.st_job_type_id)] = s.name })
 
   // Calls-per-tech per trade (default 3), admin-tunable in app_settings.
   const { data: cptRow } = await supabase.from('app_settings').select('value').eq('key', 'board_calls_per_tech').maybeSingle()
@@ -1343,11 +1346,47 @@ async function build3DayBoard() {
   try { callsPerTech = JSON.parse(cptRow?.value || '{}') } catch {}
   const cpt = (trade) => Number(callsPerTech[trade]) || 3
 
-  // Jobs per day, grouped by BU (one ST call per day).
+  // Jobs per day (one ST call per day). Keep the fields the board + drill-down need.
   const jobsByDay = await Promise.all(days.map(d =>
     stGet(`/jpm/v2/tenant/${ST_TENANT_ID}/jobs?appointmentStartsOnOrAfter=${d.startUtc.toISOString()}&appointmentStartsBefore=${d.endUtc.toISOString()}&pageSize=500`)
       .then(r => r?.data || []).catch(() => [])
   ))
+
+  // HVAC maintenance is an opportunity only when the system is 12+ years old.
+  // Find which locations (across all 3 days' HVAC maint jobs) qualify, in as
+  // few equipment calls as possible.
+  const hvacMaintLocs = new Set()
+  jobsByDay.flat().forEach(j => {
+    const t = buMap[j.businessUnitId]?.trade
+    if (t === 'HVAC' && catByType[String(j.jobTypeId)] === 'maintenance' && j.locationId) hvacMaintLocs.add(j.locationId)
+  })
+  const oldSystemLocs = new Set()
+  for (const batch of chunkIds([...hvacMaintLocs], 50)) {
+    try {
+      const eq = await stGet(`/equipmentsystems/v2/tenant/${ST_TENANT_ID}/installed-equipment?locationIds=${batch.join(',')}&pageSize=500`)
+      const ageByLoc = {}
+      ;(eq?.data || []).forEach(e => {
+        const d = e.installedOn || e.createdOn
+        if (!d || e.locationId == null) return
+        const yrs = (Date.now() - new Date(d).getTime()) / (365.25 * 864e5)
+        ageByLoc[e.locationId] = Math.max(ageByLoc[e.locationId] || 0, yrs)
+      })
+      Object.entries(ageByLoc).forEach(([lid, yrs]) => { if (yrs >= 12) oldSystemLocs.add(Number(lid)) })
+    } catch (e) { console.warn('board equipment age:', e.message) }
+  }
+
+  // An opportunity = a job with a real shot at a repair/replacement sale.
+  // Excludes installs, warranty/callback (non_commissionable), and maintenance —
+  // except HVAC maintenance on a 12+ year system.
+  const isOpportunity = (j) => {
+    const cat = catByType[String(j.jobTypeId)]
+    const trade = buMap[j.businessUnitId]?.trade
+    const role = buMap[j.businessUnitId]?.role
+    if (role === 'install' || cat === 'non_commissionable') return false
+    if (cat === 'maintenance') return trade === 'HVAC' && oldSystemLocs.has(j.locationId)
+    return true
+  }
+  const jobRow = (j) => ({ jobNumber: j.jobNumber, type: nameByType[String(j.jobTypeId)] || 'Job', summary: (j.summary || '').slice(0, 80) })
 
   const overlapFractionOfDay = (off, day) => {
     const s = Math.max(off.start.getTime(), day.startUtc.getTime())
@@ -1355,36 +1394,47 @@ async function build3DayBoard() {
     if (e <= s) return 0
     return Math.min((e - s) / (8 * 3600_000), 1)   // 8h = a full working day
   }
+  const techName = (id) => (techs.find(t => t.id === id)?.name) || `Tech ${id}`
 
   const board = BOARD_TRADES.map(trade => {
     const svc = serviceBU[trade], ins = installBU[trade]
     const svcTechIds = techsByBU[svc] || []
     const perDay = days.map((day, di) => {
       const jobs = jobsByDay[di]
-      // Techs: head count minus prorated time-off for this trade's service techs.
-      let techsAvail = svcTechIds.length
-      for (const techId of svcTechIds) {
-        const offToday = timeOff.filter(o => o.tech === techId)
-          .reduce((sum, o) => sum + overlapFractionOfDay(o, day), 0)
-        techsAvail -= Math.min(offToday, 1)
-      }
+
+      // Techs: head count minus prorated time-off. Keep the roster for drill-down.
+      let techsAvail = 0
+      const techList = svcTechIds.map(techId => {
+        const off = Math.min(timeOff.filter(o => o.tech === techId).reduce((s, o) => s + overlapFractionOfDay(o, day), 0), 1)
+        techsAvail += 1 - off
+        return { name: techName(techId), off: off >= 1 ? 'off' : off > 0 ? `${Math.round((1 - off) * 100)}%` : null }
+      })
       techsAvail = Math.round(techsAvail * 10) / 10
 
       const svcJobs = jobs.filter(j => j.businessUnitId === svc)
-      const calls = svcJobs.length
-      const opps = svcJobs.filter(j => catByType[String(j.jobTypeId)] !== 'non_commissionable').length
-      const installs = jobs.filter(j => j.businessUnitId === ins).length
+      const oppJobs = jobs.filter(j => buMap[j.businessUnitId]?.trade === trade && isOpportunity(j))
+      const installJobs = jobs.filter(j => j.businessUnitId === ins)
 
       const capacity = Math.round(techsAvail * cpt(trade) * 10) / 10
-      const pct = capacity > 0 ? calls / capacity : (calls > 0 ? 1 : 0)
-      const needed = Math.max(0, Math.round(capacity - calls))
-      const status = capacity === 0 ? 'none' : pct >= 1 ? 'good' : pct >= 0.75 ? 'warn' : 'under'
-      return { date: day.date, techs: techsAvail, calls, capacity, pct: Math.round(pct * 100), needed, opps, installs, status }
+      const pct = capacity > 0 ? svcJobs.length / capacity : (svcJobs.length > 0 ? 1 : 0)
+      const needed = Math.max(0, Math.round(capacity - svcJobs.length))
+      // Target is 80%: green at/over, amber climbing, red well below.
+      const status = capacity === 0 ? 'none' : pct >= 0.8 ? 'good' : pct >= 0.6 ? 'warn' : 'under'
+      return {
+        date: day.date, techs: techsAvail, calls: svcJobs.length, capacity,
+        pct: Math.round(pct * 100), needed, opps: oppJobs.length, installs: installJobs.length, status,
+        detail: {
+          techs: techList,
+          calls: svcJobs.map(jobRow),
+          opps: oppJobs.map(jobRow),
+          installs: installJobs.map(jobRow),
+        },
+      }
     })
     return { trade, days: perDay }
   })
 
-  return { generatedAt: new Date().toISOString(), dates: days.map(d => d.date), board }
+  return { generatedAt: new Date().toISOString(), target: 80, dates: days.map(d => d.date), board }
 }
 
 app.get('/api/board/3day', async (req, res) => {
@@ -1394,6 +1444,24 @@ app.get('/api/board/3day', async (req, res) => {
     console.error('3-day board error:', err.message)
     res.status(500).json({ error: err.message })
   }
+})
+
+// Calls-per-tech per trade (admin-tunable). GET returns current + defaults.
+app.get('/api/board/config', async (req, res) => {
+  const { data } = await supabase.from('app_settings').select('value').eq('key', 'board_calls_per_tech').maybeSingle()
+  let cpt = {}
+  try { cpt = JSON.parse(data?.value || '{}') } catch {}
+  res.json({ trades: BOARD_TRADES, callsPerTech: cpt, default: 3 })
+})
+app.post('/api/board/config', async (req, res) => {
+  const admin = await requireAdmin(req, res)
+  if (!admin) return
+  const clean = {}
+  BOARD_TRADES.forEach(t => { const v = Number(req.body?.callsPerTech?.[t]); if (v > 0) clean[t] = v })
+  const { error } = await supabase.from('app_settings').upsert(
+    { key: 'board_calls_per_tech', value: JSON.stringify(clean) }, { onConflict: 'key' })
+  if (error) return res.status(500).json({ error: error.message })
+  res.json({ ok: true, callsPerTech: clean })
 })
 
 // ─────────────────────────────────────────────
