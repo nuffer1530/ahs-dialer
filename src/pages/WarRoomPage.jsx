@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { sb } from '../lib/supabase'
 import { useData } from '../lib/DataContext'
 import { inboundStats, outboundStats, fmtSecs, SERVICE_LEVEL_SECONDS, SERVICE_LEVEL_TARGET } from '../lib/analytics'
@@ -60,12 +60,41 @@ function Panel({ title, icon, live, children, style }) {
 }
 
 export default function WarRoomPage() {
-  const { contacts, campaigns } = useData()
+  const { contacts } = useData()
   const [logs, setLogs] = useState([])
   const [tasks, setTasks] = useState([])
   const [liveCalls, setLiveCalls] = useState([])
   const [profiles, setProfiles] = useState([])
   const [time, setTime] = useState(new Date())
+  const [ticker, setTicker] = useState({ enabled: false, messages: [] })
+  const [isFull, setIsFull] = useState(false)
+  const rootRef = useRef(null)
+
+  // Fullscreen the wallboard itself (not the whole app) so the nav drops away.
+  const toggleFull = () => {
+    if (document.fullscreenElement) document.exitFullscreen?.()
+    else rootRef.current?.requestFullscreen?.()
+  }
+  useEffect(() => {
+    const onFs = () => setIsFull(!!document.fullscreenElement)
+    document.addEventListener('fullscreenchange', onFs)
+    return () => document.removeEventListener('fullscreenchange', onFs)
+  }, [])
+
+  // Floor ticker — admin-editable messages from app_settings. Polled (not
+  // realtime-dependent) so an alert posted from Settings shows within ~15s.
+  useEffect(() => {
+    const load = () => sb.from('app_settings').select('value').eq('key', 'warroom_ticker').maybeSingle()
+      .then(({ data }) => {
+        try {
+          const v = JSON.parse(data?.value || '{}')
+          setTicker({ enabled: !!v.enabled, messages: Array.isArray(v.messages) ? v.messages.filter(m => m && m.text) : [] })
+        } catch { setTicker({ enabled: false, messages: [] }) }
+      })
+    load()
+    const t = setInterval(load, 15000)
+    return () => clearInterval(t)
+  }, [])
 
   useEffect(() => {
     const since = startOfToday().toISOString()
@@ -137,9 +166,29 @@ export default function WarRoomPage() {
   const queueColor = queued.length === 0 ? C.green : longestWait > 60 ? C.red : C.amber
 
   return (
-    <div style={{ minHeight:'100vh', height:'100vh', background:C.bg, color:C.text,
+    <div ref={rootRef} style={{ minHeight:'100vh', height:'100vh', background:C.bg, color:C.text,
       fontFamily:'-apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif',
       padding:20, display:'flex', flexDirection:'column', gap:14, overflow:'hidden', boxSizing:'border-box' }}>
+
+      {/* Floor ticker — scrolls admin-set messages across the top */}
+      {ticker.enabled && ticker.messages.length > 0 && (
+        <div style={{ overflow:'hidden', whiteSpace:'nowrap', background:'#000', border:`1px solid ${C.border}`, borderRadius:10, padding:'8px 0', flexShrink:0 }}>
+          <div style={{ display:'inline-block', animation:'wr-marquee 40s linear infinite', willChange:'transform' }}>
+            {[0, 1].map(dup => (
+              <span key={dup} aria-hidden={dup === 1}>
+                {ticker.messages.map((m, i) => {
+                  const col = m.tone === 'alert' ? C.red : m.tone === 'success' ? C.green : C.text
+                  return (
+                    <span key={i} style={{ margin:'0 44px', fontSize:17, fontWeight:700, color:col, letterSpacing:.3 }}>
+                      {m.tone === 'alert' ? '⚠ ' : ''}{m.text}
+                    </span>
+                  )
+                })}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Header */}
       <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', flexShrink:0 }}>
@@ -149,11 +198,21 @@ export default function WarRoomPage() {
           <div style={{ width:8, height:8, borderRadius:'50%', background:C.green, animation:'wr-pulse 1.5s infinite' }} />
           <span style={{ fontSize:12, color:C.muted, letterSpacing:1 }}>LIVE</span>
         </div>
-        <div style={{ textAlign:'right' }}>
-          <div style={{ fontSize:30, fontWeight:800, letterSpacing:-1, color:C.blue, fontVariantNumeric:'tabular-nums' }}>
-            {time.toLocaleTimeString([], { hour:'2-digit', minute:'2-digit', second:'2-digit' })}
+        <div style={{ display:'flex', alignItems:'center', gap:16 }}>
+          <button onClick={toggleFull} title={isFull ? 'Exit fullscreen' : 'Fullscreen'}
+            style={{ background:C.panel, border:`1px solid ${C.border}`, borderRadius:8, color:C.muted, cursor:'pointer', padding:'8px 10px', display:'flex', alignItems:'center' }}>
+            {isFull ? (
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M9 3v3a3 3 0 01-3 3H3M15 3v3a3 3 0 003 3h3M9 21v-3a3 3 0 00-3-3H3M15 21v-3a3 3 0 013-3h3" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
+            ) : (
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M3 9V5a2 2 0 012-2h4M21 9V5a2 2 0 00-2-2h-4M3 15v4a2 2 0 002 2h4M21 15v4a2 2 0 01-2 2h-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
+            )}
+          </button>
+          <div style={{ textAlign:'right' }}>
+            <div style={{ fontSize:30, fontWeight:800, letterSpacing:-1, color:C.blue, fontVariantNumeric:'tabular-nums' }}>
+              {time.toLocaleTimeString([], { hour:'2-digit', minute:'2-digit', second:'2-digit' })}
+            </div>
+            <div style={{ fontSize:12, color:C.muted }}>{time.toLocaleDateString([], { weekday:'long', month:'long', day:'numeric' })}</div>
           </div>
-          <div style={{ fontSize:12, color:C.muted }}>{time.toLocaleDateString([], { weekday:'long', month:'long', day:'numeric' })}</div>
         </div>
       </div>
 
@@ -291,31 +350,10 @@ export default function WarRoomPage() {
         </Panel>
       </div>
 
-      {/* Campaign progress strip */}
-      {campaigns.length > 0 && (
-        <div style={{ display:'flex', gap:14, flexShrink:0 }}>
-          {campaigns.map(camp => {
-            const cc = contacts.filter(c => c.campaign_id === camp.id)
-            if (!cc.length) return null
-            const done = cc.filter(c => ['Booked','Not Interested','DNC','Bad Data','Max Attempts'].includes(c.status)).length
-            const booked = cc.filter(c => c.status === 'Booked').length
-            const pct = cc.length ? Math.round((done / cc.length) * 100) : 0
-            return (
-              <div key={camp.id} style={{ flex:1, background:C.panel, border:`1px solid ${C.border}`, borderRadius:12, padding:'10px 16px' }}>
-                <div style={{ display:'flex', justifyContent:'space-between', marginBottom:6, fontSize:13 }}>
-                  <span style={{ fontWeight:700 }}>{camp.name}</span>
-                  <span style={{ color:C.muted }}>{booked} booked · {pct}%</span>
-                </div>
-                <div style={{ height:7, background:C.panel2, borderRadius:99, overflow:'hidden' }}>
-                  <div style={{ height:'100%', width:`${pct}%`, background:`linear-gradient(90deg,${C.blue},${C.green})`, borderRadius:99, transition:'width 1s ease' }} />
-                </div>
-              </div>
-            )
-          })}
-        </div>
-      )}
-
-      <style>{`@keyframes wr-pulse { 0%,100%{opacity:1} 50%{opacity:.25} }`}</style>
+      <style>{`
+        @keyframes wr-pulse { 0%,100%{opacity:1} 50%{opacity:.25} }
+        @keyframes wr-marquee { from{transform:translateX(0)} to{transform:translateX(-50%)} }
+      `}</style>
     </div>
   )
 }

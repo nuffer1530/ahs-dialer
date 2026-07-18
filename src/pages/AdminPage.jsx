@@ -407,6 +407,94 @@ function rangeBounds(key) {
   return { start: s, end: null }
 }
 
+// Editor for the Call Center TV ticker — the scrolling messages/alerts on the
+// wallboard. Stored in app_settings.warroom_ticker; the TV polls it.
+function FloorTicker() {
+  const [enabled, setEnabled] = useState(false)
+  const [messages, setMessages] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [msg, setMsg] = useState('')
+
+  useEffect(() => {
+    sb.from('app_settings').select('value').eq('key', 'warroom_ticker').maybeSingle().then(({ data }) => {
+      try {
+        const v = JSON.parse(data?.value || '{}')
+        setEnabled(!!v.enabled)
+        setMessages(Array.isArray(v.messages) ? v.messages : [])
+      } catch { /* first run */ }
+      setLoading(false)
+    })
+  }, [])
+
+  const save = async (nextEnabled, nextMessages) => {
+    setSaving(true)
+    const clean = nextMessages.map(m => ({ text: (m.text || '').trim(), tone: m.tone || 'info' })).filter(m => m.text)
+    const { error } = await sb.from('app_settings').upsert(
+      { key: 'warroom_ticker', value: JSON.stringify({ enabled: nextEnabled, messages: clean }) }, { onConflict: 'key' })
+    setSaving(false)
+    setMsg(error ? `Error: ${error.message}` : '✓ Saved — live on the TV within ~15s')
+    setTimeout(() => setMsg(''), 4000)
+  }
+
+  const addLine = () => setMessages(m => [...m, { text: '', tone: 'info' }])
+  const setLine = (i, patch) => setMessages(m => m.map((x, j) => j === i ? { ...x, ...patch } : x))
+  const removeLine = (i) => setMessages(m => m.filter((_, j) => j !== i))
+
+  if (loading) return <div className="spinner" style={{ margin:'40px auto' }} />
+
+  const TONES = [
+    { id:'info', label:'Info', color:'var(--text-primary)' },
+    { id:'success', label:'Good news', color:'#16A34A' },
+    { id:'alert', label:'Alert', color:'#DC2626' },
+  ]
+
+  return (
+    <div className="card" style={{ maxWidth:760 }}>
+      <div className="card-header">
+        <div className="card-title">Call Center TV — Floor Ticker</div>
+        {msg && <span style={{ fontSize:12, color: msg.startsWith('Error') ? 'var(--danger)' : 'var(--success)' }}>{msg}</span>}
+      </div>
+      <div className="card-body" style={{ display:'flex', flexDirection:'column', gap:16 }}>
+        <div style={{ fontSize:12, color:'var(--text-muted)' }}>
+          Messages scroll across the top of the Call Center TV. Use Alert (red) for anything urgent to the floor.
+        </div>
+
+        <label style={{ display:'flex', alignItems:'center', gap:10, cursor:'pointer' }}>
+          <div onClick={() => { const v = !enabled; setEnabled(v); save(v, messages) }}
+            style={{ width:40, height:22, borderRadius:99, background: enabled ? 'var(--accent)' : 'var(--border)', position:'relative', transition:'background .15s', flexShrink:0 }}>
+            <div style={{ position:'absolute', top:2, left: enabled ? 20 : 2, width:18, height:18, borderRadius:'50%', background:'#fff', transition:'left .15s' }} />
+          </div>
+          <span style={{ fontSize:13, fontWeight:600 }}>{enabled ? 'Ticker on' : 'Ticker off'}</span>
+        </label>
+
+        <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+          {messages.map((m, i) => (
+            <div key={i} style={{ display:'flex', gap:8, alignItems:'center' }}>
+              <select value={m.tone || 'info'} onChange={e => setLine(i, { tone: e.target.value })}
+                style={{ padding:'7px 8px', border:'1px solid var(--border)', borderRadius:'var(--radius)', fontSize:12, background:'var(--surface)', color:'var(--text-primary)', flexShrink:0 }}>
+                {TONES.map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
+              </select>
+              <input className="form-input" value={m.text} placeholder="Message to the floor…"
+                onChange={e => setLine(i, { text: e.target.value })}
+                style={{ flex:1, borderLeft:`3px solid ${TONES.find(t => t.id === (m.tone||'info'))?.color}` }} />
+              <button className="btn sm danger" onClick={() => removeLine(i)}>Remove</button>
+            </div>
+          ))}
+          {messages.length === 0 && <div style={{ fontSize:12, color:'var(--text-muted)' }}>No messages. Add one to show a ticker on the TV.</div>}
+        </div>
+
+        <div style={{ display:'flex', gap:8 }}>
+          <button className="btn sm" onClick={addLine}>+ Add message</button>
+          <button className="btn sm primary" onClick={() => save(enabled, messages)} disabled={saving} style={{ marginLeft:'auto' }}>
+            {saving ? 'Saving…' : 'Save ticker'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function CommissionReport() {
   const [range, setRange] = useState('week')
   const [rows, setRows] = useState([])
@@ -1077,7 +1165,7 @@ export default function AdminPage() {
   }
 
   const TABS = isAdmin
-    ? [{ id:'users', label:'Users' }, { id:'campaigns', label:'Campaigns' }, { id:'commission', label:'Commission' }, { id:'payouts', label:'Payouts' }, { id:'statuses', label:'Statuses' }, { id:'scorecards', label:'Scorecards' }]
+    ? [{ id:'users', label:'Users' }, { id:'campaigns', label:'Campaigns' }, { id:'commission', label:'Commission' }, { id:'payouts', label:'Payouts' }, { id:'statuses', label:'Statuses' }, { id:'scorecards', label:'Scorecards' }, { id:'floortv', label:'Floor TV' }]
     : [{ id:'users', label:'My Profile' }, { id:'commission', label:'My Earnings' }]
 
   return (
@@ -1119,6 +1207,12 @@ export default function AdminPage() {
       {settingsTab === 'payouts' && isAdmin && (
         <div style={{ flex:1, overflowY:'auto', padding:24 }}>
           <CommissionReport />
+        </div>
+      )}
+
+      {settingsTab === 'floortv' && isAdmin && (
+        <div style={{ flex:1, overflowY:'auto', padding:24 }}>
+          <FloorTicker />
         </div>
       )}
 
