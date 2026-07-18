@@ -1636,12 +1636,19 @@ async function gatherCustomerFacts(id) {
       const eqRes = await stGet(`/equipmentsystems/v2/tenant/${ST_TENANT_ID}/installed-equipment?locationIds=${locIds.join(',')}&pageSize=50`)
       const eq = (eqRes?.data || []).map(e => ({
         name: e.name || e.type || 'Equipment',
+        // Make/model when ST has them — lets the brief name the actual unit.
+        // Defensive: undefined if the field isn't present, and stripped below.
+        make: e.manufacturer || e.make || null,
+        model: e.model || e.modelNumber || null,
         installedOn: e.installedOn || e.createdOn || null,
       })).filter(e => e.installedOn)
       if (eq.length) {
         facts.equipment = eq.slice(0, 6).map(e => {
           const yrs = e.installedOn ? Math.floor((Date.now() - new Date(e.installedOn)) / (365.25 * 864e5)) : null
-          return { name: e.name, ageYears: yrs }
+          const out = { name: e.name, ageYears: yrs }
+          if (e.make) out.make = e.make
+          if (e.model) out.model = e.model
+          return out
         })
       }
     }
@@ -1689,9 +1696,18 @@ async function gatherCustomerFacts(id) {
       ))
       const raw = perJob.flat()
       const all = raw.filter(e => String(e.customerId) === String(id))
+      // Only surface estimates from the last 6 months — an older open estimate is
+      // stale pricing the rep shouldn't pitch. Keyed on createdOn (when quoted),
+      // falling back to modifiedOn; an estimate with no usable date is dropped.
+      const sixMonthsAgo = Date.now() - 182 * 864e5
+      const isRecent = e => {
+        const d = e.createdOn || e.modifiedOn
+        return d && new Date(d).getTime() >= sixMonthsAgo
+      }
       const open = all.filter(e => {
         const s = (e.status?.name || '').toLowerCase()
-        return s === 'open' || (s === '' && e.active !== false && !e.soldOn)
+        const isOpen = s === 'open' || (s === '' && e.active !== false && !e.soldOn)
+        return isOpen && isRecent(e)
       })
       facts._debug.rawEstimates = raw.length
       facts._debug.afterCustomerFilter = all.length
