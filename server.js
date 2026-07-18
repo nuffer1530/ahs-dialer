@@ -1375,18 +1375,22 @@ async function build3DayBoard() {
     } catch (e) { console.warn('board equipment age:', e.message) }
   }
 
+  // Job types that never count as a booked call (non-productive / admin).
+  const EXCLUDE_CALL = /follow[- ]?up|callback|permitting|phone call/i
+  const isCountedCall = (j) => !EXCLUDE_CALL.test(nameByType[String(j.jobTypeId)] || '')
+
   // An opportunity = a job with a real shot at a repair/replacement sale.
-  // Excludes installs, warranty/callback (non_commissionable), and maintenance —
-  // except HVAC maintenance on a 12+ year system.
+  // Excludes installs, warranty/callback (non_commissionable), the non-productive
+  // types above, and maintenance — except HVAC maintenance on a 12+ year system.
   const isOpportunity = (j) => {
     const cat = catByType[String(j.jobTypeId)]
     const trade = buMap[j.businessUnitId]?.trade
     const role = buMap[j.businessUnitId]?.role
-    if (role === 'install' || cat === 'non_commissionable') return false
+    if (role === 'install' || cat === 'non_commissionable' || !isCountedCall(j)) return false
     if (cat === 'maintenance') return trade === 'HVAC' && oldSystemLocs.has(j.locationId)
     return true
   }
-  const jobRow = (j) => ({ jobNumber: j.jobNumber, type: nameByType[String(j.jobTypeId)] || 'Job', summary: (j.summary || '').slice(0, 80) })
+  const jobRow = (j) => ({ jobNumber: j.jobNumber, type: nameByType[String(j.jobTypeId)] || 'Job' })
 
   const overlapFractionOfDay = (off, day) => {
     const s = Math.max(off.start.getTime(), day.startUtc.getTime())
@@ -1411,7 +1415,8 @@ async function build3DayBoard() {
       })
       techsAvail = Math.round(techsAvail * 10) / 10
 
-      const svcJobs = jobs.filter(j => j.businessUnitId === svc)
+      // Booked calls exclude follow-up / callback / permitting / phone-call types.
+      const svcJobs = jobs.filter(j => j.businessUnitId === svc && isCountedCall(j))
       const oppJobs = jobs.filter(j => buMap[j.businessUnitId]?.trade === trade && isOpportunity(j))
       const installJobs = jobs.filter(j => j.businessUnitId === ins)
 
