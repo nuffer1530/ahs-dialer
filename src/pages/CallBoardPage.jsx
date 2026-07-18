@@ -47,7 +47,8 @@ function Cell({ trade, dayLabel, d, onDrill }) {
         <div style={{ display:'flex', flexDirection:'column' }}>
           <Metric label="Techs" value={d.techs} onClick={() => onDrill(trade, dayLabel, 'Service techs', d.detail.techs, 'tech')} />
           <Metric label="Booked" value={`${d.calls}/${d.capacity}`} onClick={() => onDrill(trade, dayLabel, 'Booked calls', d.detail.calls, 'job')} />
-          <Metric label={`Opps${oppRate != null ? ` (${oppRate}%)` : ''}`} value={d.opps} onClick={() => onDrill(trade, dayLabel, 'Opportunities', d.detail.opps, 'job')} />
+          <Metric label={<>Opps{oppRate != null && <span style={{ color: oppRate >= 30 ? '#16A34A' : '#DC2626', fontWeight:700 }}> {oppRate}%</span>}</>}
+            value={d.opps} onClick={() => onDrill(trade, dayLabel, 'Opportunities', d.detail.opps, 'job')} />
           <Metric label="Installs" value={d.installs} onClick={() => onDrill(trade, dayLabel, 'Installs', d.detail.installs, 'job')} />
         </div>
       </div>

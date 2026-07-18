@@ -67,8 +67,17 @@ export default function WarRoomPage() {
   const [profiles, setProfiles] = useState([])
   const [time, setTime] = useState(new Date())
   const [ticker, setTicker] = useState({ enabled: false, messages: [] })
+  const [board, setBoard] = useState(null)   // 3-day call board (today column shown)
   const [isFull, setIsFull] = useState(false)
   const rootRef = useRef(null)
+
+  // 3-Day Call Board — show today's "calls needed" per trade on the TV.
+  useEffect(() => {
+    const load = () => fetch('/api/board/3day').then(r => r.json()).then(setBoard).catch(() => {})
+    load()
+    const t = setInterval(load, 90_000)
+    return () => clearInterval(t)
+  }, [])
 
   // Fullscreen the wallboard itself (not the whole app) so the nav drops away.
   const toggleFull = () => {
@@ -227,6 +236,30 @@ export default function WarRoomPage() {
         <Kpi label="Booked Today" value={outbound.booked} color={C.green} glow={outbound.booked > 0} sub={`${outbound.calls} calls`} />
         <Kpi label="Agents Ready" value={agentsAvailable} color={agentsAvailable ? C.green : C.red} sub={`of ${profiles.length} on`} />
       </div>
+
+      {/* 3-Day Call Board — today's calls needed per trade */}
+      {board?.board && (
+        <div style={{ display:'grid', gridTemplateColumns:`repeat(${board.board.length}, 1fr)`, gap:12, flexShrink:0 }}>
+          {board.board.map(row => {
+            const d = row.days[0] || {}
+            const col = d.status === 'good' ? C.green : d.status === 'warn' ? C.amber : d.status === 'under' ? C.red : C.dim
+            return (
+              <div key={row.trade} style={{ background:C.panel, border:`1px solid ${C.border}`, borderTop:`3px solid ${col}`, borderRadius:14, padding:'12px 16px', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+                <div>
+                  <div style={{ fontSize:11, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color:C.muted }}>{row.trade}</div>
+                  <div style={{ fontSize:12, color:C.muted, marginTop:3 }}>{d.calls}/{d.capacity} booked · {d.pct}%</div>
+                </div>
+                <div style={{ textAlign:'right' }}>
+                  <div style={{ fontSize:32, fontWeight:800, lineHeight:1, color: d.needed > 0 ? col : C.green, fontVariantNumeric:'tabular-nums' }}>
+                    {d.needed > 0 ? d.needed : '✓'}
+                  </div>
+                  <div style={{ fontSize:10, color:C.muted, textTransform:'uppercase', letterSpacing:.4 }}>{d.needed > 0 ? 'calls needed' : 'at target'}</div>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
 
       {/* Main grid */}
       <div style={{ display:'grid', gridTemplateColumns:'1.25fr 1fr 1fr', gap:14, flex:1, minHeight:0 }}>
