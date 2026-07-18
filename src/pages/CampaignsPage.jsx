@@ -5,6 +5,7 @@ import { useNavigate } from 'react-router-dom'
 import { sb } from '../lib/supabase'
 import Badge from '../components/Badge'
 import Modal from '../components/Modal'
+import AICampaignModal from '../components/AICampaignModal'
 import { isDone, normPhone, findCol, parseLine, cleanPhone } from '../lib/utils'
 
 export default function CampaignsPage() {
@@ -12,6 +13,7 @@ export default function CampaignsPage() {
   const { isAdmin } = useAuth()
   const navigate = useNavigate()
   const [showModal, setShowModal] = useState(false)
+  const [showAI, setShowAI] = useState(false)
   const [editCamp, setEditCamp] = useState(null)
   const [campForm, setCampForm] = useState({ name:'', description:'', status:'Active', script:'', tips:'' })
   const [saving, setSaving] = useState(false)
@@ -172,8 +174,24 @@ export default function CampaignsPage() {
           <div style={{ fontSize:18, fontWeight:600, color:'var(--text-primary)' }}>Campaigns</div>
           <div style={{ fontSize:12, color:'var(--text-muted)', marginTop:2 }}>Manage contact lists and dialing campaigns</div>
         </div>
-        {isAdmin && <button className="btn primary" onClick={openNew} style={{ fontSize:13 }}>+ New campaign</button>}
+        {isAdmin && (
+          <div style={{ display:'flex', gap:8 }}>
+            <button className="btn" onClick={() => setShowAI(true)} style={{ fontSize:13 }}>✨ AI campaign</button>
+            <button className="btn primary" onClick={openNew} style={{ fontSize:13 }}>+ New campaign</button>
+          </div>
+        )}
       </div>
+
+      {showAI && (
+        <AICampaignModal
+          onClose={() => setShowAI(false)}
+          onCreated={(data) => {
+            setShowAI(false)
+            setImportProgress(`✓ Created "${data.campaignName}" with ${data.created} contacts.`)
+            setTimeout(() => setImportProgress(''), 5000)
+          }}
+        />
+      )}
 
       {importProgress && (
         <div style={{ background:'var(--accent-bg)', border:'1px solid var(--accent)', borderRadius:'var(--radius)', padding:'10px 16px', marginBottom:16, fontSize:13, color:'var(--accent)' }}>

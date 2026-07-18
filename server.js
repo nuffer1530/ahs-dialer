@@ -2319,6 +2319,339 @@ app.post('/api/twilio/hangup', async (req, res) => {
   }
 })
 
+// ═══════════════════════════════════════════════════════════════════════════
+// AI CAMPAIGN BUILDER — natural language → ServiceTitan audience → contacts.
+//
+// Claude maps a request onto ONE of a fixed catalog of recipes; it does NOT get
+// to invent queries. Each recipe is backed by ST endpoints verified live to
+// return data for this tenant (Jul 2026). Admin-only, previews before it
+// inserts, skips DNC + ST's own doNotService flag.
+//
+// ST realities baked in here (all verified live, do not "optimize" away):
+//  - Filter params are silently IGNORED (tagTypeIds, date windows) → we page the
+//    resource and filter in memory. The datasets are small (939 memberships,
+//    1087 equipment) except customers, which we pull via the 5k/page export feed.
+//  - No bulk phone feed: phone is per-customer via /customers/{id}/contacts.
+//  - installed-equipment.type is null → trade inferred from manufacturer/model.
+//  - membership.to is null for open-ended monthly plans → those never "expire".
+//  - Offset paging (?page=N) works on memberships/equipment/customers.
+// ═══════════════════════════════════════════════════════════════════════════
+
+const AUD_CAP = 20000              // hard ceiling on rows scanned per recipe
+const PHONE_CAP = 750              // max customers we resolve phones for per build
+const PHONE_CONCURRENCY = 8
+
+const normPhone10 = (v) => (v || '').replace(/\D/g, '').slice(-10)
+
+// Page an offset-paginated ST list (page=1..) until hasMore is false or cap hit.
+async function stPageAll(pathForPage, cap = AUD_CAP) {
+  const out = []
+  for (let page = 1; page <= 500; page++) {
+    const d = await stGet(pathForPage(page))
+    const rows = d?.data || []
+    out.push(...rows)
+    if (!d?.hasMore || out.length >= cap) break
+  }
+  return out
+}
+
+// Page the CRM export feed (5k/page, continuation-token). Far fewer calls than
+// offset paging for the full customer base.
+async function stExportAll(base, cap = AUD_CAP) {
+  const out = []
+  let token = null
+  for (let i = 0; i < 200; i++) {
+    const url = base + (token ? `${base.includes('?') ? '&' : '?'}from=${encodeURIComponent(token)}` : '')
+    const d = await stGet(url)
+    out.push(...(d?.data || []))
+    token = d?.continueFrom
+    if (!d?.hasMore || !token || out.length >= cap) break
+  }
+  return out
+}
+
+const dedupeByCustomer = (rows) => {
+  const seen = new Map()
+  for (const r of rows) if (r.customerId && !seen.has(r.customerId)) seen.set(r.customerId, r)
+  return [...seen.values()]
+}
+
+// The next-anniversary of a membership's start date, from today. Annual
+// maintenance recurs on the membership anniversary, so this is the due anchor —
+// deterministic and independent of ST's sparse/undated service-event records.
+function nextAnniversary(fromISO) {
+  if (!fromISO) return null
+  const from = new Date(fromISO)
+  if (Number.isNaN(from.getTime())) return null
+  const now = new Date()
+  const d = new Date(now.getFullYear(), from.getMonth(), from.getDate())
+  if (d < now) d.setFullYear(d.getFullYear() + 1)
+  return d
+}
+
+// ── Recipes. Each returns [{ customerId, reason, name?, address? }] ───────────
+
+async function recipeMembershipExpiring(plan) {
+  const months = Math.max(1, Math.min(24, plan.window_months || 3))
+  const now = new Date()
+  const soon = new Date(now); soon.setMonth(soon.getMonth() + months)
+  const past = new Date(now); past.setMonth(past.getMonth() - months)
+
+  const active = await stPageAll(p => `/memberships/v2/tenant/${ST_TENANT_ID}/memberships?status=Active&pageSize=200&page=${p}`)
+  const expiring = active
+    .filter(m => m.to && new Date(m.to) >= now && new Date(m.to) <= soon)
+    .map(m => ({ customerId: m.customerId, reason: `Membership expires ${String(m.to).slice(0, 10)}` }))
+
+  let cancelled = []
+  if (plan.include_cancelled) {
+    try {
+      const canc = await stPageAll(p => `/memberships/v2/tenant/${ST_TENANT_ID}/memberships?status=Canceled&pageSize=200&page=${p}`)
+      cancelled = canc
+        .filter(m => { const d = m.cancellationDate || m.to; return d && new Date(d) >= past && new Date(d) <= now })
+        .map(m => ({ customerId: m.customerId, reason: `Membership cancelled ${String(m.cancellationDate || m.to).slice(0, 10)}` }))
+    } catch (e) { console.warn('membership_expiring cancelled fetch failed:', e.message) }
+  }
+  return dedupeByCustomer([...expiring, ...cancelled])
+}
+
+async function recipeMaintenanceDue(plan) {
+  const trade = plan.trade || 'HVAC'
+  const months = Math.max(1, Math.min(24, plan.window_months || 3))
+  const now = new Date()
+  const soon = new Date(now); soon.setMonth(soon.getMonth() + months)
+
+  const services = await stPageAll(p => `/memberships/v2/tenant/${ST_TENANT_ID}/recurring-services?active=true&pageSize=200&page=${p}`)
+  const tradeRe = new RegExp(trade === 'Garage' ? 'garage' : trade, 'i')
+  const membIdsWithService = new Set(
+    services.filter(s => tradeRe.test(s.name || '')).map(s => s.membershipId))
+  if (!membIdsWithService.size) return []
+
+  const active = await stPageAll(p => `/memberships/v2/tenant/${ST_TENANT_ID}/memberships?status=Active&pageSize=200&page=${p}`)
+  return dedupeByCustomer(active
+    .filter(m => membIdsWithService.has(m.id))
+    .map(m => ({ m, due: nextAnniversary(m.from) }))
+    .filter(x => x.due && x.due >= now && x.due <= soon)
+    .map(x => ({ customerId: x.m.customerId, reason: `${trade} maintenance due ~${x.due.toISOString().slice(0, 10)}` })))
+}
+
+// Customers who had a matching job completed in the window. The planner picks
+// job_type_ids from the job-type catalog (empty = any job). ST's
+// completedOnOrAfter/jobStatus filters can be unreliable, so re-check both
+// client-side.
+async function recipeJobHistory(plan) {
+  const months = Math.max(1, Math.min(24, plan.window_months || 6))
+  const since = new Date(); since.setMonth(since.getMonth() - months)
+  const sinceISO = since.toISOString().slice(0, 10)
+  const ids = new Set((plan.job_type_ids || []).map(Number).filter(Boolean))
+
+  const jt = await stGet(`/jpm/v2/tenant/${ST_TENANT_ID}/job-types?active=true&pageSize=500`)
+  const typeById = new Map((jt?.data || []).map(t => [t.id, t.name || '']))
+
+  const jobs = await stPageAll(p => `/jpm/v2/tenant/${ST_TENANT_ID}/jobs?jobStatus=Completed&completedOnOrAfter=${sinceISO}&pageSize=500&page=${p}`)
+  return dedupeByCustomer(jobs
+    .filter(j => j.customerId && j.jobStatus === 'Completed' && j.completedOn && new Date(j.completedOn) >= since)
+    .filter(j => !ids.size || ids.has(j.jobTypeId))
+    .map(j => ({ customerId: j.customerId, reason: `${typeById.get(j.jobTypeId) || 'Job'} completed ${String(j.completedOn).slice(0, 10)}` })))
+}
+
+async function recipeTagType(plan) {
+  const tagId = Number(plan.tag_id)
+  if (!tagId) return []
+  const custs = await stExportAll(`/crm/v2/tenant/${ST_TENANT_ID}/export/customers`, 60000)
+  return custs
+    .filter(c => c.active !== false && !c.doNotService && (c.tagTypeIds || []).includes(tagId))
+    .map(c => ({ customerId: c.id, name: c.name, address: c.address, reason: `Tagged "${plan.tag_name || tagId}"` }))
+}
+
+const RECIPES = {
+  membership_expiring: recipeMembershipExpiring,
+  maintenance_due: recipeMaintenanceDue,
+  job_history: recipeJobHistory,
+  tag_type: recipeTagType,
+}
+
+// Turn matched customerIds into dialable contact rows: bulk-fetch names/addresses
+// where the recipe didn't already have them, then resolve one phone each.
+async function enrichAudience(matched) {
+  const need = matched.filter(m => !m.name || !m.address).map(m => m.customerId)
+  const custById = new Map()
+  for (let i = 0; i < need.length; i += 50) {
+    const ids = need.slice(i, i + 50).join(',')
+    try {
+      const d = await stGet(`/crm/v2/tenant/${ST_TENANT_ID}/customers?ids=${ids}&pageSize=50`)
+      for (const c of (d?.data || [])) custById.set(c.id, c)
+    } catch (e) { console.warn('enrich bulk customer failed:', e.message) }
+  }
+
+  const capped = matched.slice(0, PHONE_CAP)
+  const out = new Array(capped.length)
+  let idx = 0
+  await Promise.all(Array.from({ length: Math.min(PHONE_CONCURRENCY, capped.length) }, async () => {
+    while (idx < capped.length) {
+      const i = idx++
+      const m = capped[i]
+      const cust = custById.get(m.customerId)
+      const name = m.name || cust?.name || null
+      const addr = m.address || cust?.address || {}
+      let phone = null, email = null
+      try {
+        const d = await stGet(`/crm/v2/tenant/${ST_TENANT_ID}/customers/${m.customerId}/contacts`)
+        const rows = d?.data || []
+        const ph = rows.find(c => c.type === 'MobilePhone') || rows.find(c => (c.type || '').includes('Phone'))
+        const em = rows.find(c => c.type === 'Email' || c.type === 'MobileEmail')
+        phone = ph?.value || null; email = em?.value || null
+      } catch { /* no contacts → dropped as no-phone below */ }
+      out[i] = {
+        customerId: m.customerId, name, reason: m.reason, phone, email,
+        address: addr?.street || null, city: addr?.city || null,
+        state: addr?.state || null, zip: addr?.zip || null,
+      }
+    }
+  }))
+  return { rows: out.filter(Boolean), truncated: matched.length > PHONE_CAP, total: matched.length }
+}
+
+// Short-lived catalog caches (each one page: ~186 tags, ~112 job types).
+let _tagCatalog = null, _tagCatalogAt = 0
+async function getTagCatalog() {
+  if (_tagCatalog && Date.now() - _tagCatalogAt < 6 * 36e5) return _tagCatalog
+  const d = await stGet(`/settings/v2/tenant/${ST_TENANT_ID}/tag-types?pageSize=500&active=true`)
+  _tagCatalog = (d?.data || []).map(t => ({ id: t.id, name: (t.name || '').trim() }))
+  _tagCatalogAt = Date.now()
+  return _tagCatalog
+}
+let _jobTypeCatalog = null, _jobTypeCatalogAt = 0
+async function getJobTypeCatalog() {
+  if (_jobTypeCatalog && Date.now() - _jobTypeCatalogAt < 6 * 36e5) return _jobTypeCatalog
+  const d = await stGet(`/jpm/v2/tenant/${ST_TENANT_ID}/job-types?active=true&pageSize=500`)
+  _jobTypeCatalog = (d?.data || []).map(t => ({ id: t.id, name: (t.name || '').trim() }))
+  _jobTypeCatalogAt = Date.now()
+  return _jobTypeCatalog
+}
+
+// ── Planner: English → structured plan (Claude Haiku, strict JSON) ────────────
+async function planAudience(request, tagCatalog, jobTypeCatalog) {
+  if (!ANTHROPIC_KEY) throw new Error('AI planner unavailable (no ANTHROPIC_API_KEY)')
+  const sys = `You convert a call-center manager's plain-English request into a ServiceTitan audience plan for Awesome Home Services (HVAC, plumbing, electrical, garage doors). You may ONLY use the four recipes below. If the request doesn't fit one, return recipe "unsupported" and explain.
+
+RECIPES:
+- "membership_expiring": members whose membership is ending soon (and, if include_cancelled, recently-cancelled members to win back). Params: window_months (default 3), include_cancelled (bool — set true if they mention win-back, lapsed, or cancelled members).
+- "maintenance_due": active members whose annual maintenance for a trade is coming due. Params: trade (HVAC|Plumbing|Electrical|Garage), window_months (default 3).
+- "job_history": customers who had a particular kind of job completed recently (follow-up / win-back on past work). Params: job_type_ids (array of ids from the JOB TYPE CATALOG below — pick every type that fits, e.g. all "...Repair" types for "repairs"; leave empty for any job), window_months (default 6). A "tune-up" is a Maintenance job type.
+- "tag_type": customers carrying a specific ServiceTitan tag. Param: tag_id + tag_name, chosen from the TAG CATALOG below. Pick the single best-matching tag; if none clearly matches, set recipe "unsupported".
+
+TAG CATALOG (id: name):
+${tagCatalog.map(t => `${t.id}: ${t.name}`).join('\n')}
+
+JOB TYPE CATALOG (id: name):
+${jobTypeCatalog.map(t => `${t.id}: ${t.name}`).join('\n')}
+
+Return ONLY a JSON object, no markdown:
+{
+  "recipe": "membership_expiring|maintenance_due|job_history|tag_type|unsupported",
+  "trade": "HVAC|Plumbing|Electrical|Garage or null",
+  "window_months": number or null,
+  "include_cancelled": boolean,
+  "job_type_ids": [numbers] or [],
+  "tag_id": number or null,
+  "tag_name": "string or null",
+  "readback": "one plain sentence restating exactly who will be pulled",
+  "campaign_name": "short suggested campaign name (<= 5 words)",
+  "note": "if unsupported, one sentence on what ServiceTitan can't answer; else empty"
+}`
+  const r = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: { 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+    body: JSON.stringify({
+      model: 'claude-haiku-4-5-20251001', max_tokens: 500, system: sys,
+      messages: [{ role: 'user', content: request }],
+    }),
+  })
+  if (!r.ok) throw new Error(`AI planner error ${r.status}`)
+  const data = await r.json()
+  let text = (data.content || []).filter(b => b.type === 'text').map(b => b.text).join('').trim()
+  text = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim()
+  const plan = JSON.parse(text)
+  if (!RECIPES[plan.recipe] && plan.recipe !== 'unsupported') plan.recipe = 'unsupported'
+  return plan
+}
+
+app.post('/api/st/audience/plan', async (req, res) => {
+  if (!(await requireAdmin(req, res))) return
+  try {
+    const request = (req.body?.request || '').toString().slice(0, 1000)
+    if (!request.trim()) return res.status(400).json({ error: 'Describe who you want to reach.' })
+    const [tagCatalog, jobTypeCatalog] = await Promise.all([getTagCatalog(), getJobTypeCatalog()])
+    const plan = await planAudience(request, tagCatalog, jobTypeCatalog)
+    res.json({ plan })
+  } catch (err) {
+    console.error('audience/plan error:', err.message)
+    res.status(500).json({ error: err.message })
+  }
+})
+
+app.post('/api/st/audience/build', async (req, res) => {
+  if (!(await requireAdmin(req, res))) return
+  try {
+    const plan = req.body?.plan
+    const commit = req.body?.commit === true
+    if (!plan || !RECIPES[plan.recipe]) return res.status(400).json({ error: 'No runnable plan.' })
+
+    const matched = await RECIPES[plan.recipe](plan)
+    const { rows, truncated, total } = await enrichAudience(matched)
+
+    // DNC = any contact already marked DNC in Andi (the app's DNC cascade is by
+    // normalized phone). Also skip anything already in the contacts table.
+    const { data: existing } = await supabase.from('contacts').select('phone, status')
+    const dnc = new Set(), have = new Set()
+    for (const c of (existing || [])) {
+      const p = normPhone10(c.phone); if (!p) continue
+      have.add(p)
+      if (c.status === 'DNC') dnc.add(p)
+    }
+
+    let noPhone = 0, dncSkipped = 0, dupSkipped = 0
+    const keep = []
+    for (const r of rows) {
+      const p = normPhone10(r.phone)
+      if (!p) { noPhone++; continue }
+      if (dnc.has(p)) { dncSkipped++; continue }
+      if (have.has(p)) { dupSkipped++; continue }
+      keep.push(r)
+    }
+
+    const stats = { matched: total, truncated, resolved: rows.length, noPhone, dncSkipped, dupSkipped, dialable: keep.length }
+
+    if (!commit) {
+      return res.json({ stats, sample: keep.slice(0, 25).map(r => ({ name: r.name, phone: r.phone, reason: r.reason })) })
+    }
+
+    // Commit — create the campaign, then insert the dialable contacts.
+    const name = (req.body?.campaign_name || plan.campaign_name || 'AI Campaign').toString().slice(0, 120)
+    const { data: camp, error: ce } = await supabase.from('campaigns')
+      .insert({ name, description: plan.readback || '', status: 'Active', source_query: plan }).select().single()
+    if (ce) throw new Error('campaign create: ' + ce.message)
+
+    const contactRows = keep.map(r => ({
+      name: r.name || 'Unknown', phone: r.phone, email: r.email || null,
+      address: r.address || null, city: r.city || null, state: r.state || null, zip: r.zip || null,
+      source: 'ServiceTitan (AI)', import_notes: r.reason || null,
+      external_id: r.customerId ? String(r.customerId) : null,
+      status: 'Pending', attempts: 0, campaign_id: camp.id,
+    }))
+    let created = 0
+    for (let i = 0; i < contactRows.length; i += 1000) {
+      const { data, error } = await supabase.from('contacts').insert(contactRows.slice(i, i + 1000)).select('id')
+      if (error) throw new Error('contact insert: ' + error.message)
+      created += data?.length || 0
+    }
+    res.json({ stats, campaignId: camp.id, campaignName: name, created })
+  } catch (err) {
+    console.error('audience/build error:', err.message)
+    res.status(500).json({ error: err.message })
+  }
+})
+
 // ─────────────────────────────────────────────
 // ── SERVE REACT FRONTEND (must be last)
 // ─────────────────────────────────────────────
