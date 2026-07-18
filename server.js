@@ -1261,6 +1261,142 @@ app.post('/api/admin/user/reactivate', async (req, res) => {
 })
 
 // ─────────────────────────────────────────────
+// ── 3-DAY CALL BOARD
+// ─────────────────────────────────────────────
+// Repair/replacement capacity board per trade for today + next two days, live
+// from ServiceTitan. Business unit names encode trade + role ("COS - HVAC
+// Service" / "COS - HVAC Install"), so no manual mapping is needed.
+
+const BOARD_TRADES = ['HVAC', 'Plumbing', 'Electrical', 'Garage Door']
+
+function classifyBU(name) {
+  const n = (name || '').toLowerCase()
+  const trade = n.includes('hvac') ? 'HVAC'
+    : n.includes('plumb') ? 'Plumbing'
+    : n.includes('electric') ? 'Electrical'
+    : n.includes('garage') ? 'Garage Door' : null
+  const role = n.includes('install') ? 'install'
+    : n.includes('service') ? 'service'
+    : n.includes('maint') ? 'maintenance' : null
+  return { trade, role }
+}
+
+// Minutes to add to a Denver wall-clock time to get UTC (handles MST/MDT).
+function denverOffsetMs() {
+  const d = new Date()
+  const utc = new Date(d.toLocaleString('en-US', { timeZone: 'UTC' }))
+  const den = new Date(d.toLocaleString('en-US', { timeZone: 'America/Denver' }))
+  return utc.getTime() - den.getTime()
+}
+
+// The UTC window for a shop-local (Denver) day, `offset` days from today.
+function boardDay(offset) {
+  const now = new Date()
+  const dateStr = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Denver', year: 'numeric', month: '2-digit', day: '2-digit' })
+    .format(new Date(now.getTime() + offset * 864e5))
+  const off = denverOffsetMs()
+  const startUtc = new Date(Date.parse(dateStr + 'T00:00:00Z') + off)
+  const endUtc = new Date(startUtc.getTime() + 864e5)
+  return { date: dateStr, startUtc, endUtc }
+}
+
+// Cache technicians (rarely change) so a 2-min poll doesn't refetch every time.
+let techCache = null
+async function getBoardTechs() {
+  if (techCache && techCache.expires > Date.now()) return techCache.data
+  const res = await stGet(`/settings/v2/tenant/${ST_TENANT_ID}/technicians?active=true&pageSize=500`)
+  const data = (res?.data || []).map(t => ({ id: t.id, businessUnitId: t.businessUnitId }))
+  techCache = { data, expires: Date.now() + 10 * 60_000 }
+  return data
+}
+
+async function build3DayBoard() {
+  const days = [0, 1, 2].map(boardDay)
+
+  // Business unit map: id → { trade, role }
+  const buRes = await stGet(`/settings/v2/tenant/${ST_TENANT_ID}/business-units?active=true&pageSize=200`)
+  const buMap = {}
+  ;(buRes?.data || []).forEach(b => { buMap[b.id] = classifyBU(b.name) })
+  const serviceBU = {}, installBU = {}
+  Object.entries(buMap).forEach(([id, c]) => {
+    if (c.role === 'service' && c.trade) serviceBU[c.trade] = Number(id)
+    if (c.role === 'install' && c.trade) installBU[c.trade] = Number(id)
+  })
+
+  // Techs by home BU (for the Service-tech head count).
+  const techs = await getBoardTechs()
+  const techsByBU = {}
+  techs.forEach(t => { if (t.businessUnitId != null) (techsByBU[t.businessUnitId] ||= []).push(t.id) })
+
+  // Time-off across the whole 3-day window, so we can prorate tech availability.
+  const shiftRes = await stGet(`/dispatch/v2/tenant/${ST_TENANT_ID}/technician-shifts?shiftType=TimeOff&startsOnOrAfter=${days[0].startUtc.toISOString()}&endsOnOrBefore=${days[2].endUtc.toISOString()}&pageSize=500`)
+  const timeOff = (shiftRes?.data || []).map(s => ({ tech: s.technicianId, start: new Date(s.start), end: new Date(s.end) }))
+
+  // Job-type → category, to split opportunity jobs from warranty/callback.
+  const { data: spiffs } = await supabase.from('job_type_spiffs').select('st_job_type_id, category')
+  const catByType = {}
+  ;(spiffs || []).forEach(s => { catByType[String(s.st_job_type_id)] = s.category })
+
+  // Calls-per-tech per trade (default 3), admin-tunable in app_settings.
+  const { data: cptRow } = await supabase.from('app_settings').select('value').eq('key', 'board_calls_per_tech').maybeSingle()
+  let callsPerTech = {}
+  try { callsPerTech = JSON.parse(cptRow?.value || '{}') } catch {}
+  const cpt = (trade) => Number(callsPerTech[trade]) || 3
+
+  // Jobs per day, grouped by BU (one ST call per day).
+  const jobsByDay = await Promise.all(days.map(d =>
+    stGet(`/jpm/v2/tenant/${ST_TENANT_ID}/jobs?appointmentStartsOnOrAfter=${d.startUtc.toISOString()}&appointmentStartsBefore=${d.endUtc.toISOString()}&pageSize=500`)
+      .then(r => r?.data || []).catch(() => [])
+  ))
+
+  const overlapFractionOfDay = (off, day) => {
+    const s = Math.max(off.start.getTime(), day.startUtc.getTime())
+    const e = Math.min(off.end.getTime(), day.endUtc.getTime())
+    if (e <= s) return 0
+    return Math.min((e - s) / (8 * 3600_000), 1)   // 8h = a full working day
+  }
+
+  const board = BOARD_TRADES.map(trade => {
+    const svc = serviceBU[trade], ins = installBU[trade]
+    const svcTechIds = techsByBU[svc] || []
+    const perDay = days.map((day, di) => {
+      const jobs = jobsByDay[di]
+      // Techs: head count minus prorated time-off for this trade's service techs.
+      let techsAvail = svcTechIds.length
+      for (const techId of svcTechIds) {
+        const offToday = timeOff.filter(o => o.tech === techId)
+          .reduce((sum, o) => sum + overlapFractionOfDay(o, day), 0)
+        techsAvail -= Math.min(offToday, 1)
+      }
+      techsAvail = Math.round(techsAvail * 10) / 10
+
+      const svcJobs = jobs.filter(j => j.businessUnitId === svc)
+      const calls = svcJobs.length
+      const opps = svcJobs.filter(j => catByType[String(j.jobTypeId)] !== 'non_commissionable').length
+      const installs = jobs.filter(j => j.businessUnitId === ins).length
+
+      const capacity = Math.round(techsAvail * cpt(trade) * 10) / 10
+      const pct = capacity > 0 ? calls / capacity : (calls > 0 ? 1 : 0)
+      const needed = Math.max(0, Math.round(capacity - calls))
+      const status = capacity === 0 ? 'none' : pct >= 1 ? 'good' : pct >= 0.75 ? 'warn' : 'under'
+      return { date: day.date, techs: techsAvail, calls, capacity, pct: Math.round(pct * 100), needed, opps, installs, status }
+    })
+    return { trade, days: perDay }
+  })
+
+  return { generatedAt: new Date().toISOString(), dates: days.map(d => d.date), board }
+}
+
+app.get('/api/board/3day', async (req, res) => {
+  try {
+    res.json(await build3DayBoard())
+  } catch (err) {
+    console.error('3-day board error:', err.message)
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// ─────────────────────────────────────────────
 // ── TWILIO
 // ─────────────────────────────────────────────
 

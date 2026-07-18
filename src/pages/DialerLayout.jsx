@@ -9,6 +9,7 @@ import DialerPage from './DialerPage'
 import CampaignsPage from './CampaignsPage'
 import DashboardPage from './DashboardPage'
 import LivePage from './LivePage'
+import CallBoardPage from './CallBoardPage'
 import NotesPage from './NotesPage'
 import AdminPage from './AdminPage'
 import WarRoomPage from './WarRoomPage'
@@ -61,6 +62,15 @@ const NAV_ICONS = {
         <rect x="10" y="8" width="4" height="13" rx="1" fill={c} opacity=".75"/>
         <rect x="17" y="3" width="4" height="18" rx="1" fill={c}/>
         <path d="M3 21h18" stroke={c} strokeWidth="1.5" strokeLinecap="round"/>
+      </svg>
+    )
+  },
+  board: (active) => {
+    const c = active ? ICON_COLOR : ICON_MUTED
+    return (
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <rect x="3" y="4" width="18" height="16" rx="2" stroke={c} strokeWidth="1.8" fill="none"/>
+        <path d="M3 9h18M9 9v11M15 9v11" stroke={c} strokeWidth="1.6"/>
       </svg>
     )
   },
@@ -129,6 +139,7 @@ const NAV_ICONS = {
 const NAV_ITEMS = [
   { to:'/', label:'Dialer', iconKey:'dialer', end:true },
   { to:'/live', label:'Live Dashboard', iconKey:'live' },
+  { to:'/callboard', label:'Call Board', iconKey:'board' },
   { to:'/analytics', label:'Analytics', iconKey:'analytics' },
   { to:'/recordings', label:'Recordings', iconKey:'recordings' },
   { to:'/attendance', label:'WFM', iconKey:'wfm' },
@@ -142,6 +153,7 @@ const MY_PAGE_ITEM = { to:'/mypage', label:'My Page', iconKey:'mypage' }
 const PAGE_META = {
   '/':            { title: 'Dialer',                subtitle: 'Work your call queue' },
   '/live':        { title: 'Live Dashboard',        subtitle: 'Real-time floor activity' },
+  '/callboard':   { title: '3-Day Call Board',       subtitle: 'Repair & replacement capacity' },
   '/analytics':   { title: 'Analytics',             subtitle: 'Performance and pipeline' },
   '/recordings':  { title: 'Recordings',            subtitle: 'Call playback and review' },
   '/attendance':  { title: 'Workforce Management',  subtitle: 'Schedule, adherence, and points' },
@@ -674,6 +686,7 @@ function DialerLayoutInner() {
         <Routes>
           <Route path="/" element={<DialerPage />} />
           <Route path="/live" element={<LivePage />} />
+          <Route path="/callboard" element={<CallBoardPage />} />
           <Route path="/analytics" element={<DashboardPage />} />
           <Route path="/recordings" element={<RecordingsPage />} />
           <Route path="/attendance" element={<AttendancePage />} />
