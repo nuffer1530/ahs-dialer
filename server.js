@@ -1636,19 +1636,12 @@ async function gatherCustomerFacts(id) {
       const eqRes = await stGet(`/equipmentsystems/v2/tenant/${ST_TENANT_ID}/installed-equipment?locationIds=${locIds.join(',')}&pageSize=50`)
       const eq = (eqRes?.data || []).map(e => ({
         name: e.name || e.type || 'Equipment',
-        // Make/model when ST has them — lets the brief name the actual unit.
-        // Defensive: undefined if the field isn't present, and stripped below.
-        make: e.manufacturer || e.make || null,
-        model: e.model || e.modelNumber || null,
         installedOn: e.installedOn || e.createdOn || null,
       })).filter(e => e.installedOn)
       if (eq.length) {
         facts.equipment = eq.slice(0, 6).map(e => {
           const yrs = e.installedOn ? Math.floor((Date.now() - new Date(e.installedOn)) / (365.25 * 864e5)) : null
-          const out = { name: e.name, ageYears: yrs }
-          if (e.make) out.make = e.make
-          if (e.model) out.model = e.model
-          return out
+          return { name: e.name, ageYears: yrs }
         })
       }
     }
