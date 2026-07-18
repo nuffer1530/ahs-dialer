@@ -1411,10 +1411,11 @@ async function build3DayBoard() {
     const perDay = days.map((day, di) => {
       const jobs = jobsByDay[di]
 
-      // Techs scheduled: only those with a working shift that day, prorated by
-      // hours (8h = 1 full tech) and reduced by any overlapping time-off. Techs
-      // with no working shift that day don't count. Keep the roster (working
-      // ones) for drill-down.
+      // Techs scheduled: only those with a working shift that day. A scheduled
+      // tech is one full tech regardless of shift LENGTH — Sundays run a full day
+      // on shorter hours, so proration is against the tech's own shift, not a
+      // fixed 8h. Only time-off inside their shift reduces them (half-day = 0.5).
+      // No working shift that day = not scheduled = 0. Roster kept for drill-down.
       let techsAvail = 0
       const techList = []
       for (const techId of svcTechIds) {
@@ -1422,7 +1423,7 @@ async function build3DayBoard() {
         const workH = my.filter(s => s.type !== 'TimeOff').reduce((a, s) => a + overlapHours(s, day), 0)
         if (workH <= 0) continue   // not scheduled today
         const offH = my.filter(s => s.type === 'TimeOff').reduce((a, s) => a + overlapHours(s, day), 0)
-        const avail = Math.max(0, Math.min((workH - offH) / 8, 1))
+        const avail = Math.max(0, Math.min((workH - offH) / workH, 1))
         techsAvail += avail
         techList.push({ name: techName(techId), off: avail >= 1 ? null : avail <= 0 ? 'off' : `${Math.round(avail * 100)}%` })
       }
