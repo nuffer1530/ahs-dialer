@@ -170,22 +170,20 @@ export default function WarRoomPage() {
       fontFamily:'-apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif',
       padding:20, display:'flex', flexDirection:'column', gap:14, overflow:'hidden', boxSizing:'border-box' }}>
 
-      {/* Floor ticker — scrolls admin-set messages across the top */}
+      {/* Floor ticker — one strip that sweeps the admin-set messages across the
+          top, enters from the right, exits left, repeats. paddingLeft:100%
+          starts it off-screen right; a single copy means no phantom duplicate. */}
       {ticker.enabled && ticker.messages.length > 0 && (
-        <div style={{ overflow:'hidden', whiteSpace:'nowrap', background:'#000', border:`1px solid ${C.border}`, borderRadius:10, padding:'8px 0', flexShrink:0 }}>
-          <div style={{ display:'inline-block', animation:'wr-marquee 40s linear infinite', willChange:'transform' }}>
-            {[0, 1].map(dup => (
-              <span key={dup} aria-hidden={dup === 1}>
-                {ticker.messages.map((m, i) => {
-                  const col = m.tone === 'alert' ? C.red : m.tone === 'success' ? C.green : C.text
-                  return (
-                    <span key={i} style={{ margin:'0 44px', fontSize:17, fontWeight:700, color:col, letterSpacing:.3 }}>
-                      {m.tone === 'alert' ? '⚠ ' : ''}{m.text}
-                    </span>
-                  )
-                })}
-              </span>
-            ))}
+        <div style={{ overflow:'hidden', whiteSpace:'nowrap', background:'#000', border:`1px solid ${C.border}`, borderRadius:10, flexShrink:0 }}>
+          <div style={{ display:'inline-block', paddingLeft:'100%', animation:'wr-marquee 24s linear infinite', willChange:'transform' }}>
+            {ticker.messages.map((m, i) => {
+              const col = m.tone === 'alert' ? C.red : m.tone === 'success' ? C.green : C.text
+              return (
+                <span key={i} style={{ display:'inline-block', padding:'8px 0', margin:'0 44px', fontSize:18, fontWeight:700, color:col, letterSpacing:.3 }}>
+                  {m.tone === 'alert' ? '⚠ ' : ''}{m.text}
+                </span>
+              )
+            })}
           </div>
         </div>
       )}
@@ -352,7 +350,7 @@ export default function WarRoomPage() {
 
       <style>{`
         @keyframes wr-pulse { 0%,100%{opacity:1} 50%{opacity:.25} }
-        @keyframes wr-marquee { from{transform:translateX(0)} to{transform:translateX(-50%)} }
+        @keyframes wr-marquee { from{transform:translateX(0)} to{transform:translateX(-100%)} }
       `}</style>
     </div>
   )
