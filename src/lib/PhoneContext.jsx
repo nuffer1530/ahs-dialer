@@ -55,18 +55,32 @@ export function PhoneProvider({ children }) {
     syncWorkerActivity(profile.id, status)
   }, [profile?.id])
 
+  // Auto wrap-up: after a call ends the rep gets 60s of Wrap Up, then is put
+  // back to Available automatically — unless they change their status themselves
+  // (e.g. re-select Wrap Up to keep wrapping), which cancels the auto-return.
+  const WRAP_MS = 60_000
+  const wrapTimerRef = useRef(null)
+  const cancelAutoWrap = useCallback(() => {
+    if (wrapTimerRef.current) { clearTimeout(wrapTimerRef.current); wrapTimerRef.current = null }
+  }, [])
+  const enterWrapUp = useCallback(() => {
+    updateAgentStatus('Wrap Up')
+    cancelAutoWrap()
+    wrapTimerRef.current = setTimeout(() => { wrapTimerRef.current = null; updateAgentStatus('Available') }, WRAP_MS)
+  }, [updateAgentStatus, cancelAutoWrap])
+
   const wireCallEvents = useCallback((call) => {
     call.on('ringing', () => setCallStatus('ringing'))
     call.on('accept', () => { setCallStatus('connected'); startCallTimer() })
     call.on('disconnect', () => {
       callRef.current = null; setCallStatus('ended'); stopCallTimer()
-      setTimeout(() => setCallStatus(null), 3000); updateAgentStatus('Wrap Up')
+      setTimeout(() => setCallStatus(null), 3000); enterWrapUp()
     })
     call.on('error', () => {
       callRef.current = null; setCallStatus('ended'); stopCallTimer()
       setTimeout(() => setCallStatus(null), 2000)
     })
-  }, [startCallTimer, stopCallTimer, updateAgentStatus])
+  }, [startCallTimer, stopCallTimer, enterWrapUp])
 
   // Register the Device once per rep, for the whole session.
   useEffect(() => {
@@ -134,6 +148,7 @@ export function PhoneProvider({ children }) {
       cancelled = true
       if (deviceRef.current) { deviceRef.current.destroy(); deviceRef.current = null }
       stopCallTimer()
+      cancelAutoWrap()
       setTwilioReady(false)
     }
   }, [profile?.id, currentRep, stopCallTimer])
@@ -231,13 +246,13 @@ export function PhoneProvider({ children }) {
     if (callRef.current) { callRef.current.disconnect(); callRef.current = null }
     setCallStatus('ended'); stopCallTimer()
     setTimeout(() => setCallStatus(null), 2000)
-    updateAgentStatus('Wrap Up')
-  }, [stopCallTimer, updateAgentStatus])
+    enterWrapUp()
+  }, [stopCallTimer, enterWrapUp])
 
   return (
     <PhoneContext.Provider value={{
       twilioReady, incomingCall, callStatus, callDuration,
-      makeCall, acceptIncoming, rejectIncoming, hangUp,
+      makeCall, acceptIncoming, rejectIncoming, hangUp, cancelAutoWrap,
       pendingInbound, setPendingInbound,
       hasActiveCall: () => !!callRef.current,
     }}>

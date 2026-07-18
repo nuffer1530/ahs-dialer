@@ -232,6 +232,7 @@ export default function DialerLayout() {
 function DialerLayoutInner() {
   const { profile, isAdmin } = useAuth()
   const { contacts, syncStatus, reload } = useData()
+  const { cancelAutoWrap } = usePhone()
   const navigate = useNavigate()
   const location = useLocation()
   const [agentStatus, setAgentStatus] = useState('Offline')
@@ -410,6 +411,9 @@ function DialerLayoutInner() {
   }
 
   const updateStatus = async (newStatus) => {
+    // Any manual status change cancels a pending auto-wrap-up return — including
+    // re-selecting Wrap Up to keep wrapping.
+    cancelAutoWrap?.()
     setShowStatusMenu(false)
     setAgentStatus(newStatus)
     if (statusTimerRef.current) clearInterval(statusTimerRef.current)

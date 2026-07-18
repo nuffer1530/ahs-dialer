@@ -226,7 +226,7 @@ export default function DialerPage() {
   // dialer destroyed the Device and inbound calls could not be answered.
   const {
     twilioReady, callStatus, callDuration, incomingCall,
-    makeCall: phoneMakeCall, hangUp,
+    makeCall: phoneMakeCall, hangUp, cancelAutoWrap,
     pendingInbound, setPendingInbound,
   } = usePhone()
 
@@ -719,7 +719,7 @@ export default function DialerPage() {
       // too would double-pay every booking.
       if (selectedOutcome === 'Booked') { setAlsoMembership(false); setMembershipTypeId('') }
 
-      setSelectedOutcome(null); setNotesVal(''); updateAgentStatus('Available')
+      setSelectedOutcome(null); setNotesVal(''); cancelAutoWrap?.(); updateAgentStatus('Available')
       const { data: logs } = await sb.from('call_logs').select('*').eq('contact_id', c.id).order('created_at', { ascending: false })
       setContactLogs(logs || [])
 
