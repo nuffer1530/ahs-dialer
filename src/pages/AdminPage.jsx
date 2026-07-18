@@ -919,19 +919,29 @@ export default function AdminPage() {
     } finally { setAdjSaving(false) }
   }
 
-  const saveMyProfile = async () => {
+  // Persist the current user's profile. Overrides let auto-save pass the new
+  // value without waiting for a state round-trip. Also updates the profiles
+  // array so the User Management row for yourself reflects the change with no
+  // page refresh.
+  const saveMyProfile = async ({ avatar, name } = {}) => {
+    const av = avatar !== undefined ? avatar : myAvatar
+    const nm = name !== undefined ? name : myName
     setSavingProfile(true)
-    await sb.from('profiles').update({ name: myName, avatar: myAvatar }).eq('id', profile.id)
+    await sb.from('profiles').update({ name: nm, avatar: av }).eq('id', profile.id)
     await refreshProfile()
-    setProfileMsg('Profile saved')
-    setTimeout(() => setProfileMsg(''), 3000)
+    setProfiles(prev => prev.map(p => p.id === profile.id ? { ...p, name: nm, avatar: av } : p))
+    setProfileMsg('Saved')
+    setTimeout(() => setProfileMsg(''), 2000)
     setSavingProfile(false)
   }
 
+  // Picking an avatar (emoji or cropped photo) saves immediately — no separate
+  // "Save profile" click.
   const confirmAvatar = () => {
-    if (pickerSelected) setMyAvatar(pickerSelected)
+    const chosen = pickerSelected
     setShowAvatarPicker(false)
     setPickerSelected(null)
+    if (chosen) { setMyAvatar(chosen); saveMyProfile({ avatar: chosen }) }
   }
 
   const onAvatarFile = (e) => {
@@ -1475,12 +1485,12 @@ export default function AdminPage() {
               </div>
               <div className="form-field">
                 <label className="form-label">Display name</label>
-                <input className="form-input" value={myName} onChange={e => setMyName(e.target.value)} placeholder="Your name" />
+                <input className="form-input" value={myName} onChange={e => setMyName(e.target.value)} placeholder="Your name"
+                  onBlur={() => { if ((myName || '') !== (profile?.name || '')) saveMyProfile({ name: myName }) }} />
               </div>
-              <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
-                <button className="btn primary" onClick={saveMyProfile} disabled={savingProfile}>
-                  {savingProfile ? 'Saving...' : 'Save profile'}
-                </button>
+              <div style={{ display:'flex', gap:8, flexWrap:'wrap', alignItems:'center' }}>
+                <span style={{ fontSize:12, color:'var(--text-muted)' }}>{savingProfile ? 'Saving…' : profileMsg || 'Changes save automatically'}</span>
+                <div style={{ flex:1 }} />
                 <button className="btn" onClick={() => { setPwModal('me'); setNewPw(''); setPwMsg('') }}>
                   Change my password
                 </button>
