@@ -5,7 +5,7 @@ import { useData } from '../lib/DataContext'
 import Modal from '../components/Modal'
 import CampaignsPage from './CampaignsPage'
 import Avatar from '../components/Avatar'
-import { fileToAvatarDataURL } from '../lib/utils'
+import AvatarCropper from '../components/AvatarCropper'
 
 const EMOJIS = {
   '🔥 Hype': ['🔥','⚡','💥','🚀','🎯','💪','👊','🏆','👑','💎','🌟','⭐','🔑','💰','🎰','🃏'],
@@ -726,6 +726,7 @@ export default function AdminPage() {
   const [profileMsg, setProfileMsg] = useState('')
   const [showAvatarPicker, setShowAvatarPicker] = useState(false)
   const [pickerSelected, setPickerSelected] = useState(null)
+  const [cropSrc, setCropSrc] = useState(null)   // image being cropped
 
   useEffect(() => {
     setMyName(profile?.name || '')
@@ -933,15 +934,15 @@ export default function AdminPage() {
     setPickerSelected(null)
   }
 
-  const onAvatarFile = async (e) => {
+  const onAvatarFile = (e) => {
     const file = e.target.files?.[0]
     e.target.value = ''   // allow re-selecting the same file
     if (!file) return
-    try {
-      setPickerSelected(await fileToAvatarDataURL(file, 128))
-    } catch (err) {
-      alert(err.message)
-    }
+    if (!file.type?.startsWith('image/')) { alert('Please choose an image file.'); return }
+    const reader = new FileReader()
+    reader.onload = () => setCropSrc(reader.result)   // open the crop tool
+    reader.onerror = () => alert('Could not read that file.')
+    reader.readAsDataURL(file)
   }
 
   const saveProfile = async () => {
@@ -1458,8 +1459,8 @@ export default function AdminPage() {
             <div className="card-body" style={{ display:'flex', flexDirection:'column', gap:16 }}>
               <div style={{ display:'flex', alignItems:'center', gap:16 }}>
                 <div style={{ position:'relative', flexShrink:0 }}>
-                  <div style={{ width:64, height:64, borderRadius:'50%', background:'var(--accent-bg)', display:'flex', alignItems:'center', justifyContent:'center', fontSize: myAvatar ? 38 : 22, fontWeight:700, border:'2px solid var(--border)' }}>
-                    {myAvatar || (myName || profile?.email || '?')[0].toUpperCase()}
+                  <div style={{ width:64, height:64, borderRadius:'50%', overflow:'hidden', background:'var(--accent-bg)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:38, fontWeight:700, border:'2px solid var(--border)' }}>
+                    <Avatar avatar={myAvatar} name={myName || profile?.email} />
                   </div>
                   <button onClick={() => { setPickerSelected(myAvatar); setShowAvatarPicker(true) }}
                     style={{ position:'absolute', bottom:0, right:0, width:22, height:22, borderRadius:'50%', background:'var(--accent)', border:'2px solid var(--surface)', color:'#fff', fontSize:14, fontWeight:700, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' }}
@@ -1468,7 +1469,7 @@ export default function AdminPage() {
                 <div>
                   <div style={{ fontSize:13, fontWeight:600 }}>{myName || profile?.email}</div>
                   <div style={{ fontSize:11, color:'var(--text-muted)', marginTop:2 }}>
-                    {myAvatar ? `Avatar: ${myAvatar}` : 'No avatar set'} · <span style={{ color:'var(--accent)', cursor:'pointer' }} onClick={() => { setPickerSelected(myAvatar); setShowAvatarPicker(true) }}>Change</span>
+                    {!myAvatar ? 'No avatar set' : /^(data:|https?:|\/)/.test(myAvatar) ? 'Photo set' : `Emoji ${myAvatar}`} · <span style={{ color:'var(--accent)', cursor:'pointer' }} onClick={() => { setPickerSelected(myAvatar); setShowAvatarPicker(true) }}>Change</span>
                   </div>
                 </div>
               </div>
@@ -1529,6 +1530,12 @@ export default function AdminPage() {
                 <button className="btn primary" onClick={confirmAvatar} disabled={!pickerSelected}>Select avatar</button>
               </div>
             </Modal>
+          )}
+
+          {cropSrc && (
+            <AvatarCropper src={cropSrc}
+              onCancel={() => setCropSrc(null)}
+              onDone={d => { setPickerSelected(d); setCropSrc(null) }} />
           )}
 
           {/* ADMIN ONLY — User Management */}
