@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { sb } from '../lib/supabase'
 import { useAuth } from '../lib/AuthContext'
-import { inboundStats, outboundStats, fmtSecs, fmtPct, SERVICE_LEVEL_SECONDS, SERVICE_LEVEL_TARGET } from '../lib/analytics'
+import { inboundStats, outboundStats, acwStats, ahtOf, fmtSecs, fmtPct, SERVICE_LEVEL_SECONDS, SERVICE_LEVEL_TARGET } from '../lib/analytics'
 import Avatar from '../components/Avatar'
 
 const DAYS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun']
@@ -240,6 +240,7 @@ export default function MyPage() {
   const monthLogs = myLogs.filter(l => l.created_at?.slice(0,10) >= monthStart)
   const myInbound = inboundStats(monthTasks)
   const myOutbound = outboundStats(monthLogs)
+  const myAcw = acwStats(statusEvents.filter(e => e.started_at?.slice(0,10) >= monthStart))
 
   const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December']
   const scorecardLabel = `${MONTH_NAMES[scorecardMonth.month]} ${scorecardMonth.year}`
@@ -495,7 +496,9 @@ export default function MyPage() {
 
                 <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(180px,1fr))', gap:12, marginBottom:32 }}>
                   <StatCard label="Inbound Handled" value={myInbound.handled} sub="Calls you answered" />
-                  <StatCard label="Avg Handle Time" value={fmtSecs(myInbound.aht)} sub="Inbound talk time" />
+                  <StatCard label="Talk Time" value={fmtSecs(myInbound.att)} sub="Avg time on the call" />
+                  <StatCard label="After-Call Work" value={fmtSecs(myAcw.avg)} sub="Avg wrap-up per call" />
+                  <StatCard label="Handle Time" value={fmtSecs(ahtOf(myInbound.att, myAcw.avg))} sub="Talk + wrap-up" />
                   <StatCard label="Service Level" value={fmtPct(myInbound.serviceLevel)}
                     sub={`Answered within ${SERVICE_LEVEL_SECONDS}s`}
                     valueColor={myInbound.serviceLevel == null ? undefined : myInbound.serviceLevel >= SERVICE_LEVEL_TARGET ? 'var(--success)' : myInbound.serviceLevel >= 60 ? 'var(--warning)' : 'var(--danger)'} />

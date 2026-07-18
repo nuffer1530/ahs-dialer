@@ -8,7 +8,7 @@ const p1 = (v) => (v == null ? '' : Number(v.toFixed(1)))
 const n = (v) => (v == null ? '' : v)
 
 export async function exportAnalyticsWorkbook({
-  label, rangeText, inbound, outbound, hourly, daily, dow, agents, campaigns, tasks, logs,
+  label, rangeText, inbound, handle, outbound, hourly, daily, dow, agents, campaigns, tasks, logs,
 }) {
   // Loaded on demand — the library is ~800KB and most sessions never export.
   const XLSX = await import('xlsx')
@@ -32,7 +32,9 @@ export async function exportAnalyticsWorkbook({
     { Metric: `Service level (${SERVICE_LEVEL_SECONDS}s)`, Value: p1(inbound.serviceLevel), Target: `${SERVICE_LEVEL_TARGET}%` },
     { Metric: 'Abandon rate %', Value: p1(inbound.abandonRate) },
     { Metric: 'Average speed of answer', Value: fmtSecs(inbound.asa) },
-    { Metric: 'Average handle time', Value: fmtSecs(inbound.aht) },
+    { Metric: 'Average talk time (ATT)', Value: fmtSecs((handle || {}).att) },
+    { Metric: 'After-call work (ACW)', Value: fmtSecs((handle || {}).acw) },
+    { Metric: 'Average handle time (AHT)', Value: fmtSecs((handle || {}).aht) },
     { Metric: 'Longest wait', Value: fmtSecs(inbound.longestWait) },
     { Metric: '', Value: '' },
     { Metric: '— OUTBOUND —', Value: '' },
@@ -60,7 +62,9 @@ export async function exportAnalyticsWorkbook({
   add('Agents', agents.map(a => ({
     Agent: a.name,
     'Inbound handled': a.inboundHandled,
-    'Inbound AHT (s)': a.inboundAht == null ? '' : Math.round(a.inboundAht),
+    'Talk time (s)': a.talkTime == null ? '' : Math.round(a.talkTime),
+    'ACW (s)': a.acw == null ? '' : Math.round(a.acw),
+    'AHT (s)': a.aht == null ? '' : Math.round(a.aht),
     'Service level %': p1(a.serviceLevel),
     'Outbound calls': a.outboundCalls,
     Booked: a.booked,

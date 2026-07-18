@@ -5,7 +5,7 @@ import { getDupSet, getTimeframeBounds } from '../lib/utils'
 import { PROG_COLORS } from '../lib/constants'
 import {
   inboundStats, outboundStats, byHour, byDay, byDayOfWeek, agentStats, campaignStats,
-  fmtSecs, fmtPct, SERVICE_LEVEL_SECONDS, SERVICE_LEVEL_TARGET,
+  acwStats, ahtOf, fmtSecs, fmtPct, SERVICE_LEVEL_SECONDS, SERVICE_LEVEL_TARGET,
 } from '../lib/analytics'
 import { exportAnalyticsWorkbook } from '../lib/exportXlsx'
 
@@ -121,6 +121,7 @@ export default function DashboardPage() {
   }, [rangeKey])
 
   const inbound = useMemo(() => inboundStats(tasks), [tasks])
+  const teamAcw = useMemo(() => acwStats(events), [events])   // after-call work
   const outbound = useMemo(() => outboundStats(logs), [logs])
   const hourly = useMemo(() => byHour(tasks, logs), [tasks, logs])
   const daily = useMemo(() => byDay(tasks, logs), [tasks, logs])
@@ -143,7 +144,9 @@ export default function DashboardPage() {
       await exportAnalyticsWorkbook({
         label: range.label,
         rangeText: `${range.start.toLocaleString()} — ${range.end.toLocaleString()}`,
-        inbound, outbound, hourly, daily, dow, agents, campaigns: camps, tasks, logs,
+        inbound,
+        handle: { att: inbound.att, acw: teamAcw.avg, aht: ahtOf(inbound.att, teamAcw.avg) },
+        outbound, hourly, daily, dow, agents, campaigns: camps, tasks, logs,
       })
     } catch (e) {
       console.error('Export failed:', e)
@@ -231,7 +234,9 @@ export default function DashboardPage() {
             <Kpi label={`Service level (${SERVICE_LEVEL_SECONDS}s)`} value={fmtPct(inbound.serviceLevel)} tone={slTone} sub={`target ${SERVICE_LEVEL_TARGET}%`} />
             <Kpi label="Abandon rate" value={fmtPct(inbound.abandonRate)} tone={abTone} sub={`${inbound.abandoned} abandoned`} />
             <Kpi label="Avg speed of answer" value={fmtSecs(inbound.asa)} sub={`longest ${fmtSecs(inbound.longestWait)}`} />
-            <Kpi label="Avg handle time" value={fmtSecs(inbound.aht)} sub="inbound talk" />
+            <Kpi label="Avg talk time" value={fmtSecs(inbound.att)} sub="on the call" />
+            <Kpi label="After-call work" value={fmtSecs(teamAcw.avg)} sub="wrap-up per call" />
+            <Kpi label="Avg handle time" value={fmtSecs(ahtOf(inbound.att, teamAcw.avg))} sub="talk + wrap" />
             <Kpi label="Outbound calls" value={outbound.calls} sub={`${outbound.booked} booked`} tone="accent" />
             <Kpi label="Conversion" value={fmtPct(outbound.conversion)} sub="of outbound calls" />
           </div>
@@ -297,22 +302,27 @@ export default function DashboardPage() {
                 <table className="data-table">
                   <thead><tr>
                     <th>Agent</th>
-                    <th style={{textAlign:'right'}}>Inbound</th><th style={{textAlign:'right'}}>AHT</th><th style={{textAlign:'right'}}>SL</th>
+                    <th style={{textAlign:'right'}}>Inbound</th>
+                    <th style={{textAlign:'right'}} title="Average talk time">Talk</th>
+                    <th style={{textAlign:'right'}} title="After-call work (wrap-up)">ACW</th>
+                    <th style={{textAlign:'right'}} title="Handle time = talk + ACW">AHT</th>
+                    <th style={{textAlign:'right'}}>SL</th>
                     <th style={{textAlign:'right'}}>Outbound</th><th style={{textAlign:'right'}}>Booked</th><th style={{textAlign:'right'}}>Conv.</th>
-                    <th style={{textAlign:'right'}}>Logged in</th><th style={{textAlign:'right'}}>Wrap</th><th style={{textAlign:'right'}}>Occupancy</th>
+                    <th style={{textAlign:'right'}}>Logged in</th><th style={{textAlign:'right'}}>Occupancy</th>
                   </tr></thead>
                   <tbody>
                     {agents.map(a => (
                       <tr key={a.profileId}>
                         <td style={{ padding:'8px 12px', fontWeight:600 }}>{a.name}</td>
                         <td style={{ padding:'8px 12px', textAlign:'right' }}>{a.inboundHandled}</td>
-                        <td style={{ padding:'8px 12px', textAlign:'right' }}>{fmtSecs(a.inboundAht)}</td>
+                        <td style={{ padding:'8px 12px', textAlign:'right' }}>{fmtSecs(a.talkTime)}</td>
+                        <td style={{ padding:'8px 12px', textAlign:'right', color:'var(--text-muted)' }}>{fmtSecs(a.acw)}</td>
+                        <td style={{ padding:'8px 12px', textAlign:'right', fontWeight:600 }}>{fmtSecs(a.aht)}</td>
                         <td style={{ padding:'8px 12px', textAlign:'right' }}>{fmtPct(a.serviceLevel)}</td>
                         <td style={{ padding:'8px 12px', textAlign:'right' }}>{a.outboundCalls}</td>
                         <td style={{ padding:'8px 12px', textAlign:'right', fontWeight:600, color:'#16A34A' }}>{a.booked}</td>
                         <td style={{ padding:'8px 12px', textAlign:'right' }}>{fmtPct(a.conversion)}</td>
                         <td style={{ padding:'8px 12px', textAlign:'right', color:'var(--text-muted)' }}>{fmtSecs(a.loggedInSeconds)}</td>
-                        <td style={{ padding:'8px 12px', textAlign:'right', color:'var(--text-muted)' }}>{fmtSecs(a.wrapSeconds)}</td>
                         <td style={{ padding:'8px 12px', textAlign:'right' }}>{fmtPct(a.occupancy)}</td>
                       </tr>
                     ))}

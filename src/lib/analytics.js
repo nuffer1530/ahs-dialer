@@ -47,11 +47,24 @@ export function inboundStats(tasks) {
     serviceLevel: pct(withinSL.length, settled),
     abandonRate: pct(abandoned.length, settled),
     asa: waits.length ? waits.reduce((a, b) => a + b, 0) / waits.length : null,
-    aht: talks.length ? talks.reduce((a, b) => a + b, 0) / talks.length : null,
+    // Average Talk Time — time actually on the call. Handle time = talk + ACW,
+    // combined via acwStats where status events are available.
+    att: talks.length ? talks.reduce((a, b) => a + b, 0) / talks.length : null,
     longestWait: waits.length ? Math.max(...waits) : null,
     totalTalk: talks.reduce((a, b) => a + b, 0),
   }
 }
+
+// After-Call Work — time in Wrap Up. avg is per wrap-up session, so it adds to
+// talk time to give handle time (AHT = ATT + ACW).
+export function acwStats(statusEvents) {
+  const wraps = (statusEvents || []).filter(e => e.status === 'Wrap Up')
+  const total = wraps.reduce((s, e) => s + (e.duration_seconds || 0), 0)
+  return { count: wraps.length, total, avg: wraps.length ? total / wraps.length : null }
+}
+
+// Handle time from its parts. Null only if neither part exists.
+export const ahtOf = (att, acw) => (att == null && acw == null ? null : (att || 0) + (acw || 0))
 
 // ── Outbound (call_logs) ────────────────────────────────────────────────
 export function outboundStats(logs) {
@@ -125,12 +138,16 @@ export function agentStats(profiles, tasks, logs, statusEvents) {
     const loggedIn = evts.filter(e => e.status !== 'Offline')
       .reduce((s, e) => s + (e.duration_seconds || 0), 0)
     const talking = inb.totalTalk
+    const acw = acwStats(evts)
 
     return {
       profileId: p.id,
       name,
       inboundHandled: inb.handled,
-      inboundAht: inb.aht,
+      // Handle time broken into its parts: talk time + after-call work.
+      talkTime: inb.att,
+      acw: acw.avg,
+      aht: ahtOf(inb.att, acw.avg),
       serviceLevel: inb.serviceLevel,
       outboundCalls: out.calls,
       booked: out.booked,
