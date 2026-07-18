@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import { sb } from '../lib/supabase'
 import { useAuth } from '../lib/AuthContext'
 import { inboundStats, outboundStats, fmtSecs, fmtPct, SERVICE_LEVEL_SECONDS, SERVICE_LEVEL_TARGET } from '../lib/analytics'
+import Avatar from '../components/Avatar'
 
 const DAYS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun']
 
@@ -288,7 +289,7 @@ export default function MyPage() {
         <div style={{ padding:'16px 24px 0', display:'flex', alignItems:'flex-start', justifyContent:'space-between', gap:16 }}>
           <div style={{ display:'flex', alignItems:'center', gap:10 }}>
             <div style={{ width:32, height:32, borderRadius:'50%', background:'var(--accent-bg)', color:'var(--accent)', display:'flex', alignItems:'center', justifyContent:'center', fontSize: profile?.avatar ? 16 : 12, fontWeight:700, flexShrink:0 }}>
-              {profile?.avatar || (profile?.name || profile?.email || '?')[0].toUpperCase()}
+              <Avatar avatar={profile?.avatar} name={profile?.name || profile?.email} />
             </div>
             <div>
               <div style={{ fontSize:18, fontWeight:600, color:'var(--text-primary)' }}>{profile?.name || profile?.email}</div>

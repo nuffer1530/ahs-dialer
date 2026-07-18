@@ -4,6 +4,8 @@ import { useAuth } from '../lib/AuthContext'
 import { useData } from '../lib/DataContext'
 import Modal from '../components/Modal'
 import CampaignsPage from './CampaignsPage'
+import Avatar from '../components/Avatar'
+import { fileToAvatarDataURL } from '../lib/utils'
 
 const EMOJIS = {
   '🔥 Hype': ['🔥','⚡','💥','🚀','🎯','💪','👊','🏆','👑','💎','🌟','⭐','🔑','💰','🎰','🃏'],
@@ -931,6 +933,17 @@ export default function AdminPage() {
     setPickerSelected(null)
   }
 
+  const onAvatarFile = async (e) => {
+    const file = e.target.files?.[0]
+    e.target.value = ''   // allow re-selecting the same file
+    if (!file) return
+    try {
+      setPickerSelected(await fileToAvatarDataURL(file, 128))
+    } catch (err) {
+      alert(err.message)
+    }
+  }
+
   const saveProfile = async () => {
     if (!editProfile) return
     setSaving(true)
@@ -1479,13 +1492,17 @@ export default function AdminPage() {
             <Modal title="Choose Your Avatar" onClose={() => setShowAvatarPicker(false)} width={520}>
               <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
                 <div style={{ display:'flex', alignItems:'center', gap:12, padding:'12px 16px', background:'var(--surface-2)', borderRadius:'var(--radius)' }}>
-                  <div style={{ width:48, height:48, borderRadius:'50%', background:'var(--accent-bg)', display:'flex', alignItems:'center', justifyContent:'center', fontSize: pickerSelected ? 28 : 18, fontWeight:700, flexShrink:0 }}>
-                    {pickerSelected || myAvatar || (myName || profile?.email || '?')[0].toUpperCase()}
+                  <div style={{ width:48, height:48, borderRadius:'50%', overflow:'hidden', background:'var(--accent-bg)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:28, fontWeight:700, flexShrink:0 }}>
+                    <Avatar avatar={pickerSelected || myAvatar} name={myName || profile?.email} />
                   </div>
-                  <div>
+                  <div style={{ flex:1 }}>
                     <div style={{ fontSize:13, fontWeight:600 }}>{myName || profile?.email}</div>
-                    <div style={{ fontSize:11, color:'var(--text-muted)' }}>{pickerSelected ? 'Looking good! Hit save to lock it in.' : 'Pick an emoji below'}</div>
+                    <div style={{ fontSize:11, color:'var(--text-muted)' }}>{pickerSelected ? 'Looking good! Hit save to lock it in.' : 'Upload a photo or pick an emoji'}</div>
                   </div>
+                  <label className="btn sm" style={{ cursor:'pointer', flexShrink:0 }}>
+                    Upload photo
+                    <input type="file" accept="image/*" onChange={onAvatarFile} style={{ display:'none' }} />
+                  </label>
                 </div>
                 <div style={{ maxHeight:400, overflowY:'auto', display:'flex', flexDirection:'column', gap:14 }}>
                   {Object.entries(EMOJIS).map(([category, emojis]) => (
@@ -1542,7 +1559,7 @@ export default function AdminPage() {
                             <td style={{ padding:'10px 12px', fontWeight:500 }}>
                               <div style={{ display:'flex', alignItems:'center', gap:8 }}>
                                 <div style={{ width:28, height:28, borderRadius:'50%', background:'var(--accent-bg)', display:'flex', alignItems:'center', justifyContent:'center', fontSize: p.avatar ? 18 : 11, fontWeight:600, flexShrink:0, filter: removed ? 'grayscale(1)' : undefined }}>
-                                  {p.avatar || (p.name || p.email || '?')[0].toUpperCase()}
+                                  <Avatar avatar={p.avatar} name={p.name || p.email} />
                                 </div>
                                 {p.name || '—'}
                                 {removed && <span style={{ fontSize:9, fontWeight:700, textTransform:'uppercase', letterSpacing:.5, padding:'2px 6px', borderRadius:99, background:'var(--surface-2)', color:'var(--text-muted)' }}>Removed</span>}
@@ -1827,7 +1844,7 @@ export default function AdminPage() {
                   </head><body><div class="page">
                     <div class="header">
                       <div class="rep-info">
-                        <div class="avatar">${selectedRep?.avatar || (selectedRep?.name || '?')[0].toUpperCase()}</div>
+                        <div class="avatar">${(() => { const a = selectedRep?.avatar; if (a && /^(data:|https?:|\/)/.test(a)) return '<img src="' + a + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%">'; return a || (selectedRep?.name || '?')[0].toUpperCase() })()}</div>
                         <div>
                           <div class="rep-name">${selectedRep?.name || selectedRep?.email || ''}</div>
                           <div class="rep-sub">Performance Review &mdash; ${MONTH_NAMES[scMonth.month]} ${scMonth.year}</div>
@@ -1915,7 +1932,7 @@ export default function AdminPage() {
                 <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:20 }}>
                   <div style={{ display:'flex', alignItems:'center', gap:12 }}>
                     <div style={{ width:40, height:40, borderRadius:'50%', background:'var(--accent-bg)', color:'var(--accent)', display:'flex', alignItems:'center', justifyContent:'center', fontSize: selectedRep?.avatar ? 22 : 15, fontWeight:700 }}>
-                      {selectedRep?.avatar || (selectedRep?.name || selectedRep?.email || '?')[0].toUpperCase()}
+                      <Avatar avatar={selectedRep?.avatar} name={selectedRep?.name || selectedRep?.email} />
                     </div>
                     <div>
                       <div style={{ fontSize:16, fontWeight:700, color:'var(--text-primary)' }}>{selectedRep?.name || selectedRep?.email}</div>

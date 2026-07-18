@@ -4,6 +4,7 @@ import { useAuth } from '../lib/AuthContext'
 import { sb } from '../lib/supabase'
 import Badge from '../components/Badge'
 import { isDone, fmtShort, syncWorkerActivity } from '../lib/utils'
+import Avatar from '../components/Avatar'
 
 const DEFAULT_STATUS_OPTIONS = [
   { value: 'Available', color: '#22c55e' },
@@ -331,7 +332,7 @@ export default function LivePage() {
                     <td style={{ padding:'10px 12px', fontWeight:500 }}>
                       <div style={{ display:'flex', alignItems:'center', gap:8 }}>
                         <div style={{ width:28, height:28, borderRadius:'50%', background:'var(--accent-bg)', color:'var(--accent)', display:'flex', alignItems:'center', justifyContent:'center', fontSize: p.avatar ? 18 : 11, fontWeight:600, flexShrink:0 }}>
-                          {p.avatar || (p.name || p.email || '?')[0].toUpperCase()}
+                          <Avatar avatar={p.avatar} name={p.name || p.email} />
                         </div>
                         <div style={{ fontSize:13 }}>{p.name || p.email}</div>
                       </div>

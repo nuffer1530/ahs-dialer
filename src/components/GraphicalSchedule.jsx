@@ -2,6 +2,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { sb } from '../lib/supabase'
 import { useAuth } from '../lib/AuthContext'
+import Avatar from './Avatar'
 
 const START_HOUR = 6
 const END_HOUR = 21
@@ -450,7 +451,7 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
                   {/* Top row: avatar + name + + button */}
                   <div style={{ display:'flex', alignItems:'center', gap:8 }}>
                     <div style={{ width:30, height:30, borderRadius:'50%', background:'var(--accent-bg)', color:'var(--accent)', display:'flex', alignItems:'center', justifyContent:'center', fontSize: p.avatar ? 18 : 11, fontWeight:600, flexShrink:0 }}>
-                      {p.avatar || (p.name||p.email||'?')[0].toUpperCase()}
+                      <Avatar avatar={p.avatar} name={p.name||p.email} />
                     </div>
                     <div style={{ fontSize:11, fontWeight:600, color:'var(--text-primary)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'normal', wordBreak:'break-word', flex:1, minWidth:0, lineHeight:1.3 }}>{p.name||p.email}</div>
                     {isAdmin && (

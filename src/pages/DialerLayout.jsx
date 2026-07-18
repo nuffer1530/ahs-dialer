@@ -17,6 +17,7 @@ import RecordingsPage from './RecordingsPage'
 import MyPage from './MyPage'
 import WinCelebration from '../components/WinCelebration'
 import ScheduleAlerts from '../components/ScheduleAlerts'
+import Avatar from '../components/Avatar'
 
 const DEFAULT_STATUS_OPTIONS = [
   { value: 'Inbound',   color: '#16a34a' },
@@ -599,7 +600,7 @@ function DialerLayoutInner() {
           {/* Avatar with status ring */}
           <div style={{ position:'relative', flexShrink:0 }}>
             <div style={{ width:30, height:30, borderRadius:'50%', background:'var(--accent-bg)', color:'var(--accent)', display:'flex', alignItems:'center', justifyContent:'center', fontSize: profile?.avatar ? 16 : 12, fontWeight:700, border:`2px solid ${currentStatusObj.color}` }}>
-              {profile?.avatar || (profile?.name || profile?.email || '?')[0].toUpperCase()}
+              <Avatar avatar={profile?.avatar} name={profile?.name || profile?.email} />
             </div>
             <div style={{ position:'absolute', bottom:-1, right:-1, width:9, height:9, borderRadius:'50%', background:currentStatusObj.color, border:'2px solid var(--surface)' }} />
           </div>
@@ -615,7 +616,7 @@ function DialerLayoutInner() {
             {/* Who you are */}
             <div style={{ padding:'12px 14px', borderBottom:'1px solid var(--border)', background:'var(--surface-2)', display:'flex', alignItems:'center', gap:10 }}>
               <div style={{ width:34, height:34, borderRadius:'50%', background:'var(--accent-bg)', color:'var(--accent)', display:'flex', alignItems:'center', justifyContent:'center', fontSize: profile?.avatar ? 18 : 13, fontWeight:700, flexShrink:0 }}>
-                {profile?.avatar || (profile?.name || profile?.email || '?')[0].toUpperCase()}
+                <Avatar avatar={profile?.avatar} name={profile?.name || profile?.email} />
               </div>
               <div style={{ minWidth:0 }}>
                 <div style={{ fontSize:12, fontWeight:700, color:'var(--text-primary)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{profile?.name || profile?.email}</div>

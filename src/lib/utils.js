@@ -94,6 +94,30 @@ export const exportToCSV = (rows, headers, filename) => {
   a.click()
 }
 
+// Turn an uploaded image File into a small square JPEG data-URI, center-cropped
+// to `size` px. Kept small (~size px, 0.8 quality → a few KB) so it lives in the
+// profiles.avatar text column and ships with every profile the app loads.
+export const fileToAvatarDataURL = (file, size = 128) => new Promise((resolve, reject) => {
+  if (!file || !file.type?.startsWith('image/')) return reject(new Error('Please choose an image file.'))
+  const reader = new FileReader()
+  reader.onerror = () => reject(new Error('Could not read that file.'))
+  reader.onload = () => {
+    const img = new Image()
+    img.onerror = () => reject(new Error("That image couldn't be loaded."))
+    img.onload = () => {
+      const canvas = document.createElement('canvas')
+      canvas.width = size; canvas.height = size
+      const ctx = canvas.getContext('2d')
+      const s = Math.min(img.width, img.height)          // center-crop to a square
+      const sx = (img.width - s) / 2, sy = (img.height - s) / 2
+      ctx.drawImage(img, sx, sy, s, s, 0, 0, size, size)
+      resolve(canvas.toDataURL('image/jpeg', 0.8))
+    }
+    img.src = reader.result
+  }
+  reader.readAsDataURL(file)
+})
+
 // Tell TaskRouter whether this rep should receive queued calls. The inbound
 // queue only routes to workers whose activity is Available, so a rep who looks
 // Available in Andi but wasn't synced will silently never get a call.

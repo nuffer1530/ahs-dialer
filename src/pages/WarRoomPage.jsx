@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useRef } from 'react'
 import { sb } from '../lib/supabase'
 import { useData } from '../lib/DataContext'
 import { inboundStats, outboundStats, fmtSecs, SERVICE_LEVEL_SECONDS, SERVICE_LEVEL_TARGET } from '../lib/analytics'
+import Avatar from '../components/Avatar'
 
 // Call-centre wallboard — a modern "Simon board" for the floor TV. Everything
 // real-time: inbound queue health, live calls, the leaderboard (rows slide when
@@ -33,7 +34,6 @@ const timeSince = (iso) => {
   if (s < 3600) return `${Math.floor(s/60)}m`
   return `${Math.floor(s/3600)}h ${Math.floor((s%3600)/60)}m`
 }
-const initials = (n) => (n||'?').split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase()
 
 function Kpi({ label, value, sub, color = C.text, glow }) {
   return (
@@ -254,7 +254,7 @@ export default function WarRoomPage() {
                     border:`2px solid ${isLeader ? C.amber : C.border}`, color: isLeader ? '#000' : C.text,
                     display:'flex', alignItems:'center', justifyContent:'center', fontSize: p?.avatar ? 22 : 14, fontWeight:800,
                     boxShadow: isLeader ? `0 0 18px ${C.amber}66` : 'none' }}>
-                    {p?.avatar || initials(d.rep)}
+                    <Avatar avatar={p?.avatar} name={d.rep} />
                   </div>
                   <div style={{ flex:1, minWidth:0 }}>
                     <div style={{ display:'flex', alignItems:'center', gap:8 }}>
@@ -303,7 +303,7 @@ export default function WarRoomPage() {
                   <div style={{ width:36, height:36, borderRadius:'50%', background:C.panel2, border:`2px solid ${color}`,
                     display:'flex', alignItems:'center', justifyContent:'center', fontSize: p.avatar ? 18 : 12, fontWeight:800, flexShrink:0,
                     boxShadow: onCall ? `0 0 12px ${color}77` : 'none' }}>
-                    {p.avatar || initials(p.name || p.email)}
+                    <Avatar avatar={p.avatar} name={p.name || p.email} />
                   </div>
                   <div style={{ flex:1, minWidth:0 }}>
                     <div style={{ fontSize:14, fontWeight:600, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{p.name || p.email}</div>

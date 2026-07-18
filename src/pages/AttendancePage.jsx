@@ -3,6 +3,7 @@ import { sb } from '../lib/supabase'
 import { useAuth } from '../lib/AuthContext'
 import Modal from '../components/Modal'
 import GraphicalSchedule from '../components/GraphicalSchedule'
+import Avatar from '../components/Avatar'
 
 const DAYS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun']
 const GRACE = 5
@@ -424,7 +425,7 @@ export default function AttendancePage() {
                         <td style={{ padding:'12px 16px', borderRight:'1px solid var(--border)' }}>
                           <div style={{ display:'flex', alignItems:'center', gap:8 }}>
                             <div style={{ width:30, height:30, borderRadius:'50%', background:'var(--accent-bg)', color:'var(--accent)', display:'flex', alignItems:'center', justifyContent:'center', fontSize: p.avatar ? 18 : 11, fontWeight:600, flexShrink:0 }}>
-                              {p.avatar || (p.name || p.email || '?')[0].toUpperCase()}
+                              <Avatar avatar={p.avatar} name={p.name || p.email} />
                             </div>
                             <div>
                               <div style={{ fontSize:13, fontWeight:500, color:'var(--text-primary)' }}>{p.name || p.email}</div>
@@ -505,7 +506,7 @@ export default function AttendancePage() {
                   <div style={{ padding:'14px 18px', borderBottom:'1px solid var(--border)', display:'flex', alignItems:'center', justifyContent:'space-between', background:'var(--surface-2)' }}>
                     <div style={{ display:'flex', alignItems:'center', gap:10 }}>
                       <div style={{ width:32, height:32, borderRadius:'50%', background:'var(--accent-bg)', display:'flex', alignItems:'center', justifyContent:'center', fontSize: p.avatar ? 20 : 12, fontWeight:600 }}>
-                        {p.avatar || (p.name || p.email || '?')[0].toUpperCase()}
+                        <Avatar avatar={p.avatar} name={p.name || p.email} />
                       </div>
                       <span style={{ fontSize:14, fontWeight:600 }}>{p.name || p.email}</span>
                     </div>
@@ -574,7 +575,7 @@ export default function AttendancePage() {
                   <div style={{ padding:'14px 18px', borderBottom: pts.length > 0 ? '1px solid var(--border)' : 'none', display:'flex', alignItems:'center', justifyContent:'space-between', background:'var(--surface-2)' }}>
                     <div style={{ display:'flex', alignItems:'center', gap:10 }}>
                       <div style={{ width:32, height:32, borderRadius:'50%', background:'var(--accent-bg)', display:'flex', alignItems:'center', justifyContent:'center', fontSize: p.avatar ? 20 : 12, fontWeight:600 }}>
-                        {p.avatar || (p.name || p.email || '?')[0].toUpperCase()}
+                        <Avatar avatar={p.avatar} name={p.name || p.email} />
                       </div>
                       <span style={{ fontSize:14, fontWeight:600 }}>{p.name || p.email}</span>
                     </div>
@@ -658,7 +659,7 @@ export default function AttendancePage() {
                         <td style={{ padding:'12px 14px', fontWeight:500 }}>
                           <div style={{ display:'flex', alignItems:'center', gap:8 }}>
                             <div style={{ width:26, height:26, borderRadius:'50%', background:'var(--accent-bg)', display:'flex', alignItems:'center', justifyContent:'center', fontSize: r.profile.avatar ? 16 : 10, fontWeight:600 }}>
-                              {r.profile.avatar || (r.profile.name || r.profile.email || '?')[0].toUpperCase()}
+                              <Avatar avatar={r.profile.avatar} name={r.profile.name || r.profile.email} />
                             </div>
                             {r.profile.name || r.profile.email}
                           </div>
