@@ -176,8 +176,8 @@ export default function CampaignsPage() {
         </div>
         {isAdmin && (
           <div style={{ display:'flex', gap:8 }}>
-            <button className="btn" onClick={() => setShowAI(true)} style={{ fontSize:13 }}>✨ AI campaign</button>
-            <button className="btn primary" onClick={openNew} style={{ fontSize:13 }}>+ New campaign</button>
+            <button className="btn" onClick={() => setShowAI(true)} style={{ fontSize:13, padding:'8px 16px', lineHeight:1.2 }}>✨ AI campaign</button>
+            <button className="btn primary" onClick={openNew} style={{ fontSize:13, padding:'8px 16px', lineHeight:1.2 }}>+ New campaign</button>
           </div>
         )}
       </div>

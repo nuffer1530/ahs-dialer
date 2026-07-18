@@ -82,15 +82,20 @@ export default function AICampaignModal({ onClose, onCreated }) {
           onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) doPlan() }}
           placeholder="e.g. Members whose HVAC maintenance is due in the next 3 months"
           style={{ minHeight: 70 }} />
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
+        <div style={{ fontSize: 11, color: 'var(--text-muted)', margin: '12px 0 8px' }}>Try one of these</div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
           {EXAMPLES.map(x => (
-            <button key={x} className="btn ghost sm" style={{ fontSize: 11 }}
-              onClick={() => { setRequest(x); reset() }}>{x}</button>
+            <button key={x} type="button" onClick={() => { setRequest(x); reset() }}
+              style={{ fontSize: 12, padding: '7px 13px', borderRadius: 99, border: '1px solid var(--border)', background: 'var(--surface-2)', color: 'var(--text-muted)', cursor: 'pointer', transition: 'all .1s', lineHeight: 1.3 }}
+              onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--accent)'; e.currentTarget.style.color = 'var(--accent)' }}
+              onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text-muted)' }}>
+              {x}
+            </button>
           ))}
         </div>
       </div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
-        <button className="btn primary sm" onClick={doPlan} disabled={busy === 'plan' || !request.trim()}>
+        <button className="btn primary" onClick={doPlan} disabled={busy === 'plan' || !request.trim()}>
           {busy === 'plan' ? 'Reading…' : 'Interpret request'}
         </button>
       </div>
@@ -123,7 +128,7 @@ export default function AICampaignModal({ onClose, onCreated }) {
 
               {!preview && (
                 <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                  <button className="btn primary sm" onClick={doPreview} disabled={busy === 'preview'}>
+                  <button className="btn primary" onClick={doPreview} disabled={busy === 'preview'}>
                     {busy === 'preview' ? 'Searching ServiceTitan…' : 'Preview audience'}
                   </button>
                 </div>
