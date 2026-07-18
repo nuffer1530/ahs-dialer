@@ -1332,9 +1332,12 @@ async function build3DayBoard() {
   const techsByBU = {}
   techs.forEach(t => { if (t.businessUnitId != null && t.team !== 'Leadership') (techsByBU[t.businessUnitId] ||= []).push(t.id) })
 
-  // Time-off across the whole 3-day window, so we can prorate tech availability.
-  const shiftRes = await stGet(`/dispatch/v2/tenant/${ST_TENANT_ID}/technician-shifts?shiftType=TimeOff&startsOnOrAfter=${days[0].startUtc.toISOString()}&endsOnOrBefore=${days[2].endUtc.toISOString()}&pageSize=500`)
-  const timeOff = (shiftRes?.data || []).map(s => ({ tech: s.technicianId, start: new Date(s.start), end: new Date(s.end) }))
+  // All shifts across the 3-day window. A tech counts as scheduled that day only
+  // if they have a WORKING shift (not TimeOff) — no shift means they're off, so
+  // on weekends only the handful actually scheduled show up. TimeOff overlapping
+  // a working shift prorates it (half-day = 0.5).
+  const shiftRes = await stGet(`/dispatch/v2/tenant/${ST_TENANT_ID}/technician-shifts?startsOnOrAfter=${days[0].startUtc.toISOString()}&endsOnOrBefore=${days[2].endUtc.toISOString()}&pageSize=500`)
+  const shifts = (shiftRes?.data || []).map(s => ({ tech: s.technicianId, type: s.shiftType, start: new Date(s.start), end: new Date(s.end) }))
 
   // Job-type → category (splits opportunities from warranty/callback) and name
   // (for drill-downs).
@@ -1394,11 +1397,11 @@ async function build3DayBoard() {
   }
   const jobRow = (j) => ({ jobNumber: j.jobNumber, type: nameByType[String(j.jobTypeId)] || 'Job' })
 
-  const overlapFractionOfDay = (off, day) => {
-    const s = Math.max(off.start.getTime(), day.startUtc.getTime())
-    const e = Math.min(off.end.getTime(), day.endUtc.getTime())
-    if (e <= s) return 0
-    return Math.min((e - s) / (8 * 3600_000), 1)   // 8h = a full working day
+  // Hours of a shift that fall within a given day.
+  const overlapHours = (sh, day) => {
+    const s = Math.max(sh.start.getTime(), day.startUtc.getTime())
+    const e = Math.min(sh.end.getTime(), day.endUtc.getTime())
+    return e > s ? (e - s) / 3600_000 : 0
   }
   const techName = (id) => (techs.find(t => t.id === id)?.name) || `Tech ${id}`
 
@@ -1408,13 +1411,21 @@ async function build3DayBoard() {
     const perDay = days.map((day, di) => {
       const jobs = jobsByDay[di]
 
-      // Techs: head count minus prorated time-off. Keep the roster for drill-down.
+      // Techs scheduled: only those with a working shift that day, prorated by
+      // hours (8h = 1 full tech) and reduced by any overlapping time-off. Techs
+      // with no working shift that day don't count. Keep the roster (working
+      // ones) for drill-down.
       let techsAvail = 0
-      const techList = svcTechIds.map(techId => {
-        const off = Math.min(timeOff.filter(o => o.tech === techId).reduce((s, o) => s + overlapFractionOfDay(o, day), 0), 1)
-        techsAvail += 1 - off
-        return { name: techName(techId), off: off >= 1 ? 'off' : off > 0 ? `${Math.round((1 - off) * 100)}%` : null }
-      })
+      const techList = []
+      for (const techId of svcTechIds) {
+        const my = shifts.filter(s => s.tech === techId)
+        const workH = my.filter(s => s.type !== 'TimeOff').reduce((a, s) => a + overlapHours(s, day), 0)
+        if (workH <= 0) continue   // not scheduled today
+        const offH = my.filter(s => s.type === 'TimeOff').reduce((a, s) => a + overlapHours(s, day), 0)
+        const avail = Math.max(0, Math.min((workH - offH) / 8, 1))
+        techsAvail += avail
+        techList.push({ name: techName(techId), off: avail >= 1 ? null : avail <= 0 ? 'off' : `${Math.round(avail * 100)}%` })
+      }
       techsAvail = Math.round(techsAvail * 10) / 10
 
       // Booked calls exclude follow-up / callback / permitting / phone-call types.
