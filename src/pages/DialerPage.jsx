@@ -648,6 +648,11 @@ export default function DialerPage() {
       const neighbor = next[idx] ?? next[idx - 1] ?? next[0] ?? null
       setSelectedId(neighbor); setSelectedOutcome(null)
     }
+    // Closed the last tab with no live call: not working anything anymore.
+    // Without this, pulling work (On Call) then closing it without dialing or
+    // dispositioning leaves the rep stuck On Call. endInteraction defers to
+    // the call path when a call is actually up.
+    if (next.length === 0) endInteraction?.()
   }
   // Explicit selection (queue click, search, inbound pop) opens/focuses a tab.
   const selectContact = (id) => openTab(id)
@@ -701,9 +706,16 @@ export default function DialerPage() {
       }
     } catch (e) { console.warn('lead-first next pending failed:', e.message) }
 
-    if (skillsMode) { serveLead(nextSkillLead(), true); return }
+    // Rep deliberately pulled outbound work — that's an interaction starting.
+    // (The idle auto-advance effect below stays silent on purpose: it pre-loads
+    // work while the rep waits, and flipping them On Call there would make
+    // every idle rep permanently invisible to inbound routing.)
+    if (skillsMode) {
+      if (serveLead(nextSkillLead(), true)) startInteraction?.('Outbound')
+      return
+    }
     const next = filtered.find(x => !isDone(x) && x.status !== 'Max Attempts' && !x.claimed_by)
-    if (next) navigateActiveTo(next.id)
+    if (next) { navigateActiveTo(next.id); startInteraction?.('Outbound') }
   }
 
   // Auto-progressive: when a skills-routed rep is free and nothing's loaded,
@@ -723,12 +735,12 @@ export default function DialerPage() {
     const { data } = await sb.from('contacts').update({ claimed_by: currentRep, claimed_at: new Date().toISOString() }).eq('id', selectedId).select().single()
     if (data) {
       setContacts(prev => prev.map(c => c.id === selectedId ? data : c))
-      // Claiming a PAID lead means you're working it right now — same as
-      // clicking it in the rail. (Ordinary outbound contacts stay as-is here:
-      // the dial itself sets On Call + Outbound. Flipping status on every
-      // claim would break auto-progressive serving, which claims ahead.)
+      // A manual claim means "I'm working this now" — flip status, typed by
+      // what was claimed. Only the MANUAL button does this; the auto-claim
+      // paths (claimContactById / claimExclusive from auto-advance) stay
+      // silent so idle reps remain visible to inbound routing.
       const campName = campaigns.find(x => x.id === data.campaign_id)?.name
-      if (campName === 'Leads') startInteraction?.('Lead')
+      startInteraction?.(campName === 'Leads' ? 'Lead' : 'Outbound')
     }
   }
 
