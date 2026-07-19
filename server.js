@@ -2320,6 +2320,241 @@ app.post('/api/twilio/hangup', async (req, res) => {
 })
 
 // ═══════════════════════════════════════════════════════════════════════════
+// LEAD INBOX — mirrors the ServiceTitan Bookings tab into `st_leads`.
+//
+// These are PAID leads (Angi/HomeAdvisor ~$52 each, Scorpion, etc). Revin AI
+// texts and calls them immediately as a safety net; CSRs call back right away,
+// or first thing in the morning for overnight arrivals. So this poller
+// deliberately does NOT alert out-of-hours — the rail just accumulates.
+//
+// Verified ST constraints (Jul 2026), do not "simplify" these away:
+//  - Bookings are READ-ONLY. PATCH/PUT/POST on /bookings/{id} and every
+//    dismiss/convert/notes/status route return 404 "unable to match operation".
+//    There is NO way to write a claim back onto a booking — Andi is the claim
+//    authority, and ST only learns the truth when the job is booked (which
+//    flips the booking to Converted on its own).
+//  - The ?status= filter is IGNORED — asking for New returns Dismissed and
+//    Converted rows too. Status MUST be re-checked client-side.
+//  - Phone/email are not on the booking; they need /bookings/{id}/contacts.
+// ═══════════════════════════════════════════════════════════════════════════
+
+const LEAD_POLL_SECONDS = Number(process.env.LEAD_POLL_SECONDS || 60)
+
+// ST returns "LeadsIntegration#33"; the UI resolves 33 → Angi + logo, but the
+// API never gives the name. Hand-maintained — extend as providers are added.
+const LEAD_PROVIDERS = { 33: 'Angi' }
+function resolveProvider(source) {
+  const raw = String(source || '')
+  const m = raw.match(/^LeadsIntegration#(\d+)/)
+  if (m) return LEAD_PROVIDERS[m[1]] || `Lead partner #${m[1]}`
+  return raw.split('#')[0] || 'Unknown'
+}
+
+// The booking `summary` is a semi-structured blob from the lead partner. Pull
+// out the bits a rep needs at a glance; everything stays in summary regardless.
+function parseLeadSummary(summary) {
+  const s = String(summary || '')
+  const grab = (re) => { const m = s.match(re); return m ? m[1].trim() : null }
+  const fee = grab(/Lead Fee:\s*\$?([\d.]+)/i)
+  return {
+    lead_fee: fee ? Number(fee) : null,
+    urgency: grab(/When do you need this work done\?:\s*(.+)/i),
+    job_type: grab(/Partner Job type:\s*(.+)/i) || grab(/Job type\(s\):\s*(.+)/i),
+    message: grab(/Message from Customer:\s*(.+)/i),
+  }
+}
+
+async function syncLeadInbox() {
+  try {
+    // ST ignores ?status=New, so pull a recent window and filter here.
+    const since = new Date(Date.now() - 14 * 864e5).toISOString().slice(0, 10)
+    const data = await stGet(`/crm/v2/tenant/${ST_TENANT_ID}/bookings?createdOnOrAfter=${since}&pageSize=500&sort=-createdOn`)
+    const rows = data?.data || []
+    if (!rows.length) return
+
+    const open = rows.filter(b => b.status === 'New')
+    const closed = rows.filter(b => b.status && b.status !== 'New').map(b => b.id)
+
+    // Anything no longer New leaves the inbox — this is how a dismissal or
+    // conversion made inside ServiceTitan disappears from the rail.
+    if (closed.length) {
+      await supabase.from('st_leads')
+        .update({ resolved_at: new Date().toISOString(), last_synced_at: new Date().toISOString() })
+        .in('booking_id', closed).is('resolved_at', null)
+    }
+    if (!open.length) return
+
+    // Only fetch contacts for bookings we don't already hold — phone/email is
+    // one call per booking, so never re-fetch what's already mirrored.
+    const { data: existing } = await supabase.from('st_leads')
+      .select('booking_id').in('booking_id', open.map(b => b.id))
+    const have = new Set((existing || []).map(r => Number(r.booking_id)))
+    const fresh = open.filter(b => !have.has(b.id))
+
+    for (const b of fresh) {
+      let phone = null, email = null
+      try {
+        const c = await stGet(`/crm/v2/tenant/${ST_TENANT_ID}/bookings/${b.id}/contacts`)
+        const cs = c?.data || []
+        phone = (cs.find(x => (x.type || '').toLowerCase().includes('phone')) || {}).value || null
+        email = (cs.find(x => (x.type || '').toLowerCase().includes('email')) || {}).value || null
+      } catch (e) { console.warn(`lead ${b.id} contacts failed:`, e.message) }
+
+      const parsed = parseLeadSummary(b.summary)
+      const a = b.address || {}
+      const { error } = await supabase.from('st_leads').upsert({
+        booking_id: b.id,
+        name: b.name || null,
+        phone, email,
+        address: a.street || null, city: a.city || null, state: a.state || null, zip: a.zip || null,
+        source: b.source || null,
+        provider: resolveProvider(b.source),
+        summary: b.summary || null,
+        lead_fee: parsed.lead_fee,
+        urgency: parsed.urgency,
+        job_type: parsed.job_type,
+        st_status: b.status,
+        submitted_at: b.createdOn || null,
+        last_synced_at: new Date().toISOString(),
+      }, { onConflict: 'booking_id' })
+      if (error) console.error('lead upsert failed:', error.message)
+    }
+    if (fresh.length) console.log(`Lead inbox: +${fresh.length} new, ${closed.length} resolved`)
+  } catch (err) {
+    console.error('syncLeadInbox error:', err.message)
+  }
+}
+
+// Claim a lead. Andi is the claim authority — ST has no field to write this to.
+// Conditional on being unclaimed so two reps racing can't both win a paid lead.
+app.post('/api/leads/:id/claim', async (req, res) => {
+  try {
+    const rep = (req.body?.rep || '').toString().trim()
+    if (!rep) return res.status(400).json({ error: 'rep required' })
+
+    const { data, error } = await supabase.from('st_leads')
+      .update({ claimed_by: rep, claimed_at: new Date().toISOString() })
+      .eq('id', req.params.id).is('claimed_by', null).is('resolved_at', null)
+      .select().maybeSingle()
+    if (error) throw new Error(error.message)
+    if (!data) {
+      const { data: cur } = await supabase.from('st_leads').select('claimed_by, resolved_at').eq('id', req.params.id).maybeSingle()
+      return res.status(409).json({ error: cur?.resolved_at ? 'This lead is no longer open.' : `Already claimed by ${cur?.claimed_by || 'someone else'}.` })
+    }
+    res.json({ lead: data })
+  } catch (err) {
+    console.error('lead claim error:', err.message)
+    res.status(500).json({ error: err.message })
+  }
+})
+
+app.post('/api/leads/:id/release', async (req, res) => {
+  try {
+    const { error } = await supabase.from('st_leads')
+      .update({ claimed_by: null, claimed_at: null }).eq('id', req.params.id)
+    if (error) throw new Error(error.message)
+    res.json({ ok: true })
+  } catch (err) { res.status(500).json({ error: err.message }) }
+})
+
+// Promote a claimed lead into a real contact so the whole dialer machinery
+// (call logs, dispositions, DNC, AI brief, commissions) applies unchanged.
+// Re-checks the booking's live ST status first — a lead dismissed in ST up to a
+// minute ago would otherwise still look open here.
+app.post('/api/leads/:id/promote', async (req, res) => {
+  try {
+    const { data: lead } = await supabase.from('st_leads').select('*').eq('id', req.params.id).maybeSingle()
+    if (!lead) return res.status(404).json({ error: 'Lead not found' })
+    if (lead.contact_id) return res.json({ contactId: lead.contact_id, alreadyPromoted: true })
+
+    try {
+      const live = await stGet(`/crm/v2/tenant/${ST_TENANT_ID}/bookings/${lead.booking_id}`)
+      if (live?.status && live.status !== 'New') {
+        await supabase.from('st_leads').update({ st_status: live.status, resolved_at: new Date().toISOString() }).eq('id', lead.id)
+        return res.status(409).json({ error: `This lead was ${String(live.status).toLowerCase()} in ServiceTitan.` })
+      }
+    } catch (e) { console.warn('lead pre-dial status check failed:', e.message) }
+
+    // Park leads in their own campaign so they're reportable separately.
+    let campaignId = null
+    const { data: camp } = await supabase.from('campaigns').select('id').eq('name', 'Leads').maybeSingle()
+    if (camp) campaignId = camp.id
+    else {
+      const { data: made } = await supabase.from('campaigns')
+        .insert({ name: 'Leads', description: 'Paid leads from ServiceTitan Bookings', status: 'Active' })
+        .select().single()
+      campaignId = made?.id || null
+    }
+
+    const { data: contact, error } = await supabase.from('contacts').insert({
+      name: lead.name || 'Unknown',
+      phone: lead.phone, email: lead.email,
+      address: lead.address, city: lead.city, state: lead.state, zip: lead.zip,
+      source: lead.provider || 'Lead',
+      import_notes: lead.summary || null,
+      external_id: String(lead.booking_id),
+      status: 'Pending', attempts: 0,
+      campaign_id: campaignId,
+      claimed_by: lead.claimed_by || null,
+      claimed_at: lead.claimed_at || null,
+    }).select().single()
+    if (error) throw new Error('contact create: ' + error.message)
+
+    await supabase.from('st_leads')
+      .update({ contact_id: contact.id, resolved_at: new Date().toISOString() }).eq('id', lead.id)
+    res.json({ contactId: contact.id, contact })
+  } catch (err) {
+    console.error('lead promote error:', err.message)
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// Recent CALLS involving this lead's number, so a rep doesn't dial someone who
+// was just spoken to.
+//
+// Two ST traps, both verified — do not "simplify" this back:
+//  - ?phoneNumber= is IGNORED. Two different numbers return byte-identical
+//    rows, none matching what was asked for. Filtering MUST happen here, or
+//    reps get shown unrelated strangers' calls.
+//  - ?sort= is IGNORED (a -createdOn request returned 2024 rows first), so the
+//    ordering is done here too. createdOnOrAfter DOES work, which is what makes
+//    the window small enough to filter in memory (~186 calls over 2 days).
+//
+// SCOPE: calls only. Revin AI texts every lead immediately and those texts do
+// NOT exist in ST telecom, so an empty result here does NOT mean "untouched".
+// Real texting visibility needs an API/webhook from Revin.
+app.get('/api/leads/:id/touches', async (req, res) => {
+  try {
+    const { data: lead } = await supabase.from('st_leads').select('phone, submitted_at').eq('id', req.params.id).maybeSingle()
+    const digits = (lead?.phone || '').replace(/\D/g, '').slice(-10)
+    if (!digits) return res.json({ touches: [], callsOnly: true })
+
+    // Window back to just before the lead landed (min 2 days, cap 14).
+    const from = lead?.submitted_at ? new Date(lead.submitted_at) : new Date()
+    from.setDate(from.getDate() - 1)
+    const floor = new Date(Date.now() - 14 * 864e5)
+    const since = (from < floor ? floor : from).toISOString().slice(0, 10)
+
+    const data = await stGet(`/telecom/v2/tenant/${ST_TENANT_ID}/calls?createdOnOrAfter=${since}&pageSize=500`)
+    const tenOf = (v) => String(v || '').replace(/\D/g, '').slice(-10)
+    const touches = (data?.data || [])
+      .map(c => c.leadCall || c)
+      .filter(lc => tenOf(lc.from) === digits || tenOf(lc.to) === digits)
+      .map(lc => ({
+        at: lc.createdOn || null,
+        direction: lc.direction || null,
+        agent: (lc.agent && (lc.agent.name || lc.agent)) || null,
+        reason: (lc.reason && (lc.reason.name || lc.reason)) || null,
+      }))
+      .sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')))
+      .slice(0, 10)
+    res.json({ touches, callsOnly: true })
+  } catch (err) {
+    res.json({ touches: [], callsOnly: true, error: err.message })
+  }
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
 // AI CAMPAIGN BUILDER — natural language → ServiceTitan audience → contacts.
 //
 // Claude maps a request onto ONE of a fixed catalog of recipes; it does NOT get
@@ -2678,4 +2913,17 @@ if (SYNC_INTERVAL_MIN > 0) {
   console.log(`Commission sync every ${SYNC_INTERVAL_MIN}m`)
 } else {
   console.log('Commission sync disabled (COMMISSION_SYNC_MINUTES=0)')
+}
+
+// ── Lead inbox poll. Faster than the commission sync because these are paid
+// leads competitors are also calling — a minute of staleness is a lost job.
+// A second Railway replica double-polling is harmless (upsert on booking_id).
+if (LEAD_POLL_SECONDS > 0) {
+  setTimeout(() => {
+    syncLeadInbox()
+    setInterval(syncLeadInbox, LEAD_POLL_SECONDS * 1000)
+  }, 10_000)
+  console.log(`Lead inbox poll every ${LEAD_POLL_SECONDS}s`)
+} else {
+  console.log('Lead inbox poll disabled (LEAD_POLL_SECONDS=0)')
 }

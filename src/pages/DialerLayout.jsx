@@ -262,6 +262,25 @@ function DialerLayoutInner() {
   }
   const currentEventRef = useRef(null)
   const [navCollapsed, setNavCollapsed] = useState(false)
+
+  // Open paid-lead count, for the Dialer nav badge. Everyone sees it (leads are
+  // claim-on-open, first rep there wins) and it clears the moment the inbox
+  // empties — including when a booking is dismissed inside ServiceTitan, since
+  // the server poller resolves those rows.
+  const [openLeads, setOpenLeads] = useState(0)
+  useEffect(() => {
+    let stopped = false
+    const load = async () => {
+      const { count } = await sb.from('st_leads')
+        .select('id', { count: 'exact', head: true }).is('resolved_at', null)
+      if (!stopped) setOpenLeads(count || 0)
+    }
+    load()
+    const ch = sb.channel('st_leads_badge')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'st_leads' }, load)
+      .subscribe()
+    return () => { stopped = true; sb.removeChannel(ch) }
+  }, [])
   const [statusOptions, setStatusOptions] = useState(DEFAULT_STATUS_OPTIONS)
 
   // Load custom statuses from app_settings
@@ -530,8 +549,19 @@ function DialerLayoutInner() {
               onMouseLeave={e => { const isActive = e.currentTarget.style.fontWeight === '600'; handleNavLeave(e, isActive) }}>
               {({ isActive }) => (
                 <>
-                  <span style={{ flexShrink:0, display:'flex', alignItems:'center' }}>{NAV_ICONS[iconKey]?.(isActive)}</span>
+                  <span style={{ flexShrink:0, display:'flex', alignItems:'center', position:'relative' }}>
+                    {NAV_ICONS[iconKey]?.(isActive)}
+                    {iconKey === 'dialer' && openLeads > 0 && navCollapsed && (
+                      <span style={{ position:'absolute', top:-2, right:-3, width:8, height:8, borderRadius:'50%', background:'var(--danger)', border:'1.5px solid var(--surface)' }} />
+                    )}
+                  </span>
                   {!navCollapsed && <span>{label}</span>}
+                  {iconKey === 'dialer' && openLeads > 0 && !navCollapsed && (
+                    <span title={`${openLeads} paid lead${openLeads === 1 ? '' : 's'} waiting`}
+                      style={{ marginLeft:'auto', fontSize:10, fontWeight:700, background:'var(--danger)', color:'#fff', borderRadius:99, padding:'1px 7px', lineHeight:1.5 }}>
+                      {openLeads}
+                    </span>
+                  )}
                 </>
               )}
             </NavLink>

@@ -229,3 +229,55 @@ end $$;
 alter table profiles add column if not exists inbound_skill boolean not null default false;
 alter table profiles add column if not exists inbound_available boolean not null default false;
 alter table profiles add column if not exists active_campaign_ids jsonb not null default '[]';
+
+-- ── AI/paid lead inbox: mirror of the ServiceTitan Bookings tab ──────────────
+-- One row per ST booking that still needs a human touch. This is an INBOX, not
+-- a work record: when a rep claims a lead it is promoted to a normal contacts
+-- row, and the work/call history lives there. That split means a booking that
+-- gets dismissed in ServiceTitan after we already called it can leave the inbox
+-- without destroying the call log.
+
+create table if not exists st_leads (
+  id              bigserial primary key,
+  booking_id      bigint not null unique,          -- ST crm/v2 booking id
+  name            text,
+  phone           text,
+  email           text,
+  address         text,
+  city            text,
+  state           text,
+  zip             text,
+  source          text,                            -- raw ST source, e.g. LeadsIntegration#33
+  provider        text,                            -- resolved name, e.g. Angi / Scorpion
+  summary         text,                            -- customer message + interview answers
+  lead_fee        numeric,                         -- what we paid for it
+  urgency         text,                            -- e.g. "Urgent (1-2 days)"
+  job_type        text,
+  st_status       text,                            -- New / Converted / Dismissed
+  submitted_at    timestamptz,                     -- ST createdOn
+  claimed_by      text,                            -- rep display name (matches contacts.claimed_by)
+  claimed_at      timestamptz,
+  contact_id      uuid,                            -- set once promoted into contacts
+  resolved_at     timestamptz,                     -- left the inbox (converted/dismissed/worked)
+  last_synced_at  timestamptz default now(),
+  created_at      timestamptz default now()
+);
+
+-- The rail only ever reads unresolved rows, newest first.
+create index if not exists st_leads_open_idx on st_leads (resolved_at, submitted_at desc);
+create index if not exists st_leads_booking_idx on st_leads (booking_id);
+
+-- Realtime: the rail, the nav badge and the claim state all update live.
+alter publication supabase_realtime add table st_leads;
+
+-- Reps read the inbox; only the server (service key) writes the mirror, but
+-- claiming happens from the browser, so allow authenticated updates.
+alter table st_leads enable row level security;
+
+drop policy if exists "Authenticated can read leads" on st_leads;
+create policy "Authenticated can read leads" on st_leads
+  for select to authenticated using (true);
+
+drop policy if exists "Authenticated can claim leads" on st_leads;
+create policy "Authenticated can claim leads" on st_leads
+  for update to authenticated using (true) with check (true);

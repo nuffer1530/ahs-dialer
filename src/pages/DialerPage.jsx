@@ -7,6 +7,7 @@ import Modal from '../components/Modal'
 import { isDone, isCallbackDueToday, getDupSet, normPhone, getInitials, fmtDate, fmtShort, syncWorkerActivity } from '../lib/utils'
 import { usePhone } from '../lib/PhoneContext'
 import QueueSelector from '../components/QueueSelector'
+import LeadsRail from '../components/LeadsRail'
 import { OUTCOMES, MAX_ATTEMPTS, DONE_OUTCOMES } from '../lib/constants'
 
 const PAGE_SIZE = 50
@@ -648,7 +649,30 @@ export default function DialerPage() {
     return true
   }
 
-  const navNextPending = () => {
+  // Paid leads jump the queue. A $52 Angi lead is being called by competitors
+  // right now; an outbound contact has been waiting a week and can wait five
+  // more minutes. Putting this here (rather than only in the rail) means it
+  // works even for a rep who never looks at the sidebar — "Next pending" is
+  // what actually drives their day.
+  const navNextPending = async () => {
+    try {
+      const { data: lead } = await sb.from('st_leads').select('id')
+        .is('resolved_at', null).is('claimed_by', null)
+        .order('submitted_at', { ascending: true }).limit(1).maybeSingle()
+      if (lead) {
+        const c = await fetch(`/api/leads/${lead.id}/claim`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ rep: currentRep }),
+        })
+        if (c.ok) {
+          const p = await fetch(`/api/leads/${lead.id}/promote`, { method: 'POST' })
+          const pd = await p.json().catch(() => ({}))
+          if (p.ok && pd.contactId) { navigateActiveTo(pd.contactId); return }
+        }
+        // Lost the race or ST closed it — fall through to normal queue.
+      }
+    } catch (e) { console.warn('lead-first next pending failed:', e.message) }
+
     if (skillsMode) { serveLead(nextSkillLead(), true); return }
     const next = filtered.find(x => !isDone(x) && x.status !== 'Max Attempts' && !x.claimed_by)
     if (next) navigateActiveTo(next.id)
@@ -1041,54 +1065,13 @@ export default function DialerPage() {
       {/* == BODY == */}
       <div style={{ flex:1, display:'flex', overflow:'hidden', minHeight:0 }}>
 
-        {/* Queue sidebar */}
-        <aside style={{ width: queueCollapsed ? 0 : 220, minWidth: queueCollapsed ? 0 : 220, flexShrink:0, background:'var(--surface)', borderRight:'1px solid var(--border)', display:'flex', flexDirection:'column', overflow:'hidden', transition:'width .2s, min-width .2s' }}>
-          <div style={{ padding:'9px 10px 7px', borderBottom:'1px solid var(--border)', flexShrink:0 }}>
-            <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:5 }}>
-              <span style={{ fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:.8, color:'var(--text-muted)' }}>Queue</span>
-              <span style={{ fontSize:10, color:'var(--text-muted)' }}>{filtered.length}/{contacts.length}</span>
-            </div>
-            <input style={{ width:'100%', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'4px 8px', fontSize:11, background:'var(--surface-2)', color:'var(--text-primary)' }}
-              placeholder="Search..." value={search} onChange={e => setSearch(e.target.value)} />
-            <div style={{ display:'flex', gap:3, marginTop:5, flexWrap:'wrap' }}>
-              {[{id:'active',label:'Active'},{id:'callback',label:'CB'},{id:'no-answer',label:'N/A'},{id:'voicemail',label:'VM'},{id:'done',label:'Done'},{id:'all',label:'All'}].map(f => (
-                <button key={f.id} onClick={() => setFilter(f.id)}
-                  style={{ padding:'2px 6px', borderRadius:99, fontSize:10, border:'1px solid', cursor:'pointer', borderColor: filter===f.id ? 'var(--accent)' : 'var(--border)', background: filter===f.id ? 'var(--accent)' : 'transparent', color: filter===f.id ? '#fff' : 'var(--text-muted)' }}>
-                  {f.label}
-                </button>
-              ))}
-            </div>
-            <select value={campFilter} onChange={e => setCampFilter(e.target.value)}
-              style={{ width:'100%', marginTop:5, border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'3px 6px', fontSize:11, background:'var(--surface-2)', color:'var(--text-primary)' }}>
-              <option value="">All campaigns</option>
-              {campaigns.map(camp => <option key={camp.id} value={camp.id}>{camp.name}</option>)}
-            </select>
-          </div>
-          <div style={{ flex:1, overflowY:'auto' }}>
-            {filtered.slice(0, PAGE_SIZE).map((contact, idx) => {
-              const active = contact.id === selectedId
-              const hasCb = isCallbackDueToday(contact) && !isDone(contact)
-              return (
-                <div key={contact.id} onClick={() => selectContact(contact.id)}
-                  style={{ padding:'7px 10px', cursor:'pointer', borderBottom:'1px solid var(--border)', background: active ? 'var(--accent-bg)' : 'transparent', borderLeft: active ? '2px solid var(--accent)' : '2px solid transparent' }}>
-                  <div style={{ display:'flex', alignItems:'center', gap:5 }}>
-                    <span style={{ fontSize:10, color:'var(--text-muted)', width:14, flexShrink:0 }}>{idx+1}</span>
-                    <div style={{ flex:1, minWidth:0 }}>
-                      <div style={{ fontWeight:600, fontSize:11, color: active ? 'var(--accent)' : 'var(--text-primary)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
-                        {hasCb && '* '}{contact.name || '--'}
-                        {contact.claimed_by === currentRep && <span style={{ marginLeft:3, fontSize:9, background:'var(--accent)', color:'#fff', borderRadius:3, padding:'1px 3px' }}>You</span>}
-                      </div>
-                      <div style={{ fontSize:10, color:'var(--text-muted)' }}>{contact.phone || 'No phone'}</div>
-                    </div>
-                    <div style={{ display:'flex', gap:2 }}>
-                      {contact.campaign_id && Array.from({length:MAX_ATTEMPTS},(_,i) => <div key={i} style={{width:4,height:4,borderRadius:'50%',background:i<(contact.attempts||0)?'var(--accent)':'var(--border)'}}></div>)}
-                    </div>
-                  </div>
-                </div>
-              )
-            })}
-            {filtered.length > PAGE_SIZE && <div style={{ padding:'6px', fontSize:10, color:'var(--text-muted)', textAlign:'center' }}>+{filtered.length-PAGE_SIZE} more</div>}
-          </div>
+        {/* Lead inbox rail. The outbound contact list used to live here, but
+            nobody scrolls 4,000 rows — reps work off "Next pending". This space
+            is worth far more showing the handful of paid leads that are on a
+            clock. Outbound contacts are still reachable via Next pending and
+            the ServiceTitan search in the header. */}
+        <aside style={{ width: queueCollapsed ? 0 : 232, minWidth: queueCollapsed ? 0 : 232, flexShrink:0, background:'var(--surface)', borderRight:'1px solid var(--border)', display:'flex', flexDirection:'column', overflow:'hidden', transition:'width .2s, min-width .2s' }}>
+          <LeadsRail currentRep={currentRep} onOpenContact={(id) => id && navigateActiveTo(id)} />
         </aside>
 
         {/* == MAIN WORKSPACE == */}
