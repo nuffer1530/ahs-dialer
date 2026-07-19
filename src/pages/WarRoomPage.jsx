@@ -112,7 +112,11 @@ export default function WarRoomPage() {
       sb.from('call_logs').select('*').gte('created_at', since).order('created_at', { ascending:false }),
       sb.from('call_tasks').select('*').gte('queued_at', since).order('queued_at', { ascending:false }),
       sb.from('active_calls').select('*').is('ended_at', null),
-      sb.from('profiles').select('id, name, email, avatar, status, status_since, interaction_type').eq('active', true),
+      // select('*') on purpose: naming columns here means any column this file
+      // references before its migration lands 400s the WHOLE query and the
+      // floor TV renders zero agents. A wildcard degrades to a missing chip
+      // instead of an empty board.
+      sb.from('profiles').select('*').eq('active', true),
     ]).then(([l, t, a, p]) => {
       setLogs(l.data || []); setTasks(t.data || []); setLiveCalls(a.data || []); setProfiles(p.data || [])
     })

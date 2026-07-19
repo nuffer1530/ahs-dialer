@@ -229,7 +229,7 @@ export default function DialerPage() {
   // dialer destroyed the Device and inbound calls could not be answered.
   const {
     twilioReady, callStatus, callDuration, incomingCall,
-    makeCall: phoneMakeCall, hangUp, cancelAutoWrap, startInteraction,
+    makeCall: phoneMakeCall, hangUp, cancelAutoWrap, startInteraction, endInteraction,
     pendingInbound, setPendingInbound,
   } = usePhone()
 
@@ -433,7 +433,15 @@ export default function DialerPage() {
 
   const updateAgentStatus = async (status) => {
     if (!profile?.id) return
-    await sb.from('profiles').update({ status, status_since: new Date().toISOString() }).eq('id', profile.id)
+    const patch = { status, status_since: new Date().toISOString() }
+    // Leaving On Call/Wrap Up means the interaction is over — clear its label or
+    // the boards keep showing "Lead" against a rep who's back on Available.
+    if (status !== 'On Call' && status !== 'Wrap Up') patch.interaction_type = null
+    const { error } = await sb.from('profiles').update(patch).eq('id', profile.id)
+    if (error) {
+      console.error('status update failed:', error.message)
+      await sb.from('profiles').update({ status, status_since: patch.status_since }).eq('id', profile.id)
+    }
     syncWorkerActivity(profile.id, status)
   }
 
@@ -719,6 +727,7 @@ export default function DialerPage() {
   const releaseContact = async (id) => {
     const { data } = await sb.from('contacts').update({ claimed_by: null, claimed_at: null }).eq('id', id).select().single()
     if (data) setContacts(prev => prev.map(c => c.id === id ? data : c))
+    endInteraction?.()   // letting it go means you're no longer working it
   }
 
   const logOutcome = async (stay) => {

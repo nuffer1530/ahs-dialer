@@ -79,6 +79,7 @@ export function PhoneProvider({ children }) {
     updateAgentStatus('On Call', type)
   }, [updateAgentStatus])
 
+
   // Auto wrap-up: after a call ends the rep gets 60s of Wrap Up, then is put
   // back to Available automatically — unless they change their status themselves
   // (e.g. re-select Wrap Up to keep wrapping), which cancels the auto-return.
@@ -91,6 +92,17 @@ export function PhoneProvider({ children }) {
     updateAgentStatus('Wrap Up')
     cancelAutoWrap()
     wrapTimerRef.current = setTimeout(() => { wrapTimerRef.current = null; updateAgentStatus('Available', null) }, WRAP_MS)
+  }, [updateAgentStatus, cancelAutoWrap])
+
+  // Non-call interactions (a claimed lead, a text) have no hangup to end them,
+  // so without this a rep who claims a lead and never dials stays On Call
+  // forever — invisible to inbound routing and wrong on every board. Called
+  // when they disposition or release. A live call owns the status, so defer to
+  // the normal hangup → wrap-up path if one is up.
+  const endInteraction = useCallback(() => {
+    if (callRef.current) return
+    cancelAutoWrap()
+    updateAgentStatus('Available', null)
   }, [updateAgentStatus, cancelAutoWrap])
 
   const wireCallEvents = useCallback((call) => {
@@ -276,7 +288,7 @@ export function PhoneProvider({ children }) {
   return (
     <PhoneContext.Provider value={{
       twilioReady, incomingCall, callStatus, callDuration,
-      makeCall, acceptIncoming, rejectIncoming, hangUp, cancelAutoWrap, startInteraction,
+      makeCall, acceptIncoming, rejectIncoming, hangUp, cancelAutoWrap, startInteraction, endInteraction,
       pendingInbound, setPendingInbound,
       hasActiveCall: () => !!callRef.current,
     }}>
