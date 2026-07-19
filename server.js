@@ -2519,8 +2519,21 @@ async function syncLeadInbox() {
     // minutes AFTER it lands, so a one-shot check at insert would leave the
     // rail telling a rep to call someone who has since been scheduled.
     const { data: openLeads } = await supabase.from('st_leads')
-      .select('id, phone, already_booked, st_customer_id').is('resolved_at', null)
+      .select('id, phone, already_booked, st_customer_id, summary, job_type, urgency, lead_fee').is('resolved_at', null)
     for (const lead of (openLeads || [])) {
+      // Re-parse from the stored summary. Rows are parsed once at insert, so
+      // without this any improvement to the parser only ever reaches leads that
+      // arrive afterwards — existing open leads keep whatever the old parser
+      // produced (or nothing). Costs no ST calls.
+      if (lead.summary && (!lead.job_type || !lead.urgency || lead.lead_fee == null)) {
+        const reparsed = parseLeadSummary(lead.summary)
+        const fix = {}
+        if (!lead.job_type && reparsed.job_type) fix.job_type = reparsed.job_type
+        if (!lead.urgency && reparsed.urgency) fix.urgency = reparsed.urgency
+        if (lead.lead_fee == null && reparsed.lead_fee != null) fix.lead_fee = reparsed.lead_fee
+        if (Object.keys(fix).length) await supabase.from('st_leads').update(fix).eq('id', lead.id)
+      }
+
       if (lead.already_booked) continue
       const hit = await findExistingBooking(lead.phone)
       if (!hit) continue
