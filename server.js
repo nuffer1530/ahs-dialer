@@ -5,6 +5,7 @@ import cors from 'cors'
 import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
 import { existsSync } from 'fs'
+import { renderBoardEmail, boardEmailSubject } from './lib/boardEmail.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
@@ -2449,6 +2450,102 @@ app.post('/api/twilio/hangup', async (req, res) => {
 })
 
 // ═══════════════════════════════════════════════════════════════════════════
+// 3-DAY CALL BOARD — daily email to leadership.
+//
+// SAFETY: the scheduled send is inert unless BOARD_EMAIL_TO is set. Deploying
+// this cannot email anyone by accident; the recipient list is a deliberate,
+// separate action. /test always requires an explicit recipient.
+//
+// The Resend key currently lives in .env as VITE_RESEND_API_KEY. That prefix is
+// a Vite convention meaning "safe to expose to the browser", which an API key
+// is NOT — it is only safe today because no frontend file references it (a
+// VITE_ var is inlined into the bundle when, and only when, it is imported in
+// client code). Read RESEND_API_KEY first so it can be renamed without a code
+// change; the VITE_ fallback keeps it working until then.
+// ═══════════════════════════════════════════════════════════════════════════
+
+const RESEND_KEY = process.env.RESEND_API_KEY || process.env.VITE_RESEND_API_KEY
+const BOARD_EMAIL_FROM = process.env.BOARD_EMAIL_FROM || 'Andi <andi@awesomeservice.com>'
+const BOARD_EMAIL_TO = process.env.BOARD_EMAIL_TO || ''          // unset = no scheduled send
+const BOARD_EMAIL_HOUR = Number(process.env.BOARD_EMAIL_HOUR || 7)  // local hour, 24h
+const BOARD_EMAIL_TZ = process.env.BOARD_EMAIL_TZ || 'America/Denver'
+
+async function sendResend({ to, subject, html }) {
+  if (!RESEND_KEY) throw new Error('No Resend API key configured')
+  const list = (Array.isArray(to) ? to : String(to).split(',')).map(s => s.trim()).filter(Boolean)
+  if (!list.length) throw new Error('No recipient')
+  const r = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${RESEND_KEY}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ from: BOARD_EMAIL_FROM, to: list, subject, html }),
+  })
+  const body = await r.json().catch(() => ({}))
+  if (!r.ok) throw new Error(`Resend ${r.status}: ${body?.message || JSON.stringify(body).slice(0, 200)}`)
+  return body
+}
+
+async function buildBoardEmail() {
+  const data = await build3DayBoard()
+  return {
+    data,
+    subject: boardEmailSubject(data),
+    html: renderBoardEmail(data, { appUrl: process.env.APP_URL || 'https://andi.awesomeservice.com' }),
+  }
+}
+
+// Preview only — renders and returns the HTML, sends nothing.
+app.get('/api/board/email/preview', async (req, res) => {
+  if (!(await requireAdmin(req, res))) return
+  try {
+    const { html } = await buildBoardEmail()
+    res.set('Content-Type', 'text/html; charset=utf-8').send(html)
+  } catch (err) {
+    console.error('board email preview error:', err.message)
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// Explicit send. `to` is required — there is deliberately no default recipient,
+// so a stray call can't reach the leadership list.
+app.post('/api/board/email/test', async (req, res) => {
+  if (!(await requireAdmin(req, res))) return
+  try {
+    const to = (req.body?.to || '').toString().trim()
+    if (!to) return res.status(400).json({ error: 'A recipient is required.' })
+    const { subject, html } = await buildBoardEmail()
+    const out = await sendResend({ to, subject, html })
+    console.log(`BOARD EMAIL: sent to ${to} (${out?.id || 'no id'})`)
+    res.json({ ok: true, to, subject, id: out?.id || null })
+  } catch (err) {
+    console.error('board email send error:', err.message)
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// Daily scheduler. Checks every 5 minutes and fires once when the local hour is
+// reached; the sent-date guard means a restart mid-window can't double-send.
+let _boardEmailLastSent = null
+async function maybeSendDailyBoardEmail() {
+  if (!BOARD_EMAIL_TO || !RESEND_KEY) return
+  const now = new Date()
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: BOARD_EMAIL_TZ, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', hour12: false,
+  }).formatToParts(now).reduce((a, p) => (a[p.type] = p.value, a), {})
+  const localDate = `${parts.year}-${parts.month}-${parts.day}`
+  const localHour = Number(parts.hour)
+  if (localHour < BOARD_EMAIL_HOUR) return
+  if (_boardEmailLastSent === localDate) return
+  _boardEmailLastSent = localDate
+  try {
+    const { subject, html } = await buildBoardEmail()
+    await sendResend({ to: BOARD_EMAIL_TO, subject, html })
+    console.log(`BOARD EMAIL: daily send to ${BOARD_EMAIL_TO} — ${subject}`)
+  } catch (err) {
+    console.error('BOARD EMAIL: daily send FAILED:', err.message)
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // LEAD INBOX — mirrors the ServiceTitan Bookings tab into `st_leads`.
 //
 // These are PAID leads (Angi/HomeAdvisor ~$52 each, Scorpion, etc). Revin AI
@@ -3168,6 +3265,16 @@ if (SYNC_INTERVAL_MIN > 0) {
 // ── Lead inbox poll. Faster than the commission sync because these are paid
 // leads competitors are also calling — a minute of staleness is a lost job.
 // A second Railway replica double-polling is harmless (upsert on booking_id).
+// Daily leadership email. Inert until BOARD_EMAIL_TO is set — deploying this
+// cannot email anyone by accident.
+if (BOARD_EMAIL_TO && RESEND_KEY) {
+  setInterval(maybeSendDailyBoardEmail, 5 * 60_000)
+  setTimeout(maybeSendDailyBoardEmail, 60_000)
+  console.log(`Board email daily at ${BOARD_EMAIL_HOUR}:00 ${BOARD_EMAIL_TZ} to ${BOARD_EMAIL_TO}`)
+} else {
+  console.log('Board email scheduler off (set BOARD_EMAIL_TO to enable)')
+}
+
 if (LEAD_POLL_SECONDS > 0) {
   setTimeout(() => {
     syncLeadInbox()
