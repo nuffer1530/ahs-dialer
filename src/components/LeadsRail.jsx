@@ -66,7 +66,10 @@ export default function LeadsRail({ currentRep, onOpenContact }) {
       const p = await fetch(`/api/leads/${lead.id}/promote`, { method: 'POST' })
       const pd = await p.json().catch(() => ({}))
       if (!p.ok) { setErr(pd.error || 'Could not open lead'); load(); return }
-      onOpenContact?.(pd.contactId)
+      // Hand back the whole contact, not just its id. It was created server-side
+      // a millisecond ago, so the realtime INSERT hasn't reached the browser's
+      // cache yet — navigating by id alone opens an empty tab.
+      onOpenContact?.(pd.contact || (pd.contactId ? { id: pd.contactId } : null))
     } catch (e) {
       setErr(e.message)
     } finally { setBusyId(null) }

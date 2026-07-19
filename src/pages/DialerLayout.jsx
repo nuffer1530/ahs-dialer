@@ -4,6 +4,7 @@ import { useAuth } from '../lib/AuthContext'
 import { useData } from '../lib/DataContext'
 import { sb } from '../lib/supabase'
 import { syncWorkerActivity } from '../lib/utils'
+import { useOpenLeads } from '../lib/useOpenLeads'
 import { PhoneProvider, usePhone } from '../lib/PhoneContext'
 import DialerPage from './DialerPage'
 import CampaignsPage from './CampaignsPage'
@@ -263,24 +264,10 @@ function DialerLayoutInner() {
   const currentEventRef = useRef(null)
   const [navCollapsed, setNavCollapsed] = useState(false)
 
-  // Open paid-lead count, for the Dialer nav badge. Everyone sees it (leads are
+  // Open paid-lead count for the Dialer nav badge. Everyone sees it (leads are
   // claim-on-open, first rep there wins) and it clears the moment the inbox
-  // empties — including when a booking is dismissed inside ServiceTitan, since
-  // the server poller resolves those rows.
-  const [openLeads, setOpenLeads] = useState(0)
-  useEffect(() => {
-    let stopped = false
-    const load = async () => {
-      const { count } = await sb.from('st_leads')
-        .select('id', { count: 'exact', head: true }).is('resolved_at', null)
-      if (!stopped) setOpenLeads(count || 0)
-    }
-    load()
-    const ch = sb.channel('st_leads_badge')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'st_leads' }, load)
-      .subscribe()
-    return () => { stopped = true; sb.removeChannel(ch) }
-  }, [])
+  // empties — including when a booking is dismissed inside ServiceTitan.
+  const openLeads = useOpenLeads()
   const [statusOptions, setStatusOptions] = useState(DEFAULT_STATUS_OPTIONS)
 
   // Load custom statuses from app_settings

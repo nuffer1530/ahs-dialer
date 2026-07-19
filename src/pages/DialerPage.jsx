@@ -8,6 +8,7 @@ import { isDone, isCallbackDueToday, getDupSet, normPhone, getInitials, fmtDate,
 import { usePhone } from '../lib/PhoneContext'
 import QueueSelector from '../components/QueueSelector'
 import LeadsRail from '../components/LeadsRail'
+import { useOpenLeads } from '../lib/useOpenLeads'
 import { OUTCOMES, MAX_ATTEMPTS, DONE_OUTCOMES } from '../lib/constants'
 
 const PAGE_SIZE = 50
@@ -160,6 +161,7 @@ export default function DialerPage() {
   const [activeTab, setActiveTab] = useState('script')
   const [notesVal, setNotesVal] = useState('')
   const [queueCollapsed, setQueueCollapsed] = useState(true)
+  const openLeadCount = useOpenLeads()
   const [todayLogs, setTodayLogs] = useState([])
   const [powerDialActive, setPowerDialActive] = useState(false)
   const [alsoMembership, setAlsoMembership] = useState(false)
@@ -649,6 +651,16 @@ export default function DialerPage() {
     return true
   }
 
+  // Open a contact that was just created server-side (promoted from a lead).
+  // It must be seeded into DataContext first: the realtime INSERT that normally
+  // delivers new contacts hasn't arrived yet, and selecting an id that isn't in
+  // `contacts` renders an empty customer tab.
+  const openPromotedContact = (contact) => {
+    if (!contact?.id) return
+    setContacts(prev => prev.some(c => c.id === contact.id) ? prev : [...prev, contact])
+    navigateActiveTo(contact.id)
+  }
+
   // Paid leads jump the queue. A $52 Angi lead is being called by competitors
   // right now; an outbound contact has been waiting a week and can wait five
   // more minutes. Putting this here (rather than only in the rail) means it
@@ -667,7 +679,10 @@ export default function DialerPage() {
         if (c.ok) {
           const p = await fetch(`/api/leads/${lead.id}/promote`, { method: 'POST' })
           const pd = await p.json().catch(() => ({}))
-          if (p.ok && pd.contactId) { navigateActiveTo(pd.contactId); return }
+          if (p.ok && pd.contactId) {
+            openPromotedContact(pd.contact || { id: pd.contactId })
+            return
+          }
         }
         // Lost the race or ST closed it — fall through to normal queue.
       }
@@ -993,9 +1008,16 @@ export default function DialerPage() {
 
       {/* == TOP BAR == */}
       <div style={{ display:'flex', alignItems:'center', gap:8, padding:'6px 12px', background:'var(--surface)', borderBottom:'1px solid var(--border)', flexShrink:0 }}>
+        {/* Collapse toggle. Carries a dot when leads are waiting — with the rail
+            collapsed this button is the only thing on screen that could tell a
+            rep a paid lead is sitting there. */}
         <button onClick={() => setQueueCollapsed(p => !p)}
-          style={{ width:28, height:28, border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface-2)', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', fontSize:12, color:'var(--text-muted)', flexShrink:0 }}>
+          title={openLeadCount > 0 ? `${openLeadCount} paid lead${openLeadCount === 1 ? '' : 's'} waiting` : 'Show leads'}
+          style={{ position:'relative', width:28, height:28, border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface-2)', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', fontSize:12, color:'var(--text-muted)', flexShrink:0 }}>
           {queueCollapsed ? '>' : '<'}
+          {openLeadCount > 0 && (
+            <span style={{ position:'absolute', top:-3, right:-3, minWidth:8, height:8, borderRadius:99, background:'var(--danger)', border:'1.5px solid var(--surface)' }} />
+          )}
         </button>
         <button className="btn" disabled={selectedIdx <= 0} onClick={() => { const p = filtered[selectedIdx-1]; if(p) navigateActiveTo(p.id) }} style={{fontSize:11,padding:'4px 9px'}}>Prev</button>
         <button className="btn" disabled={selectedIdx >= filtered.length-1} onClick={() => { const n = filtered[selectedIdx+1]; if(n) navigateActiveTo(n.id) }} style={{fontSize:11,padding:'4px 9px'}}>Next</button>
@@ -1071,7 +1093,7 @@ export default function DialerPage() {
             clock. Outbound contacts are still reachable via Next pending and
             the ServiceTitan search in the header. */}
         <aside style={{ width: queueCollapsed ? 0 : 232, minWidth: queueCollapsed ? 0 : 232, flexShrink:0, background:'var(--surface)', borderRight:'1px solid var(--border)', display:'flex', flexDirection:'column', overflow:'hidden', transition:'width .2s, min-width .2s' }}>
-          <LeadsRail currentRep={currentRep} onOpenContact={(id) => id && navigateActiveTo(id)} />
+          <LeadsRail currentRep={currentRep} onOpenContact={openPromotedContact} />
         </aside>
 
         {/* == MAIN WORKSPACE == */}
