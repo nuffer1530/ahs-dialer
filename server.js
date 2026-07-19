@@ -1351,6 +1351,14 @@ async function build3DayBoard() {
   try { callsPerTech = JSON.parse(cptRow?.value || '{}') } catch {}
   const cpt = (trade) => Number(callsPerTech[trade]) || 3
 
+  // How much install work has to land on a service tech before it counts
+  // against service capacity. A short install tacked onto a service day doesn't
+  // stop them running calls — only a big block genuinely takes the day. Below
+  // the threshold the tech stays fully available; at or above it, the hours
+  // prorate as normal. Admin-tunable; 4h default.
+  const { data: insThRow } = await supabase.from('app_settings').select('value').eq('key', 'board_install_threshold_hours').maybeSingle()
+  const INSTALL_MIN_HOURS = Number(String(insThRow?.value ?? '').replace(/"/g, '')) || 4
+
   // Jobs per day (one ST call per day). Keep the fields the board + drill-down need.
   const jobsByDay = await Promise.all(days.map(d =>
     stGet(`/jpm/v2/tenant/${ST_TENANT_ID}/jobs?appointmentStartsOnOrAfter=${d.startUtc.toISOString()}&appointmentStartsBefore=${d.endUtc.toISOString()}&pageSize=500`)
@@ -1495,8 +1503,10 @@ async function build3DayBoard() {
         // Hours already sold to an install come off the same way time off does:
         // a tech on a 12h install has no service capacity left, even though
         // they're on shift. Capped at their shift so a long install can't push
-        // availability negative.
-        const insH = Math.min(installHours[`${techId}|${di}`] || 0, workH)
+        // availability negative. Ignored entirely below INSTALL_MIN_HOURS — an
+        // hour of install tacked onto a service day shouldn't shave the board.
+        const rawInsH = installHours[`${techId}|${di}`] || 0
+        const insH = rawInsH >= INSTALL_MIN_HOURS ? Math.min(rawInsH, workH) : 0
         const avail = Math.max(0, Math.min((workH - offH - insH) / workH, 1))
         techsAvail += avail
         techList.push({
