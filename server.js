@@ -2522,25 +2522,54 @@ app.post('/api/board/email/test', async (req, res) => {
   }
 })
 
-// Daily scheduler. Checks every 5 minutes and fires once when the local hour is
-// reached; the sent-date guard means a restart mid-window can't double-send.
-let _boardEmailLastSent = null
+// Daily scheduler, checked every 5 minutes.
+//
+// The "already sent today" guard lives in the DATABASE, not in memory. Two
+// reasons, both of which would embarrass us in front of the leadership team:
+//  - Railway restarts the process on every deploy, which would reset an
+//    in-memory flag and fire a second email on any deploy after 7am.
+//  - Two Railway replicas each hold their own memory, so both would send.
+// The claim is a conditional update: whichever replica flips the stored date
+// first wins, the other updates 0 rows and stands down.
+//
+// The send window is bounded (7:00–9:59 by default) rather than "any time at or
+// after 7am", so a restart at 11pm can't fire a daily digest in the middle of
+// the night — while still catching up if the server was down at 7.
+const BOARD_EMAIL_SENT_KEY = 'board_email_last_sent'
+const BOARD_EMAIL_WINDOW_HOURS = 3
+
 async function maybeSendDailyBoardEmail() {
   if (!BOARD_EMAIL_TO || !RESEND_KEY) return
-  const now = new Date()
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone: BOARD_EMAIL_TZ, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', hour12: false,
-  }).formatToParts(now).reduce((a, p) => (a[p.type] = p.value, a), {})
+  }).formatToParts(new Date()).reduce((a, p) => (a[p.type] = p.value, a), {})
   const localDate = `${parts.year}-${parts.month}-${parts.day}`
-  const localHour = Number(parts.hour)
-  if (localHour < BOARD_EMAIL_HOUR) return
-  if (_boardEmailLastSent === localDate) return
-  _boardEmailLastSent = localDate
+  const localHour = Number(parts.hour === '24' ? 0 : parts.hour)
+  if (localHour < BOARD_EMAIL_HOUR || localHour >= BOARD_EMAIL_HOUR + BOARD_EMAIL_WINDOW_HOURS) return
+
   try {
+    const { data: row } = await supabase.from('app_settings')
+      .select('value').eq('key', BOARD_EMAIL_SENT_KEY).maybeSingle()
+    const prev = row?.value ?? null
+    if (String(prev).replace(/"/g, '') === localDate) return   // already sent today
+
+    // Claim the day. If another replica already moved it, we update 0 rows.
+    if (row) {
+      const { data: claimed } = await supabase.from('app_settings')
+        .update({ value: localDate }).eq('key', BOARD_EMAIL_SENT_KEY).eq('value', prev).select()
+      if (!claimed || claimed.length === 0) return
+    } else {
+      const { error } = await supabase.from('app_settings')
+        .insert({ key: BOARD_EMAIL_SENT_KEY, value: localDate })
+      if (error) return   // lost the insert race to another replica
+    }
+
     const { subject, html } = await buildBoardEmail()
     await sendResend({ to: BOARD_EMAIL_TO, subject, html })
     console.log(`BOARD EMAIL: daily send to ${BOARD_EMAIL_TO} — ${subject}`)
   } catch (err) {
+    // Leave the claim in place: a failed send is better than a retry loop
+    // emailing leadership repeatedly. The next morning proceeds normally.
     console.error('BOARD EMAIL: daily send FAILED:', err.message)
   }
 }
