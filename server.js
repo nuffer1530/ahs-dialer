@@ -1357,6 +1357,75 @@ async function build3DayBoard() {
       .then(r => r?.data || []).catch(() => [])
   ))
 
+  // ── Install consumption ────────────────────────────────────────────────
+  // A service tech pulled onto an install is NOT available for service calls,
+  // but they still have a working shift, so the head count counted them and the
+  // board asked CSRs to fill slots that don't exist. Real case: Nick Jacquez
+  // and Bryce Russell, both COS - Plumbing Service techs, on a 12.5h Whole Home
+  // Water Treatment Install — the board still showed 6 plumbing techs and
+  // "6 calls needed".
+  //
+  // ST filter behaviour here is treacherous (all verified):
+  //  - appointments: startsOnOrAfter works, startsOnOrBefore is IGNORED.
+  //  - appointment-assignments: jobIds and date filters are IGNORED, but
+  //    appointmentIds works and batches (~50 ids per call).
+  //  - Do NOT try to find assignments via modifiedOnOrAfter: installs get
+  //    scheduled weeks ahead (this one was assigned 3 weeks prior), so any
+  //    recent-modification window silently misses exactly the long jobs that
+  //    matter most.
+  // Look back 3 days so multi-day installs that STARTED earlier still count.
+  const apptLookback = new Date(days[0].startUtc.getTime() - 3 * 864e5)
+  let installHours = {}   // `${techId}|${dayIndex}` → hours
+  try {
+    const apptRes = await stGet(`/jpm/v2/tenant/${ST_TENANT_ID}/appointments?startsOnOrAfter=${apptLookback.toISOString()}&pageSize=500`)
+    const appts = (apptRes?.data || []).filter(a => a.start && a.end && a.active !== false)
+
+    // Only appointments that actually overlap a board day are worth resolving.
+    const relevant = appts.filter(a => {
+      const s = new Date(a.start), e = new Date(a.end)
+      return days.some(d => s < d.endUtc && e > d.startUtc)
+    })
+
+    // jobId → business unit, so we can tell install work from service work.
+    const jobBU = {}
+    jobsByDay.flat().forEach(j => { jobBU[j.id] = j.businessUnitId })
+    const missing = [...new Set(relevant.map(a => a.jobId).filter(id => id && jobBU[id] === undefined))]
+    for (let i = 0; i < missing.length; i += 50) {
+      try {
+        const r = await stGet(`/jpm/v2/tenant/${ST_TENANT_ID}/jobs?ids=${missing.slice(i, i + 50).join(',')}&pageSize=50`)
+        ;(r?.data || []).forEach(j => { jobBU[j.id] = j.businessUnitId })
+      } catch (e) { console.warn('board install jobs:', e.message) }
+    }
+
+    const installBUIds = new Set(Object.values(installBU))
+    const installAppts = relevant.filter(a => installBUIds.has(jobBU[a.jobId]))
+    if (installAppts.length) {
+      const byId = {}
+      installAppts.forEach(a => { byId[a.id] = a })
+      const ids = Object.keys(byId)
+      for (let i = 0; i < ids.length; i += 50) {
+        try {
+          const r = await stGet(`/dispatch/v2/tenant/${ST_TENANT_ID}/appointment-assignments?appointmentIds=${ids.slice(i, i + 50).join(',')}&pageSize=200`)
+          for (const asg of (r?.data || [])) {
+            if (asg.active === false) continue
+            const a = byId[asg.appointmentId]; if (!a) continue
+            days.forEach((d, di) => {
+              const h = overlapHours({ start: new Date(a.start), end: new Date(a.end) }, d)
+              if (h > 0) {
+                const k = `${asg.technicianId}|${di}`
+                installHours[k] = (installHours[k] || 0) + h
+              }
+            })
+          }
+        } catch (e) { console.warn('board assignments:', e.message) }
+      }
+    }
+  } catch (e) {
+    // Degrade to the old head count rather than failing the whole board.
+    console.warn('install-consumption lookup failed:', e.message)
+    installHours = {}
+  }
+
   // HVAC maintenance is an opportunity only when the system is 12+ years old.
   // Find which locations (across all 3 days' HVAC maint jobs) qualify, in as
   // few equipment calls as possible.
@@ -1423,9 +1492,19 @@ async function build3DayBoard() {
         const workH = my.filter(s => s.type !== 'TimeOff').reduce((a, s) => a + overlapHours(s, day), 0)
         if (workH <= 0) continue   // not scheduled today
         const offH = my.filter(s => s.type === 'TimeOff').reduce((a, s) => a + overlapHours(s, day), 0)
-        const avail = Math.max(0, Math.min((workH - offH) / workH, 1))
+        // Hours already sold to an install come off the same way time off does:
+        // a tech on a 12h install has no service capacity left, even though
+        // they're on shift. Capped at their shift so a long install can't push
+        // availability negative.
+        const insH = Math.min(installHours[`${techId}|${di}`] || 0, workH)
+        const avail = Math.max(0, Math.min((workH - offH - insH) / workH, 1))
         techsAvail += avail
-        techList.push({ name: techName(techId), off: avail >= 1 ? null : avail <= 0 ? 'off' : `${Math.round(avail * 100)}%` })
+        techList.push({
+          name: techName(techId),
+          off: avail >= 1 ? null
+            : avail <= 0 ? (insH > 0 ? 'on install' : 'off')
+            : `${Math.round(avail * 100)}%${insH > 0 ? ' (install)' : ''}`,
+        })
       }
       techsAvail = Math.round(techsAvail * 10) / 10
 
