@@ -55,7 +55,20 @@ export function PhoneProvider({ children }) {
     if (!profile?.id) return
     const patch = { status, status_since: new Date().toISOString() }
     if (interactionType !== undefined) patch.interaction_type = interactionType
-    await sb.from('profiles').update(patch).eq('id', profile.id)
+    let { error } = await sb.from('profiles').update(patch).eq('id', profile.id)
+    // A rep silently stuck on Available keeps getting inbound routed to them
+    // while they're already busy, so never let this fail quietly. If the only
+    // problem is the interaction_type column (migration not yet applied), still
+    // get the status through — that's the part routing depends on.
+    if (error) {
+      console.error('status update failed:', error.message)
+      if ('interaction_type' in patch) {
+        const retry = await sb.from('profiles')
+          .update({ status, status_since: patch.status_since }).eq('id', profile.id)
+        error = retry.error
+        if (retry.error) console.error('status retry failed:', retry.error.message)
+      }
+    }
     syncWorkerActivity(profile.id, status)
   }, [profile?.id])
 

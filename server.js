@@ -2470,6 +2470,11 @@ app.post('/api/leads/:id/promote', async (req, res) => {
     // navigating, and an id alone renders an empty customer tab.
     if (lead.contact_id) {
       const { data: existing } = await supabase.from('contacts').select('*').eq('id', lead.contact_id).maybeSingle()
+      // Still resolve it. Without this a re-opened lead never leaves the rail,
+      // because the resolve below is skipped by this early return.
+      if (!lead.resolved_at) {
+        await supabase.from('st_leads').update({ resolved_at: new Date().toISOString() }).eq('id', lead.id)
+      }
       return res.json({ contactId: lead.contact_id, contact: existing || null, alreadyPromoted: true })
     }
 
