@@ -229,7 +229,7 @@ export default function DialerPage() {
   // dialer destroyed the Device and inbound calls could not be answered.
   const {
     twilioReady, callStatus, callDuration, incomingCall,
-    makeCall: phoneMakeCall, hangUp, cancelAutoWrap,
+    makeCall: phoneMakeCall, hangUp, cancelAutoWrap, startInteraction,
     pendingInbound, setPendingInbound,
   } = usePhone()
 
@@ -569,6 +569,7 @@ export default function DialerPage() {
       if (!res.ok) throw new Error(data.error || 'Failed to send')
       setTextResult({ ok: true })
       setTextBody('')
+      startInteraction?.('Text')
       setTimeout(() => { setShowTextModal(false); setTextResult(null) }, 1200)
     } catch (e) {
       setTextResult({ ok: false, error: e.message })
@@ -583,6 +584,7 @@ export default function DialerPage() {
     const subject = encodeURIComponent('Awesome Home Services')
     const body = encodeURIComponent(`Hi ${contact?.name || ''},\n\n`)
     window.open(`mailto:${email}?subject=${subject}&body=${body}`, '_blank')
+    startInteraction?.('Email')
   }
 
   // Send the current notes to the ST location record
@@ -659,6 +661,9 @@ export default function DialerPage() {
     if (!contact?.id) return
     setContacts(prev => prev.some(c => c.id === contact.id) ? prev : [...prev, contact])
     navigateActiveTo(contact.id)
+    // Claiming a paid lead is real work — go On Call so the floor sees it and
+    // TaskRouter stops routing inbound here while it's being worked.
+    startInteraction?.('Lead')
   }
 
   // Paid leads jump the queue. A $52 Angi lead is being called by competitors

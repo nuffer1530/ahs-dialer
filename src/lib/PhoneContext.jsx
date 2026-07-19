@@ -49,11 +49,22 @@ export function PhoneProvider({ children }) {
     if (callTimerRef.current) { clearInterval(callTimerRef.current); callTimerRef.current = null }
   }, [])
 
-  const updateAgentStatus = useCallback(async (status) => {
+  // interactionType: omit to leave it untouched (wrap-up keeps showing what the
+  // rep is wrapping), pass null to clear it, or a label to set it.
+  const updateAgentStatus = useCallback(async (status, interactionType) => {
     if (!profile?.id) return
-    await sb.from('profiles').update({ status, status_since: new Date().toISOString() }).eq('id', profile.id)
+    const patch = { status, status_since: new Date().toISOString() }
+    if (interactionType !== undefined) patch.interaction_type = interactionType
+    await sb.from('profiles').update(patch).eq('id', profile.id)
     syncWorkerActivity(profile.id, status)
   }, [profile?.id])
+
+  // Any engagement — a claimed lead, a text, an email — puts the rep On Call.
+  // That's not just cosmetic: it also pulls them out of TaskRouter routing, so
+  // an inbound call can't land on someone already working something.
+  const startInteraction = useCallback((type) => {
+    updateAgentStatus('On Call', type)
+  }, [updateAgentStatus])
 
   // Auto wrap-up: after a call ends the rep gets 60s of Wrap Up, then is put
   // back to Available automatically — unless they change their status themselves
@@ -66,7 +77,7 @@ export function PhoneProvider({ children }) {
   const enterWrapUp = useCallback(() => {
     updateAgentStatus('Wrap Up')
     cancelAutoWrap()
-    wrapTimerRef.current = setTimeout(() => { wrapTimerRef.current = null; updateAgentStatus('Available') }, WRAP_MS)
+    wrapTimerRef.current = setTimeout(() => { wrapTimerRef.current = null; updateAgentStatus('Available', null) }, WRAP_MS)
   }, [updateAgentStatus, cancelAutoWrap])
 
   const wireCallEvents = useCallback((call) => {
@@ -211,7 +222,7 @@ export function PhoneProvider({ children }) {
       const call = await deviceRef.current.connect({ params })
       callRef.current = call
       setCallStatus('calling')
-      updateAgentStatus('On Call')
+      updateAgentStatus('On Call', meta.interactionType || 'Outbound')
       wireCallEvents(call)
     } catch (err) {
       console.error('makeCall error:', err)
@@ -228,7 +239,7 @@ export function PhoneProvider({ children }) {
     callRef.current = inc.call
     setCallStatus('connected')
     startCallTimer()
-    updateAgentStatus('On Call')
+    updateAgentStatus('On Call', 'Inbound')
     wireCallEvents(inc.call)
     inc.call.accept()
     setIncomingCall(null)
@@ -252,7 +263,7 @@ export function PhoneProvider({ children }) {
   return (
     <PhoneContext.Provider value={{
       twilioReady, incomingCall, callStatus, callDuration,
-      makeCall, acceptIncoming, rejectIncoming, hangUp, cancelAutoWrap,
+      makeCall, acceptIncoming, rejectIncoming, hangUp, cancelAutoWrap, startInteraction,
       pendingInbound, setPendingInbound,
       hasActiveCall: () => !!callRef.current,
     }}>

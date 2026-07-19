@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useRef } from 'react'
 import { sb } from '../lib/supabase'
 import { useData } from '../lib/DataContext'
 import { inboundStats, outboundStats, fmtSecs, SERVICE_LEVEL_SECONDS, SERVICE_LEVEL_TARGET } from '../lib/analytics'
+import { INTERACTION_COLORS } from '../lib/constants'
 import Avatar from '../components/Avatar'
 
 // Call-centre wallboard — a modern "Simon board" for the floor TV. Everything
@@ -111,7 +112,7 @@ export default function WarRoomPage() {
       sb.from('call_logs').select('*').gte('created_at', since).order('created_at', { ascending:false }),
       sb.from('call_tasks').select('*').gte('queued_at', since).order('queued_at', { ascending:false }),
       sb.from('active_calls').select('*').is('ended_at', null),
-      sb.from('profiles').select('id, name, email, avatar, status, status_since').eq('active', true),
+      sb.from('profiles').select('id, name, email, avatar, status, status_since, interaction_type').eq('active', true),
     ]).then(([l, t, a, p]) => {
       setLogs(l.data || []); setTasks(t.data || []); setLiveCalls(a.data || []); setProfiles(p.data || [])
     })
@@ -342,6 +343,15 @@ export default function WarRoomPage() {
                     <div style={{ fontSize:14, fontWeight:600, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{p.name || p.email}</div>
                     <div style={{ fontSize:11, color:C.muted }}>in status {timeSince(p.status_since)}</div>
                   </div>
+                  {/* What kind of interaction — sits between the name and the
+                      status so the floor reads "who / on what / how long". */}
+                  {p.interaction_type && (
+                    <span style={{ fontSize:11, fontWeight:700, flexShrink:0, padding:'4px 10px', borderRadius:99,
+                      color: INTERACTION_COLORS[p.interaction_type] || C.muted,
+                      background: `${INTERACTION_COLORS[p.interaction_type] || C.muted}1f` }}>
+                      {p.interaction_type}
+                    </span>
+                  )}
                   <span style={{ fontSize:11, fontWeight:700, color, background:`${color}1f`, padding:'4px 10px', borderRadius:99, flexShrink:0,
                     display:'flex', alignItems:'center', gap:5 }}>
                     {onCall && <span style={{ width:6, height:6, borderRadius:'50%', background:color, animation:'wr-pulse 1.2s infinite' }} />}

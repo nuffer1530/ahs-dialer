@@ -281,3 +281,10 @@ create policy "Authenticated can read leads" on st_leads
 drop policy if exists "Authenticated can claim leads" on st_leads;
 create policy "Authenticated can claim leads" on st_leads
   for update to authenticated using (true) with check (true);
+
+-- ── Interaction type: what a rep is actually engaged on ──────────────────────
+-- Status alone says "On Call" but not whether that's an inbound, an outbound,
+-- a paid lead, a text or an email. The Live Dashboard and the floor TV both
+-- surface this, so a supervisor can see the shape of the floor at a glance.
+-- Null means not engaged (Available / Break / Offline).
+alter table profiles add column if not exists interaction_type text;

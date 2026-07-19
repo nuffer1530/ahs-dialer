@@ -1,4 +1,15 @@
 export const MAX_ATTEMPTS = 3
+
+// What a rep is engaged on, shown alongside their status on the Live Dashboard
+// and the floor TV. Status says "On Call"; this says what kind of call it is.
+// One definition so the two screens can't drift into different colour schemes.
+export const INTERACTION_COLORS = {
+  Inbound:  '#3b82f6',
+  Outbound: '#8b5cf6',
+  Lead:     '#ef4444',
+  Text:     '#14b8a6',
+  Email:    '#f59e0b',
+}
 export const DONE_OUTCOMES = ['Booked', 'Not Interested', 'DNC', 'Bad Data']
 export const ACTIVE_STATUSES = ['Pending', 'No Answer', 'Voicemail']
 

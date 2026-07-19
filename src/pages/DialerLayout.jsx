@@ -433,7 +433,11 @@ function DialerLayoutInner() {
       await sb.from('status_events').update({ ended_at: now }).eq('id', currentEventRef.current)
       currentEventRef.current = null
     }
-    await sb.from('profiles').update({ status: newStatus, status_since: now }).eq('id', profile.id)
+    // Wrap Up keeps showing what's being wrapped; anything else means the rep
+    // is no longer engaged, so the interaction label is cleared.
+    const patch = { status: newStatus, status_since: now }
+    if (newStatus !== 'Wrap Up' && newStatus !== 'On Call') patch.interaction_type = null
+    await sb.from('profiles').update(patch).eq('id', profile.id)
     syncWorkerActivity(profile.id, newStatus)
     // Check tardiness before inserting the new Available event (so it's not
     // counted as a prior arrival).

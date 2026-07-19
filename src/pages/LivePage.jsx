@@ -4,6 +4,7 @@ import { useAuth } from '../lib/AuthContext'
 import { sb } from '../lib/supabase'
 import Badge from '../components/Badge'
 import { isDone, fmtShort, syncWorkerActivity } from '../lib/utils'
+import { INTERACTION_COLORS } from '../lib/constants'
 import Avatar from '../components/Avatar'
 
 const DEFAULT_STATUS_OPTIONS = [
@@ -312,7 +313,7 @@ export default function LivePage() {
                 <th>Agent</th>
                 <th>Status</th>
                 <th>Time in Status</th>
-                <th>Campaign</th>
+                <th>Interaction</th>
                 <th>Today Calls</th>
                 <th>Today Booked</th>
                 <th>Last Call</th>
@@ -350,8 +351,24 @@ export default function LivePage() {
                     <td style={{ padding:'10px 12px', fontSize:12, color:'var(--text-muted)' }}>
                       {p.status_since ? timeSince(p.status_since) : '—'}
                     </td>
-                    <td style={{ padding:'10px 12px', fontSize:12, color:'var(--text-secondary)' }}>
-                      {p.current_campaign || <span style={{ color:'var(--text-muted)' }}>—</span>}
+                    {/* What they're engaged on — inbound, outbound, a paid lead,
+                        a text, an email. Campaign rides underneath when set, so
+                        this column didn't lose information when it was renamed. */}
+                    <td style={{ padding:'10px 12px', fontSize:12 }}>
+                      {p.interaction_type ? (
+                        <div>
+                          <span style={{ display:'inline-block', padding:'2px 8px', borderRadius:99, fontSize:11, fontWeight:600,
+                            background: INTERACTION_COLORS[p.interaction_type] ? INTERACTION_COLORS[p.interaction_type] + '20' : 'var(--surface-2)',
+                            color: INTERACTION_COLORS[p.interaction_type] || 'var(--text-secondary)' }}>
+                            {p.interaction_type}
+                          </span>
+                          {p.current_campaign && <div style={{ fontSize:10, color:'var(--text-muted)', marginTop:2 }}>{p.current_campaign}</div>}
+                        </div>
+                      ) : (
+                        p.current_campaign
+                          ? <span style={{ color:'var(--text-secondary)' }}>{p.current_campaign}</span>
+                          : <span style={{ color:'var(--text-muted)' }}>—</span>
+                      )}
                     </td>
                     <td style={{ padding:'10px 12px', fontWeight:600, textAlign:'center' }}>
                       {todayLogs.length}
