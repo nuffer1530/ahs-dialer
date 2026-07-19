@@ -1315,6 +1315,16 @@ const chunkIds = (arr, n) => Array.from({ length: Math.ceil(arr.length / n) }, (
 async function build3DayBoard() {
   const days = [0, 1, 2].map(boardDay)
 
+  // Defined up here on purpose: the install-consumption lookup below needs it,
+  // and a `const` arrow is not hoisted — declaring it further down threw a
+  // temporal-dead-zone ReferenceError that the lookup's own try/catch quietly
+  // swallowed, silently reverting the board to the raw head count.
+  const overlapHours = (sh, day) => {
+    const s = Math.max(sh.start.getTime(), day.startUtc.getTime())
+    const e = Math.min(sh.end.getTime(), day.endUtc.getTime())
+    return e > s ? (e - s) / 3600_000 : 0
+  }
+
   // Business unit map: id → { trade, role }
   const buRes = await stGet(`/settings/v2/tenant/${ST_TENANT_ID}/business-units?active=true&pageSize=200`)
   const buMap = {}
@@ -1429,10 +1439,14 @@ async function build3DayBoard() {
       }
     }
   } catch (e) {
-    // Degrade to the old head count rather than failing the whole board.
-    console.warn('install-consumption lookup failed:', e.message)
+    // Degrade to the old head count rather than failing the whole board — but
+    // shout about it. This catch once hid a ReferenceError of mine and the
+    // board just quietly kept over-reporting capacity, which is worse than a
+    // visible failure.
+    console.error('BOARD: install-consumption lookup FAILED, capacity will be overstated:', e.stack || e.message)
     installHours = {}
   }
+  console.log(`BOARD: install consumption computed for ${Object.keys(installHours).length} tech-days`)
 
   // HVAC maintenance is an opportunity only when the system is 12+ years old.
   // Find which locations (across all 3 days' HVAC maint jobs) qualify, in as
@@ -1475,11 +1489,6 @@ async function build3DayBoard() {
   const jobRow = (j) => ({ jobNumber: j.jobNumber, type: nameByType[String(j.jobTypeId)] || 'Job' })
 
   // Hours of a shift that fall within a given day.
-  const overlapHours = (sh, day) => {
-    const s = Math.max(sh.start.getTime(), day.startUtc.getTime())
-    const e = Math.min(sh.end.getTime(), day.endUtc.getTime())
-    return e > s ? (e - s) / 3600_000 : 0
-  }
   const techName = (id) => (techs.find(t => t.id === id)?.name) || `Tech ${id}`
 
   const board = BOARD_TRADES.map(trade => {
