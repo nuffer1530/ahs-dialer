@@ -61,11 +61,37 @@ function Cell({ trade, dayLabel, d, onDrill }) {
 }
 
 export default function CallBoardPage() {
-  const { isAdmin } = useAuth()
+  const { isAdmin, profile } = useAuth()
   const [data, setData] = useState(null)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
   const [refreshedAt, setRefreshedAt] = useState(null)
+
+  // Send the board digest to YOURSELF only. Deliberately not a "send to the
+  // team" button — the leadership blast is the scheduled job, so nobody can
+  // mail the whole management list with a stray click.
+  const [emailing, setEmailing] = useState(false)
+  const [emailMsg, setEmailMsg] = useState('')
+  const emailMe = async () => {
+    const to = profile?.email
+    if (!to) { setEmailMsg('No email on your profile'); return }
+    setEmailing(true); setEmailMsg('')
+    try {
+      const { data: { session } } = await sb.auth.getSession()
+      const r = await fetch('/api/board/email/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session?.access_token}` },
+        body: JSON.stringify({ to }),
+      })
+      const d = await r.json().catch(() => ({}))
+      setEmailMsg(r.ok ? `Sent to ${to}` : (d.error || 'Send failed'))
+    } catch (e) {
+      setEmailMsg(e.message)
+    } finally {
+      setEmailing(false)
+      setTimeout(() => setEmailMsg(''), 6000)
+    }
+  }
   const [drill, setDrill] = useState(null)
   const [config, setConfig] = useState(null)
   const [showConfig, setShowConfig] = useState(false)
@@ -109,6 +135,12 @@ export default function CallBoardPage() {
         <div style={{ display:'flex', alignItems:'center', gap:12 }}>
           {refreshedAt && <span style={{ fontSize:11, color:'var(--text-muted)' }}>Updated {refreshedAt.toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' })}</span>}
           {isAdmin && <button className="btn sm" onClick={openConfig}>Calls / tech</button>}
+          {isAdmin && (
+            <button className="btn sm" onClick={emailMe} disabled={emailing}
+              title="Send this board to your own email — nobody else receives it">
+              {emailing ? 'Sending…' : emailMsg || 'Email me this board'}
+            </button>
+          )}
           <button className="btn sm" onClick={load}>Refresh</button>
         </div>
       </div>
