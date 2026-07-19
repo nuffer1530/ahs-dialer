@@ -721,7 +721,15 @@ export default function DialerPage() {
   const claimContact = async () => {
     if (!selectedContact || selectedContact.claimed_by) return
     const { data } = await sb.from('contacts').update({ claimed_by: currentRep, claimed_at: new Date().toISOString() }).eq('id', selectedId).select().single()
-    if (data) setContacts(prev => prev.map(c => c.id === selectedId ? data : c))
+    if (data) {
+      setContacts(prev => prev.map(c => c.id === selectedId ? data : c))
+      // Claiming a PAID lead means you're working it right now — same as
+      // clicking it in the rail. (Ordinary outbound contacts stay as-is here:
+      // the dial itself sets On Call + Outbound. Flipping status on every
+      // claim would break auto-progressive serving, which claims ahead.)
+      const campName = campaigns.find(x => x.id === data.campaign_id)?.name
+      if (campName === 'Leads') startInteraction?.('Lead')
+    }
   }
 
   const releaseContact = async (id) => {
