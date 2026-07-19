@@ -229,7 +229,7 @@ export default function DialerPage() {
   // dialer destroyed the Device and inbound calls could not be answered.
   const {
     twilioReady, callStatus, callDuration, incomingCall,
-    makeCall: phoneMakeCall, hangUp, cancelAutoWrap, startInteraction, endInteraction,
+    makeCall: phoneMakeCall, hangUp, startInteraction, endInteraction,
     pendingInbound, setPendingInbound,
   } = usePhone()
 
@@ -431,19 +431,9 @@ export default function DialerPage() {
 
   const fmtDuration = (s) => `${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}`
 
-  const updateAgentStatus = async (status) => {
-    if (!profile?.id) return
-    const patch = { status, status_since: new Date().toISOString() }
-    // Leaving On Call/Wrap Up means the interaction is over — clear its label or
-    // the boards keep showing "Lead" against a rep who's back on Available.
-    if (status !== 'On Call' && status !== 'Wrap Up') patch.interaction_type = null
-    const { error } = await sb.from('profiles').update(patch).eq('id', profile.id)
-    if (error) {
-      console.error('status update failed:', error.message)
-      await sb.from('profiles').update({ status, status_since: patch.status_since }).eq('id', profile.id)
-    }
-    syncWorkerActivity(profile.id, status)
-  }
+  // Status changes all route through PhoneContext (startInteraction /
+  // endInteraction / the call paths) — no local status writer, so there is
+  // exactly one place that owns the status + interaction_type contract.
 
   // Answering happens in the shell's incoming-call banner (PhoneContext), so it
   // works on every page. What stays here is turning the answered caller into an
@@ -792,7 +782,10 @@ export default function DialerPage() {
       // too would double-pay every booking.
       if (selectedOutcome === 'Booked') { setAlsoMembership(false); setMembershipTypeId('') }
 
-      setSelectedOutcome(null); setNotesVal(''); cancelAutoWrap?.(); updateAgentStatus('Available')
+      // Disposition ends the interaction → wrap-up (60s, then auto-Available).
+      // If the call's own hangup already put us in Wrap Up, endInteraction
+      // leaves that wrap (and its timer) untouched.
+      setSelectedOutcome(null); setNotesVal(''); endInteraction?.()
       const { data: logs } = await sb.from('call_logs').select('*').eq('contact_id', c.id).order('created_at', { ascending: false })
       setContactLogs(logs || [])
 

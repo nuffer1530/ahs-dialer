@@ -94,16 +94,21 @@ export function PhoneProvider({ children }) {
     wrapTimerRef.current = setTimeout(() => { wrapTimerRef.current = null; updateAgentStatus('Available', null) }, WRAP_MS)
   }, [updateAgentStatus, cancelAutoWrap])
 
-  // Non-call interactions (a claimed lead, a text) have no hangup to end them,
-  // so without this a rep who claims a lead and never dials stays On Call
-  // forever — invisible to inbound routing and wrong on every board. Called
-  // when they disposition or release. A live call owns the status, so defer to
-  // the normal hangup → wrap-up path if one is up.
-  const endInteraction = useCallback(() => {
-    if (callRef.current) return
-    cancelAutoWrap()
-    updateAgentStatus('Available', null)
-  }, [updateAgentStatus, cancelAutoWrap])
+  // End of ANY interaction (disposition, release, closed the last tab) → the
+  // same wrap-up flow a hangup gets: Wrap Up for 60s, then auto-Available.
+  // Two guards:
+  //  - a live call owns the status; its own disconnect path wraps it.
+  //  - only reps actually On Call get wrapped — checked against the DB, so
+  //    closing a tab you were merely browsing while Available (or after
+  //    manually flipping your pill) can't throw you into a phantom Wrap Up.
+  // Wrap Up keeps the interaction label (you're wrapping *something*); the
+  // auto-return to Available clears it.
+  const endInteraction = useCallback(async () => {
+    if (callRef.current || !profile?.id) return
+    const { data } = await sb.from('profiles').select('status').eq('id', profile.id).maybeSingle()
+    if (data?.status !== 'On Call') return
+    enterWrapUp()
+  }, [profile?.id, enterWrapUp])
 
   const wireCallEvents = useCallback((call) => {
     call.on('ringing', () => setCallStatus('ringing'))
