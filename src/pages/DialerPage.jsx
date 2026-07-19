@@ -986,10 +986,13 @@ export default function DialerPage() {
       return
     }
     setStJobHistoryLoading(true)
+    // Always resolve the state, even on failure. A brand-new lead has no
+    // ServiceTitan customer yet, so this 404s — and leaving the state null made
+    // Email and Membership sit on "Loading..." forever.
     fetch(`/api/st/customer/${c.external_id}`)
       .then(r => r.ok ? r.json() : null)
-      .then(data => { if (data) setStCustomerInfo(data) })
-      .catch(() => {})
+      .then(data => setStCustomerInfo(data || { notInSt: true }))
+      .catch(() => setStCustomerInfo({ notInSt: true }))
     fetch(`/api/st/jobs?customerId=${c.external_id}`)
       .then(r => r.ok ? r.json() : null)
       .then(data => { setStJobHistory(data?.data?.slice(0,5) || []); setStJobHistoryLoading(false) })
@@ -1260,7 +1263,8 @@ export default function DialerPage() {
                           color: stCustomerInfo?.membership?.active ? '#16A34A' : stCustomerInfo ? 'var(--text-muted)' : 'var(--text-muted)' }}>
                           {stCustomerInfo?.membership
                             ? (stCustomerInfo.membership.active ? (stCustomerInfo.membership.name || 'Active') : 'Non-Member')
-                            : c.external_id ? 'Loading...' : '--'}
+                            : stCustomerInfo?.notInSt ? 'New — not in ST'
+                            : c.external_id && !stCustomerInfo ? 'Loading...' : '--'}
                         </div></div>
                         <div><L text="Last service" /><div style={{ fontSize:12, color:'var(--text-primary)' }}>
                           {stJobHistory[0] ? fmtDate(stJobHistory[0].completedOn || stJobHistory[0].scheduledDate || stJobHistory[0].createdOn) : c.external_id ? (stJobHistoryLoading ? 'Loading...' : 'None found') : '--'}

@@ -1982,9 +1982,14 @@ async function gatherCustomerFacts(id) {
   // exists anywhere in ServiceTitan. Feed it to the brief so the rep opens the
   // call already knowing it.
   try {
-    const { data: lead } = await supabase.from('st_leads')
+    // Match on EITHER key. A brand-new lead has no ServiceTitan customer yet,
+    // so promote falls back to storing the booking id in external_id — and that
+    // is exactly the case where the transcript matters most, since ST knows
+    // nothing about them. Keying only on st_customer_id missed every new lead.
+    const { data: lead } = /^\d+$/.test(String(id)) ? await supabase.from('st_leads')
       .select('provider, summary, urgency, job_type, lead_fee, already_booked, booked_job_number, booked_at, submitted_at')
-      .eq('st_customer_id', id).order('submitted_at', { ascending: false }).limit(1).maybeSingle()
+      .or(`st_customer_id.eq.${id},booking_id.eq.${id}`)
+      .order('submitted_at', { ascending: false }).limit(1).maybeSingle() : { data: null }
     if (lead?.summary) {
       facts.leadContext = {
         source: lead.provider || null,
@@ -2445,7 +2450,11 @@ function parseLeadSummary(summary) {
   if (!jobType) {
     const asks = [...s.matchAll(/^\s*User:\s*(.+)$/gim)].map(m => m[1].trim())
       .filter(t => t.length > 12 && !/^(ok|yes|no|thanks|sounds good)\b/i.test(t))
-    jobType = asks[0] || grab(/Message:\s*User:\s*(.+)/i) || null
+    // Third shape: LSA/Google sends a flat "Message: <what they want>" with no
+    // chat at all — e.g. "Installation of a 240 vault outlet [Notes from LSA:
+    // This customer has requested a quote]". Strip the bracketed partner note
+    // out of the headline; it's surfaced separately as the ask type.
+    jobType = asks[0] || (grab(/^\s*Message:\s*(.+)$/im) || '').replace(/\s*\[[^\]]*\]\s*$/, '').trim() || null
   }
   if (jobType && jobType.length > 120) jobType = jobType.slice(0, 117) + '…'
 
