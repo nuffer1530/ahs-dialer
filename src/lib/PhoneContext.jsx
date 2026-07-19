@@ -49,8 +49,9 @@ export function PhoneProvider({ children }) {
     if (callTimerRef.current) { clearInterval(callTimerRef.current); callTimerRef.current = null }
   }, [])
 
-  // interactionType: omit to leave it untouched (wrap-up keeps showing what the
-  // rep is wrapping), pass null to clear it, or a label to set it.
+  // interactionType: omit to leave it untouched, pass null to clear it, or a
+  // label to set it. The label only lives while On Call — Wrap Up and every
+  // other status clear it.
   const updateAgentStatus = useCallback(async (status, interactionType) => {
     if (!profile?.id) return
     const patch = { status, status_since: new Date().toISOString() }
@@ -89,7 +90,8 @@ export function PhoneProvider({ children }) {
     if (wrapTimerRef.current) { clearTimeout(wrapTimerRef.current); wrapTimerRef.current = null }
   }, [])
   const enterWrapUp = useCallback(() => {
-    updateAgentStatus('Wrap Up')
+    // The interaction is over once you're wrapping — clear its label.
+    updateAgentStatus('Wrap Up', null)
     cancelAutoWrap()
     wrapTimerRef.current = setTimeout(() => { wrapTimerRef.current = null; updateAgentStatus('Available', null) }, WRAP_MS)
   }, [updateAgentStatus, cancelAutoWrap])
