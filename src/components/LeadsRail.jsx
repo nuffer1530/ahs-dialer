@@ -137,6 +137,22 @@ export default function LeadsRail({ currentRep, onOpenContact }) {
                 </div>
               )}
 
+              {/* Some partners (Scorpion) book the job through a path that never
+                  converts the booking, so it still reads "New" while a tech is
+                  actually scheduled. Badged rather than hidden — the rep should
+                  see it came through, and confirm rather than re-book. */}
+              {lead.already_booked && (
+                <div style={{ marginTop: 5, padding: '4px 7px', borderRadius: 4, background: 'var(--success-bg, #e8f5ee)', border: '1px solid var(--success)', fontSize: 9, color: 'var(--success)', fontWeight: 700, lineHeight: 1.4 }}>
+                  ALREADY SCHEDULED{lead.booked_job_number ? ` · Job #${lead.booked_job_number}` : ''}
+                  {lead.booked_at && (
+                    <div style={{ fontWeight: 500, marginTop: 1 }}>
+                      {new Date(lead.booked_at).toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                    </div>
+                  )}
+                  <div style={{ fontWeight: 500, marginTop: 1 }}>Confirm — don't re-book</div>
+                </div>
+              )}
+
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 5 }}>
                 {lead.urgency && (
                   <span style={{ fontSize: 9, background: 'var(--danger-bg)', color: 'var(--danger)', borderRadius: 3, padding: '1px 5px', fontWeight: 600 }}>

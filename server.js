@@ -1975,6 +1975,31 @@ async function gatherCustomerFacts(id) {
     if (recent.length) facts.recentNotes = recent
   } catch (e) { console.warn('facts notes:', e.message) }
 
+  // Lead context. When this customer arrived as a paid lead, the partner's
+  // record holds the single richest thing we have: the customer's own words.
+  // A Scorpion chat transcript can say the AC blows warm, they already changed
+  // the capacitor, AHS installed the unit, and money is tight — none of which
+  // exists anywhere in ServiceTitan. Feed it to the brief so the rep opens the
+  // call already knowing it.
+  try {
+    const { data: lead } = await supabase.from('st_leads')
+      .select('provider, summary, urgency, job_type, lead_fee, already_booked, booked_job_number, booked_at, submitted_at')
+      .eq('st_customer_id', id).order('submitted_at', { ascending: false }).limit(1).maybeSingle()
+    if (lead?.summary) {
+      facts.leadContext = {
+        source: lead.provider || null,
+        submittedAt: lead.submitted_at || null,
+        wants: lead.job_type || null,
+        urgency: lead.urgency || null,
+        // Trimmed: the brief only needs the substance, not the UTM footer.
+        conversation: String(lead.summary).slice(0, 2500),
+        alreadyScheduled: lead.already_booked
+          ? { job: lead.booked_job_number || null, at: lead.booked_at || null }
+          : null,
+      }
+    }
+  } catch (e) { console.warn('facts lead context:', e.message) }
+
   delete facts._membership
   return facts
 }
@@ -2021,6 +2046,7 @@ Writing rules:
 - each action is what to DO on THIS call and at most 14 words: book a specific due inspection by name, move a named open estimate forward with its dollar amount, raise the unresolved problem, or offer membership. Concrete over generic.
 - MEMBERSHIP — ${MEMBERSHIP_INFO} If isMember is true: one action can thank them and book any maintenanceVisits.due (name it, it's included), and note open estimates get the 15% member discount. If not a member and memberSavings is present: one action offers membership using "up to ~$X" language plus the $49 service fee / included inspections hook. Natural and helpful, never pushy.
 - flag: if pinnedNotes exist, put the most important one here; otherwise empty string.
+- LEAD CONTEXT — if leadContext is present this person came in as a paid lead and leadContext.conversation is what they actually said (often an AI chat transcript). Mine it hard, it is usually the most valuable data here: the specific symptom, what they've already tried, who installed the equipment, budget worries, the time window they asked for. Put the concrete problem in the headline over anything generic. If leadContext.alreadyScheduled is set, the customer ALREADY has an appointment — the flag must say so with the job number and time, and the actions must be about confirming/preparing that visit, never about booking them again.
 
 CRITICAL: only use what the data supports. Never invent visit names, dates, or savings figures. A missing or zero lifetimeValue is just absent data — never imply non-payment, debt, or anything negative; omit it. If data is sparse, say so in the headline and give one sensible action.`
   try {
@@ -2350,16 +2376,83 @@ function resolveProvider(source) {
   return raw.split('#')[0] || 'Unknown'
 }
 
+// Partner summaries arrive HTML-escaped (&#x0D; for every newline in a Scorpion
+// chat transcript), which is unreadable raw. Note the mojibake in the source —
+// Scorpion sends '?' where an apostrophe belongs ("I?m seeing") — that's lossy
+// before it reaches us and can't be recovered, only tidied.
+function decodeSummary(s) {
+  if (!s) return s
+  return String(s)
+    .replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCharCode(parseInt(h, 16)))
+    .replace(/&#(\d+);/g, (_, d) => String.fromCharCode(Number(d)))
+    .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'").replace(/&nbsp;/g, ' ')
+    .replace(/\r\n?/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
+
+// Has this lead ALREADY got a job on the books?
+//
+// Scorpion books through a path that never converts the booking record, so the
+// booking sits as "New" with jobId 0 while a tech is genuinely scheduled
+// (verified: Cruz Rangel, booking 62076455 New/jobId 0, but job #34585
+// Scheduled with an appointment). Without this a rep calls someone who already
+// has an appointment and tries to book them a second time.
+//
+// Two calls per lead, and only for leads still open, so the cost is trivial.
+const OPEN_JOB_STATUSES = ['Scheduled', 'Dispatched', 'InProgress', 'In Progress']
+async function findExistingBooking(phone) {
+  const digits = (phone || '').replace(/\D/g, '').slice(-10)
+  if (digits.length !== 10) return null
+  try {
+    const cust = await stGet(`/crm/v2/tenant/${ST_TENANT_ID}/customers?phone=${digits}&pageSize=5`)
+    const customers = cust?.data || []
+    if (!customers.length) return null
+
+    for (const c of customers) {
+      const jobs = await stGet(`/jpm/v2/tenant/${ST_TENANT_ID}/jobs?customerId=${c.id}&pageSize=10&sort=-createdOn`)
+      const open = (jobs?.data || []).find(j => OPEN_JOB_STATUSES.includes(j.jobStatus))
+      if (!open) { if (customers.length === 1) return { customerId: c.id } ; continue }
+
+      let apptAt = null
+      try {
+        const appts = await stGet(`/jpm/v2/tenant/${ST_TENANT_ID}/appointments?jobId=${open.id}&pageSize=5`)
+        apptAt = (appts?.data || [])[0]?.start || null
+      } catch { /* the job alone is enough to badge it */ }
+
+      return { customerId: c.id, jobId: open.id, jobNumber: open.jobNumber || null, appointmentAt: apptAt }
+    }
+    return { customerId: customers[0].id }
+  } catch (e) {
+    console.warn('findExistingBooking failed:', e.message)
+    return null
+  }
+}
+
 // The booking `summary` is a semi-structured blob from the lead partner. Pull
 // out the bits a rep needs at a glance; everything stays in summary regardless.
 function parseLeadSummary(summary) {
-  const s = String(summary || '')
+  const s = decodeSummary(summary) || ''
   const grab = (re) => { const m = s.match(re); return m ? m[1].trim() : null }
   const fee = grab(/Lead Fee:\s*\$?([\d.]+)/i)
+
+  // Angi/HomeAdvisor ship labelled fields. Scorpion ships a chat transcript
+  // with none of them, which left Scorpion cards showing nothing but a name and
+  // a number — so fall back to the customer's own first message, which is the
+  // most useful line in the whole blob ("My home air conditioner").
+  let jobType = grab(/Partner Job type:\s*(.+)/i) || grab(/Job type\(s\):\s*(.+)/i)
+  if (!jobType) {
+    const asks = [...s.matchAll(/^\s*User:\s*(.+)$/gim)].map(m => m[1].trim())
+      .filter(t => t.length > 12 && !/^(ok|yes|no|thanks|sounds good)\b/i.test(t))
+    jobType = asks[0] || grab(/Message:\s*User:\s*(.+)/i) || null
+  }
+  if (jobType && jobType.length > 120) jobType = jobType.slice(0, 117) + '…'
+
   return {
     lead_fee: fee ? Number(fee) : null,
     urgency: grab(/When do you need this work done\?:\s*(.+)/i),
-    job_type: grab(/Partner Job type:\s*(.+)/i) || grab(/Job type\(s\):\s*(.+)/i),
+    job_type: jobType,
     message: grab(/Message from Customer:\s*(.+)/i),
   }
 }
@@ -2409,7 +2502,7 @@ async function syncLeadInbox() {
         address: a.street || null, city: a.city || null, state: a.state || null, zip: a.zip || null,
         source: b.source || null,
         provider: resolveProvider(b.source),
-        summary: b.summary || null,
+        summary: decodeSummary(b.summary) || null,
         lead_fee: parsed.lead_fee,
         urgency: parsed.urgency,
         job_type: parsed.job_type,
@@ -2420,6 +2513,27 @@ async function syncLeadInbox() {
       if (error) console.error('lead upsert failed:', error.message)
     }
     if (fresh.length) console.log(`Lead inbox: +${fresh.length} new, ${closed.length} resolved`)
+
+    // Re-check every open lead for an existing appointment. Deliberately not
+    // limited to freshly-inserted ones: a partner (or Revin) can book a lead
+    // minutes AFTER it lands, so a one-shot check at insert would leave the
+    // rail telling a rep to call someone who has since been scheduled.
+    const { data: openLeads } = await supabase.from('st_leads')
+      .select('id, phone, already_booked, st_customer_id').is('resolved_at', null)
+    for (const lead of (openLeads || [])) {
+      if (lead.already_booked) continue
+      const hit = await findExistingBooking(lead.phone)
+      if (!hit) continue
+      const patch = { st_customer_id: hit.customerId || null, last_synced_at: new Date().toISOString() }
+      if (hit.jobId) {
+        patch.already_booked = true
+        patch.booked_job_id = hit.jobId
+        patch.booked_job_number = hit.jobNumber
+        patch.booked_at = hit.appointmentAt
+        console.log(`Lead ${lead.id} is already booked (job ${hit.jobNumber || hit.jobId})`)
+      }
+      await supabase.from('st_leads').update(patch).eq('id', lead.id)
+    }
   } catch (err) {
     console.error('syncLeadInbox error:', err.message)
   }
@@ -2503,7 +2617,12 @@ app.post('/api/leads/:id/promote', async (req, res) => {
       address: lead.address, city: lead.city, state: lead.state, zip: lead.zip,
       source: lead.provider || 'Lead',
       import_notes: lead.summary || null,
-      external_id: String(lead.booking_id),
+      // external_id must be the ServiceTitan CUSTOMER id — the intelligence
+      // brief, recent jobs and membership panels all look up by it. It was the
+      // booking id, which matches no customer, so every promoted lead showed
+      // "no service history" even when ST knew them. Falls back to the booking
+      // id only when the customer genuinely doesn't exist in ST yet.
+      external_id: lead.st_customer_id ? String(lead.st_customer_id) : String(lead.booking_id),
       status: 'Pending', attempts: 0,
       campaign_id: campaignId,
       claimed_by: lead.claimed_by || null,

@@ -288,3 +288,17 @@ create policy "Authenticated can claim leads" on st_leads
 -- surface this, so a supervisor can see the shape of the floor at a glance.
 -- Null means not engaged (Available / Break / Offline).
 alter table profiles add column if not exists interaction_type text;
+
+-- ── Lead inbox: already-booked detection + ST customer link ──────────────────
+-- Some partners (Scorpion) book the job through a separate path and never
+-- convert the booking, so it sits in the Bookings tab as "New" forever even
+-- though a tech is scheduled. Without this a CSR calls a customer who already
+-- has an appointment and tries to book them twice.
+-- st_customer_id also gives promoted lead contacts a real ServiceTitan customer
+-- id, so the intelligence brief / recent jobs / membership panels resolve
+-- (they were being handed the booking id, which matches no customer).
+alter table st_leads add column if not exists already_booked boolean not null default false;
+alter table st_leads add column if not exists booked_job_id bigint;
+alter table st_leads add column if not exists booked_job_number text;
+alter table st_leads add column if not exists booked_at timestamptz;
+alter table st_leads add column if not exists st_customer_id bigint;
