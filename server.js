@@ -2465,7 +2465,13 @@ app.post('/api/leads/:id/promote', async (req, res) => {
   try {
     const { data: lead } = await supabase.from('st_leads').select('*').eq('id', req.params.id).maybeSingle()
     if (!lead) return res.status(404).json({ error: 'Lead not found' })
-    if (lead.contact_id) return res.json({ contactId: lead.contact_id, alreadyPromoted: true })
+    // Already promoted (a re-open, or two clicks racing). Return the FULL
+    // contact, not just the id — the caller seeds it into its cache before
+    // navigating, and an id alone renders an empty customer tab.
+    if (lead.contact_id) {
+      const { data: existing } = await supabase.from('contacts').select('*').eq('id', lead.contact_id).maybeSingle()
+      return res.json({ contactId: lead.contact_id, contact: existing || null, alreadyPromoted: true })
+    }
 
     try {
       const live = await stGet(`/crm/v2/tenant/${ST_TENANT_ID}/bookings/${lead.booking_id}`)
