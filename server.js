@@ -1499,7 +1499,9 @@ async function build3DayBoard() {
     if (cat === 'maintenance') return trade === 'HVAC' && oldSystemLocs.has(j.locationId)
     return true
   }
-  const jobRow = (j) => ({ jobNumber: j.jobNumber, type: nameByType[String(j.jobTypeId)] || 'Job' })
+  // id is carried alongside jobNumber because ServiceTitan deep links key on
+  // the internal id (#/Job/Index/{id}), not the human-facing job number.
+  const jobRow = (j) => ({ id: j.id, jobNumber: j.jobNumber, type: nameByType[String(j.jobTypeId)] || 'Job' })
 
   // Hours of a shift that fall within a given day.
   const techName = (id) => (techs.find(t => t.id === id)?.name) || `Tech ${id}`

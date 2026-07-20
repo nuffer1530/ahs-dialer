@@ -12,6 +12,7 @@ const STATUS = {
   none:  { color:'#6B7280', bg:'var(--surface-2)', label:'No techs' },
 }
 const DAY_LABELS = ['Today', 'Tomorrow', 'Day 3']
+const ST_JOB_URL = (jobId) => `https://go.servicetitan.com/#/Job/Index/${jobId}`
 
 // One clickable metric column in a cell's footer strip.
 function Metric({ label, value, accent, onClick }) {
@@ -197,12 +198,30 @@ export default function CallBoardPage() {
                   </div>
                 ))
               ) : (
-                drillItems.map((j, i) => (
-                  <div key={i} style={{ display:'flex', gap:10, padding:'11px 18px', borderBottom:'1px solid var(--border)', fontSize:13 }}>
-                    <span style={{ fontWeight:700, color:'var(--accent)', flexShrink:0 }}>#{j.jobNumber}</span>
-                    <span style={{ fontWeight:500 }}>{j.type}</span>
-                  </div>
-                ))
+                drillItems.map((j, i) => {
+                  const row = (
+                    <>
+                      <span style={{ fontWeight:700, color:'var(--accent)', flexShrink:0 }}>
+                        #{j.jobNumber}{j.id ? ' ↗' : ''}
+                      </span>
+                      <span style={{ fontWeight:500 }}>{j.type}</span>
+                    </>
+                  )
+                  const style = { display:'flex', gap:10, padding:'11px 18px', borderBottom:'1px solid var(--border)', fontSize:13 }
+                  // Older cached board payloads have no id — fall back to plain
+                  // text rather than rendering a link that goes nowhere.
+                  return j.id ? (
+                    <a key={i} href={ST_JOB_URL(j.id)} target="_blank" rel="noopener noreferrer"
+                      title="Open this job in ServiceTitan"
+                      style={{ ...style, textDecoration:'none', color:'var(--text-primary)' }}
+                      onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
+                      onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                      {row}
+                    </a>
+                  ) : (
+                    <div key={i} style={style}>{row}</div>
+                  )
+                })
               )}
             </div>
             <div style={{ padding:'12px 18px', borderTop:'1px solid var(--border)', textAlign:'right' }}>
