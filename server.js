@@ -2499,11 +2499,11 @@ async function fetchDispatchWindow(days = DISPATCH_WINDOW_DAYS) {
     stPageAll(p => `/sales/v2/tenant/${ST_TENANT_ID}/estimates?createdOnOrAfter=${since}&pageSize=500&page=${p}`, 20000),
     stPageAll(p => `/accounting/v2/tenant/${ST_TENANT_ID}/invoices?createdOnOrAfter=${since}&pageSize=500&page=${p}`, 20000),
     stPageAll(p => `/memberships/v2/tenant/${ST_TENANT_ID}/memberships?createdOnOrAfter=${since}&pageSize=500&page=${p}`, 20000),
-    stGet(`/settings/v2/tenant/${ST_TENANT_ID}/business-units?pageSize=200`),
+    stGet(`/settings/v2/tenant/${ST_TENANT_ID}/technicians?pageSize=500`),
   ])
   const appts = await stPageAll(p => `/jpm/v2/tenant/${ST_TENANT_ID}/appointments?startsOnOrAfter=${since}T00:00:00Z&pageSize=500&page=${p}`, 20000)
   const assignments = await assignmentsForAppointments(appts.map(a => a.id))
-  return { jobs, estimates, invoices, memberships, assignments, businessUnits: buRes?.data || [] }
+  return { jobs, estimates, invoices, memberships, assignments, technicians: buRes?.data || [] }
 }
 
 async function refreshDispatchScores() {
@@ -2519,6 +2519,7 @@ async function refreshDispatchScores() {
         tech_id: r.techId, tech_name: r.techName, business_unit: r.businessUnit,
         jobs: r.jobs, close_rate: r.closeRate, avg_sale: r.avgSale,
         expected_value: r.expectedValue, total_sold: r.totalSold,
+        opportunities: r.opportunities, options_per_opp: r.optionsPerOpp,
         membership_pct: r.membershipPct, score: r.score, tier: r.tier, rank: r.rank,
         window_days: DISPATCH_WINDOW_DAYS, refreshed_at: stamp,
       }))
@@ -2623,12 +2624,15 @@ app.get('/api/dispatch/live-board', async (req, res) => {
     }
     const [jtRes, buRes, { data: scores }, { data: zipRows }] = await Promise.all([
       stGet(`/jpm/v2/tenant/${ST_TENANT_ID}/job-types?pageSize=500`),
-      stGet(`/settings/v2/tenant/${ST_TENANT_ID}/business-units?pageSize=200`),
+      stGet(`/settings/v2/tenant/${ST_TENANT_ID}/technicians?pageSize=500`),
       supabase.from('dispatch_tech_scores').select('*'),
       supabase.from('dispatch_zip_value').select('zip, tier, avg_ticket'),
     ])
     const jtName = new Map((jtRes?.data || []).map(t => [t.id, t.name || '']))
-    const buName = new Map((buRes?.data || []).map(b => [b.id, b.name || '']))
+    // Bench = technician team, matching the Batting Order and the ST dispatch
+    // board. A tech's team, not the job's business unit, is what says whether
+    // they are a closer or a service tech.
+    const teamOf = new Map((buRes?.data || []).map(t => [t.id, (t.team || 'Unassigned').trim()]))
     const zipTier = new Map((zipRows || []).map(z => [z.zip, z.tier]))
     const scoreOf = new Map((scores || []).map(s => [`${s.tech_id}|${s.business_unit}`, s]))
     const bestByBU = new Map()
@@ -2665,7 +2669,7 @@ app.get('/api/dispatch/live-board', async (req, res) => {
     for (const a of assignments) {
       const j = jobById.get(a.jobId)
       if (!j) continue
-      const bu = buName.get(j.businessUnitId) || 'Unassigned'
+      const bu = teamOf.get(a.technicianId) || 'Unassigned'
       const jt = jtName.get(j.jobTypeId) || ''
       const zip = zipOfLoc.get(j.locationId) || ''
       const isMember = j.customerId ? memberCust.has(j.customerId) : null

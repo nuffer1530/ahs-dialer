@@ -354,3 +354,8 @@ alter table dispatch_tech_scores add column if not exists expected_value numeric
 alter table dispatch_tech_scores add column if not exists total_sold numeric;
 alter table dispatch_tech_scores drop column if exists conversion;
 alter table dispatch_tech_scores drop column if exists avg_ticket;
+
+-- Dispatch: opportunity-based KPIs (one opportunity = one job, not one
+-- estimate — techs present ~2-3 options each). Safe to re-run.
+alter table dispatch_tech_scores add column if not exists opportunities integer;
+alter table dispatch_tech_scores add column if not exists options_per_opp numeric;

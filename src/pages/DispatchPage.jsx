@@ -81,7 +81,7 @@ function BattingOrder() {
     <div>
       <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', flexWrap:'wrap', gap:10, marginBottom:14 }}>
         <div style={{ fontSize:12, color:'var(--text-muted)' }}>
-          Ranked by expected revenue per opportunity (close rate × average sale) within each business unit ·
+          Ranked by expected revenue per opportunity (close rate × average sale) within each dispatch team ·
           {data.windowDays}-day window, recent work weighted heavier · scored {ago(data.refreshedAt)}
         </div>
         <button className="btn sm" onClick={refresh} disabled={busy}>
@@ -132,8 +132,8 @@ function BattingOrder() {
                   <th style={{textAlign:'right'}}>Close rate</th>
                   <th style={{textAlign:'right'}}>Avg sale</th>
                   <th style={{textAlign:'right'}}>Total sold</th>
+                  <th style={{textAlign:'right'}} title="Opportunities run in the window">Opps</th>
                   <th style={{textAlign:'right'}}>Membership</th>
-                  <th style={{textAlign:'right'}}>Jobs</th>
                 </tr></thead>
                 <tbody>
                   {ranked.map(r => (
@@ -145,6 +145,7 @@ function BattingOrder() {
                       <td style={{ padding:'7px 12px', textAlign:'right' }}>{pct(r.close_rate)}</td>
                       <td style={{ padding:'7px 12px', textAlign:'right' }}>{money(r.avg_sale)}</td>
                       <td style={{ padding:'7px 12px', textAlign:'right', color:'var(--text-muted)' }}>{money(r.total_sold)}</td>
+                      <td style={{ padding:'7px 12px', textAlign:'right', color:'var(--text-muted)' }}>{r.opportunities ?? '—'}</td>
                       <td style={{ padding:'7px 12px', textAlign:'right' }}>{pct(r.membership_pct)}</td>
                       <td style={{ padding:'7px 12px', textAlign:'right', color:'var(--text-muted)' }}>{r.jobs}</td>
                     </tr>
