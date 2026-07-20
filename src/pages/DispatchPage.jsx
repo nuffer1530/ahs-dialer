@@ -17,6 +17,18 @@ const TIER = {
 }
 
 const ST_JOB_URL = (jobId) => `https://go.servicetitan.com/#/Job/Index/${jobId}`
+
+// One <table> per arrival window means each would otherwise auto-size its own
+// columns and the groups wouldn't line up down the page. Fixed layout + one
+// shared width list keeps every group in register.
+const LB_COLS = [
+  { key:'job',   label:'Job',        width:'15%' },
+  { key:'team',  label:'Team',       width:'14%' },
+  { key:'tech',  label:'Technician', width:'15%' },
+  { key:'tier',  label:'Tier',       width:'13%' },
+  { key:'opp',   label:'Opp.',       width:'7%',  align:'right' },
+  { key:'flag',  label:'Flag',       width:'36%' },
+]
 const money = (v) => (v == null ? '—' : `$${Math.round(Number(v)).toLocaleString()}`)
 
 // "8 AM – 12 PM". Windows are what the customer was promised and how dispatch
@@ -264,10 +276,12 @@ function LiveBoard() {
           </span>
         </div>
       <div className="card" style={{ padding:0, overflow:'hidden' }}>
-        <table className="data-table" style={{ fontSize:12 }}>
+        <table className="data-table" style={{ fontSize:12, tableLayout:'fixed', width:'100%' }}>
+          <colgroup>{LB_COLS.map(c => <col key={c.key} style={{ width:c.width }} />)}</colgroup>
           <thead><tr>
-            <th>Job</th><th>Team</th><th>Technician</th><th>Tier</th>
-            <th style={{textAlign:'right'}}>Opp.</th><th>Flag</th>
+            {LB_COLS.map(c => (
+              <th key={c.key} style={{ textAlign: c.align || 'left' }}>{c.label}</th>
+            ))}
           </tr></thead>
           <tbody>
             {list.map((c, i) => (
@@ -278,7 +292,7 @@ function LiveBoard() {
                      style={{ fontWeight:600, color:'var(--accent)', textDecoration:'none' }}>
                     #{c.jobNumber} ↗
                   </a>
-                  <div style={{ fontSize:10, color:'var(--text-muted)' }}>{c.jobType}</div>
+                  <div style={{ fontSize:10, color:'var(--text-muted)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }} title={c.jobType}>{c.jobType}</div>
                 </td>
                 <td style={{ padding:'7px 12px', fontSize:11, color:'var(--text-muted)' }}>{c.businessUnit}</td>
                 <td style={{ padding:'7px 12px' }}>{c.techName}</td>
