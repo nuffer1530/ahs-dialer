@@ -62,6 +62,7 @@ export const EXCLUDE_CALL = /follow[- ]?up|callback|permitting|phone call/i
 // it to whoever ranks higher would break the thing that makes it work, so these
 // are never reassigned, never swapped, and never offered as the call to bump.
 const STICKY_TO_TECH = /phone call|follow[- ]?up|financ/i
+const INSTALL_TYPE = /install|replacement/i
 const ST_AUTH_URL      = 'https://auth.servicetitan.io/connect/token'
 const ST_API_BASE      = `https://api.servicetitan.io`
 
@@ -2888,6 +2889,21 @@ app.get('/api/dispatch/live-board', async (req, res) => {
       return [...theirs].sort((a, b) => (a.opportunity - b.opportunity))[0]
     }
 
+    // Revenue already BOOKED for today: installs carry their invoice from when
+    // the sale was made (verified — every install scheduled today has one).
+    // The install job's own estimates are empty because the sale happened on a
+    // separate sales job, so the invoice is the only reliable route.
+    const installJobs = calls.filter(c => INSTALL_TYPE.test(c.jobType || ''))
+    const bookedByJob = new Map()
+    for (const c of installJobs.slice(0, 40)) {
+      if (bookedByJob.has(c.jobId)) continue
+      try {
+        const iv = await stGet(`/accounting/v2/tenant/${ST_TENANT_ID}/invoices?jobNumber=${encodeURIComponent(c.jobNumber)}&pageSize=5`)
+        const tot = (iv?.data || []).reduce((a, x) => a + Number(x.total || 0), 0)
+        if (tot > 0) bookedByJob.set(c.jobId, tot)
+      } catch (e) { /* leave it out rather than guess */ }
+    }
+
     const scoresByTeam = new Map()
     for (const sc of (scores || [])) {
       if (!scoresByTeam.has(sc.business_unit)) scoresByTeam.set(sc.business_unit, [])
@@ -3020,6 +3036,31 @@ app.get('/api/dispatch/live-board', async (req, res) => {
       }
     }
 
+    // Per-call money view.
+    //  - booked: an install's invoice — real, already sold.
+    //  - expected: the assigned tech's earning power per opportunity. This is a
+    //    probability-weighted figure, never money in hand, and is labelled as
+    //    such in the UI so nobody adds it to a P&L.
+    for (const c of calls) {
+      const sc = scoreOf.get(`${c.techId}|${c.businessUnit}`)
+      c.bookedRevenue = bookedByJob.get(c.jobId) || 0
+      c.expectedRevenue = c.bookedRevenue ? 0 : Math.round(Number(sc?.expected_value || 0))
+      // Reschedule candidates: what to move when demand walks in. Installs are
+      // sold work and phone/follow-ups take no truck time and must happen, so
+      // both are out. Ranked by how little the call is likely to produce.
+      c.rescheduleCandidate = !c.bookedRevenue
+        && !STICKY_TO_TECH.test(c.jobType || '')
+        && !INSTALL_TYPE.test(c.jobType || '')
+        && c.opportunity <= 0
+    }
+    const dayRevenue = {
+      booked: Math.round([...bookedByJob.values()].reduce((a, b) => a + b, 0)),
+      bookedJobs: bookedByJob.size,
+      expected: Math.round(calls.reduce((a, c) => a + (c.expectedRevenue || 0), 0)),
+      opportunityCalls: calls.filter(c => c.opportunity >= 3).length,
+      rescheduleCandidates: calls.filter(c => c.rescheduleCandidate).length,
+    }
+
     // Sort by window open, then by start within the window.
     const ts = (v) => { const t = Date.parse(v || ''); return Number.isNaN(t) ? Infinity : t }
     calls.sort((a, b) => (ts(a.windowStart) - ts(b.windowStart)) || (ts(a.start) - ts(b.start)))
@@ -3027,6 +3068,7 @@ app.get('/api/dispatch/live-board', async (req, res) => {
       generatedAt: new Date().toISOString(),
       scoresRefreshedAt: (scores || [])[0]?.refreshed_at || null,
       driveTime: driveTimeEnabled(),
+      dayRevenue,
       calls, swaps,
       counts: {
         total: calls.length,

@@ -242,7 +242,7 @@ function LiveBoard() {
   const [data, setData] = useState(null)
   const [err, setErr] = useState('')
   const [loading, setLoading] = useState(true)
-  const [onlyFlagged, setOnlyFlagged] = useState(false)
+  const [view, setView] = useState('all')   // all | flagged | reschedule
 
   const load = useCallback(async () => {
     try { setData(await authed('/api/dispatch/live-board')); setErr('') }
@@ -259,7 +259,11 @@ function LiveBoard() {
 
   const allCalls = data?.calls || []
   const flagged = allCalls.filter(c => c.flags?.length)
-  const calls = onlyFlagged ? flagged : allCalls
+  // Lowest-producing first — this list is "what to move when demand walks in".
+  const reschedule = allCalls.filter(c => c.rescheduleCandidate)
+    .sort((a, b) => (a.expectedRevenue || 0) - (b.expectedRevenue || 0))
+  const calls = view === 'flagged' ? flagged : view === 'reschedule' ? reschedule : allCalls
+  const rev = data?.dayRevenue
 
   // Within a window, group by team. Teams with flags sort first so a
   // dispatcher sees the problems without scanning every bench.
@@ -305,11 +309,13 @@ function LiveBoard() {
           {/* Jumping to what needs attention is the whole job — 95 calls with
               11 flagged is a lot of scrolling otherwise. */}
           <div style={{ display:'flex', border:'1px solid var(--border)', borderRadius:99, overflow:'hidden' }}>
-            {[[false, `All ${allCalls.length}`], [true, `⚠️ Flagged ${flagged.length}`]].map(([val, label]) => (
-              <button key={String(val)} onClick={() => setOnlyFlagged(val)}
-                style={{ padding:'5px 12px', border:'none', cursor:'pointer', fontSize:11, fontWeight:600,
-                  background: onlyFlagged === val ? 'var(--accent)' : 'transparent',
-                  color: onlyFlagged === val ? '#fff' : 'var(--text-muted)' }}>
+            {[['all', `All ${allCalls.length}`], ['flagged', `⚠️ Flagged ${flagged.length}`],
+              ['reschedule', `↻ Movable ${reschedule.length}`]].map(([val, label]) => (
+              <button key={val} onClick={() => setView(val)}
+                title={val === 'reschedule' ? 'Lowest-producing calls — candidates to move if demand comes in' : undefined}
+                style={{ padding:'5px 12px', border:'none', cursor:'pointer', fontSize:11, fontWeight:600, whiteSpace:'nowrap',
+                  background: view === val ? 'var(--accent)' : 'transparent',
+                  color: view === val ? '#fff' : 'var(--text-muted)' }}>
                 {label}
               </button>
             ))}
@@ -318,13 +324,47 @@ function LiveBoard() {
         </div>
       </div>
 
-      {onlyFlagged && flagged.length === 0 && (
+      {rev && (
+        <div className="card" style={{ padding:'12px 16px', marginBottom:14, display:'flex', gap:26, flexWrap:'wrap', alignItems:'center' }}>
+          <div>
+            <div style={{ fontSize:19, fontWeight:800, color:'#15803D', lineHeight:1.1 }}>{money(rev.booked)}</div>
+            <div style={{ fontSize:10, color:'var(--text-muted)', textTransform:'uppercase', letterSpacing:.5 }}>
+              Booked today · {rev.bookedJobs} install{rev.bookedJobs === 1 ? '' : 's'}
+            </div>
+          </div>
+          <div style={{ width:1, alignSelf:'stretch', background:'var(--border)' }} />
+          <div>
+            <div style={{ fontSize:19, fontWeight:800, color:'var(--text-primary)', lineHeight:1.1 }}>{money(rev.expected)}</div>
+            <div style={{ fontSize:10, color:'var(--text-muted)', textTransform:'uppercase', letterSpacing:.5 }}>
+              Expected from the board · {rev.opportunityCalls} opportunity call{rev.opportunityCalls === 1 ? '' : 's'}
+            </div>
+          </div>
+          <div style={{ width:1, alignSelf:'stretch', background:'var(--border)' }} />
+          <div>
+            <div style={{ fontSize:19, fontWeight:800, color:'var(--accent)', lineHeight:1.1 }}>{money(rev.booked + rev.expected)}</div>
+            <div style={{ fontSize:10, color:'var(--text-muted)', textTransform:'uppercase', letterSpacing:.5 }}>Day total</div>
+          </div>
+          <div style={{ flex:1, minWidth:180, fontSize:10, color:'var(--text-muted)', lineHeight:1.5 }}>
+            Booked is real — invoices on installs closing today. Expected is probability-weighted
+            from each tech's earning power and moves as the board changes.
+          </div>
+        </div>
+      )}
+
+      {view === 'reschedule' && (
+        <div style={{ fontSize:12, color:'var(--text-muted)', marginBottom:10 }}>
+          Lowest-producing calls first — the ones to move if demand comes in.
+          Installs are excluded (already sold) and phone/follow-ups are excluded (no truck time, and they have to happen).
+        </div>
+      )}
+
+      {view === 'flagged' && flagged.length === 0 && (
         <div className="card" style={{ padding:'22px 16px', textAlign:'center', color:'#15803D', fontSize:13 }}>
           ✓ Nothing flagged right now — every high-opportunity call is on a capable tech.
         </div>
       )}
 
-      {(data?.swaps || []).length > 0 && !onlyFlagged && (
+      {(data?.swaps || []).length > 0 && view === 'all' && (
         <div style={{ marginBottom:16 }}>
           {data.swaps.map((sw, i) => (
             <div key={i} className="card" style={{ padding:'12px 15px', marginBottom:9, borderLeft:'3px solid var(--accent)' }}>
@@ -415,9 +455,18 @@ function LiveBoard() {
                 </td>
                 <td style={{ padding:'7px 12px' }}>{c.techName}</td>
                 <td style={{ padding:'7px 12px' }}><TierPill tier={c.techTier} /></td>
-                <td title={(c.opportunityReasons || []).join(' · ') || 'no opportunity signals'}
+                <td title={c.bookedRevenue
+                    ? `Sold work — ${money(c.bookedRevenue)} invoiced`
+                    : ((c.opportunityReasons || []).join(' · ') || 'no opportunity signals')}
                   style={{ padding:'7px 12px', textAlign:'right', fontWeight:700, cursor:'help',
-                  color: c.opportunity >= 3 ? '#B91C1C' : 'var(--text-muted)' }}>{c.opportunity}</td>
+                  color: c.opportunity >= 3 ? '#B91C1C' : 'var(--text-muted)' }}>
+                  {c.opportunity}
+                  {(c.bookedRevenue > 0 || c.expectedRevenue > 0) && (
+                    <div style={{ fontSize:9, fontWeight:600, color: c.bookedRevenue ? '#15803D' : 'var(--text-muted)' }}>
+                      {money(c.bookedRevenue || c.expectedRevenue)}
+                    </div>
+                  )}
+                </td>
                 <td style={{ padding:'7px 12px' }}>
                   {(c.flags || []).map((f, k) => (
                     <div key={k} style={{ fontSize:11, color: f.level === 'warn' ? '#B91C1C' : 'var(--text-muted)' }}>
