@@ -695,9 +695,12 @@ function DecisionMaker() {
   // Job-type dropdown — custom, not a native <datalist> (those render
   // inconsistently and off-position across browsers).
   const [showTypes, setShowTypes] = useState(false)
-  const typeMatches = (jobType.trim()
+  // No cap. The list is alphabetical, so any cap eats the back half of the
+  // alphabet — "All -" and "Electrical -" sort first and HVAC/Plumbing looked
+  // missing entirely. 112 rows in a scrolling box render fine.
+  const typeMatches = jobType.trim()
     ? types.filter(t => t.toLowerCase().includes(jobType.toLowerCase()))
-    : types).slice(0, 40)
+    : types
 
   const clearAll = () => {
     setJobType(''); setAddress(''); setUrgent(false)
