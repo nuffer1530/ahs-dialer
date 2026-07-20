@@ -2698,9 +2698,17 @@ function scoreOpportunity(jobTypeName, zipTier, isMember, systemAge, isHvac) {
   return { score, reasons }
 }
 
+// The live board costs ~35 ServiceTitan calls to compute. Cache the finished
+// response for 3 minutes so ten open tabs cost one compute, not ten — the UI
+// only auto-refreshes every 15 minutes anyway. The manual Refresh button
+// sends ?force=1 to bypass.
+let _liveBoardCache = null
 app.get('/api/dispatch/live-board', async (req, res) => {
   if (!(await requireAdmin(req, res))) return
   try {
+    if (req.query.force !== '1' && _liveBoardCache && _liveBoardCache.expires > Date.now()) {
+      return res.json({ ..._liveBoardCache.data, cached: true })
+    }
     // Denver-local day, not the UTC calendar date. Railway runs in UTC, so
     // comparing UTC date strings made "today" run 6pm yesterday -> 6pm today:
     // last night's calls appeared (sorting to the top of the board) while
@@ -2722,17 +2730,17 @@ app.get('/api/dispatch/live-board', async (req, res) => {
         jobs.push(...(d?.data || []))
       } catch (e) { console.warn('live-board jobs batch:', e.message) }
     }
-    const [jtRes, buRes, { data: scores }, { data: zipRows }] = await Promise.all([
-      stGet(`/jpm/v2/tenant/${ST_TENANT_ID}/job-types?pageSize=500`),
-      stGet(`/settings/v2/tenant/${ST_TENANT_ID}/technicians?pageSize=500`),
+    const [jtCat, boardTechs, { data: scores }, { data: zipRows }] = await Promise.all([
+      getJobTypeCatalog(),    // 6h cache — fetching 112 rows fresh per load was waste
+      getBoardTechs(),        // 10min cache
       supabase.from('dispatch_tech_scores').select('*'),
       supabase.from('dispatch_zip_value').select('zip, tier, avg_ticket'),
     ])
-    const jtName = new Map((jtRes?.data || []).map(t => [t.id, t.name || '']))
+    const jtName = new Map(jtCat.map(t => [t.id, t.name || '']))
     // Bench = technician team, matching the Batting Order and the ST dispatch
     // board. A tech's team, not the job's business unit, is what says whether
     // they are a closer or a service tech.
-    const teamOf = new Map((buRes?.data || []).map(t => [t.id, (t.team || 'Unassigned').trim()]))
+    const teamOf = new Map(boardTechs.map(t => [t.id, (t.team || 'Unassigned').trim()]))
     const zipTier = new Map((zipRows || []).map(z => [z.zip, z.tier]))
     const scoreOf = new Map((scores || []).map(s => [`${s.tech_id}|${s.business_unit}`, s]))
 
@@ -2917,25 +2925,28 @@ app.get('/api/dispatch/live-board', async (req, res) => {
     // separate sales job, so the invoice is the only reliable route.
     const installJobs = calls.filter(c => INSTALL_TYPE.test(c.jobType || ''))
     const bookedByJob = new Map()
-    for (const c of installJobs.slice(0, 40)) {
-      if (bookedByJob.has(c.jobId)) continue
-      try {
-        // MULTI-DAY INSTALLS: the invoice is the whole project value, not a
-        // daily figure. 5 of 12 installs on a sampled day spanned more than one
-        // day (one had 4 appointments over 3 days), so counting the invoice on
-        // every day it appeared reported $130k for a day that should read $65k.
-        // Count it once, on the day the job actually finishes.
-        const ja = await stGet(`/jpm/v2/tenant/${ST_TENANT_ID}/appointments?jobId=${c.jobId}&pageSize=20`)
-        const days = (ja?.data || []).map(a => String(a.start || '').slice(0, 10)).filter(Boolean).sort()
-        const lastDay = days[days.length - 1]
-        const todayStr = today.date
-        if (lastDay && lastDay !== todayStr) continue      // finishes another day
-
-        const iv = await stGet(`/accounting/v2/tenant/${ST_TENANT_ID}/invoices?jobNumber=${encodeURIComponent(c.jobNumber)}&pageSize=5`)
-        const tot = (iv?.data || []).reduce((a, x) => a + Number(x.total || 0), 0)
-        if (tot > 0) bookedByJob.set(c.jobId, tot)
-      } catch (e) { /* leave it out rather than guess */ }
-    }
+    // MULTI-DAY INSTALLS: the invoice is the whole project value, not a daily
+    // figure — count it once, on the day the job finishes (see the $130k-vs-$65k
+    // incident). This loop was the page's dominant cost: 2 serial ST calls per
+    // install (~24 round-trips at 1-2s each). Now a concurrency-4 pool, so a
+    // 12-install day is ~6 waves instead of 24.
+    const installQueue = installJobs.slice(0, 40).filter((c, i, arr) =>
+      arr.findIndex(x => x.jobId === c.jobId) === i && !bookedByJob.has(c.jobId))
+    let qi = 0
+    await Promise.all(Array.from({ length: Math.min(4, installQueue.length) }, async () => {
+      while (qi < installQueue.length) {
+        const c = installQueue[qi++]
+        try {
+          const ja = await stGet(`/jpm/v2/tenant/${ST_TENANT_ID}/appointments?jobId=${c.jobId}&pageSize=20`)
+          const days = (ja?.data || []).map(a => String(a.start || '').slice(0, 10)).filter(Boolean).sort()
+          const lastDay = days[days.length - 1]
+          if (lastDay && lastDay !== today.date) continue    // finishes another day
+          const iv = await stGet(`/accounting/v2/tenant/${ST_TENANT_ID}/invoices?jobNumber=${encodeURIComponent(c.jobNumber)}&pageSize=5`)
+          const tot = (iv?.data || []).reduce((a, x) => a + Number(x.total || 0), 0)
+          if (tot > 0) bookedByJob.set(c.jobId, tot)
+        } catch (e) { /* leave it out rather than guess */ }
+      }
+    }))
 
     // Outcomes for work that finished today. Fetched as two paged queries and
     // indexed by job rather than per-job lookups, which at ~29 completed calls
@@ -3195,7 +3206,7 @@ app.get('/api/dispatch/live-board', async (req, res) => {
     // Sort by window open, then by start within the window.
     const ts = (v) => { const t = Date.parse(v || ''); return Number.isNaN(t) ? Infinity : t }
     calls.sort((a, b) => (ts(a.windowStart) - ts(b.windowStart)) || (ts(a.start) - ts(b.start)))
-    res.json({
+    const payload = {
       generatedAt: new Date().toISOString(),
       scoresRefreshedAt: (scores || [])[0]?.refreshed_at || null,
       driveTime: driveTimeEnabled(),
@@ -3206,7 +3217,9 @@ app.get('/api/dispatch/live-board', async (req, res) => {
         flagged: calls.filter(c => c.flags.length).length,
         unrankedTechs: calls.filter(c => c.techTier === 'unranked').length,
       },
-    })
+    }
+    _liveBoardCache = { data: payload, expires: Date.now() + 3 * 60_000 }
+    res.json(payload)
   } catch (err) {
     console.error('live-board error:', err.message)
     res.status(500).json({ error: err.message })
@@ -3279,8 +3292,8 @@ app.post('/api/dispatch/decide', async (req, res) => {
       try { const d = await stGet(`/jpm/v2/tenant/${ST_TENANT_ID}/jobs?ids=${jobIds.slice(i, i + 50).join(',')}&pageSize=50`); jobs.push(...(d?.data || [])) } catch {}
     }
     const jobById = new Map(jobs.map(j => [j.id, j]))
-    const jtRes = await stGet(`/jpm/v2/tenant/${ST_TENANT_ID}/job-types?pageSize=500`)
-    const jtName = new Map((jtRes?.data || []).map(t => [t.id, t.name || '']))
+    const jtCat = await getJobTypeCatalog()   // 6h-cached; a fresh fetch here was pure waste
+    const jtName = new Map(jtCat.map(t => [t.id, t.name || '']))
 
     // location coords for each job (for drive time), batched
     const locIds = [...new Set(jobs.map(j => j.locationId).filter(Boolean))]

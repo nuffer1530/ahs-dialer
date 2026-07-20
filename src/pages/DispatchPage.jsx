@@ -244,13 +244,13 @@ function LiveBoard() {
   const [loading, setLoading] = useState(true)
   const [view, setView] = useState('ontrack')   // ontrack | flagged | reschedule | completed
 
-  const load = useCallback(async () => {
-    try { setData(await authed('/api/dispatch/live-board')); setErr('') }
+  const load = useCallback(async (force = false) => {
+    try { setData(await authed(`/api/dispatch/live-board${force ? '?force=1' : ''}`)); setErr('') }
     catch (e) { setErr(e.message) } finally { setLoading(false) }
   }, [])
   useEffect(() => {
     load()
-    const t = setInterval(load, 15 * 60_000)   // 15-minute refresh, per spec
+    const t = setInterval(() => load(), 15 * 60_000)   // 15-minute refresh, per spec
     return () => clearInterval(t)
   }, [load])
 
@@ -341,7 +341,7 @@ function LiveBoard() {
               </button>
             ))}
           </div>
-          <button className="btn sm" onClick={load}>Refresh</button>
+          <button className="btn sm" onClick={() => load(true)}>Refresh</button>
         </div>
       </div>
 
