@@ -2915,6 +2915,8 @@ app.get('/api/dispatch/live-board', async (req, res) => {
       }
     }
 
+    // Sort by window open, then by start within the window.
+    const ts = (v) => { const t = Date.parse(v || ''); return Number.isNaN(t) ? Infinity : t }
     calls.sort((a, b) => (ts(a.windowStart) - ts(b.windowStart)) || (ts(a.start) - ts(b.start)))
     res.json({
       generatedAt: new Date().toISOString(),
