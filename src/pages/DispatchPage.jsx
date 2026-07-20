@@ -480,6 +480,14 @@ function LiveBoard() {
                   )}
                 </td>
                 <td style={{ padding:'7px 12px' }}>
+                  {view === 'reschedule' && (c.moveReason || []).length > 0 && (
+                    <div style={{ fontSize:11, color:'var(--text-secondary)', lineHeight:1.5 }}>
+                      {c.moveReason.join(' · ')}
+                      {c.moveCaution && (
+                        <div style={{ color:'#B45309', fontWeight:600, marginTop:2 }}>⚠️ {c.moveCaution}</div>
+                      )}
+                    </div>
+                  )}
                   {(c.flags || []).map((f, k) => (
                     <div key={k} style={{ fontSize:11, color: f.level === 'warn' ? '#B91C1C' : 'var(--text-muted)' }}>
                       {f.level === 'warn' ? '⚠️ ' : 'ℹ️ '}{f.text}

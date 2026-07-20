@@ -3088,6 +3088,32 @@ app.get('/api/dispatch/live-board', async (req, res) => {
         && !STICKY_TO_TECH.test(c.jobType || '')
         && !INSTALL_TYPE.test(c.jobType || '')
         && c.opportunity <= 0
+
+      // Say WHY it's movable — and, just as important, where moving it has a
+      // cost that the revenue number doesn't show. A callback produces no
+      // revenue, which makes it look like the cheapest thing on the board,
+      // but there's a customer waiting on a fix that already went wrong.
+      if (c.rescheduleCandidate) {
+        const jtl = c.jobType || ''
+        const why = []
+        let caution = null
+        if (/maint|tune|inspection/i.test(jtl)) {
+          why.push('Recurring maintenance — periodic, not urgent')
+        } else if (/callback|warranty/i.test(jtl)) {
+          why.push('Callback — no revenue attached')
+          caution = 'Customer is already waiting on a fix — move only if you must'
+        } else if (/permit/i.test(jtl)) {
+          why.push('Permitting — administrative, nobody waiting on site')
+        } else {
+          why.push('No replacement or upgrade signals on this call')
+        }
+        if (c.isMember) caution = caution || 'Member — worth a courtesy call before moving'
+        why.push(c.expectedRevenue > 0
+          ? `Only ~$${c.expectedRevenue.toLocaleString()} expected if it runs`
+          : 'No sale expected from it')
+        c.moveReason = why
+        c.moveCaution = caution
+      }
     }
     const dayRevenue = {
       booked: Math.round([...bookedByJob.values()].reduce((a, b) => a + b, 0)),
