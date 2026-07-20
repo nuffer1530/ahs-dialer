@@ -2989,6 +2989,41 @@ app.get('/api/dispatch/live-board', async (req, res) => {
       }
     } catch (e) { console.warn('live-board invoices:', e.message) }
 
+    // Shift-awareness for SUGGESTIONS — the same rule the Decision Maker
+    // learned when it recommended a tech who'd gone home: a candidate must
+    // have a working shift covering the call's window, minus TimeOff.
+    let shiftsByTech = null
+    try {
+      const sh = await stGet(`/dispatch/v2/tenant/${ST_TENANT_ID}/technician-shifts?startsOnOrAfter=${today.startUtc.toISOString()}&endsOnOrBefore=${today.endUtc.toISOString()}&pageSize=500`)
+      shiftsByTech = new Map()
+      for (const x of (sh?.data || [])) {
+        if (!x.technicianId) continue
+        if (!shiftsByTech.has(x.technicianId)) shiftsByTech.set(x.technicianId, [])
+        shiftsByTech.get(x.technicianId).push({ type: x.shiftType, start: Date.parse(x.start || ''), end: Date.parse(x.end || '') })
+      }
+    } catch (e) { console.warn('live-board shifts:', e.message) }
+    const canWork = (techId, ws, we) => {
+      if (!shiftsByTech) return true                      // no data — don't block
+      const list = shiftsByTech.get(techId) || []
+      let s0 = Date.parse(ws || ''), e0 = Date.parse(we || '')
+      if (Number.isNaN(s0) || Number.isNaN(e0)) { s0 = Date.now(); e0 = today.endUtc.getTime() }
+      const on = list.some(x => x.type !== 'TimeOff' && x.start < e0 && x.end > s0)
+      const off = list.some(x => x.type === 'TimeOff' && x.start < e0 && x.end > s0)
+      return on && !off
+    }
+
+    // Skill rules (boilers -> Craig Rehm): a rule-bound call is never suggested
+    // for anyone outside its list. Same app_settings the Decision Maker reads.
+    let typeRules = []
+    try {
+      const { data: rr } = await supabase.from('app_settings').select('value').eq('key', 'dispatch_type_rules').maybeSingle()
+      typeRules = JSON.parse(rr?.value || '[]')
+    } catch {}
+    const allowedByRule = (jt, techName) => {
+      const r = typeRules.find(x => x?.pattern && String(jt || '').toLowerCase().includes(String(x.pattern).toLowerCase()))
+      return !r || (r.techs || []).some(n => String(n).toLowerCase() === String(techName || '').toLowerCase())
+    }
+
     const scoresByTeam = new Map()
     for (const sc of (scores || [])) {
       if (!scoresByTeam.has(sc.business_unit)) scoresByTeam.set(sc.business_unit, [])
@@ -3010,6 +3045,8 @@ app.get('/api/dispatch/live-board', async (req, res) => {
       // Candidates: same bench, materially stronger than who's on it now.
       const candidates = (scoresByTeam.get(c.businessUnit) || [])
         .filter(s => s.tech_id !== c.techId && s.tier !== 'unranked')
+        .filter(s => canWork(s.tech_id, c.windowStart, c.windowEnd))
+        .filter(s => allowedByRule(c.jobType, s.tech_name))
         .filter(s => Number(s.expected_value || 0) > myEV)
         .map(s => ({ s, t: nearestTravel(s.tech_id, c.geo) }))
         .filter(x => {
@@ -3080,6 +3117,12 @@ app.get('/api/dispatch/live-board', async (req, res) => {
 
         const partner = underused
           .filter(u => !usedForSwap.has(u.jobId))
+          // A swap trades windows too: each tech must be on shift for the
+          // OTHER call's window, and skill rules must hold in both directions.
+          .filter(u => canWork(u.techId, m.windowStart, m.windowEnd)
+            && canWork(m.techId, u.windowStart, u.windowEnd)
+            && allowedByRule(m.jobType, u.techName)
+            && allowedByRule(u.jobType, m.techName))
           .map(u => {
             const t = (m.geo && u.geo) ? (travel.get(pairKey(m.geo, u.geo)) || straightLine(m.geo, u.geo)) : null
             return { u, t, uEV: Number(scoreOf.get(`${u.techId}|${bu}`)?.expected_value || 0) }
