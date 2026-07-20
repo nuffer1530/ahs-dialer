@@ -2669,12 +2669,6 @@ app.get('/api/dispatch/live-board', async (req, res) => {
     const teamOf = new Map((buRes?.data || []).map(t => [t.id, (t.team || 'Unassigned').trim()]))
     const zipTier = new Map((zipRows || []).map(z => [z.zip, z.tier]))
     const scoreOf = new Map((scores || []).map(s => [`${s.tech_id}|${s.business_unit}`, s]))
-    const bestByBU = new Map()
-    for (const s of (scores || [])) {
-      if (s.tier !== 'green') continue
-      const cur = bestByBU.get(s.business_unit)
-      if (!cur || (s.score ?? -99) > (cur.score ?? -99)) bestByBU.set(s.business_unit, s)
-    }
 
     // Jobs carry locationId and customerId but not the zip or membership status,
     // so resolve both in batches. Today-only, so this is a handful of calls —
@@ -2713,26 +2707,6 @@ app.get('/api/dispatch/live-board', async (req, res) => {
       const isMember = j.customerId ? memberCust.has(j.customerId) : null
       const opp = scoreOpportunity(jt, zipTier.get(zip), isMember)
       const techScore = scoreOf.get(`${a.technicianId}|${bu}`) || null
-      const best = bestByBU.get(bu) || null
-
-      const flags = []
-      // Install/leadership/unassigned have no batting order, so there is no
-      // tier to judge them against — flagging them would be pure noise.
-      const rankable = !NON_DISPATCH_TEAM.test(bu)
-      if (!rankable) { /* no flags */ }
-      else if (opp.score >= 3 && techScore && techScore.tier === 'red') {
-        flags.push({
-          level: 'warn',
-          text: `High-opportunity call on a red-tier tech${best && best.tech_id !== a.technicianId ? ` — consider ${best.tech_name}` : ''}`,
-          why: opp.reasons,
-        })
-      } else if (rankable && opp.score >= 3 && (!techScore || techScore.tier === 'unranked')) {
-        flags.push({
-          level: 'info',
-          text: `High-opportunity call on a tech with no ranking yet${best ? ` — ${best.tech_name} is your strongest here` : ''}`,
-          why: opp.reasons,
-        })
-      }
 
       const ap = apptById.get(a.appointmentId) || {}
       calls.push({
@@ -2752,10 +2726,17 @@ app.get('/api/dispatch/live-board', async (req, res) => {
         techAvgSale: techScore?.avg_sale ?? null,
         techExpectedValue: techScore?.expected_value ?? null,
         opportunity: opp.score, opportunityReasons: opp.reasons,
-        flags,
+        rankable: !NON_DISPATCH_TEAM.test(bu),
+        flags: [],
       })
     }
 
+    // ── Reassignment suggestions ────────────────────────────────────────────
+    // Route logic is about the tech's DAY, not two jobs in isolation: if a
+    // strong tech already has calls in Pueblo, another Pueblo job costs him
+    // almost nothing, while pulling someone down from Colorado Springs costs
+    // an hour each way. KPIs still lead — proximity only chooses BETWEEN techs
+    // who are good enough for the work, and never promotes a weak one.
     // Straight-line miles between two jobs. NOT drive time — there is no
     // routing service here — but enough to stop the tool proposing a swap
     // across the county, which would cost more in windshield time than the
@@ -2768,6 +2749,73 @@ app.get('/api/dispatch/live-board', async (req, res) => {
       return 2 * R * Math.asin(Math.sqrt(h))
     }
     const SWAP_MAX_MILES = 12
+    // Declared here, above its use in the flag loop: `const` is not hoisted and
+    // a TDZ ReferenceError here would be swallowed by the route's catch.
+    const money0 = (v) => (v == null ? '—' : `$${Math.round(Number(v)).toLocaleString()}`)
+    const NEARBY_MILES = 15        // "already working that area"
+    const DETOUR_MILES = 35        // beyond this, moving a tech is its own problem
+
+    const geoMiles = (g1, g2) => milesBetween({ geo: g1 }, { geo: g2 })
+
+    // Where is each tech working today?
+    const techGeos = new Map()
+    for (const c of calls) {
+      if (!c.techId || !c.geo) continue
+      if (!techGeos.has(c.techId)) techGeos.set(c.techId, [])
+      techGeos.get(c.techId).push(c.geo)
+    }
+    // How far is this tech's nearest OTHER job today from the target?
+    const nearestMiles = (techId, geo) => {
+      const gs = techGeos.get(techId)
+      if (!gs || !geo) return null
+      const ds = gs.map(g => geoMiles(g, geo)).filter(d => d != null)
+      return ds.length ? Math.min(...ds) : null
+    }
+
+    const scoresByTeam = new Map()
+    for (const sc of (scores || [])) {
+      if (!scoresByTeam.has(sc.business_unit)) scoresByTeam.set(sc.business_unit, [])
+      scoresByTeam.get(sc.business_unit).push(sc)
+    }
+
+    for (const c of calls) {
+      if (!c.rankable || c.opportunity < 3) continue
+      const weak = !c.techTier || c.techTier === 'red' || c.techTier === 'unranked'
+      if (!weak) continue
+
+      const mine = scoreOf.get(`${c.techId}|${c.businessUnit}`)
+      const myEV = Number(mine?.expected_value || 0)
+
+      // Candidates: same bench, materially stronger than who's on it now.
+      const candidates = (scoresByTeam.get(c.businessUnit) || [])
+        .filter(s => s.tech_id !== c.techId && s.tier !== 'unranked')
+        .filter(s => Number(s.expected_value || 0) > myEV)
+        .map(s => ({ s, miles: nearestMiles(s.tech_id, c.geo) }))
+        .filter(x => x.miles == null || x.miles <= DETOUR_MILES)
+
+      if (!candidates.length) continue
+
+      // KPIs lead: work down the list by earning power, and take the first one
+      // already working nearby. Only if nobody strong is in the area do we fall
+      // back to the top earner regardless of distance — and say what it costs.
+      const byEarning = [...candidates].sort((a, b) => Number(b.s.expected_value || 0) - Number(a.s.expected_value || 0))
+      const nearby = byEarning.find(x => x.miles != null && x.miles <= NEARBY_MILES)
+      const pick = nearby || byEarning[0]
+      const mi = pick.miles == null ? null : Math.round(pick.miles * 10) / 10
+
+      const where = pick.miles == null
+        ? 'no other work scheduled today'
+        : (mi <= NEARBY_MILES ? `already working ${mi} mi away` : `${mi} mi from their nearest job today`)
+
+      c.flags.push({
+        level: c.techTier === 'red' ? 'warn' : 'info',
+        text: `High-opportunity call on ${c.techTier === 'red' ? 'a red-tier tech' : 'an unranked tech'} — consider ${pick.s.tech_name}`,
+        why: [...c.opportunityReasons,
+              `${pick.s.tech_name}: ${Math.round(Number(pick.s.close_rate || 0))}% close · ${money0(pick.s.avg_sale)} avg sale`,
+              where],
+      })
+    }
+
 
     // Swap suggestion: within one team, a high-opportunity call sitting on a
     // red tech while a green tech has a routine one — and the two jobs close
