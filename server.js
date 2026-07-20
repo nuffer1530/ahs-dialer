@@ -2493,6 +2493,34 @@ async function buildBoardEmail() {
   }
 }
 
+// Is the daily send actually armed? Without this the only way to tell a
+// misconfigured scheduler from a broken one is to wait until 7am and see
+// whether anything arrives — which is how the first morning was lost.
+app.get('/api/board/email/status', async (req, res) => {
+  if (!(await requireAdmin(req, res))) return
+  try {
+    const { data: row } = await supabase.from('app_settings')
+      .select('value').eq('key', BOARD_EMAIL_SENT_KEY).maybeSingle()
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: BOARD_EMAIL_TZ, year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', hour12: false,
+    }).formatToParts(new Date()).reduce((a, p) => (a[p.type] = p.value, a), {})
+    res.json({
+      enabled: Boolean(BOARD_EMAIL_TO && RESEND_KEY),
+      recipients: BOARD_EMAIL_TO || null,
+      missing: [!BOARD_EMAIL_TO && 'BOARD_EMAIL_TO', !RESEND_KEY && 'RESEND_API_KEY'].filter(Boolean),
+      sendHour: BOARD_EMAIL_HOUR,
+      windowHours: BOARD_EMAIL_WINDOW_HOURS,
+      timezone: BOARD_EMAIL_TZ,
+      localTime: `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}`,
+      lastSentDate: row?.value ? String(row.value).replace(/"/g, '') : null,
+      from: BOARD_EMAIL_FROM,
+    })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
 // Preview only — renders and returns the HTML, sends nothing.
 app.get('/api/board/email/preview', async (req, res) => {
   if (!(await requireAdmin(req, res))) return
@@ -3297,8 +3325,8 @@ if (SYNC_INTERVAL_MIN > 0) {
 // Daily leadership email. Inert until BOARD_EMAIL_TO is set — deploying this
 // cannot email anyone by accident.
 if (BOARD_EMAIL_TO && RESEND_KEY) {
-  setInterval(maybeSendDailyBoardEmail, 5 * 60_000)
-  setTimeout(maybeSendDailyBoardEmail, 60_000)
+  setInterval(maybeSendDailyBoardEmail, 60_000)   // 1-min tick: a 5-min one made 7:00 land as late as 7:04
+  setTimeout(maybeSendDailyBoardEmail, 20_000)
   console.log(`Board email daily at ${BOARD_EMAIL_HOUR}:00 ${BOARD_EMAIL_TZ} to ${BOARD_EMAIL_TO}`)
 } else {
   console.log('Board email scheduler off (set BOARD_EMAIL_TO to enable)')
