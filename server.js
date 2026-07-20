@@ -3348,8 +3348,8 @@ Submit the analysis via the submit_brief tool. 3-6 actions, ordered by priority;
         input_schema: {
           type: 'object',
           properties: {
-            headline: { type: 'string', description: 'one sentence — the single most important thing about the board right now' },
-            situation: { type: 'string', description: '2-3 sentences: flags, revenue, capacity, completions' },
+            headline: { type: 'string', maxLength: 160, description: 'ONE short sentence — the single most important thing about the board right now. Plain text only.' },
+            situation: { type: 'string', maxLength: 400, description: 'AT MOST 3 short plain-English sentences. Never include JSON, brackets, quotes, or field names — the other fields carry the details.' },
             actions: {
               type: 'array',
               items: {
@@ -3375,6 +3375,15 @@ Submit the analysis via the submit_brief tool. 3-6 actions, ordered by priority;
   const data = await r.json()
   const brief = (data.content || []).find(b => b.type === 'tool_use')?.input
   if (!brief?.headline) throw new Error('Analysis came back empty — retry')
+  // Belt and braces: the first live run stuffed the entire answer (JSON
+  // syntax included) into `situation`. The schema now constrains it, and this
+  // clamp guarantees the panel stays readable even if the model misbehaves.
+  const clean = (t, max) => String(t || '').replace(/["{}\[\]]+/g, '').replace(/\s+/g, ' ').trim().slice(0, max)
+  brief.headline = clean(brief.headline, 160)
+  brief.situation = clean((String(brief.situation || '').match(/[^.!?]+[.!?]/g) || [brief.situation || '']).slice(0, 3).join(' '), 420)
+  brief.actions = (brief.actions || []).slice(0, 6).map(a => ({ priority: a.priority, text: clean(a.text, 140) }))
+  brief.watchouts = (brief.watchouts || []).slice(0, 4).map(w => clean(w, 120))
+  brief.wins = (brief.wins || []).slice(0, 3).map(w => clean(w, 120))
   const record = { brief, generatedAt: new Date().toISOString() }
   await supabase.from('app_settings').upsert(
     { key: 'dispatch_brief', value: JSON.stringify(record) }, { onConflict: 'key' })

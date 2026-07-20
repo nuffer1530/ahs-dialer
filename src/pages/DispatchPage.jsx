@@ -366,9 +366,9 @@ function LiveBoard() {
       )}
 
       {brief?.brief && (
-        <div className="card" style={{ padding:'15px 18px', marginBottom:14, borderLeft:'4px solid var(--accent)' }}>
+        <div className="card" style={{ padding:'11px 15px', marginBottom:12, borderLeft:'3px solid var(--accent)' }}>
           <div style={{ display:'flex', alignItems:'baseline', justifyContent:'space-between', gap:10, flexWrap:'wrap' }}>
-            <div style={{ fontSize:14, fontWeight:800, color:'var(--text-primary)' }}>
+            <div style={{ fontSize:13, fontWeight:800, color:'var(--text-primary)' }}>
               🧠 {brief.brief.headline}
             </div>
             <div style={{ display:'flex', alignItems:'center', gap:8 }}>
@@ -378,11 +378,11 @@ function LiveBoard() {
               </button>
             </div>
           </div>
-          <div style={{ fontSize:12, color:'var(--text-secondary)', marginTop:6, lineHeight:1.55 }}>{brief.brief.situation}</div>
+          <div style={{ fontSize:11.5, color:'var(--text-muted)', marginTop:4, lineHeight:1.5 }}>{brief.brief.situation}</div>
           {(brief.brief.actions || []).length > 0 && (
-            <div style={{ marginTop:10, display:'flex', flexDirection:'column', gap:5 }}>
+            <div style={{ marginTop:8, display:'flex', flexDirection:'column', gap:3 }}>
               {brief.brief.actions.map((a, i) => (
-                <div key={i} style={{ display:'flex', gap:8, alignItems:'baseline', fontSize:12.5 }}>
+                <div key={i} style={{ display:'flex', gap:7, alignItems:'baseline', fontSize:12 }}>
                   <span style={{ fontSize:9, fontWeight:700, textTransform:'uppercase', flexShrink:0, padding:'1px 7px', borderRadius:99,
                     color: a.priority === 'now' ? '#B91C1C' : a.priority === 'today' ? '#B45309' : 'var(--text-muted)',
                     background: a.priority === 'now' ? '#FBEEEA' : a.priority === 'today' ? '#FBF3E0' : 'var(--surface-2)',
@@ -395,7 +395,7 @@ function LiveBoard() {
             </div>
           )}
           {((brief.brief.watchouts || []).length > 0 || (brief.brief.wins || []).length > 0) && (
-            <div style={{ display:'flex', gap:22, marginTop:10, flexWrap:'wrap', fontSize:11, color:'var(--text-muted)' }}>
+            <div style={{ display:'flex', gap:18, marginTop:7, flexWrap:'wrap', fontSize:10.5, color:'var(--text-muted)', lineHeight:1.45 }}>
               {(brief.brief.watchouts || []).length > 0 && (
                 <div>👀 {brief.brief.watchouts.join(' · ')}</div>
               )}
