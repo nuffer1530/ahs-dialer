@@ -6,7 +6,7 @@ import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
 import { existsSync } from 'fs'
 import { renderBoardEmail, boardEmailSubject } from './lib/boardEmail.js'
-import { computeBattingOrder, computeZipValue, DEFAULT_WEIGHTS } from './lib/dispatchMetrics.js'
+import { computeBattingOrder, computeZipValue, DEFAULT_WEIGHTS, NON_DISPATCH_TEAM } from './lib/dispatchMetrics.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
@@ -2678,13 +2678,17 @@ app.get('/api/dispatch/live-board', async (req, res) => {
       const best = bestByBU.get(bu) || null
 
       const flags = []
-      if (opp.score >= 3 && techScore && techScore.tier === 'red') {
+      // Install/leadership/unassigned have no batting order, so there is no
+      // tier to judge them against — flagging them would be pure noise.
+      const rankable = !NON_DISPATCH_TEAM.test(bu)
+      if (!rankable) { /* no flags */ }
+      else if (opp.score >= 3 && techScore && techScore.tier === 'red') {
         flags.push({
           level: 'warn',
           text: `High-opportunity call on a red-tier tech${best && best.tech_id !== a.technicianId ? ` — consider ${best.tech_name}` : ''}`,
           why: opp.reasons,
         })
-      } else if (opp.score >= 3 && (!techScore || techScore.tier === 'unranked')) {
+      } else if (rankable && opp.score >= 3 && (!techScore || techScore.tier === 'unranked')) {
         flags.push({
           level: 'info',
           text: `High-opportunity call on a tech with no ranking yet${best ? ` — ${best.tech_name} is your strongest here` : ''}`,
@@ -2717,6 +2721,7 @@ app.get('/api/dispatch/live-board', async (req, res) => {
       byBU.get(c.businessUnit).push(c)
     }
     for (const [bu, list] of byBU) {
+      if (NON_DISPATCH_TEAM.test(bu)) continue
       const misplaced = list.filter(c => c.opportunity >= 3 && c.techTier === 'red')
       const underused = list.filter(c => c.opportunity <= 0 && c.techTier === 'green')
       for (let i = 0; i < Math.min(misplaced.length, underused.length); i++) {
