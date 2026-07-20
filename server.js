@@ -3291,6 +3291,22 @@ app.post('/api/dispatch/decide', async (req, res) => {
       if (g) { if (!geosByTech.has(a.technicianId)) geosByTech.set(a.technicianId, []); geosByTech.get(a.technicianId).push(g) }
     }
 
+    // Who's actually working today? A tech with a non-TimeOff shift is on; no
+    // shift means off (this is how the 3-Day Board decides). Without this the
+    // picker cheerfully recommended a tech who's off — his 0-load, no-drive row
+    // is the giveaway. Techs already carrying a call today are trivially working
+    // too, so union both signals.
+    let workingTechs = null
+    try {
+      const shiftRes = await stGet(`/dispatch/v2/tenant/${ST_TENANT_ID}/technician-shifts?startsOnOrAfter=${today.startUtc.toISOString()}&endsOnOrBefore=${today.endUtc.toISOString()}&pageSize=500`)
+      const on = new Set()
+      for (const sh of (shiftRes?.data || [])) {
+        if (sh.technicianId && sh.shiftType !== 'TimeOff') on.add(sh.technicianId)
+      }
+      for (const tid of loadByTech.keys()) on.add(tid)   // has a call today = working
+      workingTechs = on
+    } catch (e) { console.warn('decide shifts:', e.message) }
+
     // Candidate techs = this trade's dispatchable benches. Prefer their EV on
     // THIS job type (from the By Job Type board) over their bench EV.
     const [{ data: bench }, { data: jtScores }] = await Promise.all([
@@ -3301,6 +3317,10 @@ app.post('/api/dispatch/decide', async (req, res) => {
       .map(r => [r.tech_id, r]))
     const candidates = (bench || [])
       .filter(b => tradeOfTeam(b.business_unit) === trade && !NON_DISPATCH_TEAM.test(b.business_unit) && b.tier !== 'unranked')
+      // Only techs on the schedule today. If the shift lookup failed entirely
+      // we don't have the data, so fall back to showing everyone rather than an
+      // empty board — but note it.
+      .filter(b => !workingTechs || workingTechs.has(b.tech_id))
 
     // Drive time from each candidate's nearest current job to the new address.
     const travelPairs = []
@@ -3388,7 +3408,10 @@ app.post('/api/dispatch/decide', async (req, res) => {
     }
 
     res.json({
-      trade, jobType, address: address || null, zip, zipTier,
+      trade, jobType, address: address || null,
+      resolvedAddress: geo?.placeName || null,
+      shiftDataMissing: geo && !workingTechs ? true : undefined,
+      zip, zipTier,
       opportunity: opp.score, opportunityReasons: opp.reasons,
       located: Boolean(geo),
       recommendation,

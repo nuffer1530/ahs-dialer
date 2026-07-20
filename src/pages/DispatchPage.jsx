@@ -710,21 +710,22 @@ function DecisionMaker() {
       </div>
 
       <div className="card" style={{ padding:'16px 18px', marginBottom:18 }}>
-        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14 }}>
-          <div>
-            <label className="form-label">Job type</label>
-            <input className="form-input" list="dm-jobtypes" value={jobType} autoFocus
-              onChange={e => setJobType(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter') decide() }}
-              placeholder="e.g. Plumbing - Tankless Water Heater Estimate" />
-            <datalist id="dm-jobtypes">{types.map(t => <option key={t} value={t} />)}</datalist>
-          </div>
-          <div>
-            <label className="form-label">Address <span style={{ color:'var(--text-muted)', fontWeight:400 }}>(for drive time + area value)</span></label>
-            <input className="form-input" value={address}
-              onChange={e => setAddress(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter') decide() }}
-              placeholder="e.g. 4935 Stillwell Dr, Colorado Springs 80920" />
+        <div className="form-field">
+          <label className="form-label">Job type</label>
+          <input className="form-input" list="dm-jobtypes" value={jobType} autoFocus
+            onChange={e => setJobType(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') decide() }}
+            placeholder="e.g. Plumbing - Tankless Water Heater Estimate" />
+          <datalist id="dm-jobtypes">{types.map(t => <option key={t} value={t} />)}</datalist>
+        </div>
+        <div className="form-field" style={{ marginTop:12 }}>
+          <label className="form-label">Address or area <span style={{ color:'var(--text-muted)', fontWeight:400 }}>— for drive time and area value</span></label>
+          <input className="form-input" value={address} style={{ padding:'10px 14px', fontSize:14 }}
+            onChange={e => setAddress(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') decide() }}
+            placeholder="A full address is best, but a street + city or just a zip works too" />
+          <div style={{ fontSize:11, color:'var(--text-muted)', marginTop:5 }}>
+            Approximate is fine — drive times get sharper the more precise you are.
           </div>
         </div>
         <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginTop:14 }}>
@@ -749,7 +750,7 @@ function DecisionMaker() {
                 {rec.tech.techName} — {rec.tech.closeRate}% close · {money(rec.tech.avgSale)} avg sale
                 {rec.tech.onThisJobType ? ' on this exact job type' : ' on this bench'} ·
                 {rec.tech.load}/{rec.tech.cap} calls today
-                {rec.tech.driveMinutes != null ? ` · ${rec.tech.driveMinutes} min from their nearest job` : ''}
+                {rec.tech.driveMinutes != null ? ` · ${rec.tech.driveMinutes} min from their closest job on the board` : ''}
               </div>
             )}
             {rec.bump && (
@@ -762,6 +763,16 @@ function DecisionMaker() {
               {res.zipTier ? ` · ${res.zipTier}-value area` : ''}
               {res.located ? '' : ' · address not located — drive times unavailable'}
             </div>
+            {res.resolvedAddress && (
+              <div style={{ fontSize:11, color:'var(--text-muted)', marginTop:3 }}>
+                📍 Matched to <strong>{res.resolvedAddress}</strong> — if that's off, add more detail and re-run
+              </div>
+            )}
+            {res.shiftDataMissing && (
+              <div style={{ fontSize:11, color:'#B45309', marginTop:3 }}>
+                ⚠️ Couldn't confirm today's schedule — this ranking may include techs who are off
+              </div>
+            )}
           </div>
 
           <div style={{ fontSize:11, fontWeight:700, textTransform:'uppercase', letterSpacing:.5, color:'var(--text-muted)', marginBottom:8 }}>
@@ -774,7 +785,7 @@ function DecisionMaker() {
                 <th style={{textAlign:'right'}}>$ / opportunity</th>
                 <th style={{textAlign:'right'}}>Close</th>
                 <th style={{textAlign:'right'}}>Load</th>
-                <th style={{textAlign:'right'}}>Drive</th>
+                <th style={{textAlign:'right'}} title="Drive time from that tech's closest job already on today's board to this address">Drive</th>
               </tr></thead>
               <tbody>
                 {(res.options || []).map((o, i) => (
