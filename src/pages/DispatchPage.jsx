@@ -243,6 +243,15 @@ function LiveBoard() {
   const [err, setErr] = useState('')
   const [loading, setLoading] = useState(true)
   const [view, setView] = useState('ontrack')   // ontrack | flagged | reschedule | completed
+  const [brief, setBrief] = useState(null)
+  const [briefBusy, setBriefBusy] = useState(false)
+  const loadBrief = useCallback(async (refresh = false) => {
+    setBriefBusy(true)
+    try { setBrief(await authed(`/api/dispatch/brief${refresh ? '?refresh=1' : ''}`)) }
+    catch (e) { /* the board still works without the analyst */ }
+    finally { setBriefBusy(false) }
+  }, [])
+  useEffect(() => { loadBrief() }, [loadBrief])
 
   const load = useCallback(async (force = false) => {
     try { setData(await authed(`/api/dispatch/live-board${force ? '?force=1' : ''}`)); setErr('') }
@@ -344,6 +353,48 @@ function LiveBoard() {
           <button className="btn sm" onClick={() => load(true)}>Refresh</button>
         </div>
       </div>
+
+      {brief?.brief && (
+        <div className="card" style={{ padding:'15px 18px', marginBottom:14, borderLeft:'4px solid var(--accent)' }}>
+          <div style={{ display:'flex', alignItems:'baseline', justifyContent:'space-between', gap:10, flexWrap:'wrap' }}>
+            <div style={{ fontSize:14, fontWeight:800, color:'var(--text-primary)' }}>
+              🧠 {brief.brief.headline}
+            </div>
+            <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+              <span style={{ fontSize:10, color:'var(--text-muted)' }}>analyzed {ago(brief.generatedAt)}</span>
+              <button className="btn sm" onClick={() => loadBrief(true)} disabled={briefBusy}>
+                {briefBusy ? 'Reading the board…' : 'Re-analyze'}
+              </button>
+            </div>
+          </div>
+          <div style={{ fontSize:12, color:'var(--text-secondary)', marginTop:6, lineHeight:1.55 }}>{brief.brief.situation}</div>
+          {(brief.brief.actions || []).length > 0 && (
+            <div style={{ marginTop:10, display:'flex', flexDirection:'column', gap:5 }}>
+              {brief.brief.actions.map((a, i) => (
+                <div key={i} style={{ display:'flex', gap:8, alignItems:'baseline', fontSize:12.5 }}>
+                  <span style={{ fontSize:9, fontWeight:700, textTransform:'uppercase', flexShrink:0, padding:'1px 7px', borderRadius:99,
+                    color: a.priority === 'now' ? '#B91C1C' : a.priority === 'today' ? '#B45309' : 'var(--text-muted)',
+                    background: a.priority === 'now' ? '#FBEEEA' : a.priority === 'today' ? '#FBF3E0' : 'var(--surface-2)',
+                    border: `1px solid ${a.priority === 'now' ? '#F0C8BE' : a.priority === 'today' ? '#F0DCA8' : 'var(--border)'}` }}>
+                    {a.priority}
+                  </span>
+                  <span style={{ color:'var(--text-primary)' }}>{a.text}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          {((brief.brief.watchouts || []).length > 0 || (brief.brief.wins || []).length > 0) && (
+            <div style={{ display:'flex', gap:22, marginTop:10, flexWrap:'wrap', fontSize:11, color:'var(--text-muted)' }}>
+              {(brief.brief.watchouts || []).length > 0 && (
+                <div>👀 {brief.brief.watchouts.join(' · ')}</div>
+              )}
+              {(brief.brief.wins || []).length > 0 && (
+                <div style={{ color:'#15803D' }}>🏆 {brief.brief.wins.join(' · ')}</div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {rev && (
         <div className="card" style={{ padding:'13px 16px', marginBottom:14, display:'flex', gap:24, flexWrap:'wrap', alignItems:'center' }}>

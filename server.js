@@ -2720,17 +2720,7 @@ function scoreOpportunity(jobTypeName, zipTier, isMember, systemAge, isHvac) {
 // only auto-refreshes every 15 minutes anyway. The manual Refresh button
 // sends ?force=1 to bypass.
 let _liveBoardCache = null
-app.get('/api/dispatch/live-board', async (req, res) => {
-  if (!(await requireAdmin(req, res))) return
-  try {
-    if (req.query.force !== '1' && _liveBoardCache && _liveBoardCache.expires > Date.now()) {
-      return res.json({ ..._liveBoardCache.data, cached: true })
-    }
-    // Denver-local day, not the UTC calendar date. Railway runs in UTC, so
-    // comparing UTC date strings made "today" run 6pm yesterday -> 6pm today:
-    // last night's calls appeared (sorting to the top of the board) while
-    // tonight's after-6pm calls were silently dropped. boardDay() is the same
-    // helper the 3-Day Board uses.
+async function computeLiveBoardPayload() {
     const today = boardDay(0)
     const appts = (await stPageAll(p => `/jpm/v2/tenant/${ST_TENANT_ID}/appointments?startsOnOrAfter=${today.startUtc.toISOString()}&pageSize=500&page=${p}`, 3000))
       .filter(a => {
@@ -3280,9 +3270,114 @@ app.get('/api/dispatch/live-board', async (req, res) => {
       },
     }
     _liveBoardCache = { data: payload, expires: Date.now() + 3 * 60_000 }
-    res.json(payload)
+  return _liveBoardCache.data
+}
+
+app.get('/api/dispatch/live-board', async (req, res) => {
+  if (!(await requireAdmin(req, res))) return
+  try {
+    if (req.query.force !== '1' && _liveBoardCache && _liveBoardCache.expires > Date.now()) {
+      return res.json({ ..._liveBoardCache.data, cached: true })
+    }
+    res.json(await computeLiveBoardPayload())
   } catch (err) {
     console.error('live-board error:', err.message)
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// ── Andi's read of the board ────────────────────────────────────────────────
+// Claude analysis of the live board + batting order + 3-day capacity: what's
+// happening, what to do about it, in dispatcher language. Cached in
+// app_settings so it survives restarts; regenerated on demand or when stale.
+let _briefBusy = false
+async function generateDispatchBrief() {
+  if (!ANTHROPIC_KEY) throw new Error('No ANTHROPIC_API_KEY configured')
+  const board = (_liveBoardCache && _liveBoardCache.expires > Date.now())
+    ? _liveBoardCache.data : await computeLiveBoardPayload()
+  const { data: scores } = await supabase.from('dispatch_tech_scores').select('*')
+  let capacity = []
+  try {
+    const b3 = await build3DayBoard()
+    capacity = (b3?.board || []).map(r => ({
+      trade: r.trade,
+      days: (r.days || []).map(d => ({ date: d.date, pct: d.pct, needed: d.needed, status: d.status })),
+    }))
+  } catch (e) { console.warn('brief 3day:', e.message) }
+
+  // Compact facts only — the model reasons over this, so keep it signal-dense.
+  const calls = board.calls || []
+  const facts = {
+    now: new Date().toLocaleString('en-US', { timeZone: 'America/Denver' }),
+    counts: board.counts,
+    revenue: board.dayRevenue,
+    flagged: calls.filter(c => c.flags?.length).map(c => ({
+      job: c.jobNumber, type: c.jobType, tech: c.techName, tier: c.techTier,
+      window: c.windowStart, flag: c.flags[0]?.text, why: c.flags[0]?.why,
+    })),
+    swaps: (board.swaps || []).map(x => ({ text: x.text, why: x.why, upside: x.upside })),
+    rescheduleCandidates: calls.filter(c => c.rescheduleCandidate)
+      .map(c => ({ job: c.jobNumber, type: c.jobType, tech: c.techName })),
+    completedOutcomes: calls.filter(c => c.outcome).map(c => ({
+      job: c.jobNumber, type: c.jobType, tech: c.techName, outcome: c.outcome.text,
+    })),
+    benches: Object.values((scores || []).reduce((a, r) => {
+      if (r.tier === 'unranked') return a
+      ;(a[r.business_unit] = a[r.business_unit] || { bench: r.business_unit, techs: [] }).techs.push(
+        { name: r.tech_name, tier: r.tier, evPerOpp: Math.round(r.expected_value || 0) })
+      return a
+    }, {})),
+    next3DaysCapacity: capacity,
+  }
+
+  const sys = `You are the dispatch analyst for Awesome Home Services (HVAC, plumbing, electrical, garage doors — Colorado Springs). You are given a JSON snapshot of today's live dispatch board, tech performance benches, and 3-day capacity. Write the read a sharp dispatch manager would give at the huddle: concrete, numbers-first, in plain dispatcher language. Only use what is in the data; never invent jobs, names, or numbers.
+
+Return ONLY JSON, no markdown:
+{
+  "headline": "one sentence — the single most important thing about the board right now",
+  "situation": "2-3 sentences of what's going on: flags, revenue, capacity, completions",
+  "actions": [{"priority": "now" | "today" | "plan", "text": "specific action, name the tech and job number where possible, max 20 words"}],
+  "watchouts": ["short items worth an eye, e.g. a bench with no green tech, tomorrow's capacity gap"],
+  "wins": ["short items worth calling out at the huddle, e.g. a sale that closed"]
+}
+3-6 actions, ordered by priority. Empty arrays are fine. 'now' means act this hour; 'plan' means tomorrow/this week.`
+
+  const r = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: { 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+    body: JSON.stringify({
+      model: 'claude-sonnet-5', max_tokens: 1400, system: sys,
+      messages: [{ role: 'user', content: JSON.stringify(facts) }],
+    }),
+  })
+  if (!r.ok) throw new Error(`Claude ${r.status}: ${(await r.text()).slice(0, 160)}`)
+  const data = await r.json()
+  let text = (data.content || []).filter(b => b.type === 'text').map(b => b.text).join('').trim()
+  text = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '')
+  const brief = JSON.parse(text)
+  const record = { brief, generatedAt: new Date().toISOString() }
+  await supabase.from('app_settings').upsert(
+    { key: 'dispatch_brief', value: JSON.stringify(record) }, { onConflict: 'key' })
+  return record
+}
+
+app.get('/api/dispatch/brief', async (req, res) => {
+  if (!(await requireAdmin(req, res))) return
+  try {
+    const { data: row } = await supabase.from('app_settings').select('value').eq('key', 'dispatch_brief').maybeSingle()
+    let record = null
+    try { record = JSON.parse(row?.value || 'null') } catch {}
+    const ageMs = record?.generatedAt ? Date.now() - Date.parse(record.generatedAt) : Infinity
+    const wantFresh = req.query.refresh === '1' || ageMs > 6 * 3600_000
+    if (wantFresh && !_briefBusy) {
+      _briefBusy = true
+      try { record = await generateDispatchBrief() }
+      finally { _briefBusy = false }
+    }
+    if (!record) return res.status(503).json({ error: 'No analysis yet — try refresh.' })
+    res.json(record)
+  } catch (err) {
+    console.error('brief error:', err.message)
     res.status(500).json({ error: err.message })
   }
 })
