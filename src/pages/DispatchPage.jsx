@@ -831,7 +831,17 @@ function DecisionMaker() {
             )}
             {rec.bump && (
               <div style={{ fontSize:12, color:'#B45309', marginTop:5 }}>
-                Bump #{rec.bump.jobNumber} ({rec.bump.name}) — lowest-value call on their plate
+                Bump #{rec.bump.jobNumber} ({rec.bump.name})
+                {rec.bump.why && (
+                  <div style={{ fontSize:11, color:'var(--text-muted)', fontWeight:400, marginTop:2 }}>
+                    Safest to move: {rec.bump.why}
+                  </div>
+                )}
+                {rec.bump.caution && (
+                  <div style={{ fontSize:11, fontWeight:700, marginTop:2 }}>
+                    ⚠️ Not free — {rec.bump.caution}
+                  </div>
+                )}
               </div>
             )}
             <div style={{ fontSize:11, color:'var(--text-muted)', marginTop:8 }}>

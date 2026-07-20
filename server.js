@@ -2700,6 +2700,9 @@ function scoreOpportunity(jobTypeName, zipTier, isMember, systemAge, isHvac) {
     reasons.push(`notes mention a ~${systemAge} yr old system`)
   }
   if (HIGH_VALUE_RE.test(jobTypeName || '')) { score += 3; reasons.push('replacement/install job type') }
+  // "13+" in the type name means an aging system even when the notes are
+  // silent — bumping "HVAC - 13+ Any Repair" hands away a replacement lead.
+  if (/\b1[3-9]\s*\+|\b[2-9]\d\s*\+/.test(jobTypeName || '')) { score += isHvac ? 2 : 1; reasons.push('aging-system job type (13+)') }
   if (LOW_VALUE_RE.test(jobTypeName || '')) { score -= 2; reasons.push('routine job type') }
   if (zipTier === 'high') { score += 2; reasons.push('high-ticket zip') }
   if (zipTier === 'low') { score -= 1 }
@@ -3273,20 +3276,12 @@ app.post('/api/dispatch/decide', async (req, res) => {
 
     // Where is it? Zip value + a point to measure drive time from.
     const geo = address ? await geocode(address, supabase) : null
-    let zip = null, zipTier = null
-    if (geo) {
-      // Nearest zip in our value table by straight-line — good enough to tier.
-      const { data: zipRows } = await supabase.from('dispatch_zip_value').select('zip, tier')
-      const zdigits = (address.match(/\b(\d{5})\b/) || [])[1]
-      if (zdigits) { zip = zdigits; zipTier = (zipRows || []).find(z => z.zip === zdigits)?.tier || null }
-    } else {
-      const zdigits = (address.match(/\b(\d{5})\b/) || [])[1]
-      if (zdigits) {
-        zip = zdigits
-        const { data: zr } = await supabase.from('dispatch_zip_value').select('tier').eq('zip', zdigits).maybeSingle()
-        zipTier = zr?.tier || null
-      }
-    }
+    // Zip tiers loaded once — used for the new job AND to judge which existing
+    // call is safe to bump.
+    const { data: zipAll } = await supabase.from('dispatch_zip_value').select('zip, tier')
+    const zipTierMap = new Map((zipAll || []).map(z => [z.zip, z.tier]))
+    const zip = (address.match(/\b(\d{5})\b/) || [])[1] || null
+    const zipTier = zip ? (zipTierMap.get(zip) || null) : null
 
     const isHvac = trade === 'HVAC'
     const opp = scoreOpportunity(jobType, zipTier, null, null, isHvac)
@@ -3307,13 +3302,15 @@ app.post('/api/dispatch/decide', async (req, res) => {
 
     // location coords for each job (for drive time), batched
     const locIds = [...new Set(jobs.map(j => j.locationId).filter(Boolean))]
-    const geoOfLoc = new Map()
+    const geoOfLoc = new Map(), zipOfLoc = new Map()
     for (let i = 0; i < locIds.length; i += 50) {
       try {
         const d = await stGet(`/crm/v2/tenant/${ST_TENANT_ID}/locations?ids=${locIds.slice(i, i + 50).join(',')}&pageSize=50`)
         for (const l of (d?.data || [])) {
           const la = l.address?.latitude, lo = l.address?.longitude
           if (typeof la === 'number' && typeof lo === 'number') geoOfLoc.set(l.id, { lat: la, lng: lo })
+          const z = String(l.address?.zip || '').trim().slice(0, 5)
+          if (z) zipOfLoc.set(l.id, z)
         }
       } catch {}
     }
@@ -3438,12 +3435,38 @@ app.post('/api/dispatch/decide', async (req, res) => {
 
     // For a full top pick, find the call they'd bump (lowest opportunity, and
     // not sold/sticky). Members are movable per policy.
+    // Which of a tech's calls is SAFEST to move? Scored exactly like the Live
+    // Board scores calls — job notes (system age), type name, zip value — and
+    // the lowest-opportunity one wins. The first version took the first
+    // movable call unscored, and its very first real suggestion was to bump
+    // "HVAC - 13+ Any Repair": an aging-system repair, one of the most
+    // fruitful calls on the board.
+    const nowYear = new Date().getFullYear()
     const bumpFor = (techId) => {
-      const theirs = assignments.filter(a => a.technicianId === techId).map(a => jobById.get(a.jobId)).filter(Boolean)
-      const movable = theirs
-        .map(j => ({ jobNumber: j.jobNumber, name: jtName.get(j.jobTypeId) || '' }))
+      const scored = assignments
+        .filter(a => a.technicianId === techId)
+        .map(a => jobById.get(a.jobId)).filter(Boolean)
+        .map(j => {
+          const name = jtName.get(j.jobTypeId) || ''
+          return { j, name }
+        })
         .filter(x => !STICKY_TO_TECH.test(x.name) && !INSTALL_TYPE.test(x.name))
-      return movable[0] || null
+        .map(({ j, name }) => {
+          const o = scoreOpportunity(name, zipTierMap.get(zipOfLoc.get(j.locationId)) || null, null,
+            systemAgeFromNotes(j, nowYear), /hvac/i.test(name) || trade === 'HVAC')
+          return { jobNumber: j.jobNumber, name, score: o.score, reasons: o.reasons }
+        })
+        .sort((a, b) => a.score - b.score)
+      const pick = scored[0]
+      if (!pick) return null
+      return {
+        jobNumber: pick.jobNumber,
+        name: pick.name,
+        why: pick.reasons.length ? pick.reasons.join(' · ') : 'no age, value or area signals — routine work',
+        // Even the SAFEST call carrying opportunity signals is a real cost;
+        // say so instead of presenting the bump as free.
+        caution: pick.score >= 3 ? `every call on this plate carries opportunity signals (${pick.reasons.join(' · ')})` : null,
+      }
     }
 
     const top = options[0]
