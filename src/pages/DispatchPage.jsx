@@ -695,9 +695,9 @@ function DecisionMaker() {
   // Job-type dropdown — custom, not a native <datalist> (those render
   // inconsistently and off-position across browsers).
   const [showTypes, setShowTypes] = useState(false)
-  const typeMatches = jobType.trim()
-    ? types.filter(t => t.toLowerCase().includes(jobType.toLowerCase())).slice(0, 8)
-    : types.slice(0, 8)
+  const typeMatches = (jobType.trim()
+    ? types.filter(t => t.toLowerCase().includes(jobType.toLowerCase()))
+    : types).slice(0, 40)
 
   const clearAll = () => {
     setJobType(''); setAddress(''); setUrgent(false)
@@ -705,7 +705,7 @@ function DecisionMaker() {
   }
 
   useEffect(() => {
-    authed('/api/dispatch/job-types').then(d => setTypes(d.types || [])).catch(() => {})
+    authed('/api/dispatch/all-job-types').then(d => setTypes(d.types || [])).catch(() => {})
   }, [])
 
   const onAddressChange = (v) => {

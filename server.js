@@ -3219,6 +3219,16 @@ app.get('/api/dispatch/live-board', async (req, res) => {
 // recommendations. RECOMMEND ONLY — it writes nothing to ServiceTitan; the
 // dispatcher books and assigns. That's deliberate: it never silently rearranges
 // a live board, and it sidesteps assign/reschedule writes entirely.
+app.get('/api/dispatch/all-job-types', async (req, res) => {
+  if (!(await requireAdmin(req, res))) return
+  try {
+    const cat = await getJobTypeCatalog()
+    res.json({ types: cat.map(t => t.name).filter(Boolean).sort() })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
 app.get('/api/dispatch/geocode-suggest', async (req, res) => {
   if (!(await requireAdmin(req, res))) return
   try {
