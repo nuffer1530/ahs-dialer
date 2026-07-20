@@ -302,8 +302,10 @@ function LiveBoard() {
     <div>
       <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', flexWrap:'wrap', gap:10, marginBottom:14 }}>
         <div style={{ fontSize:12, color:'var(--text-muted)' }}>
-          {data?.counts?.total ?? 0} calls on today's board · {data?.counts?.flagged ?? 0} flagged ·
-          auto-refreshes every 15 min
+          {data?.counts?.total ?? 0} calls on today's board
+          {rev ? ` · ${rev.remaining} still to run · ${rev.done} done` : ''}
+          {rev?.working ? ` · ${rev.working} on site` : ''}
+          {' · '}auto-refreshes every 15 min
         </div>
         <div style={{ display:'flex', gap:8, alignItems:'center' }}>
           {/* Jumping to what needs attention is the whole job — 95 calls with
@@ -336,7 +338,7 @@ function LiveBoard() {
               Expected sales
             </div>
             <div style={{ fontSize:10, color:'var(--text-muted)' }}>
-              {rev.opportunityCalls} opportunity call{rev.opportunityCalls === 1 ? '' : 's'} on the board
+              {rev.opportunityCalls} opportunity call{rev.opportunityCalls === 1 ? '' : 's'} still to run
             </div>
           </div>
 
@@ -358,7 +360,8 @@ function LiveBoard() {
             revenue later, when it's installed.<br />
             <strong>Revenue</strong> is the invoiced value of installs whose last day is today.
             A multi-day install counts once, on the day it finishes.<br />
-            Both are forward-looking for the whole day, not earned-so-far.
+            Sales counts only calls still to run, so it falls through the day as work completes.
+            Revenue counts every install finishing today, done or not.
           </div>
         </div>
       )}
@@ -437,7 +440,9 @@ function LiveBoard() {
           </tr></thead>
           <tbody>
             {tlist.map((c, i) => (
-              <tr key={`${c.appointmentId}-${i}`} style={{ background: c.flags?.length ? 'rgba(185,28,28,.04)' : 'transparent' }}>
+              <tr key={`${c.appointmentId}-${i}`} style={{
+                background: c.flags?.length ? 'rgba(185,28,28,.04)' : 'transparent',
+                opacity: c.actionable ? 1 : .55 }}>
                 <td style={{ padding:'7px 12px' }}>
                   <a href={ST_JOB_URL(c.jobId)} target="_blank" rel="noopener noreferrer"
                      title="Open this job in ServiceTitan"
@@ -448,6 +453,25 @@ function LiveBoard() {
                   {/* Shown on every row, not just flagged ones: otherwise the
                       notes signal is invisible on the calls it didn't flag and
                       it looks like the notes aren't being read at all. */}
+                  {c.status && c.status !== 'Scheduled' && (
+                    <span title={c.status === 'Done' ? 'Finished — nothing to change here'
+                      : c.status === 'Working' ? 'Tech is on site' : c.status}
+                      style={{ display:'inline-block', marginTop:3, marginRight:4, fontSize:9, fontWeight:700,
+                        padding:'1px 5px', borderRadius:99,
+                        color: c.status === 'Done' ? '#15803D' : 'var(--text-muted)',
+                        background: c.status === 'Done' ? '#EAF5EE' : 'var(--surface-2)',
+                        border: `1px solid ${c.status === 'Done' ? '#BBE3C9' : 'var(--border)'}` }}>
+                      {c.status.toLowerCase()}
+                    </span>
+                  )}
+                  {c.windowPassed && c.actionable && (
+                    <span title="Arrival window has closed and this hasn't been dispatched"
+                      style={{ display:'inline-block', marginTop:3, marginRight:4, fontSize:9, fontWeight:700,
+                        color:'#B45309', background:'#FBF3E0', border:'1px solid #F0DCA8',
+                        padding:'1px 5px', borderRadius:99 }}>
+                      window passed
+                    </span>
+                  )}
                   {c.sticky && (
                     <span title="Follow-up / financing call — stays with this tech, and doesn't use a capacity slot"
                       style={{ display:'inline-block', marginTop:3, marginRight:4, fontSize:9, fontWeight:700,

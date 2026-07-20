@@ -2756,6 +2756,11 @@ app.get('/api/dispatch/live-board', async (req, res) => {
       const techScore = scoreOf.get(`${a.technicianId}|${bu}`) || null
 
       const ap = apptById.get(a.appointmentId) || {}
+      // ST appointment status: Scheduled | Working | Done | Hold | Canceled.
+      // Only Scheduled work is still actionable — you cannot reassign a call
+      // that finished at 9am or reschedule one a tech is standing in front of.
+      const apStatus = ap.status || 'Scheduled'
+      if (apStatus === 'Canceled') continue          // not on the board at all
       calls.push({
         appointmentId: a.appointmentId, jobId: j.id, jobNumber: j.jobNumber,
         start: ap.start || null,
@@ -2767,6 +2772,9 @@ app.get('/api/dispatch/live-board', async (req, res) => {
         windowEnd: ap.arrivalWindowEnd || ap.end || null,
         businessUnit: bu, jobType: jt,
         zip, isMember, systemAge, geo: geoOfLoc.get(j.locationId) || null,
+        status: apStatus,
+        actionable: apStatus === 'Scheduled',
+        windowPassed: Boolean(ap.arrivalWindowEnd && Date.parse(ap.arrivalWindowEnd) < Date.now()),
         sticky: STICKY_TO_TECH.test(jt), countsToCapacity: !EXCLUDE_CALL.test(jt),
         techId: a.technicianId, techName: a.technicianName,
         techTier: techScore?.tier || 'unranked',
@@ -2814,6 +2822,7 @@ app.get('/api/dispatch/live-board', async (req, res) => {
       if (!c.rankable) continue
       if (!swapPool.has(c.businessUnit)) swapPool.set(c.businessUnit, { misplaced: [], underused: [] })
       const pool = swapPool.get(c.businessUnit)
+      if (!c.actionable) continue                          // can't swap finished work
       if (STICKY_TO_TECH.test(c.jobType || '')) continue   // relationship-bound
       if (c.opportunity >= 3 && c.techTier === 'red') pool.misplaced.push(c)
       else if (c.opportunity <= 0 && c.techTier === 'green') pool.underused.push(c)
@@ -2923,6 +2932,7 @@ app.get('/api/dispatch/live-board', async (req, res) => {
 
     for (const c of calls) {
       if (!c.rankable || c.opportunity < 3) continue
+      if (!c.actionable) continue            // already done, working, or on hold
       // Follow-ups and financing calls belong to the tech who owns the
       // relationship — reassigning them by rank would destroy their value.
       if (STICKY_TO_TECH.test(c.jobType || '')) continue
@@ -3078,13 +3088,17 @@ app.get('/api/dispatch/live-board', async (req, res) => {
         && !INSTALL_TYPE.test(c.jobType || '')
         && !STICKY_TO_TECH.test(c.jobType || '')
         && (salesBench || c.opportunity >= 1)
-      c.expectedRevenue = countsAsSales
+      // Only work still to run counts as EXPECTED — a call that's already Done
+      // either sold or didn't, so leaving it in makes the forecast stop moving
+      // and quietly overstate the rest of the day.
+      c.expectedRevenue = (countsAsSales && c.actionable)
         ? Math.round(Number(sc?.expected_value || 0) * oppRate)
         : 0
       // Reschedule candidates: what to move when demand walks in. Installs are
       // sold work and phone/follow-ups take no truck time and must happen, so
       // both are out. Ranked by how little the call is likely to produce.
-      c.rescheduleCandidate = !c.bookedRevenue
+      c.rescheduleCandidate = c.actionable
+        && !c.bookedRevenue
         && !STICKY_TO_TECH.test(c.jobType || '')
         && !INSTALL_TYPE.test(c.jobType || '')
         && c.opportunity <= 0
@@ -3121,6 +3135,9 @@ app.get('/api/dispatch/live-board', async (req, res) => {
       expected: Math.round(calls.reduce((a, c) => a + (c.expectedRevenue || 0), 0)),
       opportunityCalls: calls.filter(c => c.expectedRevenue > 0).length,
       rescheduleCandidates: calls.filter(c => c.rescheduleCandidate).length,
+      remaining: calls.filter(c => c.actionable).length,
+      done: calls.filter(c => c.status === 'Done').length,
+      working: calls.filter(c => c.status === 'Working').length,
     }
 
     // Sort by window open, then by start within the window.
