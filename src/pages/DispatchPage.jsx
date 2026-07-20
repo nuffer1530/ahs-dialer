@@ -262,7 +262,13 @@ function LiveBoard() {
   // Lowest-producing first — this list is "what to move when demand walks in".
   const reschedule = allCalls.filter(c => c.rescheduleCandidate)
     .sort((a, b) => (a.expectedRevenue || 0) - (b.expectedRevenue || 0))
-  const calls = view === 'flagged' ? flagged : view === 'reschedule' ? reschedule : allCalls
+  // Finished work, biggest result first — the day's scoreboard.
+  const completed = allCalls.filter(c => c.status === 'Done')
+    .sort((a, b) => (b.outcome?.amount || 0) - (a.outcome?.amount || 0))
+  const calls = view === 'flagged' ? flagged
+    : view === 'reschedule' ? reschedule
+    : view === 'completed' ? completed
+    : allCalls
   const rev = data?.dayRevenue
 
   // Within a window, group by team. Teams with flags sort first so a
@@ -312,9 +318,11 @@ function LiveBoard() {
               11 flagged is a lot of scrolling otherwise. */}
           <div style={{ display:'flex', border:'1px solid var(--border)', borderRadius:99, overflow:'hidden' }}>
             {[['all', `All ${allCalls.length}`], ['flagged', `⚠️ Flagged ${flagged.length}`],
-              ['reschedule', `↻ Movable ${reschedule.length}`]].map(([val, label]) => (
+              ['reschedule', `↻ Reschedule ${reschedule.length}`],
+              ['completed', `✓ Completed ${completed.length}`]].map(([val, label]) => (
               <button key={val} onClick={() => setView(val)}
-                title={val === 'reschedule' ? 'Lowest-producing calls — candidates to move if demand comes in' : undefined}
+                title={val === 'reschedule' ? 'Lowest-producing calls — candidates to move if demand comes in'
+                  : val === 'completed' ? 'Finished calls and what each one produced' : undefined}
                 style={{ padding:'5px 12px', border:'none', cursor:'pointer', fontSize:11, fontWeight:600, whiteSpace:'nowrap',
                   background: view === val ? 'var(--accent)' : 'transparent',
                   color: view === val ? '#fff' : 'var(--text-muted)' }}>
@@ -328,22 +336,6 @@ function LiveBoard() {
 
       {rev && (
         <div className="card" style={{ padding:'13px 16px', marginBottom:14, display:'flex', gap:24, flexWrap:'wrap', alignItems:'center' }}>
-          {/* Sales and Revenue are different money at different times: a sale
-              closed today becomes revenue weeks later when it's installed, and
-              today's revenue came from sales made weeks ago. They are shown
-              side by side and never summed. */}
-          <div>
-            <div style={{ fontSize:20, fontWeight:800, color:'var(--accent)', lineHeight:1.1 }}>{money(rev.expected)}</div>
-            <div style={{ fontSize:10, fontWeight:700, color:'var(--text-primary)', textTransform:'uppercase', letterSpacing:.5, marginTop:2 }}>
-              Expected sales
-            </div>
-            <div style={{ fontSize:10, color:'var(--text-muted)' }}>
-              {rev.opportunityCalls} opportunity call{rev.opportunityCalls === 1 ? '' : 's'} still to run
-            </div>
-          </div>
-
-          <div style={{ width:1, alignSelf:'stretch', background:'var(--border)' }} />
-
           <div>
             <div style={{ fontSize:20, fontWeight:800, color:'#15803D', lineHeight:1.1 }}>{money(rev.booked)}</div>
             <div style={{ fontSize:10, fontWeight:700, color:'var(--text-primary)', textTransform:'uppercase', letterSpacing:.5, marginTop:2 }}>
@@ -354,14 +346,25 @@ function LiveBoard() {
             </div>
           </div>
 
+          {(rev.soldToday > 0 || rev.invoicedToday > 0) && (
+            <>
+              <div style={{ width:1, alignSelf:'stretch', background:'var(--border)' }} />
+              <div>
+                <div style={{ fontSize:20, fontWeight:800, color:'var(--accent)', lineHeight:1.1 }}>{money(rev.soldToday)}</div>
+                <div style={{ fontSize:10, fontWeight:700, color:'var(--text-primary)', textTransform:'uppercase', letterSpacing:.5, marginTop:2 }}>
+                  Sold so far
+                </div>
+                <div style={{ fontSize:10, color:'var(--text-muted)' }}>
+                  from calls completed today{rev.invoicedToday ? ` · ${money(rev.invoicedToday)} invoiced` : ''}
+                </div>
+              </div>
+            </>
+          )}
+
           <div style={{ flex:1, minWidth:210, fontSize:10, color:'var(--text-muted)', lineHeight:1.6 }}>
-            <strong>Sales</strong> is new work that could close today — replacements found on
-            opportunity calls, weighted by each tech's close rate and average sale. It becomes
-            revenue later, when it's installed.<br />
-            <strong>Revenue</strong> is the invoiced value of installs whose last day is today.
-            A multi-day install counts once, on the day it finishes.<br />
-            Sales counts only calls still to run, so it falls through the day as work completes.
-            Revenue counts every install finishing today, done or not.
+            <strong>Expected revenue</strong> is the invoiced value of installs whose last day is today —
+            a multi-day install counts once, on the day it finishes.<br />
+            <strong>Sold so far</strong> is actual, from work already completed today.
           </div>
         </div>
       )}
@@ -504,6 +507,15 @@ function LiveBoard() {
                   )}
                 </td>
                 <td style={{ padding:'7px 12px' }}>
+                  {c.outcome && (view === 'completed' || view === 'all') && (
+                    <div style={{ fontSize:11, fontWeight:600, lineHeight:1.5,
+                      color: c.outcome.kind === 'sold' ? '#15803D'
+                        : c.outcome.kind === 'invoiced' ? 'var(--text-primary)'
+                        : c.outcome.kind === 'quoted' ? '#B45309' : 'var(--text-muted)' }}>
+                      {c.outcome.kind === 'sold' ? '✓ ' : c.outcome.kind === 'quoted' ? '○ ' : ''}
+                      {c.outcome.text}
+                    </div>
+                  )}
                   {view === 'reschedule' && (c.moveReason || []).length > 0 && (
                     <div style={{ fontSize:11, color:'var(--text-secondary)', lineHeight:1.5 }}>
                       {c.moveReason.join(' · ')}

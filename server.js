@@ -2924,6 +2924,29 @@ app.get('/api/dispatch/live-board', async (req, res) => {
       } catch (e) { /* leave it out rather than guess */ }
     }
 
+    // Outcomes for work that finished today. Fetched as two paged queries and
+    // indexed by job rather than per-job lookups, which at ~29 completed calls
+    // would have doubled this route's API cost every 15 minutes.
+    const todayIso = today.startUtc.toISOString().slice(0, 10)
+    const soldByJob = new Map(), quotedByJob = new Map(), invoicedByJob = new Map()
+    try {
+      const est = await stPageAll(p => `/sales/v2/tenant/${ST_TENANT_ID}/estimates?createdOnOrAfter=${todayIso}&pageSize=500&page=${p}`, 4000)
+      for (const e of est) {
+        if (!e?.jobId) continue
+        const v = Number(e.subtotal || 0)
+        const st = (e.status && typeof e.status === 'object') ? e.status.name : e.status
+        if (st === 'Sold') soldByJob.set(e.jobId, (soldByJob.get(e.jobId) || 0) + v)
+        else quotedByJob.set(e.jobId, Math.max(quotedByJob.get(e.jobId) || 0, v))
+      }
+    } catch (e) { console.warn('live-board estimates:', e.message) }
+    try {
+      const inv = await stPageAll(p => `/accounting/v2/tenant/${ST_TENANT_ID}/invoices?createdOnOrAfter=${todayIso}&pageSize=500&page=${p}`, 4000)
+      for (const x of inv) {
+        const jid = x?.job?.id
+        if (jid) invoicedByJob.set(jid, (invoicedByJob.get(jid) || 0) + Number(x.total || 0))
+      }
+    } catch (e) { console.warn('live-board invoices:', e.message) }
+
     const scoresByTeam = new Map()
     for (const sc of (scores || [])) {
       if (!scoresByTeam.has(sc.business_unit)) scoresByTeam.set(sc.business_unit, [])
@@ -3107,6 +3130,20 @@ app.get('/api/dispatch/live-board', async (req, res) => {
       // cost that the revenue number doesn't show. A callback produces no
       // revenue, which makes it look like the cheapest thing on the board,
       // but there's a customer waiting on a fix that already went wrong.
+      // What actually happened on finished work.
+      if (!c.actionable && c.status === 'Done') {
+        const sold = soldByJob.get(c.jobId) || 0
+        const quoted = quotedByJob.get(c.jobId) || 0
+        const invoiced = invoicedByJob.get(c.jobId) || 0
+        c.outcome = sold > 0
+          ? { kind: 'sold', amount: Math.round(sold), text: `Sold $${Math.round(sold).toLocaleString()}` }
+          : invoiced > 0
+            ? { kind: 'invoiced', amount: Math.round(invoiced), text: `Invoiced $${Math.round(invoiced).toLocaleString()}` }
+            : quoted > 0
+              ? { kind: 'quoted', amount: Math.round(quoted), text: `Quoted $${Math.round(quoted).toLocaleString()} — not sold` }
+              : { kind: 'none', amount: 0, text: 'No sale recorded' }
+      }
+
       if (c.rescheduleCandidate) {
         const jtl = c.jobType || ''
         const why = []
@@ -3136,6 +3173,8 @@ app.get('/api/dispatch/live-board', async (req, res) => {
       opportunityCalls: calls.filter(c => c.expectedRevenue > 0).length,
       rescheduleCandidates: calls.filter(c => c.rescheduleCandidate).length,
       remaining: calls.filter(c => c.actionable).length,
+      soldToday: Math.round(calls.reduce((a, c) => a + (c.outcome?.kind === 'sold' ? c.outcome.amount : 0), 0)),
+      invoicedToday: Math.round(calls.reduce((a, c) => a + (c.outcome?.kind === 'invoiced' ? c.outcome.amount : 0), 0)),
       done: calls.filter(c => c.status === 'Done').length,
       working: calls.filter(c => c.status === 'Working').length,
     }
