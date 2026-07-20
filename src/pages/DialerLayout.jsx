@@ -76,6 +76,18 @@ const NAV_ICONS = {
       </svg>
     )
   },
+  dispatch: (active) => {
+    const c = active ? ICON_COLOR : ICON_MUTED
+    return (
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M2 6.5A1.5 1.5 0 013.5 5h8A1.5 1.5 0 0113 6.5V16H2V6.5z" stroke={c} strokeWidth="1.8" fill="none" strokeLinejoin="round"/>
+        <path d="M13 9.5h3.6a2 2 0 011.7.95L22 16h-9V9.5z" stroke={c} strokeWidth="1.8" fill="none" strokeLinejoin="round"/>
+        <circle cx="6.5" cy="18" r="1.9" stroke={c} strokeWidth="1.7" fill="none"/>
+        <circle cx="17" cy="18" r="1.9" stroke={c} strokeWidth="1.7" fill="none"/>
+        <path d="M8.4 18h6.7" stroke={c} strokeWidth="1.5" strokeLinecap="round"/>
+      </svg>
+    )
+  },
   wfm: (active) => {
     const c = active ? ICON_COLOR : ICON_MUTED
     return (
@@ -142,7 +154,7 @@ const NAV_ITEMS = [
   { to:'/', label:'Dialer', iconKey:'dialer', end:true },
   { to:'/live', label:'Live Dashboard', iconKey:'live' },
   { to:'/callboard', label:'Call Board', iconKey:'board' },
-  { to:'/dispatch', label:'Dispatch', iconKey:'board', adminOnly:true },
+  { to:'/dispatch', label:'Dispatch', iconKey:'dispatch', adminOnly:true },
   { to:'/analytics', label:'Analytics', iconKey:'analytics' },
   { to:'/recordings', label:'Recordings', iconKey:'recordings' },
   { to:'/attendance', label:'WFM', iconKey:'wfm' },
