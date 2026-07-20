@@ -7,7 +7,7 @@ import { dirname, join } from 'path'
 import { existsSync } from 'fs'
 import { renderBoardEmail, boardEmailSubject } from './lib/boardEmail.js'
 import { computeBattingOrder, computeZipValue, computeJobTypeOrder, DEFAULT_WEIGHTS, NON_DISPATCH_TEAM } from './lib/dispatchMetrics.js'
-import { driveTimes, straightLine, pairKey, driveTimeEnabled, geocode } from './lib/driveTime.js'
+import { driveTimes, straightLine, pairKey, driveTimeEnabled, geocode, suggestAddresses } from './lib/driveTime.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
@@ -3219,6 +3219,15 @@ app.get('/api/dispatch/live-board', async (req, res) => {
 // recommendations. RECOMMEND ONLY — it writes nothing to ServiceTitan; the
 // dispatcher books and assigns. That's deliberate: it never silently rearranges
 // a live board, and it sidesteps assign/reschedule writes entirely.
+app.get('/api/dispatch/geocode-suggest', async (req, res) => {
+  if (!(await requireAdmin(req, res))) return
+  try {
+    res.json({ suggestions: await suggestAddresses(req.query.q) })
+  } catch (err) {
+    res.json({ suggestions: [] })
+  }
+})
+
 app.post('/api/dispatch/decide', async (req, res) => {
   if (!(await requireAdmin(req, res))) return
   try {

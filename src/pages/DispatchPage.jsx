@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { sb } from '../lib/supabase'
 
 // Dispatch for Profit — who to send, and whether today's board agrees.
@@ -686,9 +686,34 @@ function DecisionMaker() {
   const [err, setErr] = useState('')
   const [types, setTypes] = useState([])
 
+  // Address typeahead — "did you mean…" as you type.
+  const [suggests, setSuggests] = useState([])
+  const [showSuggests, setShowSuggests] = useState(false)
+  const pickedRef = useRef(false)   // suppress a fetch on the change caused by a pick
+  const debounceRef = useRef(null)
+
   useEffect(() => {
     authed('/api/dispatch/job-types').then(d => setTypes(d.types || [])).catch(() => {})
   }, [])
+
+  const onAddressChange = (v) => {
+    setAddress(v)
+    if (pickedRef.current) { pickedRef.current = false; return }
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+    if (v.trim().length < 4) { setSuggests([]); setShowSuggests(false); return }
+    debounceRef.current = setTimeout(async () => {
+      try {
+        const d = await authed(`/api/dispatch/geocode-suggest?q=${encodeURIComponent(v)}`)
+        setSuggests(d.suggestions || [])
+        setShowSuggests((d.suggestions || []).length > 0)
+      } catch { setSuggests([]) }
+    }, 250)
+  }
+  const pickSuggest = (sg) => {
+    pickedRef.current = true
+    setAddress(sg.placeName)
+    setSuggests([]); setShowSuggests(false)
+  }
 
   const decide = async () => {
     if (!jobType.trim()) return
@@ -718,14 +743,31 @@ function DecisionMaker() {
             placeholder="e.g. Plumbing - Tankless Water Heater Estimate" />
           <datalist id="dm-jobtypes">{types.map(t => <option key={t} value={t} />)}</datalist>
         </div>
-        <div className="form-field" style={{ marginTop:12 }}>
+        <div className="form-field" style={{ marginTop:12, position:'relative' }}>
           <label className="form-label">Address or area <span style={{ color:'var(--text-muted)', fontWeight:400 }}>— for drive time and area value</span></label>
           <input className="form-input" value={address} style={{ padding:'10px 14px', fontSize:14 }}
-            onChange={e => setAddress(e.target.value)}
-            onKeyDown={e => { if (e.key === 'Enter') decide() }}
-            placeholder="A full address is best, but a street + city or just a zip works too" />
+            autoComplete="off"
+            onChange={e => onAddressChange(e.target.value)}
+            onFocus={() => suggests.length && setShowSuggests(true)}
+            onBlur={() => setTimeout(() => setShowSuggests(false), 150)}
+            onKeyDown={e => { if (e.key === 'Enter') { setShowSuggests(false); decide() } if (e.key === 'Escape') setShowSuggests(false) }}
+            placeholder="Start typing — a full address, street + city, or a zip" />
+          {showSuggests && suggests.length > 0 && (
+            <div style={{ position:'absolute', top:'100%', left:0, right:0, zIndex:20, marginTop:2,
+              background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius)',
+              boxShadow:'0 6px 20px rgba(0,0,0,.14)', overflow:'hidden' }}>
+              {suggests.map((sg, i) => (
+                <div key={i} onMouseDown={() => pickSuggest(sg)}
+                  style={{ padding:'9px 13px', fontSize:13, cursor:'pointer', borderBottom: i < suggests.length-1 ? '1px solid var(--border)' : 'none' }}
+                  onMouseEnter={e => e.currentTarget.style.background='var(--surface-2)'}
+                  onMouseLeave={e => e.currentTarget.style.background='transparent'}>
+                  📍 {sg.placeName}
+                </div>
+              ))}
+            </div>
+          )}
           <div style={{ fontSize:11, color:'var(--text-muted)', marginTop:5 }}>
-            Approximate is fine — drive times get sharper the more precise you are.
+            Pick a suggestion, or just type — approximate is fine, drive times sharpen with precision.
           </div>
         </div>
         <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginTop:14 }}>
