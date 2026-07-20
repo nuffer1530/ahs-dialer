@@ -752,7 +752,7 @@ function DecisionMaker() {
           <label className="form-label">Job type</label>
           <input className="form-input" value={jobType} autoFocus autoComplete="off"
             onChange={e => { setJobType(e.target.value); setShowTypes(true) }}
-            onFocus={() => setShowTypes(true)}
+            onClick={() => setShowTypes(true)}
             onBlur={() => setTimeout(() => setShowTypes(false), 150)}
             onKeyDown={e => { if (e.key === 'Enter') { setShowTypes(false); decide() } if (e.key === 'Escape') setShowTypes(false) }}
             placeholder="e.g. Plumbing - Tankless Water Heater Estimate" />
