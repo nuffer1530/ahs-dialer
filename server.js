@@ -51,6 +51,17 @@ const ABANDON_GRACE_SECONDS = Number(process.env.ABANDON_GRACE_SECONDS ?? 10)
 const ST_CLIENT_ID     = process.env.ST_CLIENT_ID
 const ST_CLIENT_SECRET = process.env.ST_CLIENT_SECRET
 const ST_TENANT_ID     = process.env.ST_TENANT_ID || '3101065365'
+
+// Job types that are not a truck roll: follow-ups, callbacks, permitting and
+// phone-only calls. Shared by the 3-Day Board (where they don't count as a
+// booked call) and Dispatch (where they don't consume a tech's capacity).
+export const EXCLUDE_CALL = /follow[- ]?up|callback|permitting|phone call/i
+
+// Phone/follow-up work is RELATIONSHIP-BOUND — it's the same tech continuing a
+// financing conversation or a callback with a customer they already met. Moving
+// it to whoever ranks higher would break the thing that makes it work, so these
+// are never reassigned, never swapped, and never offered as the call to bump.
+const STICKY_TO_TECH = /phone call|follow[- ]?up|financ/i
 const ST_AUTH_URL      = 'https://auth.servicetitan.io/connect/token'
 const ST_API_BASE      = `https://api.servicetitan.io`
 
@@ -1474,8 +1485,6 @@ async function build3DayBoard() {
     } catch (e) { console.warn('board equipment age:', e.message) }
   }
 
-  // Job types that never count as a booked call (non-productive / admin).
-  const EXCLUDE_CALL = /follow[- ]?up|callback|permitting|phone call/i
   const isCountedCall = (j) => !EXCLUDE_CALL.test(nameByType[String(j.jobTypeId)] || '')
 
   // An opportunity = a job with a real shot at a repair/replacement sale.
@@ -2757,6 +2766,7 @@ app.get('/api/dispatch/live-board', async (req, res) => {
         windowEnd: ap.arrivalWindowEnd || ap.end || null,
         businessUnit: bu, jobType: jt,
         zip, isMember, systemAge, geo: geoOfLoc.get(j.locationId) || null,
+        sticky: STICKY_TO_TECH.test(jt), countsToCapacity: !EXCLUDE_CALL.test(jt),
         techId: a.technicianId, techName: a.technicianName,
         techTier: techScore?.tier || 'unranked',
         techCloseRate: techScore?.close_rate ?? null,
@@ -2803,6 +2813,7 @@ app.get('/api/dispatch/live-board', async (req, res) => {
       if (!c.rankable) continue
       if (!swapPool.has(c.businessUnit)) swapPool.set(c.businessUnit, { misplaced: [], underused: [] })
       const pool = swapPool.get(c.businessUnit)
+      if (STICKY_TO_TECH.test(c.jobType || '')) continue   // relationship-bound
       if (c.opportunity >= 3 && c.techTier === 'red') pool.misplaced.push(c)
       else if (c.opportunity <= 0 && c.techTier === 'green') pool.underused.push(c)
     }
@@ -2860,16 +2871,19 @@ app.get('/api/dispatch/live-board', async (req, res) => {
       return { target: base, stretch: base + 1 }
     }
 
+    // Capacity counts truck rolls only — a phone-only call or a follow-up
+    // doesn't consume a slot in a tech's day the way a dispatched call does.
     const loadByTech = new Map()
     for (const c of calls) {
-      if (!c.techId) continue
+      if (!c.techId || EXCLUDE_CALL.test(c.jobType || '')) continue
       loadByTech.set(c.techId, (loadByTech.get(c.techId) || 0) + 1)
     }
     // If a suggested tech is already full, the lowest-value call on their plate
     // is the one to move — low-dollar work is what gets rescheduled to make room
     // for demand opportunities.
     const bumpCandidate = (techId, exceptJobId) => {
-      const theirs = calls.filter(c => c.techId === techId && c.jobId !== exceptJobId)
+      const theirs = calls.filter(c => c.techId === techId && c.jobId !== exceptJobId
+        && !STICKY_TO_TECH.test(c.jobType || ''))
       if (!theirs.length) return null
       return [...theirs].sort((a, b) => (a.opportunity - b.opportunity))[0]
     }
@@ -2882,6 +2896,9 @@ app.get('/api/dispatch/live-board', async (req, res) => {
 
     for (const c of calls) {
       if (!c.rankable || c.opportunity < 3) continue
+      // Follow-ups and financing calls belong to the tech who owns the
+      // relationship — reassigning them by rank would destroy their value.
+      if (STICKY_TO_TECH.test(c.jobType || '')) continue
       const weak = !c.techTier || c.techTier === 'red' || c.techTier === 'unranked'
       if (!weak) continue
 

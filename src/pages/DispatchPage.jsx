@@ -396,6 +396,14 @@ function LiveBoard() {
                   {/* Shown on every row, not just flagged ones: otherwise the
                       notes signal is invisible on the calls it didn't flag and
                       it looks like the notes aren't being read at all. */}
+                  {c.sticky && (
+                    <span title="Follow-up / financing call — stays with this tech, and doesn't use a capacity slot"
+                      style={{ display:'inline-block', marginTop:3, marginRight:4, fontSize:9, fontWeight:700,
+                        color:'var(--text-muted)', background:'var(--surface-2)', border:'1px solid var(--border)',
+                        padding:'1px 5px', borderRadius:99 }}>
+                      stays with tech
+                    </span>
+                  )}
                   {c.systemAge != null && (
                     <span title="Age of the system, read from the job notes"
                       style={{ display:'inline-block', marginTop:3, fontSize:9, fontWeight:700,
