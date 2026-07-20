@@ -76,10 +76,19 @@ function tradeOfTeam(team) {
 }
 function tradeOfJobType(name) {
   const t = String(name || '')
-  if (/hvac|a\/?c|furnace|heat|cool|mini.?split/i.test(t)) return 'HVAC'
+  // Job types are prefixed with their trade ("Garage Door - Panel
+  // Repair/Replace"), so trust the prefix before any keyword: 'Panel' in that
+  // name matched the Electrical keywords and sent a garage job to electricians.
+  if (/^garage/i.test(t)) return 'Garage Door'
+  if (/^electrical/i.test(t)) return 'Electrical'
+  if (/^plumbing/i.test(t)) return 'Plumbing'
+  if (/^hvac/i.test(t)) return 'HVAC'
+  // Free-typed text without a prefix falls back to keywords — garage checked
+  // before electrical for the same 'panel' reason.
+  if (/garage|overhead door|opener/i.test(t)) return 'Garage Door'
+  if (/hvac|a\/?c|furnace|heat|cool|mini.?split|boiler/i.test(t)) return 'HVAC'
   if (/plumb|water heater|drain|sewer|faucet|toilet|tankless/i.test(t)) return 'Plumbing'
   if (/electric|panel|breaker|generator|wiring|rewire/i.test(t)) return 'Electrical'
-  if (/garage|overhead door|opener/i.test(t)) return 'Garage Door'
   return null
 }
 const ST_AUTH_URL      = 'https://auth.servicetitan.io/connect/token'
@@ -3256,6 +3265,7 @@ app.post('/api/dispatch/decide', async (req, res) => {
   try {
     const jobType = String(req.body?.jobType || '').trim()
     const address = String(req.body?.address || '').trim()
+    const urgent = Boolean(req.body?.urgent)   // "must run today" override
     if (!jobType) return res.status(400).json({ error: 'A job type is required.' })
 
     const trade = tradeOfJobType(jobType)
@@ -3328,15 +3338,26 @@ app.post('/api/dispatch/decide', async (req, res) => {
     // picker cheerfully recommended a tech who's off — his 0-load, no-drive row
     // is the giveaway. Techs already carrying a call today are trivially working
     // too, so union both signals.
+    // Available for NEW work, not just "worked at some point today". The first
+    // version counted anyone with a call today as available all day — which
+    // recommended a tech who ran one morning call and left. A tech is available
+    // only if a working shift still has time left, minus any TimeOff covering
+    // the rest of the day.
     let workingTechs = null
     try {
       const shiftRes = await stGet(`/dispatch/v2/tenant/${ST_TENANT_ID}/technician-shifts?startsOnOrAfter=${today.startUtc.toISOString()}&endsOnOrBefore=${today.endUtc.toISOString()}&pageSize=500`)
-      const on = new Set()
+      const nowMs = Date.now()
+      const stillOn = new Set(), offNow = new Set()
       for (const sh of (shiftRes?.data || [])) {
-        if (sh.technicianId && sh.shiftType !== 'TimeOff') on.add(sh.technicianId)
+        if (!sh.technicianId) continue
+        const st = Date.parse(sh.start || ''), en = Date.parse(sh.end || '')
+        if (sh.shiftType === 'TimeOff') {
+          if (!Number.isNaN(st) && !Number.isNaN(en) && st <= nowMs && en > nowMs) offNow.add(sh.technicianId)
+        } else if (!Number.isNaN(en) && en > nowMs) {
+          stillOn.add(sh.technicianId)   // working shift with time remaining
+        }
       }
-      for (const tid of loadByTech.keys()) on.add(tid)   // has a call today = working
-      workingTechs = on
+      workingTechs = new Set([...stillOn].filter(t => !offNow.has(t)))
     } catch (e) { console.warn('decide shifts:', e.message) }
 
     // Candidate techs = this trade's dispatchable benches. Prefer their EV on
@@ -3347,12 +3368,28 @@ app.post('/api/dispatch/decide', async (req, res) => {
     ])
     const jtEvByTech = new Map((jtScores || []).filter(r => (r.job_type || '').toLowerCase() === jobType.toLowerCase())
       .map(r => [r.tech_id, r]))
-    const candidates = (bench || [])
+    // Skill rules: some job types only specific techs can run (boilers are
+    // Craig Rehm only, per AHS). Stored in app_settings.dispatch_type_rules as
+    // [{"pattern":"boiler","techs":["Craig Rehm"]}] so new rules need no deploy.
+    // A matching rule OVERRIDES trade routing — the named techs are the bench,
+    // whatever team they sit on.
+    let restriction = null
+    try {
+      const { data: ruleRow } = await supabase.from('app_settings').select('value').eq('key', 'dispatch_type_rules').maybeSingle()
+      const rules = JSON.parse(ruleRow?.value || '[]')
+      restriction = rules.find(r => r?.pattern && jobType.toLowerCase().includes(String(r.pattern).toLowerCase())) || null
+    } catch {}
+
+    let candidates = (bench || [])
       .filter(b => tradeOfTeam(b.business_unit) === trade && !NON_DISPATCH_TEAM.test(b.business_unit) && b.tier !== 'unranked')
-      // Only techs on the schedule today. If the shift lookup failed entirely
-      // we don't have the data, so fall back to showing everyone rather than an
-      // empty board — but note it.
-      .filter(b => !workingTechs || workingTechs.has(b.tech_id))
+    if (restriction) {
+      const allowed = new Set((restriction.techs || []).map(n => String(n).toLowerCase()))
+      candidates = (bench || []).filter(b => allowed.has(String(b.tech_name || '').toLowerCase()))
+    }
+    // Only techs on the schedule today. If the shift lookup failed entirely
+    // we don't have the data, so fall back to showing everyone rather than an
+    // empty board — but note it.
+    candidates = candidates.filter(b => !workingTechs || workingTechs.has(b.tech_id))
 
     // Drive time from each candidate's nearest current job to the new address.
     const travelPairs = []
@@ -3412,7 +3449,12 @@ app.post('/api/dispatch/decide', async (req, res) => {
     const top = options[0]
     let recommendation
     if (!top) {
-      recommendation = { action: 'no_tech', text: `No ranked ${trade} tech is available for this.` }
+      recommendation = {
+        action: 'no_tech',
+        text: restriction
+          ? `${(restriction.techs || []).join(' / ')} ${restriction.techs?.length === 1 ? 'is' : 'are'} the only tech${restriction.techs?.length === 1 ? '' : 's'} for this job type — not on the schedule today. Hold until they're next on.`
+          : `No ranked ${trade} tech is on the schedule for this today.`,
+      }
     } else if (top.hasRoom) {
       recommendation = {
         action: 'book_assign',
@@ -3420,14 +3462,35 @@ app.post('/api/dispatch/decide', async (req, res) => {
         tech: top,
       }
     } else {
-      // Full — is the upside worth a bump, or hold for tomorrow?
+      // Full — is the upside worth a bump? "Must run today" skips that math
+      // entirely: the dispatcher has decided it runs, our job is the least-bad
+      // placement, not the worth-it question.
       const bump = bumpFor(top.techId)
-      const worthBumping = top.expectedValue >= 800 && opp.score >= 2
+      const worthBumping = urgent || (top.expectedValue >= 800 && opp.score >= 2)
       if (worthBumping && bump) {
         recommendation = {
           action: 'book_bump',
-          text: `Book it on ${top.techName}, and reschedule #${bump.jobNumber} (${bump.name})`,
+          text: `${urgent ? 'Override — ' : ''}Book it on ${top.techName}, and reschedule #${bump.jobNumber} (${bump.name})`,
           tech: top, bump,
+        }
+      } else if (urgent) {
+        // Top pick has nothing movable — walk the rest of the bench for anyone
+        // with room or a movable call.
+        const alt = options.find(o => o.hasRoom) ||
+          options.map(o => ({ o, b: bumpFor(o.techId) })).find(x => x.b)
+        if (alt && alt.hasRoom) {
+          recommendation = { action: 'book_assign', text: `Override — book it and put it on ${alt.techName}`, tech: alt }
+        } else if (alt && alt.b) {
+          recommendation = {
+            action: 'book_bump',
+            text: `Override — book it on ${alt.o.techName}, and reschedule #${alt.b.jobNumber} (${alt.b.name})`,
+            tech: alt.o, bump: alt.b,
+          }
+        } else {
+          recommendation = {
+            action: 'no_slot',
+            text: 'Every available tech is full and nothing on their plates can move — it physically has to go to another day.',
+          }
         }
       } else {
         recommendation = {
@@ -3446,6 +3509,8 @@ app.post('/api/dispatch/decide', async (req, res) => {
       zip, zipTier,
       opportunity: opp.score, opportunityReasons: opp.reasons,
       located: Boolean(geo),
+      restriction: restriction ? { pattern: restriction.pattern, techs: restriction.techs || [] } : null,
+      urgent,
       recommendation,
       options: options.slice(0, 6),
       boardContext: { totalAssigned: assignments.length, benchSize: candidates.length, capacity: cap },

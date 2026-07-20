@@ -675,6 +675,7 @@ const ACTION_STYLE = {
   book_bump:   { color:'#B45309', bg:'#FBF3E0', border:'#F0DCA8', icon:'🔁' },
   hold:        { color:'var(--text-muted)', bg:'var(--surface-2)', border:'var(--border)', icon:'📅' },
   no_tech:     { color:'#B91C1C', bg:'#FBEEEA', border:'#F0C8BE', icon:'⚠️' },
+  no_slot:     { color:'#B91C1C', bg:'#FBEEEA', border:'#F0C8BE', icon:'🚫' },
 }
 
 function DecisionMaker() {
@@ -803,7 +804,7 @@ function DecisionMaker() {
         <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginTop:14 }}>
           <label style={{ display:'flex', alignItems:'center', gap:7, fontSize:12, color:'var(--text-secondary)', cursor:'pointer' }}>
             <input type="checkbox" checked={urgent} onChange={e => setUrgent(e.target.checked)} />
-            Customer needs it today
+            Must run today — override the worth-it math and find the least-bad slot
           </label>
           <div style={{ display:'flex', gap:8 }}>
             {(jobType || address || res) && <button className="btn" onClick={clearAll}>Clear</button>}
@@ -838,6 +839,11 @@ function DecisionMaker() {
               {res.zipTier ? ` · ${res.zipTier}-value area` : ''}
               {res.located ? '' : ' · address not located — drive times unavailable'}
             </div>
+            {res.restriction && (
+              <div style={{ fontSize:11, color:'#B45309', fontWeight:600, marginTop:3 }}>
+                🔒 Only {res.restriction.techs.join(' / ')} run{res.restriction.techs.length === 1 ? 's' : ''} this job type — bench limited accordingly
+              </div>
+            )}
             {res.resolvedAddress && (
               <div style={{ fontSize:11, color:'var(--text-muted)', marginTop:3 }}>
                 📍 Matched to <strong>{res.resolvedAddress}</strong> — if that's off, add more detail and re-run
