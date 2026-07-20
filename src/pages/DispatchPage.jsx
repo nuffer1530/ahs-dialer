@@ -325,29 +325,40 @@ function LiveBoard() {
       </div>
 
       {rev && (
-        <div className="card" style={{ padding:'12px 16px', marginBottom:14, display:'flex', gap:26, flexWrap:'wrap', alignItems:'center' }}>
+        <div className="card" style={{ padding:'13px 16px', marginBottom:14, display:'flex', gap:24, flexWrap:'wrap', alignItems:'center' }}>
+          {/* Sales and Revenue are different money at different times: a sale
+              closed today becomes revenue weeks later when it's installed, and
+              today's revenue came from sales made weeks ago. They are shown
+              side by side and never summed. */}
           <div>
-            <div style={{ fontSize:19, fontWeight:800, color:'#15803D', lineHeight:1.1 }}>{money(rev.booked)}</div>
-            <div style={{ fontSize:10, color:'var(--text-muted)', textTransform:'uppercase', letterSpacing:.5 }}>
-              Scheduled to close today · {rev.bookedJobs} install{rev.bookedJobs === 1 ? '' : 's'}
+            <div style={{ fontSize:20, fontWeight:800, color:'var(--accent)', lineHeight:1.1 }}>{money(rev.expected)}</div>
+            <div style={{ fontSize:10, fontWeight:700, color:'var(--text-primary)', textTransform:'uppercase', letterSpacing:.5, marginTop:2 }}>
+              Expected sales
+            </div>
+            <div style={{ fontSize:10, color:'var(--text-muted)' }}>
+              {rev.opportunityCalls} opportunity call{rev.opportunityCalls === 1 ? '' : 's'} on the board
             </div>
           </div>
+
           <div style={{ width:1, alignSelf:'stretch', background:'var(--border)' }} />
+
           <div>
-            <div style={{ fontSize:19, fontWeight:800, color:'var(--text-primary)', lineHeight:1.1 }}>{money(rev.expected)}</div>
-            <div style={{ fontSize:10, color:'var(--text-muted)', textTransform:'uppercase', letterSpacing:.5 }}>
-              Opportunity upside · {rev.opportunityCalls} call{rev.opportunityCalls === 1 ? '' : 's'}
+            <div style={{ fontSize:20, fontWeight:800, color:'#15803D', lineHeight:1.1 }}>{money(rev.booked)}</div>
+            <div style={{ fontSize:10, fontWeight:700, color:'var(--text-primary)', textTransform:'uppercase', letterSpacing:.5, marginTop:2 }}>
+              Expected revenue
+            </div>
+            <div style={{ fontSize:10, color:'var(--text-muted)' }}>
+              {rev.bookedJobs} install{rev.bookedJobs === 1 ? '' : 's'} finishing today
             </div>
           </div>
-          <div style={{ width:1, alignSelf:'stretch', background:'var(--border)' }} />
-          <div>
-            <div style={{ fontSize:19, fontWeight:800, color:'var(--accent)', lineHeight:1.1 }}>{money(rev.booked + rev.expected)}</div>
-            <div style={{ fontSize:10, color:'var(--text-muted)', textTransform:'uppercase', letterSpacing:.5 }}>Day potential</div>
-          </div>
-          <div style={{ flex:1, minWidth:180, fontSize:10, color:'var(--text-muted)', lineHeight:1.5 }}>
-            Forward-looking, not revenue earned so far. Left: invoiced value of installs whose LAST
-            day is today (a multi-day install counts once, on the day it finishes). Middle:
-            probability-weighted upside on calls that carry an opportunity signal — not money in hand.
+
+          <div style={{ flex:1, minWidth:210, fontSize:10, color:'var(--text-muted)', lineHeight:1.6 }}>
+            <strong>Sales</strong> is new work that could close today — replacements found on
+            opportunity calls, weighted by each tech's close rate and average sale. It becomes
+            revenue later, when it's installed.<br />
+            <strong>Revenue</strong> is the invoiced value of installs whose last day is today.
+            A multi-day install counts once, on the day it finishes.<br />
+            Both are forward-looking for the whole day, not earned-so-far.
           </div>
         </div>
       )}
