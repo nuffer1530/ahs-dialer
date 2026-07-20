@@ -2926,6 +2926,7 @@ app.get('/api/dispatch/live-board', async (req, res) => {
     // for demand opportunities.
     const bumpCandidate = (techId, exceptJobId) => {
       const theirs = calls.filter(c => c.techId === techId && c.jobId !== exceptJobId
+        && c.actionable   // can't move a call that's Working, Done, or on Hold
         && !STICKY_TO_TECH.test(c.jobType || ''))
       if (!theirs.length) return null
       return [...theirs].sort((a, b) => (a.opportunity - b.opportunity))[0]
@@ -3291,6 +3292,7 @@ app.post('/api/dispatch/decide', async (req, res) => {
     const appts = (await stPageAll(p => `/jpm/v2/tenant/${ST_TENANT_ID}/appointments?startsOnOrAfter=${today.startUtc.toISOString()}&pageSize=500&page=${p}`, 3000))
       .filter(a => { const t = Date.parse(a.start || ''); return t >= today.startUtc.getTime() && t < today.endUtc.getTime() && a.status !== 'Canceled' })
     const assignments = await assignmentsForAppointments(appts.map(a => a.id))
+    const apptById = new Map(appts.map(a => [a.id, a]))
     const jobIds = [...new Set(assignments.map(a => a.jobId).filter(Boolean))]
     const jobs = []
     for (let i = 0; i < jobIds.length; i += 50) {
@@ -3445,6 +3447,10 @@ app.post('/api/dispatch/decide', async (req, res) => {
     const bumpFor = (techId) => {
       const scored = assignments
         .filter(a => a.technicianId === techId)
+        // Whitelist: only Scheduled work can move. Working means the tech is
+        // standing in the customer's house; Done is history; Hold is somebody
+        // else's decision. Same rule the Live Board applies to its own flags.
+        .filter(a => (apptById.get(a.appointmentId)?.status || 'Scheduled') === 'Scheduled')
         .map(a => jobById.get(a.jobId)).filter(Boolean)
         .map(j => {
           const name = jtName.get(j.jobTypeId) || ''
