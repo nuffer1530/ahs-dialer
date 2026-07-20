@@ -2635,9 +2635,17 @@ function scoreOpportunity(jobTypeName, zipTier, isMember) {
 app.get('/api/dispatch/live-board', async (req, res) => {
   if (!(await requireAdmin(req, res))) return
   try {
-    const dayStart = new Date(); dayStart.setHours(0, 0, 0, 0)
-    const appts = (await stPageAll(p => `/jpm/v2/tenant/${ST_TENANT_ID}/appointments?startsOnOrAfter=${dayStart.toISOString()}&pageSize=500&page=${p}`, 3000))
-      .filter(a => a.start && String(a.start).slice(0, 10) === new Date().toISOString().slice(0, 10))
+    // Denver-local day, not the UTC calendar date. Railway runs in UTC, so
+    // comparing UTC date strings made "today" run 6pm yesterday -> 6pm today:
+    // last night's calls appeared (sorting to the top of the board) while
+    // tonight's after-6pm calls were silently dropped. boardDay() is the same
+    // helper the 3-Day Board uses.
+    const today = boardDay(0)
+    const appts = (await stPageAll(p => `/jpm/v2/tenant/${ST_TENANT_ID}/appointments?startsOnOrAfter=${today.startUtc.toISOString()}&pageSize=500&page=${p}`, 3000))
+      .filter(a => {
+        const t = Date.parse(a.start || '')
+        return t >= today.startUtc.getTime() && t < today.endUtc.getTime()
+      })
     const assignments = await assignmentsForAppointments(appts.map(a => a.id))
 
     const jobIds = [...new Set(assignments.map(a => a.jobId).filter(Boolean))]
@@ -2767,7 +2775,8 @@ app.get('/api/dispatch/live-board', async (req, res) => {
       }
     }
 
-    calls.sort((a, b) => String(a.start || '').localeCompare(String(b.start || '')))
+    const ts = (v) => { const t = Date.parse(v || ''); return Number.isNaN(t) ? Infinity : t }
+    calls.sort((a, b) => (ts(a.windowStart) - ts(b.windowStart)) || (ts(a.start) - ts(b.start)))
     res.json({
       generatedAt: new Date().toISOString(),
       scoresRefreshedAt: (scores || [])[0]?.refreshed_at || null,

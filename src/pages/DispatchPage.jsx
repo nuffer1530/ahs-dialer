@@ -219,12 +219,12 @@ function LiveBoard() {
       if (!m.has(k)) m.set(k, [])
       m.get(k).push(c)
     }
-    return [...m.entries()].sort((a, b) => {
-      const ta = a[1][0]?.windowStart, tb = b[1][0]?.windowStart
-      if (!ta) return 1
-      if (!tb) return -1
-      return String(ta).localeCompare(String(tb))
-    })
+    // Sort by the actual window-open timestamp, numerically. Unscheduled last.
+    const at = (g) => {
+      const t = Date.parse(g[1][0]?.windowStart || '')
+      return Number.isNaN(t) ? Infinity : t
+    }
+    return [...m.entries()].sort((a, b) => at(a) - at(b))
   })()
 
   return (
