@@ -3476,6 +3476,10 @@ app.post('/api/dispatch/decide', async (req, res) => {
       }
     }
 
+    // Every option carries its bump cost, so the ranking table can explain
+    // each alternative — not just the one the recommendation chose.
+    for (const o of options) o.bump = o.hasRoom ? null : bumpFor(o.techId)
+
     const top = options[0]
     let recommendation
     if (!top) {
@@ -3502,7 +3506,7 @@ app.post('/api/dispatch/decide', async (req, res) => {
       //           tech worth sending) → a lower tech with room → hold.
       //   override: someone with room → profitable bump → any bump → the day
       //             is physically closed.
-      const bumped = options.map(o => ({ o, b: bumpFor(o.techId) })).filter(x => x.b)
+      const bumped = options.filter(o => o.bump).map(o => ({ o, b: o.bump }))
       const profitable = bumped.find(x =>
         x.o.expectedValue >= 800 && (opp.score - x.b.score) >= 2)
       const roomy = options.find(o => o.hasRoom)   // top is full; someone below may not be

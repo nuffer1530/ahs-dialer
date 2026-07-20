@@ -879,10 +879,21 @@ function DecisionMaker() {
                 <th style={{textAlign:'right'}} title="Drive time from that tech's closest job already on today's board to this address">Drive</th>
               </tr></thead>
               <tbody>
-                {(res.options || []).map((o, i) => (
-                  <tr key={o.techId} style={{ background: i === 0 ? 'rgba(21,128,61,.05)' : 'transparent' }}>
+                {(res.options || []).map((o) => {
+                  const chosen = o.techId === res.recommendation?.tech?.techId
+                  return (
+                  <tr key={o.techId} style={{ background: chosen ? 'rgba(21,128,61,.06)' : 'transparent' }}>
                     <td style={{ padding:'7px 12px', fontWeight:600 }}>
-                      {o.techName}{i === 0 && <span style={{ marginLeft:6, fontSize:9, fontWeight:700, color:'#15803D' }}>PICK</span>}
+                      {o.techName}{chosen && <span style={{ marginLeft:6, fontSize:9, fontWeight:700, color:'#15803D' }}>PICK</span>}
+                      {/* Each row explains its own cost, so the ranking and the
+                          recommendation can never look contradictory: the top
+                          earner may be un-bumpable while #2 has a routine call
+                          worth trading — which is a better decision, not a bug. */}
+                      <div style={{ fontSize:10, fontWeight:400, color:'var(--text-muted)', marginTop:1 }}>
+                        {o.hasRoom ? 'has room'
+                          : o.bump ? `full — would bump #${o.bump.jobNumber} (${o.bump.why})`
+                          : 'full — nothing movable today'}
+                      </div>
                     </td>
                     <td style={{ padding:'7px 12px', fontSize:11, color:'var(--text-muted)' }}>
                       {o.team}{o.onThisJobType ? '' : ' *'}
@@ -896,7 +907,8 @@ function DecisionMaker() {
                       {o.driveMinutes == null ? '—' : `${o.driveMinutes} min`}
                     </td>
                   </tr>
-                ))}
+                  )
+                })}
               </tbody>
             </table>
           </div>
