@@ -218,6 +218,7 @@ function LiveBoard() {
   const [data, setData] = useState(null)
   const [err, setErr] = useState('')
   const [loading, setLoading] = useState(true)
+  const [onlyFlagged, setOnlyFlagged] = useState(false)
 
   const load = useCallback(async () => {
     try { setData(await authed('/api/dispatch/live-board')); setErr('') }
@@ -232,8 +233,9 @@ function LiveBoard() {
   if (err) return <div style={{ padding:20, color:'var(--danger)', fontSize:13 }}>{err}</div>
   if (loading && !data) return <div className="spinner lg" style={{ margin:'60px auto' }} />
 
-  const calls = data?.calls || []
-  const flagged = calls.filter(c => c.flags?.length)
+  const allCalls = data?.calls || []
+  const flagged = allCalls.filter(c => c.flags?.length)
+  const calls = onlyFlagged ? flagged : allCalls
 
   // Within a window, group by team. Teams with flags sort first so a
   // dispatcher sees the problems without scanning every bench.
@@ -275,10 +277,30 @@ function LiveBoard() {
           {data?.counts?.total ?? 0} calls on today's board · {data?.counts?.flagged ?? 0} flagged ·
           auto-refreshes every 15 min
         </div>
-        <button className="btn sm" onClick={load}>Refresh</button>
+        <div style={{ display:'flex', gap:8, alignItems:'center' }}>
+          {/* Jumping to what needs attention is the whole job — 95 calls with
+              11 flagged is a lot of scrolling otherwise. */}
+          <div style={{ display:'flex', border:'1px solid var(--border)', borderRadius:99, overflow:'hidden' }}>
+            {[[false, `All ${allCalls.length}`], [true, `⚠️ Flagged ${flagged.length}`]].map(([val, label]) => (
+              <button key={String(val)} onClick={() => setOnlyFlagged(val)}
+                style={{ padding:'5px 12px', border:'none', cursor:'pointer', fontSize:11, fontWeight:600,
+                  background: onlyFlagged === val ? 'var(--accent)' : 'transparent',
+                  color: onlyFlagged === val ? '#fff' : 'var(--text-muted)' }}>
+                {label}
+              </button>
+            ))}
+          </div>
+          <button className="btn sm" onClick={load}>Refresh</button>
+        </div>
       </div>
 
-      {(data?.swaps || []).length > 0 && (
+      {onlyFlagged && flagged.length === 0 && (
+        <div className="card" style={{ padding:'22px 16px', textAlign:'center', color:'#15803D', fontSize:13 }}>
+          ✓ Nothing flagged right now — every high-opportunity call is on a capable tech.
+        </div>
+      )}
+
+      {(data?.swaps || []).length > 0 && !onlyFlagged && (
         <div style={{ marginBottom:16 }}>
           {data.swaps.map((sw, i) => (
             <div key={i} className="card" style={{ padding:'12px 15px', marginBottom:9, borderLeft:'3px solid var(--accent)' }}>
@@ -347,10 +369,22 @@ function LiveBoard() {
                     #{c.jobNumber} ↗
                   </a>
                   <div style={{ fontSize:10, color:'var(--text-muted)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }} title={c.jobType}>{c.jobType}</div>
+                  {/* Shown on every row, not just flagged ones: otherwise the
+                      notes signal is invisible on the calls it didn't flag and
+                      it looks like the notes aren't being read at all. */}
+                  {c.systemAge != null && (
+                    <span title="Age of the system, read from the job notes"
+                      style={{ display:'inline-block', marginTop:3, fontSize:9, fontWeight:700,
+                        color:'#B45309', background:'#FBF3E0', border:'1px solid #F0DCA8',
+                        padding:'1px 5px', borderRadius:99 }}>
+                      ~{c.systemAge} yr system
+                    </span>
+                  )}
                 </td>
                 <td style={{ padding:'7px 12px' }}>{c.techName}</td>
                 <td style={{ padding:'7px 12px' }}><TierPill tier={c.techTier} /></td>
-                <td style={{ padding:'7px 12px', textAlign:'right', fontWeight:700,
+                <td title={(c.opportunityReasons || []).join(' · ') || 'no opportunity signals'}
+                  style={{ padding:'7px 12px', textAlign:'right', fontWeight:700, cursor:'help',
                   color: c.opportunity >= 3 ? '#B91C1C' : 'var(--text-muted)' }}>{c.opportunity}</td>
                 <td style={{ padding:'7px 12px' }}>
                   {(c.flags || []).map((f, k) => (
