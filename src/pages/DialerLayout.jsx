@@ -11,6 +11,7 @@ import CampaignsPage from './CampaignsPage'
 import DashboardPage from './DashboardPage'
 import LivePage from './LivePage'
 import CallBoardPage from './CallBoardPage'
+import DispatchPage from './DispatchPage'
 import NotesPage from './NotesPage'
 import AdminPage from './AdminPage'
 import WarRoomPage from './WarRoomPage'
@@ -141,6 +142,7 @@ const NAV_ITEMS = [
   { to:'/', label:'Dialer', iconKey:'dialer', end:true },
   { to:'/live', label:'Live Dashboard', iconKey:'live' },
   { to:'/callboard', label:'Call Board', iconKey:'board' },
+  { to:'/dispatch', label:'Dispatch', iconKey:'board', adminOnly:true },
   { to:'/analytics', label:'Analytics', iconKey:'analytics' },
   { to:'/recordings', label:'Recordings', iconKey:'recordings' },
   { to:'/attendance', label:'WFM', iconKey:'wfm' },
@@ -155,6 +157,7 @@ const PAGE_META = {
   '/':            { title: 'Dialer',                subtitle: 'Work your call queue' },
   '/live':        { title: 'Live Dashboard',        subtitle: 'Real-time floor activity' },
   '/callboard':   { title: '3-Day Call Board',       subtitle: 'Repair & replacement capacity' },
+  '/dispatch':    { title: 'Dispatch for Profit',    subtitle: 'Send the right tech to the right call' },
   '/analytics':   { title: 'Analytics',             subtitle: 'Performance and pipeline' },
   '/recordings':  { title: 'Recordings',            subtitle: 'Call playback and review' },
   '/attendance':  { title: 'Workforce Management',  subtitle: 'Schedule, adherence, and points' },
@@ -534,7 +537,7 @@ function DialerLayoutInner() {
 
         {/* Nav links */}
         <div style={{ flex:1, overflowY:'auto', padding:'10px 8px', display:'flex', flexDirection:'column' }}>
-          {NAV_ITEMS.map(({ to, label, iconKey, end }) => (
+          {NAV_ITEMS.filter(n => !n.adminOnly || isAdmin).map(({ to, label, iconKey, end }) => (
             <NavLink key={to} to={to} end={end} style={navLinkStyle} title={navCollapsed ? label : undefined}
               onMouseEnter={e => { const isActive = e.currentTarget.style.fontWeight === '600'; handleNavHover(e, isActive) }}
               onMouseLeave={e => { const isActive = e.currentTarget.style.fontWeight === '600'; handleNavLeave(e, isActive) }}>
@@ -749,6 +752,7 @@ function DialerLayoutInner() {
           <Route path="/" element={<DialerPage />} />
           <Route path="/live" element={<LivePage />} />
           <Route path="/callboard" element={<CallBoardPage />} />
+          {isAdmin && <Route path="/dispatch" element={<DispatchPage />} />}
           <Route path="/analytics" element={<DashboardPage />} />
           <Route path="/recordings" element={<RecordingsPage />} />
           <Route path="/attendance" element={<AttendancePage />} />

@@ -302,3 +302,42 @@ alter table st_leads add column if not exists booked_job_id bigint;
 alter table st_leads add column if not exists booked_job_number text;
 alter table st_leads add column if not exists booked_at timestamptz;
 alter table st_leads add column if not exists st_customer_id bigint;
+
+-- ── Dispatch for Profit: cached tech scorecard ───────────────────────────────
+-- Computing the batting order touches ~100 ServiceTitan endpoints (45 days of
+-- appointments, assignment batches, estimates, invoices, memberships) and takes
+-- minutes, so it CANNOT run on page load. A scheduled job writes this table and
+-- the UI reads it. refreshed_at drives the "as of" stamp.
+create table if not exists dispatch_tech_scores (
+  id             bigserial primary key,
+  tech_id        bigint not null,
+  tech_name      text,
+  business_unit  text not null,
+  jobs           integer not null default 0,      -- raw job count (sample size)
+  conversion     numeric,                          -- % of estimates sold
+  avg_ticket     numeric,                          -- MEDIAN non-zero invoice
+  membership_pct numeric,                          -- memberships sold per job
+  score          numeric,                          -- weighted z-score vs peers in BU
+  tier           text,                             -- green | yellow | red | unranked
+  rank           integer,
+  window_days    integer not null default 45,
+  refreshed_at   timestamptz not null default now(),
+  unique (tech_id, business_unit)
+);
+create index if not exists dispatch_scores_bu_idx on dispatch_tech_scores (business_unit, rank);
+
+-- Zip value, computed from real invoice history (not assumptions).
+create table if not exists dispatch_zip_value (
+  zip           text primary key,
+  avg_ticket    numeric,
+  job_count     integer,
+  tier          text,          -- high | mid | low
+  refreshed_at  timestamptz not null default now()
+);
+
+alter table dispatch_tech_scores enable row level security;
+alter table dispatch_zip_value  enable row level security;
+drop policy if exists "Authenticated read tech scores" on dispatch_tech_scores;
+create policy "Authenticated read tech scores" on dispatch_tech_scores for select to authenticated using (true);
+drop policy if exists "Authenticated read zip value" on dispatch_zip_value;
+create policy "Authenticated read zip value" on dispatch_zip_value for select to authenticated using (true);

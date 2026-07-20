@@ -6,6 +6,7 @@ import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
 import { existsSync } from 'fs'
 import { renderBoardEmail, boardEmailSubject } from './lib/boardEmail.js'
+import { computeBattingOrder, computeZipValue, DEFAULT_WEIGHTS } from './lib/dispatchMetrics.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
@@ -2450,6 +2451,296 @@ app.post('/api/twilio/hangup', async (req, res) => {
 })
 
 // ═══════════════════════════════════════════════════════════════════════════
+// DISPATCH FOR PROFIT
+//
+// Two surfaces:
+//  - Batting Order: which tech to send, ranked within each business unit.
+//    CACHED — computing it touches ~100 ST endpoints over 45 days and takes
+//    minutes, so a scheduled job writes dispatch_tech_scores and the UI reads
+//    that. Never compute this on request.
+//  - Live Board Analyzer: today's dispatch board scored against those ranks.
+//    Cheap enough to compute per request (today only).
+//
+// Scoring definitions and the ST filter traps live in lib/dispatchMetrics.js —
+// read that before changing any metric.
+// ═══════════════════════════════════════════════════════════════════════════
+
+const DISPATCH_WINDOW_DAYS = Number(process.env.DISPATCH_WINDOW_DAYS || 45)
+const DISPATCH_REFRESH_HOURS = Number(process.env.DISPATCH_REFRESH_HOURS || 6)
+const DISPATCH_WEIGHTS_KEY = 'dispatch_weights'
+
+async function getDispatchWeights() {
+  const { data } = await supabase.from('app_settings').select('value').eq('key', DISPATCH_WEIGHTS_KEY).maybeSingle()
+  try {
+    const w = JSON.parse(data?.value || '{}')
+    if (w && Number(w.conversion) >= 0) return { conversion: +w.conversion, avgTicket: +w.avgTicket, membership: +w.membership }
+  } catch {}
+  return DEFAULT_WEIGHTS
+}
+
+// Resolve technician per job. appointment-assignments ignores jobIds and date
+// filters (verified — asking for a date range returns 2024 data); only
+// appointmentIds works, batched ~50 at a time.
+async function assignmentsForAppointments(appointmentIds) {
+  const out = []
+  for (let i = 0; i < appointmentIds.length; i += 50) {
+    try {
+      const d = await stGet(`/dispatch/v2/tenant/${ST_TENANT_ID}/appointment-assignments?appointmentIds=${appointmentIds.slice(i, i + 50).join(',')}&pageSize=200`)
+      out.push(...(d?.data || []))
+    } catch (e) { console.warn('dispatch assignments batch failed:', e.message) }
+  }
+  return out
+}
+
+async function fetchDispatchWindow(days = DISPATCH_WINDOW_DAYS) {
+  const since = new Date(Date.now() - days * 864e5).toISOString().slice(0, 10)
+  const [jobs, estimates, invoices, memberships, buRes] = await Promise.all([
+    stPageAll(p => `/jpm/v2/tenant/${ST_TENANT_ID}/jobs?jobStatus=Completed&completedOnOrAfter=${since}&pageSize=200&page=${p}`, 20000),
+    stPageAll(p => `/sales/v2/tenant/${ST_TENANT_ID}/estimates?createdOnOrAfter=${since}&pageSize=500&page=${p}`, 20000),
+    stPageAll(p => `/accounting/v2/tenant/${ST_TENANT_ID}/invoices?createdOnOrAfter=${since}&pageSize=500&page=${p}`, 20000),
+    stPageAll(p => `/memberships/v2/tenant/${ST_TENANT_ID}/memberships?createdOnOrAfter=${since}&pageSize=500&page=${p}`, 20000),
+    stGet(`/settings/v2/tenant/${ST_TENANT_ID}/business-units?pageSize=200`),
+  ])
+  const appts = await stPageAll(p => `/jpm/v2/tenant/${ST_TENANT_ID}/appointments?startsOnOrAfter=${since}T00:00:00Z&pageSize=500&page=${p}`, 20000)
+  const assignments = await assignmentsForAppointments(appts.map(a => a.id))
+  return { jobs, estimates, invoices, memberships, assignments, businessUnits: buRes?.data || [] }
+}
+
+async function refreshDispatchScores() {
+  const started = Date.now()
+  try {
+    const weights = await getDispatchWeights()
+    const data = await fetchDispatchWindow()
+    const ranked = computeBattingOrder(data, weights, { now: Date.now() })
+    const stamp = new Date().toISOString()
+
+    if (ranked.length) {
+      const rows = ranked.map(r => ({
+        tech_id: r.techId, tech_name: r.techName, business_unit: r.businessUnit,
+        jobs: r.jobs, conversion: r.conversion, avg_ticket: r.avgTicket,
+        membership_pct: r.membershipPct, score: r.score, tier: r.tier, rank: r.rank,
+        window_days: DISPATCH_WINDOW_DAYS, refreshed_at: stamp,
+      }))
+      const { error } = await supabase.from('dispatch_tech_scores')
+        .upsert(rows, { onConflict: 'tech_id,business_unit' })
+      if (error) throw new Error('scores upsert: ' + error.message)
+      // Drop stale rows — a tech who moved BUs would otherwise linger forever.
+      await supabase.from('dispatch_tech_scores').delete().lt('refreshed_at', stamp)
+    }
+
+    const zips = computeZipValue(data.invoices)
+    if (zips.length) {
+      await supabase.from('dispatch_zip_value').upsert(
+        zips.map(z => ({ zip: z.zip, avg_ticket: z.avgTicket, job_count: z.jobCount, tier: z.tier, refreshed_at: stamp })),
+        { onConflict: 'zip' })
+    }
+    console.log(`DISPATCH: scored ${ranked.length} tech-groups, ${zips.length} zips in ${Math.round((Date.now() - started) / 1000)}s`)
+    return { ranked: ranked.length, zips: zips.length, refreshedAt: stamp }
+  } catch (err) {
+    console.error('DISPATCH: refresh FAILED:', err.stack || err.message)
+    throw err
+  }
+}
+
+app.get('/api/dispatch/batting-order', async (req, res) => {
+  if (!(await requireAdmin(req, res))) return
+  try {
+    const [{ data: rows }, weights] = await Promise.all([
+      supabase.from('dispatch_tech_scores').select('*').order('business_unit').order('rank', { nullsFirst: false }),
+      getDispatchWeights(),
+    ])
+    res.json({
+      weights,
+      windowDays: DISPATCH_WINDOW_DAYS,
+      refreshedAt: rows?.[0]?.refreshed_at || null,
+      groups: rows || [],
+    })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+app.post('/api/dispatch/refresh', async (req, res) => {
+  if (!(await requireAdmin(req, res))) return
+  try { res.json(await refreshDispatchScores()) }
+  catch (err) { res.status(500).json({ error: err.message }) }
+})
+
+app.post('/api/dispatch/weights', async (req, res) => {
+  if (!(await requireAdmin(req, res))) return
+  try {
+    const w = req.body?.weights || {}
+    const clean = {
+      conversion: Math.max(0, Number(w.conversion) || 0),
+      avgTicket: Math.max(0, Number(w.avgTicket) || 0),
+      membership: Math.max(0, Number(w.membership) || 0),
+    }
+    if (clean.conversion + clean.avgTicket + clean.membership === 0) {
+      return res.status(400).json({ error: 'Weights cannot all be zero.' })
+    }
+    const { error } = await supabase.from('app_settings')
+      .upsert({ key: DISPATCH_WEIGHTS_KEY, value: JSON.stringify(clean) }, { onConflict: 'key' })
+    if (error) throw new Error(error.message)
+    res.json({ ok: true, weights: clean, note: 'Applies on the next refresh.' })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// ── Live Board Analyzer ─────────────────────────────────────────────────────
+// How valuable is this call likely to be? Deliberately explainable: a
+// dispatcher who can't see WHY a call is flagged won't trust the flag.
+const HIGH_VALUE_RE = /replace|replacement|install|estimate|system|upgrade|new /i
+const LOW_VALUE_RE = /maintenance|tune|inspection|filter|follow.?up|callback|warranty|permit/i
+
+function scoreOpportunity(jobTypeName, zipTier, isMember) {
+  const reasons = []
+  let score = 0
+  if (HIGH_VALUE_RE.test(jobTypeName || '')) { score += 3; reasons.push('replacement/install job type') }
+  if (LOW_VALUE_RE.test(jobTypeName || '')) { score -= 2; reasons.push('routine job type') }
+  if (zipTier === 'high') { score += 2; reasons.push('high-ticket zip') }
+  if (zipTier === 'low') { score -= 1 }
+  if (isMember === false) { score += 1; reasons.push('non-member — membership opportunity') }
+  return { score, reasons }
+}
+
+app.get('/api/dispatch/live-board', async (req, res) => {
+  if (!(await requireAdmin(req, res))) return
+  try {
+    const dayStart = new Date(); dayStart.setHours(0, 0, 0, 0)
+    const appts = (await stPageAll(p => `/jpm/v2/tenant/${ST_TENANT_ID}/appointments?startsOnOrAfter=${dayStart.toISOString()}&pageSize=500&page=${p}`, 3000))
+      .filter(a => a.start && String(a.start).slice(0, 10) === new Date().toISOString().slice(0, 10))
+    const assignments = await assignmentsForAppointments(appts.map(a => a.id))
+
+    const jobIds = [...new Set(assignments.map(a => a.jobId).filter(Boolean))]
+    const jobs = []
+    for (let i = 0; i < jobIds.length; i += 50) {
+      try {
+        const d = await stGet(`/jpm/v2/tenant/${ST_TENANT_ID}/jobs?ids=${jobIds.slice(i, i + 50).join(',')}&pageSize=50`)
+        jobs.push(...(d?.data || []))
+      } catch (e) { console.warn('live-board jobs batch:', e.message) }
+    }
+    const [jtRes, buRes, { data: scores }, { data: zipRows }] = await Promise.all([
+      stGet(`/jpm/v2/tenant/${ST_TENANT_ID}/job-types?pageSize=500`),
+      stGet(`/settings/v2/tenant/${ST_TENANT_ID}/business-units?pageSize=200`),
+      supabase.from('dispatch_tech_scores').select('*'),
+      supabase.from('dispatch_zip_value').select('zip, tier, avg_ticket'),
+    ])
+    const jtName = new Map((jtRes?.data || []).map(t => [t.id, t.name || '']))
+    const buName = new Map((buRes?.data || []).map(b => [b.id, b.name || '']))
+    const zipTier = new Map((zipRows || []).map(z => [z.zip, z.tier]))
+    const scoreOf = new Map((scores || []).map(s => [`${s.tech_id}|${s.business_unit}`, s]))
+    const bestByBU = new Map()
+    for (const s of (scores || [])) {
+      if (s.tier !== 'green') continue
+      const cur = bestByBU.get(s.business_unit)
+      if (!cur || (s.score ?? -99) > (cur.score ?? -99)) bestByBU.set(s.business_unit, s)
+    }
+
+    // Jobs carry locationId and customerId but not the zip or membership status,
+    // so resolve both in batches. Today-only, so this is a handful of calls —
+    // without it the zip and membership signals silently never fire and every
+    // opportunity score collapses to "job type name".
+    const locIds = [...new Set(jobs.map(j => j.locationId).filter(Boolean))]
+    const zipOfLoc = new Map()
+    for (let i = 0; i < locIds.length; i += 50) {
+      try {
+        const d = await stGet(`/crm/v2/tenant/${ST_TENANT_ID}/locations?ids=${locIds.slice(i, i + 50).join(',')}&pageSize=50`)
+        for (const l of (d?.data || [])) zipOfLoc.set(l.id, String(l.address?.zip || '').trim().slice(0, 5))
+      } catch (e) { console.warn('live-board locations batch:', e.message) }
+    }
+    const custIds = [...new Set(jobs.map(j => j.customerId).filter(Boolean))]
+    const memberCust = new Set()
+    for (let i = 0; i < custIds.length; i += 50) {
+      try {
+        const d = await stGet(`/memberships/v2/tenant/${ST_TENANT_ID}/memberships?customerIds=${custIds.slice(i, i + 50).join(',')}&status=Active&pageSize=200`)
+        for (const m of (d?.data || [])) if (m.customerId) memberCust.add(m.customerId)
+      } catch (e) { console.warn('live-board memberships batch:', e.message) }
+    }
+
+    const jobById = new Map(jobs.map(j => [j.id, j]))
+    const apptById = new Map(appts.map(a => [a.id, a]))
+    const calls = []
+    for (const a of assignments) {
+      const j = jobById.get(a.jobId)
+      if (!j) continue
+      const bu = buName.get(j.businessUnitId) || 'Unassigned'
+      const jt = jtName.get(j.jobTypeId) || ''
+      const zip = zipOfLoc.get(j.locationId) || ''
+      const isMember = j.customerId ? memberCust.has(j.customerId) : null
+      const opp = scoreOpportunity(jt, zipTier.get(zip), isMember)
+      const techScore = scoreOf.get(`${a.technicianId}|${bu}`) || null
+      const best = bestByBU.get(bu) || null
+
+      const flags = []
+      if (opp.score >= 3 && techScore && techScore.tier === 'red') {
+        flags.push({
+          level: 'warn',
+          text: `High-opportunity call on a red-tier tech${best && best.tech_id !== a.technicianId ? ` — consider ${best.tech_name}` : ''}`,
+          why: opp.reasons,
+        })
+      } else if (opp.score >= 3 && (!techScore || techScore.tier === 'unranked')) {
+        flags.push({
+          level: 'info',
+          text: `High-opportunity call on a tech with no ranking yet${best ? ` — ${best.tech_name} is your strongest here` : ''}`,
+          why: opp.reasons,
+        })
+      }
+
+      calls.push({
+        appointmentId: a.appointmentId, jobId: j.id, jobNumber: j.jobNumber,
+        start: apptById.get(a.appointmentId)?.start || null,
+        businessUnit: bu, jobType: jt,
+        zip, isMember,
+        techId: a.technicianId, techName: a.technicianName,
+        techTier: techScore?.tier || 'unranked',
+        techConversion: techScore?.conversion ?? null,
+        techTicket: techScore?.avg_ticket ?? null,
+        opportunity: opp.score, opportunityReasons: opp.reasons,
+        flags,
+      })
+    }
+
+    // Swap suggestion: within one business unit, a high-opportunity call sitting
+    // on a red tech while a green tech has a routine one. Only surfaced as a
+    // suggestion — Andi never writes assignments back to ServiceTitan.
+    const swaps = []
+    const byBU = new Map()
+    for (const c of calls) {
+      if (!byBU.has(c.businessUnit)) byBU.set(c.businessUnit, [])
+      byBU.get(c.businessUnit).push(c)
+    }
+    for (const [bu, list] of byBU) {
+      const misplaced = list.filter(c => c.opportunity >= 3 && c.techTier === 'red')
+      const underused = list.filter(c => c.opportunity <= 0 && c.techTier === 'green')
+      for (let i = 0; i < Math.min(misplaced.length, underused.length); i++) {
+        swaps.push({
+          businessUnit: bu,
+          from: { jobNumber: misplaced[i].jobNumber, tech: misplaced[i].techName, jobType: misplaced[i].jobType },
+          to: { jobNumber: underused[i].jobNumber, tech: underused[i].techName, jobType: underused[i].jobType },
+          text: `Swap: ${misplaced[i].techName} has the ${misplaced[i].jobType} (#${misplaced[i].jobNumber}) while ${underused[i].techName} has a routine ${underused[i].jobType}`,
+        })
+      }
+    }
+
+    calls.sort((a, b) => String(a.start || '').localeCompare(String(b.start || '')))
+    res.json({
+      generatedAt: new Date().toISOString(),
+      scoresRefreshedAt: (scores || [])[0]?.refreshed_at || null,
+      calls, swaps,
+      counts: {
+        total: calls.length,
+        flagged: calls.filter(c => c.flags.length).length,
+        unrankedTechs: calls.filter(c => c.techTier === 'unranked').length,
+      },
+    })
+  } catch (err) {
+    console.error('live-board error:', err.message)
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
 // 3-DAY CALL BOARD — daily email to leadership.
 //
 // SAFETY: the scheduled send is inert unless BOARD_EMAIL_TO is set. Deploying
@@ -3330,6 +3621,16 @@ if (BOARD_EMAIL_TO && RESEND_KEY) {
   console.log(`Board email daily at ${BOARD_EMAIL_HOUR}:00 ${BOARD_EMAIL_TZ} to ${BOARD_EMAIL_TO}`)
 } else {
   console.log('Board email scheduler off (set BOARD_EMAIL_TO to enable)')
+}
+
+// Dispatch scores: expensive (~100 ST calls), so refreshed on a slow cycle
+// rather than on demand. Staggered past boot so a deploy doesn't stampede ST.
+if (DISPATCH_REFRESH_HOURS > 0) {
+  setTimeout(() => {
+    refreshDispatchScores().catch(() => {})
+    setInterval(() => refreshDispatchScores().catch(() => {}), DISPATCH_REFRESH_HOURS * 3600_000)
+  }, 120_000)
+  console.log(`Dispatch scores refresh every ${DISPATCH_REFRESH_HOURS}h (${DISPATCH_WINDOW_DAYS}d window)`)
 }
 
 if (LEAD_POLL_SECONDS > 0) {
