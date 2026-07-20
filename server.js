@@ -3468,6 +3468,7 @@ app.post('/api/dispatch/decide', async (req, res) => {
       return {
         jobNumber: pick.jobNumber,
         name: pick.name,
+        score: pick.score,
         why: pick.reasons.length ? pick.reasons.join(' · ') : 'no age, value or area signals — routine work',
         // Even the SAFEST call carrying opportunity signals is a real cost;
         // say so instead of presenting the bump as free.
@@ -3491,42 +3492,59 @@ app.post('/api/dispatch/decide', async (req, res) => {
         tech: top,
       }
     } else {
-      // Full — is the upside worth a bump? "Must run today" skips that math
-      // entirely: the dispatcher has decided it runs, our job is the least-bad
-      // placement, not the worth-it question.
-      const bump = bumpFor(top.techId)
-      const worthBumping = urgent || (top.expectedValue >= 800 && opp.score >= 2)
-      if (worthBumping && bump) {
-        recommendation = {
-          action: 'book_bump',
-          text: `${urgent ? 'Override — ' : ''}Book it on ${top.techName}, and reschedule #${bump.jobNumber} (${bump.name})`,
-          tech: top, bump,
-        }
-      } else if (urgent) {
-        // Top pick has nothing movable — walk the rest of the bench for anyone
-        // with room or a movable call.
-        const alt = options.find(o => o.hasRoom) ||
-          options.map(o => ({ o, b: bumpFor(o.techId) })).find(x => x.b)
-        if (alt && alt.hasRoom) {
-          recommendation = { action: 'book_assign', text: `Override — book it and put it on ${alt.techName}`, tech: alt }
-        } else if (alt && alt.b) {
+      // Full — a bump has to BUY something. The first version only asked "is
+      // the new job valuable?", never "more valuable than what it displaces?"
+      // — so it recommended evicting an HVAC Estimate to book an identical
+      // HVAC Estimate: zero net revenue plus one rescheduled customer.
+      //
+      // Decision order when the top tech is full:
+      //   normal: profitable bump (new call out-scores displaced by 2+, on a
+      //           tech worth sending) → a lower tech with room → hold.
+      //   override: someone with room → profitable bump → any bump → the day
+      //             is physically closed.
+      const bumped = options.map(o => ({ o, b: bumpFor(o.techId) })).filter(x => x.b)
+      const profitable = bumped.find(x =>
+        x.o.expectedValue >= 800 && (opp.score - x.b.score) >= 2)
+      const roomy = options.find(o => o.hasRoom)   // top is full; someone below may not be
+
+      if (!urgent) {
+        if (profitable) {
           recommendation = {
             action: 'book_bump',
-            text: `Override — book it on ${alt.o.techName}, and reschedule #${alt.b.jobNumber} (${alt.b.name})`,
-            tech: alt.o, bump: alt.b,
+            text: `Book it on ${profitable.o.techName}, and reschedule #${profitable.b.jobNumber} (${profitable.b.name})`,
+            tech: profitable.o, bump: profitable.b,
+          }
+        } else if (roomy) {
+          recommendation = {
+            action: 'book_assign',
+            text: `Book it and put it on ${roomy.techName} — stronger techs are full, and swapping their work buys nothing`,
+            tech: roomy,
+          }
+        } else {
+          recommendation = {
+            action: 'hold',
+            text: opp.score < 2
+              ? 'Not worth disrupting today — schedule it for the next open day'
+              : bumped.length
+                ? `Everyone is full and nothing on their plates is worth less than this call — a swap buys nothing. Hold for the next open day, or check "Must run today" to force it.`
+                : `Everyone is full with work that can't move — hold for the next open day`,
+          }
+        }
+      } else {
+        if (roomy) {
+          recommendation = { action: 'book_assign', text: `Override — book it and put it on ${roomy.techName}`, tech: roomy }
+        } else if (bumped.length) {
+          const pick2 = profitable || bumped[0]
+          recommendation = {
+            action: 'book_bump',
+            text: `Override — book it on ${pick2.o.techName}, and reschedule #${pick2.b.jobNumber} (${pick2.b.name})`,
+            tech: pick2.o, bump: pick2.b,
           }
         } else {
           recommendation = {
             action: 'no_slot',
             text: 'Every available tech is full and nothing on their plates can move — it physically has to go to another day.',
           }
-        }
-      } else {
-        recommendation = {
-          action: 'hold',
-          text: opp.score < 2
-            ? 'Not worth disrupting today — schedule it for the next open day'
-            : `Everyone strong is full and the upside doesn't justify a bump — hold for the next open day`,
         }
       }
     }
