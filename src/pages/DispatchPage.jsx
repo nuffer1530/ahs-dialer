@@ -266,11 +266,24 @@ function LiveBoard() {
 
       {(data?.swaps || []).length > 0 && (
         <div style={{ marginBottom:16 }}>
-          {data.swaps.map((s, i) => (
-            <div key={i} className="card" style={{ padding:'11px 14px', marginBottom:8, borderLeft:'3px solid var(--accent)' }}>
-              <div style={{ fontSize:12, fontWeight:600, color:'var(--text-primary)' }}>🔁 {s.text}</div>
-              <div style={{ fontSize:11, color:'var(--text-muted)', marginTop:3 }}>
-                {s.businessUnit}{s.note ? ` · ${s.note}` : ''} · suggestion only — make the change in ServiceTitan
+          {data.swaps.map((sw, i) => (
+            <div key={i} className="card" style={{ padding:'12px 15px', marginBottom:9, borderLeft:'3px solid var(--accent)' }}>
+              <div style={{ display:'flex', alignItems:'baseline', justifyContent:'space-between', gap:10, flexWrap:'wrap' }}>
+                <div style={{ fontSize:12.5, fontWeight:700, color:'var(--text-primary)' }}>🔁 {sw.text}</div>
+                {sw.upside > 0 && (
+                  <span style={{ fontSize:11, fontWeight:700, color:'#15803D', background:'#EAF5EE',
+                    border:'1px solid #BBE3C9', padding:'2px 8px', borderRadius:99, whiteSpace:'nowrap' }}>
+                    +{money(sw.upside)} expected
+                  </span>
+                )}
+              </div>
+              {/* The reasoning matters more than the recommendation — a
+                  dispatcher who can't see WHY won't trust it, and shouldn't. */}
+              <ul style={{ margin:'7px 0 0 0', padding:'0 0 0 16px', fontSize:11, color:'var(--text-secondary)', lineHeight:1.65 }}>
+                {(sw.why || []).map((w, k) => <li key={k}>{w}</li>)}
+              </ul>
+              <div style={{ fontSize:10, color:'var(--text-muted)', marginTop:6 }}>
+                {sw.businessUnit} · suggestion only — make the change in ServiceTitan
               </div>
             </div>
           ))}

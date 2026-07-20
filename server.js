@@ -2738,18 +2738,8 @@ app.get('/api/dispatch/live-board', async (req, res) => {
     // almost nothing, while pulling someone down from Colorado Springs costs
     // an hour each way. KPIs still lead — proximity only chooses BETWEEN techs
     // who are good enough for the work, and never promotes a weak one.
-    // Straight-line miles between two jobs. NOT drive time — there is no
-    // routing service here — but enough to stop the tool proposing a swap
-    // across the county, which would cost more in windshield time than the
-    // revenue it chases.
-    const milesBetween = (a, b) => {
-      if (!a?.geo || !b?.geo) return null
-      const R = 3958.8, rad = (d) => (d * Math.PI) / 180
-      const dLat = rad(b.geo.lat - a.geo.lat), dLng = rad(b.geo.lng - a.geo.lng)
-      const h = Math.sin(dLat / 2) ** 2 + Math.cos(rad(a.geo.lat)) * Math.cos(rad(b.geo.lat)) * Math.sin(dLng / 2) ** 2
-      return 2 * R * Math.asin(Math.sqrt(h))
-    }
     const SWAP_MAX_MILES = 12
+    const SWAP_MAX_MIN = 25   // a swap that costs more than this in drive time isn't worth it
     // Declared here, above its use in the flag loop: `const` is not hoisted and
     // a TDZ ReferenceError here would be swallowed by the route's catch.
     const money0 = (v) => (v == null ? '—' : `$${Math.round(Number(v)).toLocaleString()}`)
@@ -2758,7 +2748,6 @@ app.get('/api/dispatch/live-board', async (req, res) => {
     const NEARBY_MIN = 20          // same idea once real drive time is available
     const DETOUR_MIN = 45
 
-    const geoMiles = (g1, g2) => milesBetween({ geo: g1 }, { geo: g2 })
 
     // Where is each tech working today?
     const techGeos = new Map()
@@ -2771,12 +2760,28 @@ app.get('/api/dispatch/live-board', async (req, res) => {
     // Resolve travel for every (candidate tech's job -> target job) pair we
     // might reason about, in one batched, cached call. With no Mapbox token
     // this returns empty and we fall back to straight-line below.
+    // Swap candidates, identified up front so their pairs ride along in the
+    // same batched travel lookup as the reassignment candidates.
+    const swapPool = new Map()   // team -> { misplaced, underused }
+    for (const c of calls) {
+      if (!c.rankable) continue
+      if (!swapPool.has(c.businessUnit)) swapPool.set(c.businessUnit, { misplaced: [], underused: [] })
+      const pool = swapPool.get(c.businessUnit)
+      if (c.opportunity >= 3 && c.techTier === 'red') pool.misplaced.push(c)
+      else if (c.opportunity <= 0 && c.techTier === 'green') pool.underused.push(c)
+    }
+
     const travelPairs = []
     for (const c of calls) {
       if (!c.rankable || c.opportunity < 3 || !c.geo) continue
       for (const [tid, gs] of techGeos) {
         if (tid === c.techId) continue
         for (const g of gs) travelPairs.push({ from: g, to: c.geo })
+      }
+    }
+    for (const { misplaced, underused } of swapPool.values()) {
+      for (const m of misplaced) for (const u of underused) {
+        if (m.geo && u.geo) travelPairs.push({ from: m.geo, to: u.geo })
       }
     }
     let travel = new Map()
@@ -2859,37 +2864,57 @@ app.get('/api/dispatch/live-board', async (req, res) => {
     // Andi never writes assignments back to ServiceTitan.
     const swaps = []
     const usedForSwap = new Set()
-    const byBU = new Map()
-    for (const c of calls) {
-      if (!byBU.has(c.businessUnit)) byBU.set(c.businessUnit, [])
-      byBU.get(c.businessUnit).push(c)
-    }
-    for (const [bu, list] of byBU) {
-      if (NON_DISPATCH_TEAM.test(bu)) continue
-      const misplaced = list.filter(c => c.opportunity >= 3 && c.techTier === 'red')
-      const underused = list.filter(c => c.opportunity <= 0 && c.techTier === 'green')
+    for (const [bu, pool] of swapPool) {
+      const { misplaced, underused } = pool
+      if (!misplaced.length || !underused.length) continue
+
       for (const m of misplaced) {
-        // Prefer the nearest viable partner rather than the first one found.
+        const mEV = Number(scoreOf.get(`${m.techId}|${bu}`)?.expected_value || 0)
+
         const partner = underused
           .filter(u => !usedForSwap.has(u.jobId))
-          .map(u => ({ u, miles: milesBetween(m, u) }))
-          .filter(x => x.miles == null || x.miles <= SWAP_MAX_MILES)
-          .sort((a, b) => (a.miles ?? 999) - (b.miles ?? 999))[0]
+          .map(u => {
+            const t = (m.geo && u.geo) ? (travel.get(pairKey(m.geo, u.geo)) || straightLine(m.geo, u.geo)) : null
+            return { u, t, uEV: Number(scoreOf.get(`${u.techId}|${bu}`)?.expected_value || 0) }
+          })
+          // Travel is a VETO, not a tiebreak: a swap that wrecks the route is
+          // not worth any revenue upside on a single call.
+          .filter(x => !x.t || (x.t.minutes != null ? x.t.minutes <= SWAP_MAX_MIN : x.t.miles <= SWAP_MAX_MILES))
+          .sort((a, b) => {
+            const ta = a.t?.minutes ?? a.t?.miles ?? 999
+            const tb = b.t?.minutes ?? b.t?.miles ?? 999
+            return (b.uEV - a.uEV) || (ta - tb)      // strongest partner, then closest
+          })[0]
+
         if (!partner) continue
         usedForSwap.add(partner.u.jobId)
-        const mi = partner.miles == null ? null : Math.round(partner.miles * 10) / 10
+
+        const t = partner.t
+        const travelText = !t ? 'distance unknown — check the map'
+          : t.minutes != null ? `${t.minutes} min drive between the two jobs`
+          : `~${t.miles} mi between the two jobs (straight line)`
+
+        const upside = Math.max(0, Math.round(partner.uEV - mEV))
+        const why = [
+          `#${m.jobNumber} scores ${m.opportunity} on opportunity (${m.opportunityReasons.join(' · ') || 'high-value job type'}) but is on ${m.techName}, your lowest earner on this bench`,
+          `${partner.u.techName} is rated "deploy here" (${money0(partner.uEV)}/opportunity vs ${money0(mEV)}) and is currently on a routine ${partner.u.jobType}`,
+          upside > 0 ? `Expected upside on #${m.jobNumber}: about ${money0(upside)}` : 'Similar earning power — swap only if convenient',
+          travelText,
+        ]
+
         swaps.push({
           businessUnit: bu,
-          miles: mi,
-          from: { jobNumber: m.jobNumber, tech: m.techName, jobType: m.jobType },
-          to: { jobNumber: partner.u.jobNumber, tech: partner.u.techName, jobType: partner.u.jobType },
-          text: `Swap: ${m.techName} has the ${m.jobType} (#${m.jobNumber}) while ${partner.u.techName} has a routine ${partner.u.jobType}`,
-          note: mi == null ? 'distance unknown — check the map' : `${mi} mi apart`,
+          travelMinutes: t?.minutes ?? null,
+          travelMiles: t?.miles ?? null,
+          upside,
+          from: { jobNumber: m.jobNumber, jobId: m.jobId, tech: m.techName, jobType: m.jobType, opportunity: m.opportunity },
+          to: { jobNumber: partner.u.jobNumber, jobId: partner.u.jobId, tech: partner.u.techName, jobType: partner.u.jobType },
+          text: `Give #${m.jobNumber} (${m.jobType}) to ${partner.u.techName}, and #${partner.u.jobNumber} (${partner.u.jobType}) to ${m.techName}`,
+          why,
         })
       }
     }
 
-    const ts = (v) => { const t = Date.parse(v || ''); return Number.isNaN(t) ? Infinity : t }
     calls.sort((a, b) => (ts(a.windowStart) - ts(b.windowStart)) || (ts(a.start) - ts(b.start)))
     res.json({
       generatedAt: new Date().toISOString(),
