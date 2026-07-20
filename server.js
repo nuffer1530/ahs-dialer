@@ -2619,12 +2619,46 @@ app.post('/api/dispatch/weights', async (req, res) => {
 // ── Live Board Analyzer ─────────────────────────────────────────────────────
 // How valuable is this call likely to be? Deliberately explainable: a
 // dispatcher who can't see WHY a call is flagged won't trust the flag.
+// Dispatchers read the notes to find the 20-year-old unit — that context never
+// reaches the structured equipment records (installed-equipment.installedOn is
+// the 2024-26 ServiceTitan onboarding date for every unit, and manufacturedOn
+// is empty), so the notes ARE the age signal. ~25% of jobs carry one.
+const AGE_PHRASE_RE = /(\d{1,2})\s*\+?\s*(?:year|yr)s?\s*old/i
+const AGE_YEAR_RE = /\b(19[89]\d|20[01]\d)\b/g
+const stripHtml = (v) => String(v || '').replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ')
+
+// Returns the age in years of the oldest system mentioned, or null.
+function systemAgeFromNotes(job, nowYear) {
+  const txt = stripHtml(`${job?.summary || ''} ${job?.summaryOfWork || ''}`)
+  let best = null
+  const m = txt.match(AGE_PHRASE_RE)
+  if (m) {
+    const n = Number(m[1])
+    if (n >= 8 && n <= 40) best = n
+  }
+  // Bare 4-digit years: only trust ones old enough to be an install year rather
+  // than a date reference, and cap at 40 so a stray "1985" in prose can't
+  // dominate.
+  for (const y of (txt.match(AGE_YEAR_RE) || [])) {
+    const age = nowYear - Number(y)
+    if (age >= 10 && age <= 40) best = Math.max(best ?? 0, age)
+  }
+  return best
+}
+
 const HIGH_VALUE_RE = /replace|replacement|install|estimate|system|upgrade|new /i
 const LOW_VALUE_RE = /maintenance|tune|inspection|filter|follow.?up|callback|warranty|permit/i
 
-function scoreOpportunity(jobTypeName, zipTier, isMember) {
+function scoreOpportunity(jobTypeName, zipTier, isMember, systemAge, isHvac) {
   const reasons = []
   let score = 0
+  // Age is the strongest signal in HVAC — an old system turns a no-cool call
+  // into a replacement conversation, which is why a dispatcher will hand a
+  // routine-looking maintenance to their best closer.
+  if (systemAge != null && systemAge >= 12) {
+    score += isHvac ? 3 : 1
+    reasons.push(`notes mention a ~${systemAge} yr old system`)
+  }
   if (HIGH_VALUE_RE.test(jobTypeName || '')) { score += 3; reasons.push('replacement/install job type') }
   if (LOW_VALUE_RE.test(jobTypeName || '')) { score -= 2; reasons.push('routine job type') }
   if (zipTier === 'high') { score += 2; reasons.push('high-ticket zip') }
@@ -2706,7 +2740,9 @@ app.get('/api/dispatch/live-board', async (req, res) => {
       const jt = jtName.get(j.jobTypeId) || ''
       const zip = zipOfLoc.get(j.locationId) || ''
       const isMember = j.customerId ? memberCust.has(j.customerId) : null
-      const opp = scoreOpportunity(jt, zipTier.get(zip), isMember)
+      const isHvac = /hvac/i.test(bu) || /hvac/i.test(jt)
+      const systemAge = systemAgeFromNotes(j, new Date().getFullYear())
+      const opp = scoreOpportunity(jt, zipTier.get(zip), isMember, systemAge, isHvac)
       const techScore = scoreOf.get(`${a.technicianId}|${bu}`) || null
 
       const ap = apptById.get(a.appointmentId) || {}
@@ -2720,7 +2756,7 @@ app.get('/api/dispatch/live-board', async (req, res) => {
         windowStart: ap.arrivalWindowStart || ap.start || null,
         windowEnd: ap.arrivalWindowEnd || ap.end || null,
         businessUnit: bu, jobType: jt,
-        zip, isMember, geo: geoOfLoc.get(j.locationId) || null,
+        zip, isMember, systemAge, geo: geoOfLoc.get(j.locationId) || null,
         techId: a.technicianId, techName: a.technicianName,
         techTier: techScore?.tier || 'unranked',
         techCloseRate: techScore?.close_rate ?? null,
@@ -2804,6 +2840,40 @@ app.get('/api/dispatch/live-board', async (req, res) => {
       return best
     }
 
+    // Callboard capacity: HVAC runs 3 calls a day (4 if pushed), other trades 4
+    // (5 if pushed). Shared with the 3-Day Board via app_settings so the two
+    // screens can't disagree about what a full day is.
+    const { data: cptRow } = await supabase.from('app_settings')
+      .select('value').eq('key', 'board_calls_per_tech').maybeSingle()
+    let callsPerTech = {}
+    try { callsPerTech = JSON.parse(cptRow?.value || '{}') } catch {}
+    const tradeOfTeam = (team) => {
+      const t = String(team || '')
+      if (/hvac/i.test(t)) return 'HVAC'
+      if (/plumb/i.test(t)) return 'Plumbing'
+      if (/electric/i.test(t)) return 'Electrical'
+      if (/garage/i.test(t)) return 'Garage Door'
+      return 'Other'
+    }
+    const capacityFor = (team) => {
+      const base = Number(callsPerTech[tradeOfTeam(team)]) || 3   // HVAC default 3
+      return { target: base, stretch: base + 1 }
+    }
+
+    const loadByTech = new Map()
+    for (const c of calls) {
+      if (!c.techId) continue
+      loadByTech.set(c.techId, (loadByTech.get(c.techId) || 0) + 1)
+    }
+    // If a suggested tech is already full, the lowest-value call on their plate
+    // is the one to move — low-dollar work is what gets rescheduled to make room
+    // for demand opportunities.
+    const bumpCandidate = (techId, exceptJobId) => {
+      const theirs = calls.filter(c => c.techId === techId && c.jobId !== exceptJobId)
+      if (!theirs.length) return null
+      return [...theirs].sort((a, b) => (a.opportunity - b.opportunity))[0]
+    }
+
     const scoresByTeam = new Map()
     for (const sc of (scores || [])) {
       if (!scoresByTeam.has(sc.business_unit)) scoresByTeam.set(sc.business_unit, [])
@@ -2848,12 +2918,30 @@ app.get('/api/dispatch/live-board', async (req, res) => {
           ? (isNear(pick) ? `already working ${t.minutes} min away` : `${t.minutes} min drive from their nearest job today`)
           : (isNear(pick) ? `already working ~${t.miles} mi away (straight line)` : `~${t.miles} mi away (straight line)`)
 
+      const cap = capacityFor(c.businessUnit)
+      const load = loadByTech.get(pick.s.tech_id) || 0
+      const why = [...c.opportunityReasons,
+                   `${pick.s.tech_name}: ${Math.round(Number(pick.s.close_rate || 0))}% close · ${money0(pick.s.avg_sale)} avg sale`,
+                   where]
+
+      // Never suggest a move without saying what it costs the receiving tech.
+      if (load >= cap.target) {
+        const bump = bumpCandidate(pick.s.tech_id, c.jobId)
+        const atCap = load >= cap.stretch
+        why.push(
+          `${pick.s.tech_name} already has ${load} call${load === 1 ? '' : 's'} (${tradeOfTeam(c.businessUnit)} runs ${cap.target}, ${cap.stretch} if pushed)` +
+          (atCap ? ' — at the stretch limit' : ''))
+        if (bump) {
+          why.push(`Lowest-value call on their plate to move: #${bump.jobNumber} (${bump.jobType}${bump.opportunity <= 0 ? ', routine' : ''})`)
+        }
+      } else {
+        why.push(`${pick.s.tech_name} has room today (${load} of ${cap.target})`)
+      }
+
       c.flags.push({
         level: c.techTier === 'red' ? 'warn' : 'info',
         text: `High-opportunity call on ${c.techTier === 'red' ? 'a red-tier tech' : 'an unranked tech'} — consider ${pick.s.tech_name}`,
-        why: [...c.opportunityReasons,
-              `${pick.s.tech_name}: ${Math.round(Number(pick.s.close_rate || 0))}% close · ${money0(pick.s.avg_sale)} avg sale`,
-              where],
+        why,
       })
     }
 
