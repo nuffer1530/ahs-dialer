@@ -329,24 +329,25 @@ function LiveBoard() {
           <div>
             <div style={{ fontSize:19, fontWeight:800, color:'#15803D', lineHeight:1.1 }}>{money(rev.booked)}</div>
             <div style={{ fontSize:10, color:'var(--text-muted)', textTransform:'uppercase', letterSpacing:.5 }}>
-              Booked today · {rev.bookedJobs} install{rev.bookedJobs === 1 ? '' : 's'}
+              Scheduled to close today · {rev.bookedJobs} install{rev.bookedJobs === 1 ? '' : 's'}
             </div>
           </div>
           <div style={{ width:1, alignSelf:'stretch', background:'var(--border)' }} />
           <div>
             <div style={{ fontSize:19, fontWeight:800, color:'var(--text-primary)', lineHeight:1.1 }}>{money(rev.expected)}</div>
             <div style={{ fontSize:10, color:'var(--text-muted)', textTransform:'uppercase', letterSpacing:.5 }}>
-              Expected from the board · {rev.opportunityCalls} opportunity call{rev.opportunityCalls === 1 ? '' : 's'}
+              Opportunity upside · {rev.opportunityCalls} call{rev.opportunityCalls === 1 ? '' : 's'}
             </div>
           </div>
           <div style={{ width:1, alignSelf:'stretch', background:'var(--border)' }} />
           <div>
             <div style={{ fontSize:19, fontWeight:800, color:'var(--accent)', lineHeight:1.1 }}>{money(rev.booked + rev.expected)}</div>
-            <div style={{ fontSize:10, color:'var(--text-muted)', textTransform:'uppercase', letterSpacing:.5 }}>Day total</div>
+            <div style={{ fontSize:10, color:'var(--text-muted)', textTransform:'uppercase', letterSpacing:.5 }}>Day potential</div>
           </div>
           <div style={{ flex:1, minWidth:180, fontSize:10, color:'var(--text-muted)', lineHeight:1.5 }}>
-            Booked is real — invoices on installs closing today. Expected is probability-weighted
-            from each tech's earning power and moves as the board changes.
+            Forward-looking, not revenue earned so far. Left: invoiced value of installs whose LAST
+            day is today (a multi-day install counts once, on the day it finishes). Middle:
+            probability-weighted upside on calls that carry an opportunity signal — not money in hand.
           </div>
         </div>
       )}

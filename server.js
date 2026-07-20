@@ -2898,6 +2898,17 @@ app.get('/api/dispatch/live-board', async (req, res) => {
     for (const c of installJobs.slice(0, 40)) {
       if (bookedByJob.has(c.jobId)) continue
       try {
+        // MULTI-DAY INSTALLS: the invoice is the whole project value, not a
+        // daily figure. 5 of 12 installs on a sampled day spanned more than one
+        // day (one had 4 appointments over 3 days), so counting the invoice on
+        // every day it appeared reported $130k for a day that should read $65k.
+        // Count it once, on the day the job actually finishes.
+        const ja = await stGet(`/jpm/v2/tenant/${ST_TENANT_ID}/appointments?jobId=${c.jobId}&pageSize=20`)
+        const days = (ja?.data || []).map(a => String(a.start || '').slice(0, 10)).filter(Boolean).sort()
+        const lastDay = days[days.length - 1]
+        const todayStr = today.date
+        if (lastDay && lastDay !== todayStr) continue      // finishes another day
+
         const iv = await stGet(`/accounting/v2/tenant/${ST_TENANT_ID}/invoices?jobNumber=${encodeURIComponent(c.jobNumber)}&pageSize=5`)
         const tot = (iv?.data || []).reduce((a, x) => a + Number(x.total || 0), 0)
         if (tot > 0) bookedByJob.set(c.jobId, tot)
@@ -3044,7 +3055,12 @@ app.get('/api/dispatch/live-board', async (req, res) => {
     for (const c of calls) {
       const sc = scoreOf.get(`${c.techId}|${c.businessUnit}`)
       c.bookedRevenue = bookedByJob.get(c.jobId) || 0
-      c.expectedRevenue = c.bookedRevenue ? 0 : Math.round(Number(sc?.expected_value || 0))
+      // Expected applies ONLY to calls with a real opportunity signal. Applying
+      // a tech's per-opportunity earning power to every routine maintenance and
+      // filter change invented ~$135k of revenue on a 73-call day.
+      c.expectedRevenue = (c.bookedRevenue || INSTALL_TYPE.test(c.jobType || '') || c.opportunity < 1)
+        ? 0
+        : Math.round(Number(sc?.expected_value || 0))
       // Reschedule candidates: what to move when demand walks in. Installs are
       // sold work and phone/follow-ups take no truck time and must happen, so
       // both are out. Ranked by how little the call is likely to produce.
@@ -3057,7 +3073,7 @@ app.get('/api/dispatch/live-board', async (req, res) => {
       booked: Math.round([...bookedByJob.values()].reduce((a, b) => a + b, 0)),
       bookedJobs: bookedByJob.size,
       expected: Math.round(calls.reduce((a, c) => a + (c.expectedRevenue || 0), 0)),
-      opportunityCalls: calls.filter(c => c.opportunity >= 3).length,
+      opportunityCalls: calls.filter(c => c.expectedRevenue > 0).length,
       rescheduleCandidates: calls.filter(c => c.rescheduleCandidate).length,
     }
 
