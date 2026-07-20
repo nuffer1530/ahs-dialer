@@ -2697,7 +2697,12 @@ function scoreOpportunity(jobTypeName, zipTier, isMember, systemAge, isHvac) {
   // routine-looking maintenance to their best closer.
   if (systemAge != null && systemAge >= 12) {
     score += isHvac ? 3 : 1
-    reasons.push(`notes mention a ~${systemAge} yr old system`)
+    reasons.push(`~${systemAge} yr old system`)
+  } else if (systemAge != null && systemAge <= 8) {
+    // Age cuts BOTH ways: a 2-year-old no-cool is a warranty-flavored repair,
+    // not a replacement conversation — don't spend a closer's slot on it.
+    score -= isHvac ? 2 : 1
+    reasons.push(`young system (~${systemAge} yr) — repair, not replacement`)
   }
   if (HIGH_VALUE_RE.test(jobTypeName || '')) { score += 3; reasons.push('replacement/install job type') }
   // "13+" in the type name means an aging system even when the notes are
@@ -3270,6 +3275,11 @@ app.post('/api/dispatch/decide', async (req, res) => {
     const jobType = String(req.body?.jobType || '').trim()
     const address = String(req.body?.address || '').trim()
     const urgent = Boolean(req.body?.urgent)   // "must run today" override
+    // What the dispatcher already knows from the call. A new job has no ST
+    // notes yet, so this is the only way a "2-year-old no cool" reaches the
+    // model. Age can be typed directly or parsed out of the notes text.
+    const givenAge = req.body?.systemAge != null && req.body.systemAge !== '' ? Number(req.body.systemAge) : null
+    const callNotes = String(req.body?.notes || '').trim()
     if (!jobType) return res.status(400).json({ error: 'A job type is required.' })
 
     const trade = tradeOfJobType(jobType)
@@ -3285,7 +3295,8 @@ app.post('/api/dispatch/decide', async (req, res) => {
     const zipTier = zip ? (zipTierMap.get(zip) || null) : null
 
     const isHvac = trade === 'HVAC'
-    const opp = scoreOpportunity(jobType, zipTier, null, null, isHvac)
+    const knownAge = givenAge ?? systemAgeFromNotes({ summary: callNotes }, new Date().getFullYear())
+    const opp = scoreOpportunity(jobType, zipTier, null, knownAge, isHvac)
 
     // Today's board: assignments + jobs + tech geos, same gather as the live board.
     const today = boardDay(0)
@@ -3476,9 +3487,54 @@ app.post('/api/dispatch/decide', async (req, res) => {
       }
     }
 
-    // Every option carries its bump cost, so the ranking table can explain
-    // each alternative — not just the one the recommendation chose.
-    for (const o of options) o.bump = o.hasRoom ? null : bumpFor(o.techId)
+    // Which arrival windows does each tech still have open? Derived from
+    // today's board: the day's distinct windows, minus ones where the tech
+    // already has a commitment. Heuristic (windows overlap each other), so the
+    // UI says "looks open" rather than promising.
+    const winLabel = (ws, we) => {
+      const f = (iso) => { const d = new Date(iso); const h = d.getHours(); const ap = h >= 12 ? 'PM' : 'AM'; const h12 = h % 12 === 0 ? 12 : h % 12; return `${h12} ${ap}` }
+      return `${f(ws)}–${f(we)}`
+    }
+    const dayWindows = new Map()   // key -> {start,label}
+    for (const a of appts) {
+      const ws = a.arrivalWindowStart || a.start, we = a.arrivalWindowEnd || a.end
+      if (!ws || !we) continue
+      const k = `${ws}|${we}`
+      if (!dayWindows.has(k)) dayWindows.set(k, { start: Date.parse(ws), end: Date.parse(we), label: winLabel(ws, we) })
+    }
+    const techWins = new Map()   // techId -> Set(windowKey)
+    for (const a of assignments) {
+      const ap = apptById.get(a.appointmentId)
+      if (!ap || !a.technicianId) continue
+      const ws = ap.arrivalWindowStart || ap.start, we = ap.arrivalWindowEnd || ap.end
+      if (ws && we) {
+        if (!techWins.has(a.technicianId)) techWins.set(a.technicianId, new Set())
+        techWins.get(a.technicianId).add(`${ws}|${we}`)
+      }
+    }
+    const nowMs2 = Date.now()
+    const openWindowsFor = (techId) => [...dayWindows.entries()]
+      .filter(([k, w]) => w.end > nowMs2 && !(techWins.get(techId)?.has(k)))
+      .sort((a, b) => a[1].start - b[1].start)
+      .map(([, w]) => w.label)
+
+    // How deep into their day is each tech? A validated burnout penalty needs
+    // the historical study first — until then this is surfaced, not scored.
+    const runByTech = new Map()
+    for (const a of assignments) {
+      const st = apptById.get(a.appointmentId)?.status
+      if (a.technicianId && (st === 'Done' || st === 'Working')) {
+        runByTech.set(a.technicianId, (runByTech.get(a.technicianId) || 0) + 1)
+      }
+    }
+
+    // Every option carries its bump cost, open windows and day-depth, so the
+    // ranking table explains each alternative — not just the chosen one.
+    for (const o of options) {
+      o.bump = o.hasRoom ? null : bumpFor(o.techId)
+      o.openWindows = o.hasRoom ? openWindowsFor(o.techId).slice(0, 3) : []
+      o.callsRun = runByTech.get(o.techId) || 0
+    }
 
     const top = options[0]
     let recommendation
@@ -3492,7 +3548,7 @@ app.post('/api/dispatch/decide', async (req, res) => {
     } else if (top.hasRoom) {
       recommendation = {
         action: 'book_assign',
-        text: `Book it and put it on ${top.techName}`,
+        text: `Book it and put it on ${top.techName}${top.openWindows?.[0] ? ` — ${top.openWindows[0]} looks open` : ''}`,
         tech: top,
       }
     } else {

@@ -682,6 +682,8 @@ function DecisionMaker() {
   const [jobType, setJobType] = useState('')
   const [address, setAddress] = useState('')
   const [urgent, setUrgent] = useState(false)
+  const [sysAge, setSysAge] = useState('')
+  const [notes, setNotes] = useState('')
   const [busy, setBusy] = useState(false)
   const [res, setRes] = useState(null)
   const [err, setErr] = useState('')
@@ -704,7 +706,7 @@ function DecisionMaker() {
     : types
 
   const clearAll = () => {
-    setJobType(''); setAddress(''); setUrgent(false)
+    setJobType(''); setAddress(''); setUrgent(false); setSysAge(''); setNotes('')
     setRes(null); setErr(''); setSuggests([]); setShowSuggests(false); setShowTypes(false)
   }
 
@@ -735,7 +737,7 @@ function DecisionMaker() {
     if (!jobType.trim()) return
     setBusy(true); setErr(''); setRes(null)
     try {
-      setRes(await authed('/api/dispatch/decide', { method:'POST', body: JSON.stringify({ jobType, address, urgent }) }))
+      setRes(await authed('/api/dispatch/decide', { method:'POST', body: JSON.stringify({ jobType, address, urgent, systemAge: sysAge, notes }) }))
     } catch (e) { setErr(e.message) } finally { setBusy(false) }
   }
 
@@ -799,6 +801,19 @@ function DecisionMaker() {
           )}
           <div style={{ fontSize:11, color:'var(--text-muted)', marginTop:5 }}>
             Pick a suggestion, or just type — approximate is fine, drive times sharpen with precision.
+          </div>
+        </div>
+        <div style={{ display:'grid', gridTemplateColumns:'140px 1fr', gap:14, marginTop:12 }}>
+          <div>
+            <label className="form-label">System age <span style={{ color:'var(--text-muted)', fontWeight:400 }}>(yrs)</span></label>
+            <input className="form-input" type="number" min="0" max="60" value={sysAge}
+              onChange={e => setSysAge(e.target.value)} placeholder="if known" />
+          </div>
+          <div>
+            <label className="form-label">From the call <span style={{ color:'var(--text-muted)', fontWeight:400 }}>— anything the customer said that matters</span></label>
+            <input className="form-input" value={notes} onChange={e => setNotes(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') decide() }}
+              placeholder={'e.g. "unit is from 2008, blowing warm, already replaced the capacitor"'} />
           </div>
         </div>
         <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginTop:14 }}>
@@ -890,9 +905,11 @@ function DecisionMaker() {
                           earner may be un-bumpable while #2 has a routine call
                           worth trading — which is a better decision, not a bug. */}
                       <div style={{ fontSize:10, fontWeight:400, color:'var(--text-muted)', marginTop:1 }}>
-                        {o.hasRoom ? 'has room'
+                        {o.hasRoom
+                          ? `has room${o.openWindows?.length ? ` · ${o.openWindows.slice(0, 2).join(', ')} look open` : ''}`
                           : o.bump ? `full — would bump #${o.bump.jobNumber} (${o.bump.why})`
                           : 'full — nothing movable today'}
+                        {o.callsRun > 0 ? ` · ${o.callsRun} call${o.callsRun === 1 ? '' : 's'} already run today` : ''}
                       </div>
                     </td>
                     <td style={{ padding:'7px 12px', fontSize:11, color:'var(--text-muted)' }}>
