@@ -75,14 +75,14 @@ function BattingOrder() {
   if (!data) return <div className="spinner lg" style={{ margin:'60px auto' }} />
 
   const units = [...new Set((data.groups || []).map(g => g.business_unit))].sort()
-  const wTotal = weights ? (weights.conversion + weights.avgTicket + weights.membership) : 0
+  const wTotal = weights ? (weights.expectedValue + weights.closeRate + weights.membership) : 0
 
   return (
     <div>
       <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', flexWrap:'wrap', gap:10, marginBottom:14 }}>
         <div style={{ fontSize:12, color:'var(--text-muted)' }}>
-          Ranked within each business unit · {data.windowDays}-day window, recent work weighted heavier ·
-          scored {ago(data.refreshedAt)}
+          Ranked by expected revenue per opportunity (close rate × average sale) within each business unit ·
+          {data.windowDays}-day window, recent work weighted heavier · scored {ago(data.refreshedAt)}
         </div>
         <button className="btn sm" onClick={refresh} disabled={busy}>
           {busy ? 'Scoring… (takes a minute)' : 'Rescore now'}
@@ -93,7 +93,7 @@ function BattingOrder() {
       {weights && (
         <div className="card" style={{ padding:'12px 14px', marginBottom:16, display:'flex', alignItems:'center', gap:14, flexWrap:'wrap' }}>
           <span style={{ fontSize:11, fontWeight:700, textTransform:'uppercase', letterSpacing:.5, color:'var(--text-muted)' }}>Weighting</span>
-          {[['conversion','Conversion'],['avgTicket','Avg ticket'],['membership','Membership']].map(([k,label]) => (
+          {[['expectedValue','Expected value'],['closeRate','Close rate'],['membership','Membership']].map(([k,label]) => (
             <label key={k} style={{ display:'flex', alignItems:'center', gap:6, fontSize:12 }}>
               {label}
               <input type="number" min="0" max="100" value={weights[k]}
@@ -128,8 +128,10 @@ function BattingOrder() {
               <table className="data-table" style={{ fontSize:12 }}>
                 <thead><tr>
                   <th style={{width:34}}>#</th><th>Technician</th><th>Tier</th>
-                  <th style={{textAlign:'right'}}>Conversion</th>
-                  <th style={{textAlign:'right'}}>Avg ticket</th>
+                  <th style={{textAlign:'right'}} title="Expected revenue per opportunity = close rate x average sale">$ / opportunity</th>
+                  <th style={{textAlign:'right'}}>Close rate</th>
+                  <th style={{textAlign:'right'}}>Avg sale</th>
+                  <th style={{textAlign:'right'}}>Total sold</th>
                   <th style={{textAlign:'right'}}>Membership</th>
                   <th style={{textAlign:'right'}}>Jobs</th>
                 </tr></thead>
@@ -139,8 +141,10 @@ function BattingOrder() {
                       <td style={{ padding:'7px 12px', color:'var(--text-muted)' }}>{r.rank}</td>
                       <td style={{ padding:'7px 12px', fontWeight:600 }}>{r.tech_name}</td>
                       <td style={{ padding:'7px 12px' }}><TierPill tier={r.tier} /></td>
-                      <td style={{ padding:'7px 12px', textAlign:'right', fontWeight:600 }}>{pct(r.conversion)}</td>
-                      <td style={{ padding:'7px 12px', textAlign:'right' }}>{money(r.avg_ticket)}</td>
+                      <td style={{ padding:'7px 12px', textAlign:'right', fontWeight:700 }}>{money(r.expected_value)}</td>
+                      <td style={{ padding:'7px 12px', textAlign:'right' }}>{pct(r.close_rate)}</td>
+                      <td style={{ padding:'7px 12px', textAlign:'right' }}>{money(r.avg_sale)}</td>
+                      <td style={{ padding:'7px 12px', textAlign:'right', color:'var(--text-muted)' }}>{money(r.total_sold)}</td>
                       <td style={{ padding:'7px 12px', textAlign:'right' }}>{pct(r.membership_pct)}</td>
                       <td style={{ padding:'7px 12px', textAlign:'right', color:'var(--text-muted)' }}>{r.jobs}</td>
                     </tr>
@@ -150,7 +154,7 @@ function BattingOrder() {
                       <td style={{ padding:'7px 12px' }}>—</td>
                       <td style={{ padding:'7px 12px' }}>{r.tech_name}</td>
                       <td style={{ padding:'7px 12px' }}><TierPill tier="unranked" /></td>
-                      <td colSpan={3} style={{ padding:'7px 12px', color:'var(--text-muted)', fontSize:11 }}>
+                      <td colSpan={5} style={{ padding:'7px 12px', color:'var(--text-muted)', fontSize:11 }}>
                         Needs 10+ jobs to rank — not a rating
                       </td>
                       <td style={{ padding:'7px 12px', textAlign:'right', color:'var(--text-muted)' }}>{r.jobs}</td>

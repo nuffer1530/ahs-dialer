@@ -2473,7 +2473,7 @@ async function getDispatchWeights() {
   const { data } = await supabase.from('app_settings').select('value').eq('key', DISPATCH_WEIGHTS_KEY).maybeSingle()
   try {
     const w = JSON.parse(data?.value || '{}')
-    if (w && Number(w.conversion) >= 0) return { conversion: +w.conversion, avgTicket: +w.avgTicket, membership: +w.membership }
+    if (w && Number(w.expectedValue) >= 0) return { expectedValue: +w.expectedValue, closeRate: +w.closeRate, membership: +w.membership }
   } catch {}
   return DEFAULT_WEIGHTS
 }
@@ -2517,7 +2517,8 @@ async function refreshDispatchScores() {
     if (ranked.length) {
       const rows = ranked.map(r => ({
         tech_id: r.techId, tech_name: r.techName, business_unit: r.businessUnit,
-        jobs: r.jobs, conversion: r.conversion, avg_ticket: r.avgTicket,
+        jobs: r.jobs, close_rate: r.closeRate, avg_sale: r.avgSale,
+        expected_value: r.expectedValue, total_sold: r.totalSold,
         membership_pct: r.membershipPct, score: r.score, tier: r.tier, rank: r.rank,
         window_days: DISPATCH_WINDOW_DAYS, refreshed_at: stamp,
       }))
@@ -2571,11 +2572,11 @@ app.post('/api/dispatch/weights', async (req, res) => {
   try {
     const w = req.body?.weights || {}
     const clean = {
-      conversion: Math.max(0, Number(w.conversion) || 0),
-      avgTicket: Math.max(0, Number(w.avgTicket) || 0),
+      expectedValue: Math.max(0, Number(w.expectedValue) || 0),
+      closeRate: Math.max(0, Number(w.closeRate) || 0),
       membership: Math.max(0, Number(w.membership) || 0),
     }
-    if (clean.conversion + clean.avgTicket + clean.membership === 0) {
+    if (clean.expectedValue + clean.closeRate + clean.membership === 0) {
       return res.status(400).json({ error: 'Weights cannot all be zero.' })
     }
     const { error } = await supabase.from('app_settings')
@@ -2694,8 +2695,9 @@ app.get('/api/dispatch/live-board', async (req, res) => {
         zip, isMember,
         techId: a.technicianId, techName: a.technicianName,
         techTier: techScore?.tier || 'unranked',
-        techConversion: techScore?.conversion ?? null,
-        techTicket: techScore?.avg_ticket ?? null,
+        techCloseRate: techScore?.close_rate ?? null,
+        techAvgSale: techScore?.avg_sale ?? null,
+        techExpectedValue: techScore?.expected_value ?? null,
         opportunity: opp.score, opportunityReasons: opp.reasons,
         flags,
       })

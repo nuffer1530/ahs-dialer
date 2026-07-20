@@ -314,8 +314,10 @@ create table if not exists dispatch_tech_scores (
   tech_name      text,
   business_unit  text not null,
   jobs           integer not null default 0,      -- raw job count (sample size)
-  conversion     numeric,                          -- % of estimates sold
-  avg_ticket     numeric,                          -- MEDIAN non-zero invoice
+  close_rate     numeric,                          -- opportunity close rate %
+  avg_sale       numeric,                          -- MEDIAN value of SOLD ESTIMATES
+  expected_value numeric,                          -- close_rate x avg_sale
+  total_sold     numeric,                          -- total sold in window
   membership_pct numeric,                          -- memberships sold per job
   score          numeric,                          -- weighted z-score vs peers in BU
   tier           text,                             -- green | yellow | red | unranked
@@ -341,3 +343,14 @@ drop policy if exists "Authenticated read tech scores" on dispatch_tech_scores;
 create policy "Authenticated read tech scores" on dispatch_tech_scores for select to authenticated using (true);
 drop policy if exists "Authenticated read zip value" on dispatch_zip_value;
 create policy "Authenticated read zip value" on dispatch_zip_value for select to authenticated using (true);
+
+-- Dispatch metrics corrected: average sale must come from SOLD ESTIMATES, not
+-- invoices. Sales techs sell the system while the install crew's job carries
+-- the invoice, so invoice-based tickets showed a tech who sold $437k in 45 days
+-- as a $89 performer. Safe to re-run.
+alter table dispatch_tech_scores add column if not exists close_rate numeric;
+alter table dispatch_tech_scores add column if not exists avg_sale numeric;
+alter table dispatch_tech_scores add column if not exists expected_value numeric;
+alter table dispatch_tech_scores add column if not exists total_sold numeric;
+alter table dispatch_tech_scores drop column if exists conversion;
+alter table dispatch_tech_scores drop column if exists avg_ticket;
