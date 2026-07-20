@@ -359,3 +359,29 @@ alter table dispatch_tech_scores drop column if exists avg_ticket;
 -- estimate — techs present ~2-3 options each). Safe to re-run.
 alter table dispatch_tech_scores add column if not exists opportunities integer;
 alter table dispatch_tech_scores add column if not exists options_per_opp numeric;
+
+-- ── Dispatch: per-job-type batting order ────────────────────────────────────
+-- "Who is my best guy on tanked water heaters?" Written by the same refresh
+-- pass as dispatch_tech_scores. Samples are small by nature, so opportunities
+-- is surfaced in the UI and thin rows are marked rather than hidden.
+create table if not exists dispatch_jobtype_scores (
+  id             bigserial primary key,
+  tech_id        bigint not null,
+  tech_name      text,
+  team           text,
+  job_type_id    bigint not null,
+  job_type       text not null,
+  opportunities  integer not null default 0,
+  won            integer not null default 0,
+  close_rate     numeric,
+  avg_sale       numeric,
+  total_sold     numeric,
+  expected_value numeric,
+  thin           boolean not null default false,
+  refreshed_at   timestamptz not null default now(),
+  unique (tech_id, job_type_id)
+);
+create index if not exists dispatch_jobtype_idx on dispatch_jobtype_scores (job_type, expected_value desc);
+alter table dispatch_jobtype_scores enable row level security;
+drop policy if exists "Authenticated read jobtype scores" on dispatch_jobtype_scores;
+create policy "Authenticated read jobtype scores" on dispatch_jobtype_scores for select to authenticated using (true);

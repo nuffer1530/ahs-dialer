@@ -6,7 +6,7 @@ import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
 import { existsSync } from 'fs'
 import { renderBoardEmail, boardEmailSubject } from './lib/boardEmail.js'
-import { computeBattingOrder, computeZipValue, DEFAULT_WEIGHTS, NON_DISPATCH_TEAM } from './lib/dispatchMetrics.js'
+import { computeBattingOrder, computeZipValue, computeJobTypeOrder, DEFAULT_WEIGHTS, NON_DISPATCH_TEAM } from './lib/dispatchMetrics.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
@@ -2494,16 +2494,18 @@ async function assignmentsForAppointments(appointmentIds) {
 
 async function fetchDispatchWindow(days = DISPATCH_WINDOW_DAYS) {
   const since = new Date(Date.now() - days * 864e5).toISOString().slice(0, 10)
-  const [jobs, estimates, invoices, memberships, buRes] = await Promise.all([
+  const [jobs, estimates, invoices, memberships, buRes, jtRes] = await Promise.all([
     stPageAll(p => `/jpm/v2/tenant/${ST_TENANT_ID}/jobs?jobStatus=Completed&completedOnOrAfter=${since}&pageSize=200&page=${p}`, 20000),
     stPageAll(p => `/sales/v2/tenant/${ST_TENANT_ID}/estimates?createdOnOrAfter=${since}&pageSize=500&page=${p}`, 20000),
     stPageAll(p => `/accounting/v2/tenant/${ST_TENANT_ID}/invoices?createdOnOrAfter=${since}&pageSize=500&page=${p}`, 20000),
     stPageAll(p => `/memberships/v2/tenant/${ST_TENANT_ID}/memberships?createdOnOrAfter=${since}&pageSize=500&page=${p}`, 20000),
     stGet(`/settings/v2/tenant/${ST_TENANT_ID}/technicians?pageSize=500`),
+    stGet(`/jpm/v2/tenant/${ST_TENANT_ID}/job-types?pageSize=500`),
   ])
   const appts = await stPageAll(p => `/jpm/v2/tenant/${ST_TENANT_ID}/appointments?startsOnOrAfter=${since}T00:00:00Z&pageSize=500&page=${p}`, 20000)
   const assignments = await assignmentsForAppointments(appts.map(a => a.id))
-  return { jobs, estimates, invoices, memberships, assignments, technicians: buRes?.data || [] }
+  return { jobs, estimates, invoices, memberships, assignments,
+           technicians: buRes?.data || [], jobTypes: jtRes?.data || [] }
 }
 
 async function refreshDispatchScores() {
@@ -2530,13 +2532,27 @@ async function refreshDispatchScores() {
       await supabase.from('dispatch_tech_scores').delete().lt('refreshed_at', stamp)
     }
 
+    const byType = computeJobTypeOrder(data, { now: Date.now() })
+    if (byType.length) {
+      const { error: jtErr } = await supabase.from('dispatch_jobtype_scores').upsert(
+        byType.map(r => ({
+          tech_id: r.techId, tech_name: r.techName, team: r.team,
+          job_type_id: r.jobTypeId, job_type: r.jobType,
+          opportunities: r.opps, won: r.won, close_rate: r.closeRate,
+          avg_sale: r.avgSale, total_sold: r.revenue, expected_value: r.expectedValue,
+          thin: r.thin, refreshed_at: stamp,
+        })), { onConflict: 'tech_id,job_type_id' })
+      if (jtErr) console.error('jobtype upsert:', jtErr.message)
+      else await supabase.from('dispatch_jobtype_scores').delete().lt('refreshed_at', stamp)
+    }
+
     const zips = computeZipValue(data.invoices)
     if (zips.length) {
       await supabase.from('dispatch_zip_value').upsert(
         zips.map(z => ({ zip: z.zip, avg_ticket: z.avgTicket, job_count: z.jobCount, tier: z.tier, refreshed_at: stamp })),
         { onConflict: 'zip' })
     }
-    console.log(`DISPATCH: scored ${ranked.length} tech-groups, ${zips.length} zips in ${Math.round((Date.now() - started) / 1000)}s`)
+    console.log(`DISPATCH: scored ${ranked.length} tech-groups, ${byType.length} job-type rows, ${zips.length} zips in ${Math.round((Date.now() - started) / 1000)}s`)
     return { ranked: ranked.length, zips: zips.length, refreshedAt: stamp }
   } catch (err) {
     console.error('DISPATCH: refresh FAILED:', err.stack || err.message)
@@ -2560,6 +2576,16 @@ app.get('/api/dispatch/batting-order', async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message })
   }
+})
+
+app.get('/api/dispatch/job-types', async (req, res) => {
+  if (!(await requireAdmin(req, res))) return
+  try {
+    const { data: rows } = await supabase.from('dispatch_jobtype_scores')
+      .select('*').order('job_type').order('expected_value', { ascending: false })
+    const types = [...new Set((rows || []).map(r => r.job_type))].sort()
+    res.json({ types, rows: rows || [], refreshedAt: rows?.[0]?.refreshed_at || null })
+  } catch (err) { res.status(500).json({ error: err.message }) }
 })
 
 app.post('/api/dispatch/refresh', async (req, res) => {

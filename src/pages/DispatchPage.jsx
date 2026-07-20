@@ -134,6 +134,7 @@ function BattingOrder() {
                   <th style={{textAlign:'right'}}>Total sold</th>
                   <th style={{textAlign:'right'}} title="Opportunities run in the window">Opps</th>
                   <th style={{textAlign:'right'}}>Membership</th>
+                  <th style={{textAlign:'right'}} title="Total jobs run — the sample size behind the ranking">Jobs</th>
                 </tr></thead>
                 <tbody>
                   {ranked.map(r => (
@@ -155,7 +156,7 @@ function BattingOrder() {
                       <td style={{ padding:'7px 12px' }}>—</td>
                       <td style={{ padding:'7px 12px' }}>{r.tech_name}</td>
                       <td style={{ padding:'7px 12px' }}><TierPill tier="unranked" /></td>
-                      <td colSpan={5} style={{ padding:'7px 12px', color:'var(--text-muted)', fontSize:11 }}>
+                      <td colSpan={6} style={{ padding:'7px 12px', color:'var(--text-muted)', fontSize:11 }}>
                         Needs 10+ jobs to rank — not a rating
                       </td>
                       <td style={{ padding:'7px 12px', textAlign:'right', color:'var(--text-muted)' }}>{r.jobs}</td>
@@ -264,12 +265,106 @@ function LiveBoard() {
   )
 }
 
+
+function ByJobType() {
+  const [data, setData] = useState(null)
+  const [err, setErr] = useState('')
+  const [pick, setPick] = useState('')
+  const [q, setQ] = useState('')
+
+  useEffect(() => {
+    (async () => {
+      try { setData(await authed('/api/dispatch/job-types')) } catch (e) { setErr(e.message) }
+    })()
+  }, [])
+
+  if (err) return <div style={{ padding:20, color:'var(--danger)', fontSize:13 }}>{err}</div>
+  if (!data) return <div className="spinner lg" style={{ margin:'60px auto' }} />
+
+  const types = (data.types || []).filter(t => t.toLowerCase().includes(q.toLowerCase()))
+  const rows = (data.rows || []).filter(r => r.job_type === pick)
+    .sort((a, b) => (b.expected_value || 0) - (a.expected_value || 0))
+
+  return (
+    <div>
+      <div style={{ fontSize:12, color:'var(--text-muted)', marginBottom:12 }}>
+        Who to send for a specific job type. Opportunity counts are shown because samples here are
+        small — a tech may only see a given job type a handful of times in the window.
+      </div>
+
+      <div style={{ display:'flex', gap:10, flexWrap:'wrap', marginBottom:14 }}>
+        <input className="form-input" placeholder="Filter job types…" value={q}
+          onChange={e => setQ(e.target.value)} style={{ maxWidth:240, fontSize:12, padding:'6px 10px' }} />
+        <select className="form-input" value={pick} onChange={e => setPick(e.target.value)}
+          style={{ maxWidth:360, fontSize:12, padding:'6px 10px' }}>
+          <option value="">Select a job type… ({types.length})</option>
+          {types.map(t => <option key={t} value={t}>{t}</option>)}
+        </select>
+      </div>
+
+      {!pick && (
+        <div className="empty-state" style={{ padding:'36px 20px', textAlign:'center', color:'var(--text-muted)', fontSize:13 }}>
+          Pick a job type to see who closes it best.
+        </div>
+      )}
+
+      {pick && rows.length === 0 && (
+        <div className="empty-state" style={{ padding:'36px 20px', textAlign:'center', color:'var(--text-muted)', fontSize:13 }}>
+          Nobody has run this job type enough times to rank.
+        </div>
+      )}
+
+      {pick && rows.length > 0 && (
+        <div className="card" style={{ padding:0, overflow:'hidden' }}>
+          <table className="data-table" style={{ fontSize:12 }}>
+            <thead><tr>
+              <th style={{width:34}}>#</th><th>Technician</th><th>Team</th>
+              <th style={{textAlign:'right'}}>$ / opportunity</th>
+              <th style={{textAlign:'right'}}>Close rate</th>
+              <th style={{textAlign:'right'}}>Avg sale</th>
+              <th style={{textAlign:'right'}}>Total sold</th>
+              <th style={{textAlign:'right'}}>Opps</th>
+              <th style={{textAlign:'right'}}>Won</th>
+            </tr></thead>
+            <tbody>
+              {rows.map((r, i) => (
+                <tr key={r.tech_id} style={{ background: i === 0 ? 'rgba(21,128,61,.05)' : 'transparent', opacity: r.thin ? .72 : 1 }}>
+                  <td style={{ padding:'7px 12px', color:'var(--text-muted)' }}>{i + 1}</td>
+                  <td style={{ padding:'7px 12px', fontWeight:600 }}>
+                    {r.tech_name}
+                    {i === 0 && <span style={{ marginLeft:6, fontSize:9, fontWeight:700, color:'#15803D', background:'#EAF5EE', border:'1px solid #BBE3C9', padding:'1px 6px', borderRadius:99 }}>TOP</span>}
+                  </td>
+                  <td style={{ padding:'7px 12px', fontSize:11, color:'var(--text-muted)' }}>{r.team}</td>
+                  <td style={{ padding:'7px 12px', textAlign:'right', fontWeight:700 }}>{money(r.expected_value)}</td>
+                  <td style={{ padding:'7px 12px', textAlign:'right' }}>{pct(r.close_rate)}</td>
+                  <td style={{ padding:'7px 12px', textAlign:'right' }}>{money(r.avg_sale)}</td>
+                  <td style={{ padding:'7px 12px', textAlign:'right', color:'var(--text-muted)' }}>{money(r.total_sold)}</td>
+                  <td style={{ padding:'7px 12px', textAlign:'right', fontWeight:600 }}>
+                    {r.opportunities}
+                    {r.thin && <span title="Thin sample — read with caution" style={{ marginLeft:4, color:'var(--warning)' }}>*</span>}
+                  </td>
+                  <td style={{ padding:'7px 12px', textAlign:'right', color:'var(--text-muted)' }}>{r.won}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {rows.some(r => r.thin) && (
+            <div style={{ padding:'8px 12px', fontSize:10, color:'var(--text-muted)', borderTop:'1px solid var(--border)' }}>
+              * fewer than 8 opportunities — treat as a hint, not a verdict
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function DispatchPage() {
   const [tab, setTab] = useState('order')
   return (
     <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden' }}>
       <div style={{ background:'var(--surface)', borderBottom:'1px solid var(--border)', flexShrink:0, padding:'0 24px', display:'flex', gap:4 }}>
-        {[['order','Batting Order'],['live','Live Board Analyzer']].map(([id,label]) => (
+        {[['order','Batting Order'],['jobtype','By Job Type'],['live','Live Board Analyzer']].map(([id,label]) => (
           <button key={id} onClick={() => setTab(id)}
             style={{ padding:'12px 14px', border:'none', background:'transparent', cursor:'pointer', fontSize:13,
               fontWeight: tab===id ? 700 : 500, color: tab===id ? 'var(--accent)' : 'var(--text-muted)',
@@ -279,7 +374,7 @@ export default function DispatchPage() {
         ))}
       </div>
       <div style={{ flex:1, overflow:'auto', padding:'20px 24px', background:'var(--bg)' }}>
-        {tab === 'order' ? <BattingOrder /> : <LiveBoard />}
+        {tab === 'order' ? <BattingOrder /> : tab === 'jobtype' ? <ByJobType /> : <LiveBoard />}
       </div>
     </div>
   )
