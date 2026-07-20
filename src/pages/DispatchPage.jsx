@@ -242,7 +242,7 @@ function LiveBoard() {
   const [data, setData] = useState(null)
   const [err, setErr] = useState('')
   const [loading, setLoading] = useState(true)
-  const [view, setView] = useState('all')   // all | flagged | reschedule
+  const [view, setView] = useState('ontrack')   // ontrack | flagged | reschedule | completed
 
   const load = useCallback(async () => {
     try { setData(await authed('/api/dispatch/live-board')); setErr('') }
@@ -265,10 +265,20 @@ function LiveBoard() {
   // Finished work, biggest result first — the day's scoreboard.
   const completed = allCalls.filter(c => c.status === 'Done')
     .sort((a, b) => (b.outcome?.amount || 0) - (a.outcome?.amount || 0))
+  // The four buckets are mutually exclusive by construction: flags need
+  // opportunity >= 3, reschedule needs <= 0, and both need actionable work,
+  // which Done never is. So "on track" is genuinely the remainder — scheduled
+  // or in-progress work that's correctly assigned and not worth moving.
+  // Keyed on the assignment, not the job: one job can carry several
+  // assignments (a multi-day install shows once per tech), and keying on jobId
+  // would hide a colleague's row because someone else's got flagged.
+  const rowKey = (c) => `${c.appointmentId}|${c.techId}`
+  const special = new Set([...flagged, ...reschedule, ...completed].map(rowKey))
+  const onTrack = allCalls.filter(c => !special.has(rowKey(c)))
   const calls = view === 'flagged' ? flagged
     : view === 'reschedule' ? reschedule
     : view === 'completed' ? completed
-    : allCalls
+    : onTrack
   const rev = data?.dayRevenue
 
   // Within a window, group by team. Teams with flags sort first so a
@@ -317,11 +327,12 @@ function LiveBoard() {
           {/* Jumping to what needs attention is the whole job — 95 calls with
               11 flagged is a lot of scrolling otherwise. */}
           <div style={{ display:'flex', border:'1px solid var(--border)', borderRadius:99, overflow:'hidden' }}>
-            {[['all', `All ${allCalls.length}`], ['flagged', `⚠️ Flagged ${flagged.length}`],
+            {[['ontrack', `On track ${onTrack.length}`], ['flagged', `⚠️ Flagged ${flagged.length}`],
               ['reschedule', `↻ Reschedule ${reschedule.length}`],
               ['completed', `✓ Completed ${completed.length}`]].map(([val, label]) => (
               <button key={val} onClick={() => setView(val)}
-                title={val === 'reschedule' ? 'Lowest-producing calls — candidates to move if demand comes in'
+                title={val === 'ontrack' ? 'Correctly assigned, still to run — nothing to act on'
+                  : val === 'reschedule' ? 'Lowest-producing calls — candidates to move if demand comes in'
                   : val === 'completed' ? 'Finished calls and what each one produced' : undefined}
                 style={{ padding:'5px 12px', border:'none', cursor:'pointer', fontSize:11, fontWeight:600, whiteSpace:'nowrap',
                   background: view === val ? 'var(--accent)' : 'transparent',
@@ -382,7 +393,19 @@ function LiveBoard() {
         </div>
       )}
 
-      {(data?.swaps || []).length > 0 && view === 'all' && (
+      {view === 'ontrack' && onTrack.length === 0 && allCalls.length > 0 && (
+        <div className="card" style={{ padding:'22px 16px', textAlign:'center', color:'var(--text-muted)', fontSize:13 }}>
+          Every call on the board is either flagged, a reschedule candidate, or already done.
+        </div>
+      )}
+
+      {view === 'completed' && completed.length === 0 && (
+        <div className="card" style={{ padding:'22px 16px', textAlign:'center', color:'var(--text-muted)', fontSize:13 }}>
+          Nothing has finished yet today.
+        </div>
+      )}
+
+      {(data?.swaps || []).length > 0 && view === 'flagged' && (
         <div style={{ marginBottom:16 }}>
           {data.swaps.map((sw, i) => (
             <div key={i} className="card" style={{ padding:'12px 15px', marginBottom:9, borderLeft:'3px solid var(--accent)' }}>
@@ -507,7 +530,7 @@ function LiveBoard() {
                   )}
                 </td>
                 <td style={{ padding:'7px 12px' }}>
-                  {c.outcome && (view === 'completed' || view === 'all') && (
+                  {c.outcome && view === 'completed' && (
                     <div style={{ fontSize:11, fontWeight:600, lineHeight:1.5,
                       color: c.outcome.kind === 'sold' ? '#15803D'
                         : c.outcome.kind === 'invoiced' ? 'var(--text-primary)'
