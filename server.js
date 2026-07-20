@@ -7,6 +7,7 @@ import { dirname, join } from 'path'
 import { existsSync } from 'fs'
 import { renderBoardEmail, boardEmailSubject } from './lib/boardEmail.js'
 import { computeBattingOrder, computeZipValue, computeJobTypeOrder, DEFAULT_WEIGHTS, NON_DISPATCH_TEAM } from './lib/dispatchMetrics.js'
+import { driveTimes, straightLine, pairKey, driveTimeEnabled } from './lib/driveTime.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
@@ -2752,8 +2753,10 @@ app.get('/api/dispatch/live-board', async (req, res) => {
     // Declared here, above its use in the flag loop: `const` is not hoisted and
     // a TDZ ReferenceError here would be swallowed by the route's catch.
     const money0 = (v) => (v == null ? '—' : `$${Math.round(Number(v)).toLocaleString()}`)
-    const NEARBY_MILES = 15        // "already working that area"
+    const NEARBY_MILES = 15        // "already working that area" (fallback units)
     const DETOUR_MILES = 35        // beyond this, moving a tech is its own problem
+    const NEARBY_MIN = 20          // same idea once real drive time is available
+    const DETOUR_MIN = 45
 
     const geoMiles = (g1, g2) => milesBetween({ geo: g1 }, { geo: g2 })
 
@@ -2764,12 +2767,36 @@ app.get('/api/dispatch/live-board', async (req, res) => {
       if (!techGeos.has(c.techId)) techGeos.set(c.techId, [])
       techGeos.get(c.techId).push(c.geo)
     }
-    // How far is this tech's nearest OTHER job today from the target?
-    const nearestMiles = (techId, geo) => {
+
+    // Resolve travel for every (candidate tech's job -> target job) pair we
+    // might reason about, in one batched, cached call. With no Mapbox token
+    // this returns empty and we fall back to straight-line below.
+    const travelPairs = []
+    for (const c of calls) {
+      if (!c.rankable || c.opportunity < 3 || !c.geo) continue
+      for (const [tid, gs] of techGeos) {
+        if (tid === c.techId) continue
+        for (const g of gs) travelPairs.push({ from: g, to: c.geo })
+      }
+    }
+    let travel = new Map()
+    try { travel = await driveTimes(travelPairs, supabase) }
+    catch (e) { console.warn('drive-time lookup failed, using straight-line:', e.message) }
+
+    // Nearest of this tech's other jobs to the target — by drive time when we
+    // have it, straight-line miles otherwise. One shape either way.
+    const nearestTravel = (techId, geo) => {
       const gs = techGeos.get(techId)
       if (!gs || !geo) return null
-      const ds = gs.map(g => geoMiles(g, geo)).filter(d => d != null)
-      return ds.length ? Math.min(...ds) : null
+      let best = null
+      for (const g of gs) {
+        const t = travel.get(pairKey(g, geo)) || straightLine(g, geo)
+        if (!t) continue
+        const cur = t.minutes ?? t.miles
+        const prev = best ? (best.minutes ?? best.miles) : Infinity
+        if (cur != null && cur < prev) best = t
+      }
+      return best
     }
 
     const scoresByTeam = new Map()
@@ -2790,8 +2817,12 @@ app.get('/api/dispatch/live-board', async (req, res) => {
       const candidates = (scoresByTeam.get(c.businessUnit) || [])
         .filter(s => s.tech_id !== c.techId && s.tier !== 'unranked')
         .filter(s => Number(s.expected_value || 0) > myEV)
-        .map(s => ({ s, miles: nearestMiles(s.tech_id, c.geo) }))
-        .filter(x => x.miles == null || x.miles <= DETOUR_MILES)
+        .map(s => ({ s, t: nearestTravel(s.tech_id, c.geo) }))
+        .filter(x => {
+          if (!x.t) return true                                   // unknown: don't exclude
+          if (x.t.minutes != null) return x.t.minutes <= DETOUR_MIN
+          return x.t.miles == null || x.t.miles <= DETOUR_MILES
+        })
 
       if (!candidates.length) continue
 
@@ -2799,13 +2830,18 @@ app.get('/api/dispatch/live-board', async (req, res) => {
       // already working nearby. Only if nobody strong is in the area do we fall
       // back to the top earner regardless of distance — and say what it costs.
       const byEarning = [...candidates].sort((a, b) => Number(b.s.expected_value || 0) - Number(a.s.expected_value || 0))
-      const nearby = byEarning.find(x => x.miles != null && x.miles <= NEARBY_MILES)
+      const isNear = (x) => x.t && (x.t.minutes != null ? x.t.minutes <= NEARBY_MIN : (x.t.miles != null && x.t.miles <= NEARBY_MILES))
+      const nearby = byEarning.find(isNear)
       const pick = nearby || byEarning[0]
-      const mi = pick.miles == null ? null : Math.round(pick.miles * 10) / 10
 
-      const where = pick.miles == null
+      // Say it in minutes when it's real drive time, miles when it's the
+      // straight-line estimate — never dress an estimate up as a measurement.
+      const t = pick.t
+      const where = !t
         ? 'no other work scheduled today'
-        : (mi <= NEARBY_MILES ? `already working ${mi} mi away` : `${mi} mi from their nearest job today`)
+        : t.minutes != null
+          ? (isNear(pick) ? `already working ${t.minutes} min away` : `${t.minutes} min drive from their nearest job today`)
+          : (isNear(pick) ? `already working ~${t.miles} mi away (straight line)` : `~${t.miles} mi away (straight line)`)
 
       c.flags.push({
         level: c.techTier === 'red' ? 'warn' : 'info',
@@ -2858,6 +2894,7 @@ app.get('/api/dispatch/live-board', async (req, res) => {
     res.json({
       generatedAt: new Date().toISOString(),
       scoresRefreshedAt: (scores || [])[0]?.refreshed_at || null,
+      driveTime: driveTimeEnabled(),
       calls, swaps,
       counts: {
         total: calls.length,

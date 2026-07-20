@@ -385,3 +385,19 @@ create index if not exists dispatch_jobtype_idx on dispatch_jobtype_scores (job_
 alter table dispatch_jobtype_scores enable row level security;
 drop policy if exists "Authenticated read jobtype scores" on dispatch_jobtype_scores;
 create policy "Authenticated read jobtype scores" on dispatch_jobtype_scores for select to authenticated using (true);
+
+-- ── Drive-time cache ────────────────────────────────────────────────────────
+-- Real drive time is a paid API call, and the Live Board refreshes every 15
+-- minutes — without a cache that's ~150k lookups/day. Road distance between two
+-- fixed points doesn't change, so every pair is fetched once and reused
+-- forever. Coordinates are rounded to ~11m so the same address hits cache.
+create table if not exists drive_time_cache (
+  pair_key    text primary key,      -- "lat1,lng1|lat2,lng2", rounded, ordered
+  minutes     numeric,
+  miles       numeric,
+  provider    text,
+  created_at  timestamptz not null default now()
+);
+alter table drive_time_cache enable row level security;
+drop policy if exists "Authenticated read drive cache" on drive_time_cache;
+create policy "Authenticated read drive cache" on drive_time_cache for select to authenticated using (true);
