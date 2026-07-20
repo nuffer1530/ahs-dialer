@@ -669,12 +669,152 @@ function ByJobType() {
   )
 }
 
+
+const ACTION_STYLE = {
+  book_assign: { color:'#15803D', bg:'#EAF5EE', border:'#BBE3C9', icon:'✅' },
+  book_bump:   { color:'#B45309', bg:'#FBF3E0', border:'#F0DCA8', icon:'🔁' },
+  hold:        { color:'var(--text-muted)', bg:'var(--surface-2)', border:'var(--border)', icon:'📅' },
+  no_tech:     { color:'#B91C1C', bg:'#FBEEEA', border:'#F0C8BE', icon:'⚠️' },
+}
+
+function DecisionMaker() {
+  const [jobType, setJobType] = useState('')
+  const [address, setAddress] = useState('')
+  const [urgent, setUrgent] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [res, setRes] = useState(null)
+  const [err, setErr] = useState('')
+  const [types, setTypes] = useState([])
+
+  useEffect(() => {
+    authed('/api/dispatch/job-types').then(d => setTypes(d.types || [])).catch(() => {})
+  }, [])
+
+  const decide = async () => {
+    if (!jobType.trim()) return
+    setBusy(true); setErr(''); setRes(null)
+    try {
+      setRes(await authed('/api/dispatch/decide', { method:'POST', body: JSON.stringify({ jobType, address, urgent }) }))
+    } catch (e) { setErr(e.message) } finally { setBusy(false) }
+  }
+
+  const rec = res?.recommendation
+  const rs = rec ? (ACTION_STYLE[rec.action] || ACTION_STYLE.hold) : null
+
+  return (
+    <div style={{ maxWidth:900 }}>
+      <div style={{ fontSize:12, color:'var(--text-muted)', marginBottom:14 }}>
+        A call just came in — where does it go? Enter the job and address; this scores every tech on the
+        right bench against the current board (earning power on this work, capacity, drive time) and tells
+        you whether to book it, book-and-bump, or hold for the next open day. It recommends only — you book it in ServiceTitan.
+      </div>
+
+      <div className="card" style={{ padding:'16px 18px', marginBottom:18 }}>
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14 }}>
+          <div>
+            <label className="form-label">Job type</label>
+            <input className="form-input" list="dm-jobtypes" value={jobType} autoFocus
+              onChange={e => setJobType(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') decide() }}
+              placeholder="e.g. Plumbing - Tankless Water Heater Estimate" />
+            <datalist id="dm-jobtypes">{types.map(t => <option key={t} value={t} />)}</datalist>
+          </div>
+          <div>
+            <label className="form-label">Address <span style={{ color:'var(--text-muted)', fontWeight:400 }}>(for drive time + area value)</span></label>
+            <input className="form-input" value={address}
+              onChange={e => setAddress(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') decide() }}
+              placeholder="e.g. 4935 Stillwell Dr, Colorado Springs 80920" />
+          </div>
+        </div>
+        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginTop:14 }}>
+          <label style={{ display:'flex', alignItems:'center', gap:7, fontSize:12, color:'var(--text-secondary)', cursor:'pointer' }}>
+            <input type="checkbox" checked={urgent} onChange={e => setUrgent(e.target.checked)} />
+            Customer needs it today
+          </label>
+          <button className="btn primary" onClick={decide} disabled={busy || !jobType.trim()}>
+            {busy ? 'Working it out…' : 'Where should this go?'}
+          </button>
+        </div>
+      </div>
+
+      {err && <div style={{ padding:14, color:'var(--danger)', fontSize:13 }}>{err}</div>}
+
+      {res && rec && (
+        <>
+          <div className="card" style={{ padding:'16px 18px', marginBottom:16, borderLeft:`4px solid ${rs.color}`, background:rs.bg }}>
+            <div style={{ fontSize:16, fontWeight:800, color:rs.color }}>{rs.icon} {rec.text}</div>
+            {rec.tech && (
+              <div style={{ fontSize:12, color:'var(--text-secondary)', marginTop:6, lineHeight:1.6 }}>
+                {rec.tech.techName} — {rec.tech.closeRate}% close · {money(rec.tech.avgSale)} avg sale
+                {rec.tech.onThisJobType ? ' on this exact job type' : ' on this bench'} ·
+                {rec.tech.load}/{rec.tech.cap} calls today
+                {rec.tech.driveMinutes != null ? ` · ${rec.tech.driveMinutes} min from their nearest job` : ''}
+              </div>
+            )}
+            {rec.bump && (
+              <div style={{ fontSize:12, color:'#B45309', marginTop:5 }}>
+                Bump #{rec.bump.jobNumber} ({rec.bump.name}) — lowest-value call on their plate
+              </div>
+            )}
+            <div style={{ fontSize:11, color:'var(--text-muted)', marginTop:8 }}>
+              {res.trade} · opportunity {res.opportunity}{res.opportunityReasons?.length ? ` (${res.opportunityReasons.join(' · ')})` : ''}
+              {res.zipTier ? ` · ${res.zipTier}-value area` : ''}
+              {res.located ? '' : ' · address not located — drive times unavailable'}
+            </div>
+          </div>
+
+          <div style={{ fontSize:11, fontWeight:700, textTransform:'uppercase', letterSpacing:.5, color:'var(--text-muted)', marginBottom:8 }}>
+            Full bench ranking
+          </div>
+          <div className="card" style={{ padding:0, overflow:'hidden' }}>
+            <table className="data-table" style={{ fontSize:12 }}>
+              <thead><tr>
+                <th>Technician</th><th>Team</th>
+                <th style={{textAlign:'right'}}>$ / opportunity</th>
+                <th style={{textAlign:'right'}}>Close</th>
+                <th style={{textAlign:'right'}}>Load</th>
+                <th style={{textAlign:'right'}}>Drive</th>
+              </tr></thead>
+              <tbody>
+                {(res.options || []).map((o, i) => (
+                  <tr key={o.techId} style={{ background: i === 0 ? 'rgba(21,128,61,.05)' : 'transparent' }}>
+                    <td style={{ padding:'7px 12px', fontWeight:600 }}>
+                      {o.techName}{i === 0 && <span style={{ marginLeft:6, fontSize:9, fontWeight:700, color:'#15803D' }}>PICK</span>}
+                    </td>
+                    <td style={{ padding:'7px 12px', fontSize:11, color:'var(--text-muted)' }}>
+                      {o.team}{o.onThisJobType ? '' : ' *'}
+                    </td>
+                    <td style={{ padding:'7px 12px', textAlign:'right', fontWeight:700 }}>{money(o.expectedValue)}</td>
+                    <td style={{ padding:'7px 12px', textAlign:'right' }}>{o.closeRate}%</td>
+                    <td style={{ padding:'7px 12px', textAlign:'right', color: o.hasRoom ? 'var(--text-muted)' : '#B45309', fontWeight: o.hasRoom ? 400 : 700 }}>
+                      {o.load}/{o.cap}{o.hasRoom ? '' : ' full'}
+                    </td>
+                    <td style={{ padding:'7px 12px', textAlign:'right', color:'var(--text-muted)' }}>
+                      {o.driveMinutes == null ? '—' : `${o.driveMinutes} min`}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {(res.options || []).some(o => !o.onThisJobType) && (
+            <div style={{ fontSize:10, color:'var(--text-muted)', marginTop:6 }}>
+              * bench-average earning power — not enough of this exact job type to rank them on it specifically
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
 export default function DispatchPage() {
   const [tab, setTab] = useState('order')
   return (
     <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden' }}>
       <div style={{ background:'var(--surface)', borderBottom:'1px solid var(--border)', flexShrink:0, padding:'0 24px', display:'flex', gap:4 }}>
-        {[['order','Batting Order'],['jobtype','By Job Type'],['live','Live Board Analyzer']].map(([id,label]) => (
+        {[['order','Batting Order'],['jobtype','By Job Type'],['live','Live Board Analyzer'],['decide','Decision Maker']].map(([id,label]) => (
           <button key={id} onClick={() => setTab(id)}
             style={{ padding:'12px 14px', border:'none', background:'transparent', cursor:'pointer', fontSize:13,
               fontWeight: tab===id ? 700 : 500, color: tab===id ? 'var(--accent)' : 'var(--text-muted)',
@@ -684,7 +824,7 @@ export default function DispatchPage() {
         ))}
       </div>
       <div style={{ flex:1, overflow:'auto', padding:'20px 24px', background:'var(--bg)' }}>
-        {tab === 'order' ? <BattingOrder /> : tab === 'jobtype' ? <ByJobType /> : <LiveBoard />}
+        {tab === 'order' ? <BattingOrder /> : tab === 'jobtype' ? <ByJobType /> : tab === 'decide' ? <DecisionMaker /> : <LiveBoard />}
       </div>
     </div>
   )

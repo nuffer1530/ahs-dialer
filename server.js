@@ -7,7 +7,7 @@ import { dirname, join } from 'path'
 import { existsSync } from 'fs'
 import { renderBoardEmail, boardEmailSubject } from './lib/boardEmail.js'
 import { computeBattingOrder, computeZipValue, computeJobTypeOrder, DEFAULT_WEIGHTS, NON_DISPATCH_TEAM } from './lib/dispatchMetrics.js'
-import { driveTimes, straightLine, pairKey, driveTimeEnabled } from './lib/driveTime.js'
+import { driveTimes, straightLine, pairKey, driveTimeEnabled, geocode } from './lib/driveTime.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
@@ -63,6 +63,25 @@ export const EXCLUDE_CALL = /follow[- ]?up|callback|permitting|phone call/i
 // are never reassigned, never swapped, and never offered as the call to bump.
 const STICKY_TO_TECH = /phone call|follow[- ]?up|financ/i
 const INSTALL_TYPE = /install|replacement/i
+
+// Trade of a technician team ("HVAC - Sales" -> "HVAC"). Module scope so both
+// the Live Board and the Decision Maker read it the same way.
+function tradeOfTeam(team) {
+  const t = String(team || '')
+  if (/hvac/i.test(t)) return 'HVAC'
+  if (/plumb/i.test(t)) return 'Plumbing'
+  if (/electric/i.test(t)) return 'Electrical'
+  if (/garage/i.test(t)) return 'Garage Door'
+  return 'Other'
+}
+function tradeOfJobType(name) {
+  const t = String(name || '')
+  if (/hvac|a\/?c|furnace|heat|cool|mini.?split/i.test(t)) return 'HVAC'
+  if (/plumb|water heater|drain|sewer|faucet|toilet|tankless/i.test(t)) return 'Plumbing'
+  if (/electric|panel|breaker|generator|wiring|rewire/i.test(t)) return 'Electrical'
+  if (/garage|overhead door|opener/i.test(t)) return 'Garage Door'
+  return null
+}
 const ST_AUTH_URL      = 'https://auth.servicetitan.io/connect/token'
 const ST_API_BASE      = `https://api.servicetitan.io`
 
@@ -2870,14 +2889,6 @@ app.get('/api/dispatch/live-board', async (req, res) => {
       .select('value').eq('key', 'board_calls_per_tech').maybeSingle()
     let callsPerTech = {}
     try { callsPerTech = JSON.parse(cptRow?.value || '{}') } catch {}
-    const tradeOfTeam = (team) => {
-      const t = String(team || '')
-      if (/hvac/i.test(t)) return 'HVAC'
-      if (/plumb/i.test(t)) return 'Plumbing'
-      if (/electric/i.test(t)) return 'Electrical'
-      if (/garage/i.test(t)) return 'Garage Door'
-      return 'Other'
-    }
     const capacityFor = (team) => {
       const base = Number(callsPerTech[tradeOfTeam(team)]) || 3   // HVAC default 3
       return { target: base, stretch: base + 1 }
@@ -3198,6 +3209,194 @@ app.get('/api/dispatch/live-board', async (req, res) => {
     })
   } catch (err) {
     console.error('live-board error:', err.message)
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// ── Decision Maker ──────────────────────────────────────────────────────────
+// "A tankless estimate just came in — where does it go?" Given a job type and
+// address, score every placement against the current board and return ranked
+// recommendations. RECOMMEND ONLY — it writes nothing to ServiceTitan; the
+// dispatcher books and assigns. That's deliberate: it never silently rearranges
+// a live board, and it sidesteps assign/reschedule writes entirely.
+app.post('/api/dispatch/decide', async (req, res) => {
+  if (!(await requireAdmin(req, res))) return
+  try {
+    const jobType = String(req.body?.jobType || '').trim()
+    const address = String(req.body?.address || '').trim()
+    if (!jobType) return res.status(400).json({ error: 'A job type is required.' })
+
+    const trade = tradeOfJobType(jobType)
+    if (!trade) return res.status(400).json({ error: `Couldn't tell which trade "${jobType}" belongs to. Try including the trade name.` })
+
+    // Where is it? Zip value + a point to measure drive time from.
+    const geo = address ? await geocode(address, supabase) : null
+    let zip = null, zipTier = null
+    if (geo) {
+      // Nearest zip in our value table by straight-line — good enough to tier.
+      const { data: zipRows } = await supabase.from('dispatch_zip_value').select('zip, tier')
+      const zdigits = (address.match(/\b(\d{5})\b/) || [])[1]
+      if (zdigits) { zip = zdigits; zipTier = (zipRows || []).find(z => z.zip === zdigits)?.tier || null }
+    } else {
+      const zdigits = (address.match(/\b(\d{5})\b/) || [])[1]
+      if (zdigits) {
+        zip = zdigits
+        const { data: zr } = await supabase.from('dispatch_zip_value').select('tier').eq('zip', zdigits).maybeSingle()
+        zipTier = zr?.tier || null
+      }
+    }
+
+    const isHvac = trade === 'HVAC'
+    const opp = scoreOpportunity(jobType, zipTier, null, null, isHvac)
+
+    // Today's board: assignments + jobs + tech geos, same gather as the live board.
+    const today = boardDay(0)
+    const appts = (await stPageAll(p => `/jpm/v2/tenant/${ST_TENANT_ID}/appointments?startsOnOrAfter=${today.startUtc.toISOString()}&pageSize=500&page=${p}`, 3000))
+      .filter(a => { const t = Date.parse(a.start || ''); return t >= today.startUtc.getTime() && t < today.endUtc.getTime() && a.status !== 'Canceled' })
+    const assignments = await assignmentsForAppointments(appts.map(a => a.id))
+    const jobIds = [...new Set(assignments.map(a => a.jobId).filter(Boolean))]
+    const jobs = []
+    for (let i = 0; i < jobIds.length; i += 50) {
+      try { const d = await stGet(`/jpm/v2/tenant/${ST_TENANT_ID}/jobs?ids=${jobIds.slice(i, i + 50).join(',')}&pageSize=50`); jobs.push(...(d?.data || [])) } catch {}
+    }
+    const jobById = new Map(jobs.map(j => [j.id, j]))
+    const jtRes = await stGet(`/jpm/v2/tenant/${ST_TENANT_ID}/job-types?pageSize=500`)
+    const jtName = new Map((jtRes?.data || []).map(t => [t.id, t.name || '']))
+
+    // location coords for each job (for drive time), batched
+    const locIds = [...new Set(jobs.map(j => j.locationId).filter(Boolean))]
+    const geoOfLoc = new Map()
+    for (let i = 0; i < locIds.length; i += 50) {
+      try {
+        const d = await stGet(`/crm/v2/tenant/${ST_TENANT_ID}/locations?ids=${locIds.slice(i, i + 50).join(',')}&pageSize=50`)
+        for (const l of (d?.data || [])) {
+          const la = l.address?.latitude, lo = l.address?.longitude
+          if (typeof la === 'number' && typeof lo === 'number') geoOfLoc.set(l.id, { lat: la, lng: lo })
+        }
+      } catch {}
+    }
+
+    // Load per tech + where they are today.
+    const { data: cptRow } = await supabase.from('app_settings').select('value').eq('key', 'board_calls_per_tech').maybeSingle()
+    let callsPerTech = {}; try { callsPerTech = JSON.parse(cptRow?.value || '{}') } catch {}
+    const capOf = () => (Number(callsPerTech[trade]) || 3)
+
+    const loadByTech = new Map(), geosByTech = new Map()
+    for (const a of assignments) {
+      const j = jobById.get(a.jobId)
+      if (!j || !a.technicianId) continue
+      const jn = jtName.get(j.jobTypeId) || ''
+      if (!EXCLUDE_CALL.test(jn)) loadByTech.set(a.technicianId, (loadByTech.get(a.technicianId) || 0) + 1)
+      const g = geoOfLoc.get(j.locationId)
+      if (g) { if (!geosByTech.has(a.technicianId)) geosByTech.set(a.technicianId, []); geosByTech.get(a.technicianId).push(g) }
+    }
+
+    // Candidate techs = this trade's dispatchable benches. Prefer their EV on
+    // THIS job type (from the By Job Type board) over their bench EV.
+    const [{ data: bench }, { data: jtScores }] = await Promise.all([
+      supabase.from('dispatch_tech_scores').select('*'),
+      supabase.from('dispatch_jobtype_scores').select('*'),
+    ])
+    const jtEvByTech = new Map((jtScores || []).filter(r => (r.job_type || '').toLowerCase() === jobType.toLowerCase())
+      .map(r => [r.tech_id, r]))
+    const candidates = (bench || [])
+      .filter(b => tradeOfTeam(b.business_unit) === trade && !NON_DISPATCH_TEAM.test(b.business_unit) && b.tier !== 'unranked')
+
+    // Drive time from each candidate's nearest current job to the new address.
+    const travelPairs = []
+    if (geo) for (const b of candidates) for (const g of (geosByTech.get(b.tech_id) || [])) travelPairs.push({ from: g, to: geo })
+    let travel = new Map()
+    try { travel = await driveTimes(travelPairs, supabase) } catch {}
+    const nearestMin = (techId) => {
+      if (!geo) return null
+      const gs = geosByTech.get(techId) || []
+      let best = null
+      for (const g of gs) {
+        const t = travel.get(pairKey(g, geo)) || straightLine(g, geo)
+        const v = t?.minutes ?? (t?.miles != null ? t.miles * 2 : null)   // rough min if only miles
+        if (v != null && (best == null || v < best)) best = v
+      }
+      return best
+    }
+
+    const cap = capOf()
+    const options = candidates.map(b => {
+      const jt = jtEvByTech.get(b.tech_id)
+      const ev = Number((jt && jt.expected_value) ?? b.expected_value ?? 0)
+      const load = loadByTech.get(b.tech_id) || 0
+      const drive = nearestMin(b.tech_id)
+      const hasRoom = load < cap
+      return {
+        techId: b.tech_id, techName: b.tech_name, team: b.business_unit, tier: b.tier,
+        expectedValue: Math.round(ev),
+        closeRate: jt ? Math.round(Number(jt.close_rate || 0)) : Math.round(Number(b.close_rate || 0)),
+        avgSale: Math.round(Number((jt && jt.avg_sale) ?? b.avg_sale ?? 0)),
+        onThisJobType: Boolean(jt),
+        load, cap, hasRoom,
+        driveMinutes: drive == null ? null : Math.round(drive),
+      }
+    })
+
+    // Rank: best expected value, but a tech with room and a short drive beats a
+    // marginally-higher earner who's full and far. Simple, explainable score.
+    const scoreOption = (o) => {
+      let s = o.expectedValue
+      if (!o.hasRoom) s -= 400                        // needs a bump
+      if (o.driveMinutes != null) s -= o.driveMinutes * 8   // ~$8/min of windshield
+      return s
+    }
+    options.sort((a, b) => scoreOption(b) - scoreOption(a))
+
+    // For a full top pick, find the call they'd bump (lowest opportunity, and
+    // not sold/sticky). Members are movable per policy.
+    const bumpFor = (techId) => {
+      const theirs = assignments.filter(a => a.technicianId === techId).map(a => jobById.get(a.jobId)).filter(Boolean)
+      const movable = theirs
+        .map(j => ({ jobNumber: j.jobNumber, name: jtName.get(j.jobTypeId) || '' }))
+        .filter(x => !STICKY_TO_TECH.test(x.name) && !INSTALL_TYPE.test(x.name))
+      return movable[0] || null
+    }
+
+    const top = options[0]
+    let recommendation
+    if (!top) {
+      recommendation = { action: 'no_tech', text: `No ranked ${trade} tech is available for this.` }
+    } else if (top.hasRoom) {
+      recommendation = {
+        action: 'book_assign',
+        text: `Book it and put it on ${top.techName}`,
+        tech: top,
+      }
+    } else {
+      // Full — is the upside worth a bump, or hold for tomorrow?
+      const bump = bumpFor(top.techId)
+      const worthBumping = top.expectedValue >= 800 && opp.score >= 2
+      if (worthBumping && bump) {
+        recommendation = {
+          action: 'book_bump',
+          text: `Book it on ${top.techName}, and reschedule #${bump.jobNumber} (${bump.name})`,
+          tech: top, bump,
+        }
+      } else {
+        recommendation = {
+          action: 'hold',
+          text: opp.score < 2
+            ? 'Not worth disrupting today — schedule it for the next open day'
+            : `Everyone strong is full and the upside doesn't justify a bump — hold for the next open day`,
+        }
+      }
+    }
+
+    res.json({
+      trade, jobType, address: address || null, zip, zipTier,
+      opportunity: opp.score, opportunityReasons: opp.reasons,
+      located: Boolean(geo),
+      recommendation,
+      options: options.slice(0, 6),
+      boardContext: { totalAssigned: assignments.length, benchSize: candidates.length, capacity: cap },
+    })
+  } catch (err) {
+    console.error('decide error:', err.message)
     res.status(500).json({ error: err.message })
   }
 })
