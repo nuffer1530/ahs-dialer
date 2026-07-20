@@ -21,6 +21,24 @@ const ST_JOB_URL = (jobId) => `https://go.servicetitan.com/#/Job/Index/${jobId}`
 // One <table> per arrival window means each would otherwise auto-size its own
 // columns and the groups wouldn't line up down the page. Fixed layout + one
 // shared width list keeps every group in register.
+// Batting Order renders one table per team, so it needs the same fixed-layout
+// treatment as the Live Board or the groups won't line up down the page.
+const BO_COLS = [
+  { key:'rank',  label:'#',              width:'4%'  },
+  { key:'tech',  label:'Technician',     width:'19%' },
+  { key:'tier',  label:'Tier',           width:'14%' },
+  { key:'ev',    label:'$ / opportunity', width:'12%', align:'right',
+    title:'Expected revenue per opportunity = close rate × average sale' },
+  { key:'close', label:'Close rate',     width:'10%', align:'right' },
+  { key:'sale',  label:'Avg sale',       width:'10%', align:'right' },
+  { key:'sold',  label:'Total sold',     width:'11%', align:'right' },
+  { key:'opps',  label:'Opps',           width:'7%',  align:'right',
+    title:'Opportunities run in the window' },
+  { key:'memb',  label:'Membership',     width:'7%',  align:'right' },
+  { key:'jobs',  label:'Jobs',           width:'6%',  align:'right',
+    title:'Total jobs run — the sample size behind the ranking' },
+]
+
 const LB_COLS = [
   { key:'job',   label:'Job',        width:'20%' },
   { key:'tech',  label:'Technician', width:'17%' },
@@ -153,22 +171,18 @@ function BattingOrder() {
           <div key={bu} style={{ marginBottom:22 }}>
             <div style={{ fontSize:13, fontWeight:700, color:'var(--text-primary)', marginBottom:8 }}>{bu}</div>
             <div className="card" style={{ padding:0, overflow:'hidden' }}>
-              <table className="data-table" style={{ fontSize:12 }}>
+              <table className="data-table" style={{ fontSize:12, tableLayout:'fixed', width:'100%' }}>
+                <colgroup>{BO_COLS.map(c => <col key={c.key} style={{ width:c.width }} />)}</colgroup>
                 <thead><tr>
-                  <th style={{width:34}}>#</th><th>Technician</th><th>Tier</th>
-                  <th style={{textAlign:'right'}} title="Expected revenue per opportunity = close rate x average sale">$ / opportunity</th>
-                  <th style={{textAlign:'right'}}>Close rate</th>
-                  <th style={{textAlign:'right'}}>Avg sale</th>
-                  <th style={{textAlign:'right'}}>Total sold</th>
-                  <th style={{textAlign:'right'}} title="Opportunities run in the window">Opps</th>
-                  <th style={{textAlign:'right'}}>Membership</th>
-                  <th style={{textAlign:'right'}} title="Total jobs run — the sample size behind the ranking">Jobs</th>
+                  {BO_COLS.map(c => (
+                    <th key={c.key} style={{ textAlign: c.align || 'left' }} title={c.title}>{c.label}</th>
+                  ))}
                 </tr></thead>
                 <tbody>
                   {ranked.map(r => (
                     <tr key={r.tech_id} style={{ background: r.tier === 'green' ? 'rgba(21,128,61,.04)' : 'transparent' }}>
                       <td style={{ padding:'7px 12px', color:'var(--text-muted)' }}>{r.rank}</td>
-                      <td style={{ padding:'7px 12px', fontWeight:600 }}>{r.tech_name}</td>
+                      <td style={{ padding:'7px 12px', fontWeight:600, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }} title={r.tech_name}>{r.tech_name}</td>
                       <td style={{ padding:'7px 12px' }}><TierPill tier={r.tier} /></td>
                       <td style={{ padding:'7px 12px', textAlign:'right', fontWeight:700 }}>{money(r.expected_value)}</td>
                       <td style={{ padding:'7px 12px', textAlign:'right' }}>{pct(r.close_rate)}</td>
@@ -182,7 +196,7 @@ function BattingOrder() {
                   {thin.map(r => (
                     <tr key={r.tech_id} style={{ opacity:.6 }}>
                       <td style={{ padding:'7px 12px' }}>—</td>
-                      <td style={{ padding:'7px 12px' }}>{r.tech_name}</td>
+                      <td style={{ padding:'7px 12px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }} title={r.tech_name}>{r.tech_name}</td>
                       <td style={{ padding:'7px 12px' }}><TierPill tier="unranked" /></td>
                       <td colSpan={6} style={{ padding:'7px 12px', color:'var(--text-muted)', fontSize:11 }}>
                         Needs 10+ jobs to rank — not a rating
