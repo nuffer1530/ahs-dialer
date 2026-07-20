@@ -169,7 +169,31 @@ function BattingOrder() {
         const thin = rows.filter(r => r.tier === 'unranked').sort((a,b) => b.jobs - a.jobs)
         return (
           <div key={bu} style={{ marginBottom:22 }}>
-            <div style={{ fontSize:13, fontWeight:700, color:'var(--text-primary)', marginBottom:8 }}>{bu}</div>
+            <div style={{ display:'flex', alignItems:'baseline', gap:9, marginBottom:8, flexWrap:'wrap' }}>
+              <span style={{ fontSize:13, fontWeight:700, color:'var(--text-primary)' }}>{bu}</span>
+              {(() => {
+                // A tight bench is the most important thing to say out loud:
+                // ranking #1 vs #2 on a 7% gap is noise, and treating it as a
+                // verdict makes dispatch avoid a perfectly good tech.
+                const evs = ranked.map(r => Number(r.expected_value) || 0).filter(v => v > 0).sort((a,b) => a-b)
+                if (evs.length < 2) return null
+                const spread = (evs[evs.length-1] - evs[0]) / evs[evs.length-1]
+                const tight = spread < 0.25
+                return (
+                  <span title={tight
+                    ? 'These techs are within noise of each other — rank order here is not a meaningful difference'
+                    : 'There is real separation between top and bottom on this bench'}
+                    style={{ fontSize:10, fontWeight:600, padding:'2px 8px', borderRadius:99,
+                      color: tight ? 'var(--text-muted)' : '#B45309',
+                      background: tight ? 'var(--surface-2)' : '#FBF3E0',
+                      border: `1px solid ${tight ? 'var(--border)' : '#F0DCA8'}` }}>
+                    {tight
+                      ? `${Math.round(spread*100)}% spread — effectively interchangeable`
+                      : `${Math.round(spread*100)}% spread`}
+                  </span>
+                )
+              })()}
+            </div>
             <div className="card" style={{ padding:0, overflow:'hidden' }}>
               <table className="data-table" style={{ fontSize:12, tableLayout:'fixed', width:'100%' }}>
                 <colgroup>{BO_COLS.map(c => <col key={c.key} style={{ width:c.width }} />)}</colgroup>
