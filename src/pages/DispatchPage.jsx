@@ -16,7 +16,24 @@ const TIER = {
   unranked: { color:'#6B7280', bg:'#F3F4F6', border:'#E5E7EB', label:'Not enough data' },
 }
 
+const ST_JOB_URL = (jobId) => `https://go.servicetitan.com/#/Job/Index/${jobId}`
 const money = (v) => (v == null ? '—' : `$${Math.round(Number(v)).toLocaleString()}`)
+
+// "8 AM – 12 PM". Windows are what the customer was promised and how dispatch
+// reads the board, so calls are grouped by them rather than by exact start.
+const hr = (iso) => {
+  if (!iso) return null
+  const d = new Date(iso)
+  const h = d.getHours(), m = d.getMinutes()
+  const ampm = h >= 12 ? 'PM' : 'AM'
+  const h12 = h % 12 === 0 ? 12 : h % 12
+  return m ? `${h12}:${String(m).padStart(2,'0')} ${ampm}` : `${h12} ${ampm}`
+}
+const windowLabel = (c) => {
+  const a = hr(c.windowStart), b = hr(c.windowEnd)
+  if (!a) return 'Unscheduled'
+  return b ? `${a} – ${b}` : a
+}
 const pct = (v) => (v == null ? '—' : `${Number(v).toFixed(1)}%`)
 const ago = (iso) => {
   if (!iso) return 'never'
@@ -193,6 +210,23 @@ function LiveBoard() {
   const calls = data?.calls || []
   const flagged = calls.filter(c => c.flags?.length)
 
+  // Group by arrival window, ordered by when the window opens. Unscheduled
+  // sorts last rather than pretending to be midnight.
+  const groups = (() => {
+    const m = new Map()
+    for (const c of calls) {
+      const k = windowLabel(c)
+      if (!m.has(k)) m.set(k, [])
+      m.get(k).push(c)
+    }
+    return [...m.entries()].sort((a, b) => {
+      const ta = a[1][0]?.windowStart, tb = b[1][0]?.windowStart
+      if (!ta) return 1
+      if (!tb) return -1
+      return String(ta).localeCompare(String(tb))
+    })
+  })()
+
   return (
     <div>
       <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', flexWrap:'wrap', gap:10, marginBottom:14 }}>
@@ -220,20 +254,30 @@ function LiveBoard() {
         </div>
       )}
 
+      {groups.map(([label, list]) => (
+      <div key={label} style={{ marginBottom:18 }}>
+        <div style={{ display:'flex', alignItems:'baseline', gap:8, marginBottom:6 }}>
+          <span style={{ fontSize:13, fontWeight:700, color:'var(--text-primary)' }}>{label}</span>
+          <span style={{ fontSize:11, color:'var(--text-muted)' }}>
+            {list.length} call{list.length === 1 ? '' : 's'}
+            {list.some(c => c.flags?.length) ? ` · ${list.filter(c => c.flags?.length).length} flagged` : ''}
+          </span>
+        </div>
       <div className="card" style={{ padding:0, overflow:'hidden' }}>
         <table className="data-table" style={{ fontSize:12 }}>
           <thead><tr>
-            <th>Time</th><th>Job</th><th>Business unit</th><th>Technician</th><th>Tier</th>
+            <th>Job</th><th>Team</th><th>Technician</th><th>Tier</th>
             <th style={{textAlign:'right'}}>Opp.</th><th>Flag</th>
           </tr></thead>
           <tbody>
-            {calls.map((c, i) => (
+            {list.map((c, i) => (
               <tr key={`${c.appointmentId}-${i}`} style={{ background: c.flags?.length ? 'rgba(185,28,28,.04)' : 'transparent' }}>
-                <td style={{ padding:'7px 12px', whiteSpace:'nowrap', color:'var(--text-muted)' }}>
-                  {c.start ? new Date(c.start).toLocaleTimeString([], { hour:'numeric', minute:'2-digit' }) : '—'}
-                </td>
                 <td style={{ padding:'7px 12px' }}>
-                  <div style={{ fontWeight:600 }}>#{c.jobNumber}</div>
+                  <a href={ST_JOB_URL(c.jobId)} target="_blank" rel="noopener noreferrer"
+                     title="Open this job in ServiceTitan"
+                     style={{ fontWeight:600, color:'var(--accent)', textDecoration:'none' }}>
+                    #{c.jobNumber} ↗
+                  </a>
                   <div style={{ fontSize:10, color:'var(--text-muted)' }}>{c.jobType}</div>
                 </td>
                 <td style={{ padding:'7px 12px', fontSize:11, color:'var(--text-muted)' }}>{c.businessUnit}</td>
@@ -253,14 +297,17 @@ function LiveBoard() {
                 </td>
               </tr>
             ))}
-            {calls.length === 0 && (
-              <tr><td colSpan={7} style={{ padding:'26px 12px', textAlign:'center', color:'var(--text-muted)' }}>
-                Nothing assigned on today's board yet.
-              </td></tr>
-            )}
           </tbody>
         </table>
       </div>
+      </div>
+      ))}
+
+      {calls.length === 0 && (
+        <div className="card" style={{ padding:'26px 12px', textAlign:'center', color:'var(--text-muted)', fontSize:13 }}>
+          Nothing assigned on today's board yet.
+        </div>
+      )}
     </div>
   )
 }

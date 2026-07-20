@@ -2722,9 +2722,16 @@ app.get('/api/dispatch/live-board', async (req, res) => {
         })
       }
 
+      const ap = apptById.get(a.appointmentId) || {}
       calls.push({
         appointmentId: a.appointmentId, jobId: j.id, jobNumber: j.jobNumber,
-        start: apptById.get(a.appointmentId)?.start || null,
+        start: ap.start || null,
+        // The arrival WINDOW is what the customer was promised and how the
+        // dispatch board is laid out (8-12, 2-6...). It is wider than
+        // start/end — a 30-minute job can sit in a 4-hour window — so group
+        // by it, falling back to start/end when a window wasn't set.
+        windowStart: ap.arrivalWindowStart || ap.start || null,
+        windowEnd: ap.arrivalWindowEnd || ap.end || null,
         businessUnit: bu, jobType: jt,
         zip, isMember,
         techId: a.technicianId, techName: a.technicianName,
