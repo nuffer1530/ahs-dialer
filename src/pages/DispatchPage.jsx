@@ -692,6 +692,18 @@ function DecisionMaker() {
   const pickedRef = useRef(false)   // suppress a fetch on the change caused by a pick
   const debounceRef = useRef(null)
 
+  // Job-type dropdown — custom, not a native <datalist> (those render
+  // inconsistently and off-position across browsers).
+  const [showTypes, setShowTypes] = useState(false)
+  const typeMatches = jobType.trim()
+    ? types.filter(t => t.toLowerCase().includes(jobType.toLowerCase())).slice(0, 8)
+    : types.slice(0, 8)
+
+  const clearAll = () => {
+    setJobType(''); setAddress(''); setUrgent(false)
+    setRes(null); setErr(''); setSuggests([]); setShowSuggests(false); setShowTypes(false)
+  }
+
   useEffect(() => {
     authed('/api/dispatch/job-types').then(d => setTypes(d.types || [])).catch(() => {})
   }, [])
@@ -734,14 +746,29 @@ function DecisionMaker() {
         you whether to book it, book-and-bump, or hold for the next open day. It recommends only — you book it in ServiceTitan.
       </div>
 
-      <div className="card" style={{ padding:'16px 18px', marginBottom:18 }}>
-        <div className="form-field">
+      {/* Not a .card — that has overflow:hidden, which clipped the dropdowns. */}
+      <div style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius-lg)', padding:'16px 18px', marginBottom:18 }}>
+        <div className="form-field" style={{ position:'relative' }}>
           <label className="form-label">Job type</label>
-          <input className="form-input" list="dm-jobtypes" value={jobType} autoFocus
-            onChange={e => setJobType(e.target.value)}
-            onKeyDown={e => { if (e.key === 'Enter') decide() }}
+          <input className="form-input" value={jobType} autoFocus autoComplete="off"
+            onChange={e => { setJobType(e.target.value); setShowTypes(true) }}
+            onFocus={() => setShowTypes(true)}
+            onBlur={() => setTimeout(() => setShowTypes(false), 150)}
+            onKeyDown={e => { if (e.key === 'Enter') { setShowTypes(false); decide() } if (e.key === 'Escape') setShowTypes(false) }}
             placeholder="e.g. Plumbing - Tankless Water Heater Estimate" />
-          <datalist id="dm-jobtypes">{types.map(t => <option key={t} value={t} />)}</datalist>
+          {showTypes && typeMatches.length > 0 && (
+            <div style={{ position:'absolute', top:'100%', left:0, right:0, zIndex:30, marginTop:2, maxHeight:260, overflowY:'auto',
+              background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius)', boxShadow:'0 6px 20px rgba(0,0,0,.14)' }}>
+              {typeMatches.map((t, i) => (
+                <div key={i} onMouseDown={() => { setJobType(t); setShowTypes(false) }}
+                  style={{ padding:'8px 13px', fontSize:13, cursor:'pointer', borderBottom: i < typeMatches.length-1 ? '1px solid var(--border)' : 'none' }}
+                  onMouseEnter={e => e.currentTarget.style.background='var(--surface-2)'}
+                  onMouseLeave={e => e.currentTarget.style.background='transparent'}>
+                  {t}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
         <div className="form-field" style={{ marginTop:12, position:'relative' }}>
           <label className="form-label">Address or area <span style={{ color:'var(--text-muted)', fontWeight:400 }}>— for drive time and area value</span></label>
@@ -775,9 +802,12 @@ function DecisionMaker() {
             <input type="checkbox" checked={urgent} onChange={e => setUrgent(e.target.checked)} />
             Customer needs it today
           </label>
-          <button className="btn primary" onClick={decide} disabled={busy || !jobType.trim()}>
-            {busy ? 'Working it out…' : 'Where should this go?'}
-          </button>
+          <div style={{ display:'flex', gap:8 }}>
+            {(jobType || address || res) && <button className="btn" onClick={clearAll}>Clear</button>}
+            <button className="btn primary" onClick={decide} disabled={busy || !jobType.trim()}>
+              {busy ? 'Working it out…' : 'Where should this go?'}
+            </button>
+          </div>
         </div>
       </div>
 
