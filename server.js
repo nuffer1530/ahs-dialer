@@ -3332,29 +3332,49 @@ async function generateDispatchBrief() {
 
   const sys = `You are the dispatch analyst for Awesome Home Services (HVAC, plumbing, electrical, garage doors — Colorado Springs). You are given a JSON snapshot of today's live dispatch board, tech performance benches, and 3-day capacity. Write the read a sharp dispatch manager would give at the huddle: concrete, numbers-first, in plain dispatcher language. Only use what is in the data; never invent jobs, names, or numbers.
 
-Return ONLY JSON, no markdown:
-{
-  "headline": "one sentence — the single most important thing about the board right now",
-  "situation": "2-3 sentences of what's going on: flags, revenue, capacity, completions",
-  "actions": [{"priority": "now" | "today" | "plan", "text": "specific action, name the tech and job number where possible, max 20 words"}],
-  "watchouts": ["short items worth an eye, e.g. a bench with no green tech, tomorrow's capacity gap"],
-  "wins": ["short items worth calling out at the huddle, e.g. a sale that closed"]
-}
-3-6 actions, ordered by priority. Empty arrays are fine. 'now' means act this hour; 'plan' means tomorrow/this week.`
+Submit the analysis via the submit_brief tool. 3-6 actions, ordered by priority; empty arrays are fine. 'now' means act this hour; 'plan' means tomorrow/this week.`
 
+  // Forced tool call, not free-text JSON: the API validates the arguments
+  // against the schema, so a stray quote or preamble can't produce the
+  // 'Expected double-quoted property name' parse failure this shipped with.
   const r = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: { 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
     body: JSON.stringify({
       model: 'claude-sonnet-5', max_tokens: 1400, system: sys,
+      tools: [{
+        name: 'submit_brief',
+        description: 'Submit the dispatch board analysis',
+        input_schema: {
+          type: 'object',
+          properties: {
+            headline: { type: 'string', description: 'one sentence — the single most important thing about the board right now' },
+            situation: { type: 'string', description: '2-3 sentences: flags, revenue, capacity, completions' },
+            actions: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  priority: { type: 'string', enum: ['now', 'today', 'plan'] },
+                  text: { type: 'string', description: 'specific action, name the tech and job number where possible, max 20 words' },
+                },
+                required: ['priority', 'text'],
+              },
+            },
+            watchouts: { type: 'array', items: { type: 'string' } },
+            wins: { type: 'array', items: { type: 'string' } },
+          },
+          required: ['headline', 'situation', 'actions', 'watchouts', 'wins'],
+        },
+      }],
+      tool_choice: { type: 'tool', name: 'submit_brief' },
       messages: [{ role: 'user', content: JSON.stringify(facts) }],
     }),
   })
   if (!r.ok) throw new Error(`Claude ${r.status}: ${(await r.text()).slice(0, 160)}`)
   const data = await r.json()
-  let text = (data.content || []).filter(b => b.type === 'text').map(b => b.text).join('').trim()
-  text = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '')
-  const brief = JSON.parse(text)
+  const brief = (data.content || []).find(b => b.type === 'tool_use')?.input
+  if (!brief?.headline) throw new Error('Analysis came back empty — retry')
   const record = { brief, generatedAt: new Date().toISOString() }
   await supabase.from('app_settings').upsert(
     { key: 'dispatch_brief', value: JSON.stringify(record) }, { onConflict: 'key' })
