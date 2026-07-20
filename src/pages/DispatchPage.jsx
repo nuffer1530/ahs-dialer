@@ -22,9 +22,8 @@ const ST_JOB_URL = (jobId) => `https://go.servicetitan.com/#/Job/Index/${jobId}`
 // columns and the groups wouldn't line up down the page. Fixed layout + one
 // shared width list keeps every group in register.
 const LB_COLS = [
-  { key:'job',   label:'Job',        width:'15%' },
-  { key:'team',  label:'Team',       width:'14%' },
-  { key:'tech',  label:'Technician', width:'15%' },
+  { key:'job',   label:'Job',        width:'20%' },
+  { key:'tech',  label:'Technician', width:'17%' },
   { key:'tier',  label:'Tier',       width:'13%' },
   { key:'opp',   label:'Opp.',       width:'7%',  align:'right' },
   { key:'flag',  label:'Flag',       width:'36%' },
@@ -222,6 +221,22 @@ function LiveBoard() {
   const calls = data?.calls || []
   const flagged = calls.filter(c => c.flags?.length)
 
+  // Within a window, group by team. Teams with flags sort first so a
+  // dispatcher sees the problems without scanning every bench.
+  const byTeam = (list) => {
+    const m = new Map()
+    for (const c of list) {
+      const k = c.businessUnit || 'Unassigned'
+      if (!m.has(k)) m.set(k, [])
+      m.get(k).push(c)
+    }
+    return [...m.entries()].sort((a, b) => {
+      const fa = a[1].some(c => c.flags?.length) ? 0 : 1
+      const fb = b[1].some(c => c.flags?.length) ? 0 : 1
+      return fa - fb || a[0].localeCompare(b[0])
+    })
+  }
+
   // Group by arrival window, ordered by when the window opens. Unscheduled
   // sorts last rather than pretending to be midnight.
   const groups = (() => {
@@ -254,7 +269,9 @@ function LiveBoard() {
           {data.swaps.map((s, i) => (
             <div key={i} className="card" style={{ padding:'11px 14px', marginBottom:8, borderLeft:'3px solid var(--accent)' }}>
               <div style={{ fontSize:12, fontWeight:600, color:'var(--text-primary)' }}>🔁 {s.text}</div>
-              <div style={{ fontSize:11, color:'var(--text-muted)', marginTop:3 }}>{s.businessUnit} · suggestion only — make the change in ServiceTitan</div>
+              <div style={{ fontSize:11, color:'var(--text-muted)', marginTop:3 }}>
+                {s.businessUnit}{s.note ? ` · ${s.note}` : ''} · suggestion only — make the change in ServiceTitan
+              </div>
             </div>
           ))}
         </div>
@@ -267,14 +284,24 @@ function LiveBoard() {
       )}
 
       {groups.map(([label, list]) => (
-      <div key={label} style={{ marginBottom:18 }}>
-        <div style={{ display:'flex', alignItems:'baseline', gap:8, marginBottom:6 }}>
-          <span style={{ fontSize:13, fontWeight:700, color:'var(--text-primary)' }}>{label}</span>
+      <div key={label} style={{ marginBottom:22 }}>
+        <div style={{ display:'flex', alignItems:'baseline', gap:8, marginBottom:8,
+          borderBottom:'2px solid var(--border)', paddingBottom:5 }}>
+          <span style={{ fontSize:14, fontWeight:800, color:'var(--text-primary)' }}>{label}</span>
           <span style={{ fontSize:11, color:'var(--text-muted)' }}>
             {list.length} call{list.length === 1 ? '' : 's'}
             {list.some(c => c.flags?.length) ? ` · ${list.filter(c => c.flags?.length).length} flagged` : ''}
           </span>
         </div>
+        {byTeam(list).map(([team, tlist]) => (
+        <div key={team} style={{ marginBottom:10 }}>
+          <div style={{ display:'flex', alignItems:'baseline', gap:7, margin:'0 0 4px 2px' }}>
+            <span style={{ fontSize:11, fontWeight:700, color:'var(--text-secondary)' }}>{team}</span>
+            <span style={{ fontSize:10, color:'var(--text-muted)' }}>
+              {tlist.length}
+              {tlist.some(c => c.flags?.length) ? ` · ${tlist.filter(c => c.flags?.length).length} flagged` : ''}
+            </span>
+          </div>
       <div className="card" style={{ padding:0, overflow:'hidden' }}>
         <table className="data-table" style={{ fontSize:12, tableLayout:'fixed', width:'100%' }}>
           <colgroup>{LB_COLS.map(c => <col key={c.key} style={{ width:c.width }} />)}</colgroup>
@@ -284,7 +311,7 @@ function LiveBoard() {
             ))}
           </tr></thead>
           <tbody>
-            {list.map((c, i) => (
+            {tlist.map((c, i) => (
               <tr key={`${c.appointmentId}-${i}`} style={{ background: c.flags?.length ? 'rgba(185,28,28,.04)' : 'transparent' }}>
                 <td style={{ padding:'7px 12px' }}>
                   <a href={ST_JOB_URL(c.jobId)} target="_blank" rel="noopener noreferrer"
@@ -294,7 +321,6 @@ function LiveBoard() {
                   </a>
                   <div style={{ fontSize:10, color:'var(--text-muted)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }} title={c.jobType}>{c.jobType}</div>
                 </td>
-                <td style={{ padding:'7px 12px', fontSize:11, color:'var(--text-muted)' }}>{c.businessUnit}</td>
                 <td style={{ padding:'7px 12px' }}>{c.techName}</td>
                 <td style={{ padding:'7px 12px' }}><TierPill tier={c.techTier} /></td>
                 <td style={{ padding:'7px 12px', textAlign:'right', fontWeight:700,
@@ -314,6 +340,8 @@ function LiveBoard() {
           </tbody>
         </table>
       </div>
+        </div>
+        ))}
       </div>
       ))}
 

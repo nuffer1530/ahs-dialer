@@ -2681,11 +2681,15 @@ app.get('/api/dispatch/live-board', async (req, res) => {
     // without it the zip and membership signals silently never fire and every
     // opportunity score collapses to "job type name".
     const locIds = [...new Set(jobs.map(j => j.locationId).filter(Boolean))]
-    const zipOfLoc = new Map()
+    const zipOfLoc = new Map(), geoOfLoc = new Map()
     for (let i = 0; i < locIds.length; i += 50) {
       try {
         const d = await stGet(`/crm/v2/tenant/${ST_TENANT_ID}/locations?ids=${locIds.slice(i, i + 50).join(',')}&pageSize=50`)
-        for (const l of (d?.data || [])) zipOfLoc.set(l.id, String(l.address?.zip || '').trim().slice(0, 5))
+        for (const l of (d?.data || [])) {
+          zipOfLoc.set(l.id, String(l.address?.zip || '').trim().slice(0, 5))
+          const la = l.address?.latitude, lo = l.address?.longitude
+          if (typeof la === 'number' && typeof lo === 'number') geoOfLoc.set(l.id, { lat: la, lng: lo })
+        }
       } catch (e) { console.warn('live-board locations batch:', e.message) }
     }
     const custIds = [...new Set(jobs.map(j => j.customerId).filter(Boolean))]
@@ -2741,7 +2745,7 @@ app.get('/api/dispatch/live-board', async (req, res) => {
         windowStart: ap.arrivalWindowStart || ap.start || null,
         windowEnd: ap.arrivalWindowEnd || ap.end || null,
         businessUnit: bu, jobType: jt,
-        zip, isMember,
+        zip, isMember, geo: geoOfLoc.get(j.locationId) || null,
         techId: a.technicianId, techName: a.technicianName,
         techTier: techScore?.tier || 'unranked',
         techCloseRate: techScore?.close_rate ?? null,
@@ -2752,10 +2756,25 @@ app.get('/api/dispatch/live-board', async (req, res) => {
       })
     }
 
-    // Swap suggestion: within one business unit, a high-opportunity call sitting
-    // on a red tech while a green tech has a routine one. Only surfaced as a
-    // suggestion — Andi never writes assignments back to ServiceTitan.
+    // Straight-line miles between two jobs. NOT drive time — there is no
+    // routing service here — but enough to stop the tool proposing a swap
+    // across the county, which would cost more in windshield time than the
+    // revenue it chases.
+    const milesBetween = (a, b) => {
+      if (!a?.geo || !b?.geo) return null
+      const R = 3958.8, rad = (d) => (d * Math.PI) / 180
+      const dLat = rad(b.geo.lat - a.geo.lat), dLng = rad(b.geo.lng - a.geo.lng)
+      const h = Math.sin(dLat / 2) ** 2 + Math.cos(rad(a.geo.lat)) * Math.cos(rad(b.geo.lat)) * Math.sin(dLng / 2) ** 2
+      return 2 * R * Math.asin(Math.sqrt(h))
+    }
+    const SWAP_MAX_MILES = 12
+
+    // Swap suggestion: within one team, a high-opportunity call sitting on a
+    // red tech while a green tech has a routine one — and the two jobs close
+    // enough that trading them doesn't blow up the route. Suggestion only;
+    // Andi never writes assignments back to ServiceTitan.
     const swaps = []
+    const usedForSwap = new Set()
     const byBU = new Map()
     for (const c of calls) {
       if (!byBU.has(c.businessUnit)) byBU.set(c.businessUnit, [])
@@ -2765,12 +2784,23 @@ app.get('/api/dispatch/live-board', async (req, res) => {
       if (NON_DISPATCH_TEAM.test(bu)) continue
       const misplaced = list.filter(c => c.opportunity >= 3 && c.techTier === 'red')
       const underused = list.filter(c => c.opportunity <= 0 && c.techTier === 'green')
-      for (let i = 0; i < Math.min(misplaced.length, underused.length); i++) {
+      for (const m of misplaced) {
+        // Prefer the nearest viable partner rather than the first one found.
+        const partner = underused
+          .filter(u => !usedForSwap.has(u.jobId))
+          .map(u => ({ u, miles: milesBetween(m, u) }))
+          .filter(x => x.miles == null || x.miles <= SWAP_MAX_MILES)
+          .sort((a, b) => (a.miles ?? 999) - (b.miles ?? 999))[0]
+        if (!partner) continue
+        usedForSwap.add(partner.u.jobId)
+        const mi = partner.miles == null ? null : Math.round(partner.miles * 10) / 10
         swaps.push({
           businessUnit: bu,
-          from: { jobNumber: misplaced[i].jobNumber, tech: misplaced[i].techName, jobType: misplaced[i].jobType },
-          to: { jobNumber: underused[i].jobNumber, tech: underused[i].techName, jobType: underused[i].jobType },
-          text: `Swap: ${misplaced[i].techName} has the ${misplaced[i].jobType} (#${misplaced[i].jobNumber}) while ${underused[i].techName} has a routine ${underused[i].jobType}`,
+          miles: mi,
+          from: { jobNumber: m.jobNumber, tech: m.techName, jobType: m.jobType },
+          to: { jobNumber: partner.u.jobNumber, tech: partner.u.techName, jobType: partner.u.jobType },
+          text: `Swap: ${m.techName} has the ${m.jobType} (#${m.jobNumber}) while ${partner.u.techName} has a routine ${partner.u.jobType}`,
+          note: mi == null ? 'distance unknown — check the map' : `${mi} mi apart`,
         })
       }
     }
