@@ -245,10 +245,11 @@ function LiveBoard() {
   const [view, setView] = useState('ontrack')   // ontrack | flagged | reschedule | completed
   const [brief, setBrief] = useState(null)
   const [briefBusy, setBriefBusy] = useState(false)
+  const [briefErr, setBriefErr] = useState('')
   const loadBrief = useCallback(async (refresh = false) => {
-    setBriefBusy(true)
+    setBriefBusy(true); setBriefErr('')
     try { setBrief(await authed(`/api/dispatch/brief${refresh ? '?refresh=1' : ''}`)) }
-    catch (e) { /* the board still works without the analyst */ }
+    catch (e) { setBriefErr(e.message) }   // visible, not silent — 'where is it?' was the bug
     finally { setBriefBusy(false) }
   }, [])
   useEffect(() => { loadBrief() }, [loadBrief])
@@ -353,6 +354,16 @@ function LiveBoard() {
           <button className="btn sm" onClick={() => load(true)}>Refresh</button>
         </div>
       </div>
+
+      {!brief?.brief && (briefBusy || briefErr) && (
+        <div className="card" style={{ padding:'13px 18px', marginBottom:14, borderLeft:'4px solid var(--accent)', fontSize:12.5,
+          color: briefErr ? 'var(--danger)' : 'var(--text-muted)' }}>
+          {briefBusy
+            ? '🧠 Andi is reading the board — first analysis takes about 30 seconds…'
+            : `Analysis unavailable: ${briefErr} `}
+          {!briefBusy && <button className="btn sm" style={{ marginLeft:8 }} onClick={() => loadBrief(true)}>Retry</button>}
+        </div>
+      )}
 
       {brief?.brief && (
         <div className="card" style={{ padding:'15px 18px', marginBottom:14, borderLeft:'4px solid var(--accent)' }}>
