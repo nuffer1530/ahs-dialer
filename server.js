@@ -3055,12 +3055,32 @@ app.get('/api/dispatch/live-board', async (req, res) => {
     for (const c of calls) {
       const sc = scoreOf.get(`${c.techId}|${c.businessUnit}`)
       c.bookedRevenue = bookedByJob.get(c.jobId) || 0
-      // Expected applies ONLY to calls with a real opportunity signal. Applying
-      // a tech's per-opportunity earning power to every routine maintenance and
-      // filter change invented ~$135k of revenue on a 73-call day.
-      c.expectedRevenue = (c.bookedRevenue || INSTALL_TYPE.test(c.jobType || '') || c.opportunity < 1)
-        ? 0
-        : Math.round(Number(sc?.expected_value || 0))
+
+      // EXPECTED SALES. Two corrections live here, both learned the hard way:
+      //
+      // 1) A SALES-BENCH call is inherently a sales opportunity — that's what
+      //    the bench is for. Gating on job-type keywords scored Arber's
+      //    "HVAC - No Cool" at zero, which is precisely the call where he sells
+      //    a $12-20k system. Sales benches always count; other benches still
+      //    need a real signal (old system, replacement type, high-ticket zip).
+      //
+      // 2) EV is revenue per OPPORTUNITY, not per dispatched call, and only
+      //    ~35% of a sales tech's calls produce an estimate at all (Arber: 32
+      //    opportunities across 92 jobs). Multiplying EV by every call assumed
+      //    every visit becomes a quote and overstated the day ~3x. Scale by the
+      //    tech's own opportunity rate so this is what a DISPATCHED call is
+      //    worth before we know whether it turns into one.
+      const oppRate = Number(sc?.jobs) > 0
+        ? Math.min(1, Number(sc.opportunities || 0) / Number(sc.jobs))
+        : 0
+      const salesBench = /sales/i.test(c.businessUnit || '')
+      const countsAsSales = !c.bookedRevenue
+        && !INSTALL_TYPE.test(c.jobType || '')
+        && !STICKY_TO_TECH.test(c.jobType || '')
+        && (salesBench || c.opportunity >= 1)
+      c.expectedRevenue = countsAsSales
+        ? Math.round(Number(sc?.expected_value || 0) * oppRate)
+        : 0
       // Reschedule candidates: what to move when demand walks in. Installs are
       // sold work and phone/follow-ups take no truck time and must happen, so
       // both are out. Ranked by how little the call is likely to produce.
