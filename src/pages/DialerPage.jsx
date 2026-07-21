@@ -1229,7 +1229,9 @@ export default function DialerPage() {
                       <span key={i} style={{ fontSize:11, color:'var(--text-secondary)' }}>{v}</span>
                     ))}
                     <span style={{ fontSize:11, color:'var(--text-secondary)' }}>ST: {c.external_id || '--'}</span>
-                    {isOutbound && <span style={{ fontSize:11, color:'var(--text-secondary)' }}>Attempts: {c.attempts||0}/{MAX_ATTEMPTS}</span>}
+                    {/* Attempts is outbound-campaign lifecycle — hidden for paid
+                        leads (the 'Leads' campaign) and ST-searched customers. */}
+                    {isOutbound && campName(c) !== 'Leads' && <span style={{ fontSize:11, color:'var(--text-secondary)' }}>Attempts: {c.attempts||0}/{MAX_ATTEMPTS}</span>}
                   </div>
                 </div>
                 {/* Action buttons */}
