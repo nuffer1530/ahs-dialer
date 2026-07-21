@@ -1190,16 +1190,7 @@ export default function DialerPage() {
               {stSearchLoading ? (
                 <div style={{ padding:'14px', textAlign:'center', fontSize:12, color:'var(--text-muted)' }}>Searching...</div>
               ) : stSearchResults.length === 0 ? (
-                <div style={{ padding:'12px 14px', textAlign:'center' }}>
-                  <div style={{ fontSize:12, color:'var(--text-muted)', marginBottom:8 }}>No customers found</div>
-                  <button className="btn sm primary" onClick={() => {
-                    const q = stSearch.trim()
-                    const digits = q.replace(/\D/g, '')
-                    setNewCustErr('')
-                    setNewCust({ name: digits.length >= 7 ? '' : q, phone: digits.length >= 7 ? q : '', email: '', street: '', city: 'Colorado Springs', state: 'CO', zip: '' })
-                    setStSearchOpen(false)
-                  }}>＋ Create new ServiceTitan customer</button>
-                </div>
+                <div style={{ padding:'14px', textAlign:'center', fontSize:12, color:'var(--text-muted)' }}>No customers found</div>
               ) : stSearchResults.map(cust => (
                 <div key={cust.id} onClick={() => openStCustomer(cust)}
                   style={{ padding:'9px 12px', borderBottom:'1px solid var(--border)', cursor:'pointer' }}
@@ -1211,6 +1202,21 @@ export default function DialerPage() {
                   </div>
                 </div>
               ))}
+              {/* Always available — right person not in the list means new customer */}
+              {!stSearchLoading && (
+                <div onClick={() => {
+                    const q = stSearch.trim()
+                    const digits = q.replace(/\D/g, '')
+                    setNewCustErr('')
+                    setNewCust({ name: digits.length >= 7 ? '' : q, phone: digits.length >= 7 ? q : '', email: '', street: '', city: 'Colorado Springs', state: 'CO', zip: '' })
+                    setStSearchOpen(false)
+                  }}
+                  style={{ padding:'9px 12px', cursor:'pointer', fontSize:12, fontWeight:600, color:'var(--accent)', display:'flex', alignItems:'center', gap:6, borderTop:'1px solid var(--border)', background:'var(--surface-2)', position:'sticky', bottom:0 }}
+                  onMouseEnter={e => e.currentTarget.style.background='var(--accent-bg)'}
+                  onMouseLeave={e => e.currentTarget.style.background='var(--surface-2)'}>
+                  <span style={{ fontSize:14, lineHeight:1 }}>＋</span> Create new ServiceTitan customer
+                </div>
+              )}
             </div>
           )}
         </div>
