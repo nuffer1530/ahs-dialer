@@ -1,4 +1,6 @@
-export const MAX_ATTEMPTS = 3
+// Live binding — opsConfig.js overwrites this from app_settings.
+export let MAX_ATTEMPTS = 3
+export const setMaxAttempts = (n) => { if (Number(n) > 0) MAX_ATTEMPTS = Math.round(Number(n)) }
 
 // What a rep is engaged on, shown alongside their status on the Live Dashboard
 // and the floor TV. Status says "On Call"; this says what kind of call it is.

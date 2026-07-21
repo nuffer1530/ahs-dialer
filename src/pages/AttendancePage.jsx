@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { sb } from '../lib/supabase'
 import { useAuth } from '../lib/AuthContext'
+import { ATTENDANCE_DEFAULTS, invalidateOpsConfig, loadOpsConfig } from '../lib/opsConfig'
 import Modal from '../components/Modal'
 import GraphicalSchedule from '../components/GraphicalSchedule'
 import Avatar from '../components/Avatar'
@@ -109,6 +110,24 @@ const POINT_REASONS = [
 
 export default function AttendancePage() {
   const { profile, isAdmin } = useAuth()
+  // Admin-tunable WFM numbers (Settings live in app_settings.attendance_config)
+  const [attCfg, setAttCfg] = useState(ATTENDANCE_DEFAULTS)
+  const [wfmCfg, setWfmCfg] = useState(null)     // edit buffer for the admin card
+  const [wfmMsg, setWfmMsg] = useState('')
+  useEffect(() => {
+    loadOpsConfig().then(c => {
+      setAttCfg(c.attendance)
+      setWfmCfg({ ...c.attendance, points: { ...c.attendance.points } })
+    })
+  }, [])
+  const saveWfmCfg = async () => {
+    try {
+      await sb.from('app_settings').upsert({ key: 'attendance_config', value: JSON.stringify(wfmCfg) }, { onConflict: 'key' })
+      invalidateOpsConfig(); await loadOpsConfig(true)
+      setAttCfg(wfmCfg)
+      setWfmMsg('Saved'); setTimeout(() => setWfmMsg(''), 3000)
+    } catch (e) { setWfmMsg('Error: ' + e.message) }
+  }
 
   const getTodayMonday = () => {
     const now = new Date()
@@ -513,9 +532,9 @@ export default function AttendancePage() {
                     {avgAdh != null && (
                       <div style={{ display:'flex', alignItems:'center', gap:8 }}>
                         <div style={{ width:120, height:6, background:'var(--border)', borderRadius:99, overflow:'hidden' }}>
-                          <div style={{ height:'100%', width:`${avgAdh}%`, background: avgAdh >= 90 ? 'var(--success)' : avgAdh >= 75 ? '#f59e0b' : 'var(--danger)', borderRadius:99 }} />
+                          <div style={{ height:'100%', width:`${avgAdh}%`, background: avgAdh >= attCfg.adherenceGood ? 'var(--success)' : avgAdh >= attCfg.adherenceWarn ? '#f59e0b' : 'var(--danger)', borderRadius:99 }} />
                         </div>
-                        <span style={{ fontSize:14, fontWeight:700, color: avgAdh >= 90 ? 'var(--success)' : avgAdh >= 75 ? '#f59e0b' : 'var(--danger)' }}>{avgAdh}%</span>
+                        <span style={{ fontSize:14, fontWeight:700, color: avgAdh >= attCfg.adherenceGood ? 'var(--success)' : avgAdh >= attCfg.adherenceWarn ? '#f59e0b' : 'var(--danger)' }}>{avgAdh}%</span>
                       </div>
                     )}
                   </div>
@@ -542,7 +561,7 @@ export default function AttendancePage() {
                               <td style={{ padding:'10px 12px', fontSize:12 }}>{lunchEvent ? <span style={{ color: bv(lunchEvent, sched?.lunch_duration || 30) ? 'var(--danger)' : 'var(--text-secondary)' }}>{fmtTime(lunchEvent.started_at)} ({fmtDuration(lunchEvent.duration_seconds)}){bv(lunchEvent, sched?.lunch_duration || 30) ? ' !' : ''}</span> : <span style={{ color:'var(--text-muted)' }}>—</span>}</td>
                               <td style={{ padding:'10px 12px', fontSize:12 }}>{breakEvents[1] ? <span style={{ color: bv(breakEvents[1], sched?.break2_duration || 15) ? 'var(--danger)' : 'var(--text-secondary)' }}>{fmtTime(breakEvents[1].started_at)} ({fmtDuration(breakEvents[1].duration_seconds)}){bv(breakEvents[1], sched?.break2_duration || 15) ? ' !' : ''}</span> : <span style={{ color:'var(--text-muted)' }}>—</span>}</td>
                               <td style={{ padding:'10px 12px', fontSize:12 }}>{offlineEvent ? <span>{fmtTime(offlineEvent.started_at)}</span> : <span style={{ color:'var(--text-muted)' }}>—</span>}</td>
-                              <td style={{ padding:'10px 12px', textAlign:'right' }}>{pct != null ? <span style={{ fontSize:13, fontWeight:700, color: pct >= 90 ? 'var(--success)' : pct >= 75 ? '#f59e0b' : 'var(--danger)' }}>{pct}%</span> : <span style={{ color:'var(--text-muted)' }}>—</span>}</td>
+                              <td style={{ padding:'10px 12px', textAlign:'right' }}>{pct != null ? <span style={{ fontSize:13, fontWeight:700, color: pct >= attCfg.adherenceGood ? 'var(--success)' : pct >= attCfg.adherenceWarn ? '#f59e0b' : 'var(--danger)' }}>{pct}%</span> : <span style={{ color:'var(--text-muted)' }}>—</span>}</td>
                             </tr>
                           )
                         })}
@@ -561,15 +580,52 @@ export default function AttendancePage() {
             <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
               <span style={{ fontSize:12, color:'var(--text-muted)' }}>Calendar year {new Date().getFullYear()} · Points reset Jan 1</span>
               <div style={{ display:'flex', gap:10, fontSize:11, color:'var(--text-muted)' }}>
-                <span style={{ display:'flex', alignItems:'center', gap:4 }}><span style={{ width:10, height:10, borderRadius:'50%', background:'var(--success)', display:'inline-block' }}></span> 0–2.9 Good</span>
-                <span style={{ display:'flex', alignItems:'center', gap:4 }}><span style={{ width:10, height:10, borderRadius:'50%', background:'#f59e0b', display:'inline-block' }}></span> 3–5.9 Warning</span>
-                <span style={{ display:'flex', alignItems:'center', gap:4 }}><span style={{ width:10, height:10, borderRadius:'50%', background:'var(--danger)', display:'inline-block' }}></span> 6+ Critical</span>
+                <span style={{ display:'flex', alignItems:'center', gap:4 }}><span style={{ width:10, height:10, borderRadius:'50%', background:'var(--success)', display:'inline-block' }}></span> {`0–${(attCfg.pointsWarn - 0.1).toFixed(1)} Good`}</span>
+                <span style={{ display:'flex', alignItems:'center', gap:4 }}><span style={{ width:10, height:10, borderRadius:'50%', background:'#f59e0b', display:'inline-block' }}></span> {`${attCfg.pointsWarn}–${(attCfg.pointsCritical - 0.1).toFixed(1)} Warning`}</span>
+                <span style={{ display:'flex', alignItems:'center', gap:4 }}><span style={{ width:10, height:10, borderRadius:'50%', background:'var(--danger)', display:'inline-block' }}></span> {`${attCfg.pointsCritical}+ Critical`}</span>
               </div>
             </div>
+            {isAdmin && wfmCfg && (
+              <div style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius-lg)', padding:16 }}>
+                <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:12 }}>
+                  <span style={{ fontSize:13, fontWeight:700 }}>WFM settings</span>
+                  <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+                    {wfmMsg && <span style={{ fontSize:12, color: wfmMsg.startsWith('Error') ? 'var(--danger)' : 'var(--success)' }}>{wfmMsg}</span>}
+                    <button className="btn sm primary" onClick={saveWfmCfg}>Save</button>
+                  </div>
+                </div>
+                <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(150px, 1fr))', gap:12 }}>
+                  {[
+                    ['late', 'Late arrival (pts)'],
+                    ['absence', 'Unexcused absence (pts)'],
+                    ['early_departure', 'Early departure (pts)'],
+                    ['no_call', 'No call / no show (pts)'],
+                  ].map(([k, label]) => (
+                    <div key={k} className="form-field">
+                      <label className="form-label" style={{ fontSize:11 }}>{label}</label>
+                      <input className="form-input" type="number" step="0.5" min="0" value={wfmCfg.points[k]}
+                        onChange={e => setWfmCfg(f => ({ ...f, points: { ...f.points, [k]: Number(e.target.value) } }))} />
+                    </div>
+                  ))}
+                  {[
+                    ['pointsWarn', 'Points → Warning at'],
+                    ['pointsCritical', 'Points → Critical at'],
+                    ['adherenceGood', 'Adherence green ≥ (%)'],
+                    ['adherenceWarn', 'Adherence amber ≥ (%)'],
+                  ].map(([k, label]) => (
+                    <div key={k} className="form-field">
+                      <label className="form-label" style={{ fontSize:11 }}>{label}</label>
+                      <input className="form-input" type="number" min="0" value={wfmCfg[k]}
+                        onChange={e => setWfmCfg(f => ({ ...f, [k]: Number(e.target.value) }))} />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
             {profiles.map(p => {
               const pts = attendancePoints.filter(ap => ap.profile_id === p.id)
               const total = pts.reduce((sum, ap) => sum + parseFloat(ap.points), 0)
-              const statusColor = total >= 6 ? 'var(--danger)' : total >= 3 ? '#f59e0b' : 'var(--success)'
+              const statusColor = total >= attCfg.pointsCritical ? 'var(--danger)' : total >= attCfg.pointsWarn ? '#f59e0b' : 'var(--success)'
               return (
                 <div key={p.id} style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius-lg)', overflow:'hidden' }}>
                   <div style={{ padding:'14px 18px', borderBottom: pts.length > 0 ? '1px solid var(--border)' : 'none', display:'flex', alignItems:'center', justifyContent:'space-between', background:'var(--surface-2)' }}>
@@ -668,7 +724,7 @@ export default function AttendancePage() {
                         <td style={{ padding:'12px 14px', textAlign:'center', fontWeight:700, color: r.totalPoints >= 6 ? 'var(--danger)' : r.totalPoints >= 3 ? '#f59e0b' : 'var(--success)' }}>{r.totalPoints.toFixed(1)}</td>
                         <td style={{ padding:'12px 14px', textAlign:'center' }}>
                           {r.avgAdherence != null ? (
-                            <span style={{ fontWeight:700, color: r.avgAdherence >= 90 ? 'var(--success)' : r.avgAdherence >= 75 ? '#f59e0b' : 'var(--danger)' }}>{r.avgAdherence}%</span>
+                            <span style={{ fontWeight:700, color: r.avgAdherence >= attCfg.adherenceGood ? 'var(--success)' : r.avgAdherence >= attCfg.adherenceWarn ? '#f59e0b' : 'var(--danger)' }}>{r.avgAdherence}%</span>
                           ) : <span style={{ color:'var(--text-muted)' }}>—</span>}
                         </td>
                         <td style={{ padding:'12px 14px', textAlign:'center', color: r.breakViolations > 0 ? 'var(--danger)' : 'var(--text-secondary)', fontWeight: r.breakViolations > 0 ? 700 : 400 }}>{r.breakViolations}</td>
@@ -761,7 +817,7 @@ export default function AttendancePage() {
               <label className="form-label">Reason</label>
               <select className="form-input" value={pointData.reason} onChange={e => {
                 const r = POINT_REASONS.find(r => r.value === e.target.value)
-                setPointData(p => ({ ...p, reason: e.target.value, points: r?.points || p.points }))
+                setPointData(p => ({ ...p, reason: e.target.value, points: (attCfg.points || {})[e.target.value] ?? r?.points ?? p.points }))
               }}>
                 {POINT_REASONS.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
               </select>

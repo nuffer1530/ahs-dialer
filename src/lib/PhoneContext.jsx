@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useRef, useState, useCallback } from 'react'
 import { sb } from './supabase'
+import { loadOpsConfig } from './opsConfig'
 import { useAuth } from './AuthContext'
 import { useData } from './DataContext'
 import { syncWorkerActivity } from './utils'
@@ -84,7 +85,11 @@ export function PhoneProvider({ children }) {
   // Auto wrap-up: after a call ends the rep gets 60s of Wrap Up, then is put
   // back to Available automatically — unless they change their status themselves
   // (e.g. re-select Wrap Up to keep wrapping), which cancels the auto-return.
-  const WRAP_MS = 60_000
+  const wrapMsRef = useRef(60_000)
+  useEffect(() => {
+    loadOpsConfig().then(c => { wrapMsRef.current = Math.max(5, Number(c.ops.wrapUpSeconds) || 60) * 1000 })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   const wrapTimerRef = useRef(null)
   const cancelAutoWrap = useCallback(() => {
     if (wrapTimerRef.current) { clearTimeout(wrapTimerRef.current); wrapTimerRef.current = null }
@@ -93,7 +98,7 @@ export function PhoneProvider({ children }) {
     // The interaction is over once you're wrapping — clear its label.
     updateAgentStatus('Wrap Up', null)
     cancelAutoWrap()
-    wrapTimerRef.current = setTimeout(() => { wrapTimerRef.current = null; updateAgentStatus('Available', null) }, WRAP_MS)
+    wrapTimerRef.current = setTimeout(() => { wrapTimerRef.current = null; updateAgentStatus('Available', null) }, wrapMsRef.current)
   }, [updateAgentStatus, cancelAutoWrap])
 
   // End of ANY interaction (disposition, release, closed the last tab) → the

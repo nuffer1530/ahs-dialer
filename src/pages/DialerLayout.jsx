@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { Routes, Route, NavLink, useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../lib/AuthContext'
 import WeatherStrip from '../components/WeatherStrip'
+import { loadOpsConfig } from '../lib/opsConfig'
 import { useData } from '../lib/DataContext'
 import { sb } from '../lib/supabase'
 import { syncWorkerActivity } from '../lib/utils'
@@ -248,6 +249,7 @@ export default function DialerLayout() {
 
 function DialerLayoutInner() {
   const { profile, isAdmin, isDispatcher } = useAuth()
+  useEffect(() => { loadOpsConfig() }, [])   // pull admin thresholds into the live bindings
   const canDispatch = isAdmin || isDispatcher
   const { contacts, syncStatus, reload } = useData()
   const { cancelAutoWrap } = usePhone()

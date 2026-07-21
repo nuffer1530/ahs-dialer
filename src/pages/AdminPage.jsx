@@ -6,6 +6,7 @@ import Modal from '../components/Modal'
 import CampaignsPage from './CampaignsPage'
 import Avatar from '../components/Avatar'
 import AvatarCropper from '../components/AvatarCropper'
+import { OPS_DEFAULTS, invalidateOpsConfig, loadOpsConfig } from '../lib/opsConfig'
 
 const EMOJIS = {
   '🔥 Hype': ['🔥','⚡','💥','🚀','🎯','💪','👊','🏆','👑','💎','🌟','⭐','🔑','💰','🎰','🃏'],
@@ -672,6 +673,13 @@ export default function AdminPage() {
   const [pwModal, setPwModal] = useState(null) // { profileId, name } or 'me'
   const [busyUser, setBusyUser] = useState(null) // profile id mid deactivate/reactivate
   const [showRemoved, setShowRemoved] = useState(false)
+  // Thresholds tab (Settings → Thresholds)
+  const [opsForm, setOpsForm] = useState(null)
+  const [wxLocs, setWxLocs] = useState(null)
+  const [wxQuery, setWxQuery] = useState('')
+  const [wxSugs, setWxSugs] = useState([])
+  const [opsMsg, setOpsMsg] = useState('')
+  const [opsSaving, setOpsSaving] = useState(false)
   // Invite by email
   const [invEmail, setInvEmail] = useState('')
   const [invRole, setInvRole] = useState('rep')
@@ -749,6 +757,44 @@ export default function AdminPage() {
       setLoading(false)
     })
   }, [isAdmin])
+
+  useEffect(() => {
+    if (settingsTab !== 'ops' || !isAdmin || opsForm) return
+    ;(async () => {
+      const { data } = await sb.from('app_settings').select('key, value').in('key', ['ops_config', 'weather_locations'])
+      const parse = (k) => { try { return JSON.parse(data?.find(r => r.key === k)?.value || 'null') } catch { return null } }
+      setOpsForm({ ...OPS_DEFAULTS, ...(parse('ops_config') || {}) })
+      const locs = parse('weather_locations')
+      setWxLocs(Array.isArray(locs) && locs.length ? locs : [
+        { key: 'COS', name: 'Colorado Springs', lat: 38.8339, lng: -104.8214 },
+        { key: 'Pueblo', name: 'Pueblo', lat: 38.2544, lng: -104.6091 },
+        { key: 'Castle Rock', name: 'Castle Rock', lat: 39.3722, lng: -104.8561 },
+      ])
+    })()
+  }, [settingsTab, isAdmin, opsForm])
+
+  const saveOps = async () => {
+    setOpsSaving(true); setOpsMsg('')
+    try {
+      await sb.from('app_settings').upsert({ key: 'ops_config', value: JSON.stringify(opsForm) }, { onConflict: 'key' })
+      await sb.from('app_settings').upsert({ key: 'weather_locations', value: JSON.stringify(wxLocs) }, { onConflict: 'key' })
+      invalidateOpsConfig(); await loadOpsConfig(true)
+      setOpsMsg('Saved. Live for everyone on their next page load; the weather strip refreshes within 15 minutes.')
+    } catch (e) { setOpsMsg('Error: ' + e.message) }
+    setOpsSaving(false)
+  }
+
+  const wxSearch = async (q) => {
+    setWxQuery(q)
+    if (q.trim().length < 3) { setWxSugs([]); return }
+    try {
+      const { data: { session } } = await sb.auth.getSession()
+      const r = await fetch(`/api/dispatch/geocode-suggest?q=${encodeURIComponent(q.trim())}`,
+        { headers: { Authorization: `Bearer ${session?.access_token}` } })
+      const d = await r.json()
+      setWxSugs(d.suggestions || [])
+    } catch { setWxSugs([]) }
+  }
 
   const sendInvite = async () => {
     const email = invEmail.trim()
@@ -1223,7 +1269,7 @@ export default function AdminPage() {
   }
 
   const TABS = isAdmin
-    ? [{ id:'users', label:'Users' }, { id:'campaigns', label:'Campaigns' }, { id:'commission', label:'Commission' }, { id:'payouts', label:'Payouts' }, { id:'statuses', label:'Statuses' }, { id:'scorecards', label:'Scorecards' }, { id:'floortv', label:'Floor TV' }]
+    ? [{ id:'users', label:'Users' }, { id:'campaigns', label:'Campaigns' }, { id:'commission', label:'Commission' }, { id:'payouts', label:'Payouts' }, { id:'statuses', label:'Statuses' }, { id:'scorecards', label:'Scorecards' }, { id:'floortv', label:'Floor TV' }, { id:'ops', label:'Thresholds' }]
     : [{ id:'users', label:'My Profile' }, { id:'commission', label:'My Earnings' }]
 
   return (
@@ -1491,6 +1537,79 @@ export default function AdminPage() {
 
 
       {/* Users tab */}
+      {settingsTab === 'ops' && isAdmin && (
+        <div style={{ flex:1, overflowY:'auto', padding:24, display:'flex', flexDirection:'column', gap:20 }}>
+          {!opsForm || !wxLocs ? <div className="spinner"></div> : (
+            <>
+              {opsMsg && <div style={{ background: opsMsg.startsWith('Error') ? 'var(--danger-bg)' : 'var(--success-bg)', color: opsMsg.startsWith('Error') ? 'var(--danger)' : 'var(--success)', padding:'10px 14px', borderRadius:'var(--radius)', fontSize:13 }}>{opsMsg}</div>}
+              <div className="card">
+                <div className="card-header">
+                  <div className="card-title">Call center thresholds</div>
+                  <span style={{ fontSize:11, color:'var(--text-muted)' }}>Drives the TV, Analytics, wrap-up and the dialer — no deploy needed</span>
+                </div>
+                <div className="card-body" style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(200px, 1fr))', gap:14 }}>
+                  {[
+                    ['serviceLevelSeconds', 'Service level window (sec)', 'Answered within this counts toward service level'],
+                    ['serviceLevelTarget', 'Service level target (%)', 'Green at or above this'],
+                    ['abandonGraceSeconds', 'Abandon grace (sec)', 'Hangups faster than this are misdials, not abandons'],
+                    ['wrapUpSeconds', 'Wrap-up length (sec)', 'After an interaction, before auto-Available'],
+                    ['maxAttempts', 'Max dial attempts', 'Contact goes to Max Attempts after this many'],
+                  ].map(([k, label, hint]) => (
+                    <div key={k} className="form-field">
+                      <label className="form-label">{label}</label>
+                      <input className="form-input" type="number" min="1" value={opsForm[k]}
+                        onChange={e => setOpsForm(f => ({ ...f, [k]: Number(e.target.value) }))} />
+                      <div style={{ fontSize:10, color:'var(--text-muted)', marginTop:3 }}>{hint}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="card">
+                <div className="card-header">
+                  <div className="card-title">Weather locations</div>
+                  <span style={{ fontSize:11, color:'var(--text-muted)' }}>Up to 5 · shown across the top of every page and the Floor TV</span>
+                </div>
+                <div className="card-body" style={{ display:'flex', flexDirection:'column', gap:10 }}>
+                  {wxLocs.map((l, i) => (
+                    <div key={i} style={{ display:'flex', gap:8, alignItems:'center' }}>
+                      <input className="form-input" value={l.key} title="Short label shown in the strip"
+                        onChange={e => setWxLocs(ls => ls.map((x, xi) => xi === i ? { ...x, key: e.target.value } : x))}
+                        style={{ width:130 }} />
+                      <span style={{ flex:1, fontSize:12, color:'var(--text-muted)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{l.name}</span>
+                      <button className="btn sm" onClick={() => setWxLocs(ls => ls.filter((_, xi) => xi !== i))} disabled={wxLocs.length <= 1}>Remove</button>
+                    </div>
+                  ))}
+                  {wxLocs.length < 5 && (
+                    <div style={{ position:'relative' }}>
+                      <input className="form-input" placeholder="Add a place — city, town or address" value={wxQuery}
+                        onChange={e => wxSearch(e.target.value)} />
+                      {wxSugs.length > 0 && (
+                        <div style={{ position:'absolute', top:'calc(100% + 4px)', left:0, right:0, background:'var(--surface)', border:'1px solid var(--border)', borderRadius:8, boxShadow:'0 8px 24px rgba(0,0,0,.12)', zIndex:20, overflow:'hidden' }}>
+                          {wxSugs.map((sug, si) => (
+                            <button key={si} onClick={() => {
+                              const short = String(sug.placeName || '').split(',')[0].trim()
+                              setWxLocs(ls => [...ls, { key: short, name: sug.placeName, lat: sug.lat, lng: sug.lng }])
+                              setWxQuery(''); setWxSugs([])
+                            }} style={{ display:'block', width:'100%', textAlign:'left', padding:'8px 12px', background:'transparent', border:'none', cursor:'pointer', fontSize:12, color:'var(--text-primary)' }}
+                              onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
+                              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                              {sug.placeName}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+              <div>
+                <button className="btn primary" onClick={saveOps} disabled={opsSaving}>{opsSaving ? 'Saving…' : 'Save thresholds'}</button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
       {settingsTab === 'users' && (
         <div style={{ flex:1, overflowY:'auto', padding:24, display:'flex', flexDirection:'column', gap:20 }}>
 

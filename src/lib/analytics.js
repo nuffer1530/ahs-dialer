@@ -7,8 +7,15 @@
 // so service level, ASA and abandon rate cannot be computed for anything before
 // that — they aren't zero, they're unknown. Callers must not read an empty
 // early period as "we were perfect".
-export const SERVICE_LEVEL_SECONDS = 30
-export const SERVICE_LEVEL_TARGET = 90   // % answered within the threshold
+// Live bindings: opsConfig.js updates these from app_settings, and every
+// importer sees the new values (ES module exports are live). Defaults match
+// the values that were hardcoded before thresholds became admin-configurable.
+export let SERVICE_LEVEL_SECONDS = 30
+export let SERVICE_LEVEL_TARGET = 90   // % answered within the threshold
+export const setServiceLevelConfig = ({ seconds, target }) => {
+  if (Number(seconds) > 0) SERVICE_LEVEL_SECONDS = Number(seconds)
+  if (Number(target) > 0) SERVICE_LEVEL_TARGET = Number(target)
+}
 
 export const pct = (n, d) => (d ? (n / d) * 100 : null)
 

@@ -42,7 +42,19 @@ const TWILIO_ACTIVITY_OFFLINE   = process.env.TWILIO_ACTIVITY_OFFLINE   || 'WA8f
 
 // A caller who hangs up faster than this is a misdial, not an abandon. Stored
 // on the row when the task is canceled, so changing it never rewrites history.
+// The env var is the fallback; admins tune the live value in Settings →
+// Thresholds (app_settings.ops_config), read through getOpsConfig().
 const ABANDON_GRACE_SECONDS = Number(process.env.ABANDON_GRACE_SECONDS ?? 10)
+let _opsCfg = null, _opsCfgAt = 0
+async function getOpsConfig() {
+  if (_opsCfg && Date.now() - _opsCfgAt < 60_000) return _opsCfg
+  try {
+    const { data } = await supabase.from('app_settings').select('value').eq('key', 'ops_config').maybeSingle()
+    _opsCfg = JSON.parse(data?.value || '{}')
+  } catch { _opsCfg = {} }
+  _opsCfgAt = Date.now()
+  return _opsCfg
+}
 
 // ─────────────────────────────────────────────
 // ── SERVICETITAN API LAYER
@@ -1807,7 +1819,19 @@ const wxIcon = (s) => {
   return 'sun'
 }
 async function computeWeather() {
-  const cities = await Promise.all(WEATHER_CITIES.map(async (c) => {
+  // Locations are admin-configurable (Settings → Thresholds). Bad or empty
+  // config falls back to the built-in three.
+  let cityList = WEATHER_CITIES
+  try {
+    const { data: locRow } = await supabase.from('app_settings').select('value').eq('key', 'weather_locations').maybeSingle()
+    const parsed = JSON.parse(locRow?.value || 'null')
+    if (Array.isArray(parsed)) {
+      const good = parsed.filter(l => l?.key && Number.isFinite(Number(l.lat)) && Number.isFinite(Number(l.lng)))
+        .map(l => ({ key: String(l.key), name: String(l.name || l.key), lat: Number(l.lat), lng: Number(l.lng) }))
+      if (good.length) cityList = good.slice(0, 5)
+    }
+  } catch {}
+  const cities = await Promise.all(cityList.map(async (c) => {
     const gk = `${c.lat},${c.lng}`
     if (!_wxGrid.has(gk)) {
       const p = await nwsGet(`https://api.weather.gov/points/${c.lat},${c.lng}`)
@@ -2696,7 +2720,8 @@ app.post('/api/twilio/taskrouter/events', async (req, res) => {
       const waited = task?.queued_at
         ? Math.max(0, Math.round((Date.now() - new Date(task.queued_at).getTime()) / 1000))
         : 0
-      const isAbandon = !task?.answered_at && waited >= ABANDON_GRACE_SECONDS
+      const graceS = Number((await getOpsConfig()).abandonGraceSeconds ?? ABANDON_GRACE_SECONDS)
+      const isAbandon = !task?.answered_at && waited >= graceS
       await supabase.from('call_tasks').update({
         state: task?.answered_at ? 'answered' : (isAbandon ? 'abandoned' : 'missed'),
         abandoned: isAbandon,
