@@ -3055,6 +3055,20 @@ async function computeLiveBoardPayload() {
       scoresByTeam.get(sc.business_unit).push(sc)
     }
 
+    // Per-tech day load, and whether an all-day install has consumed them.
+    // A tech spending 8-6 on one install has "1 call" by count — but zero
+    // room. Reassignments, swaps, the brief and the payload all read this.
+    const techLoad = new Map()
+    for (const c of calls) {
+      if (!c.techId || EXCLUDE_CALL.test(c.jobType || '')) continue
+      const t = techLoad.get(c.techId) || { calls: 0, allDayInstall: false }
+      t.calls++
+      const hrs = (Date.parse(c.windowEnd || '') - Date.parse(c.windowStart || '')) / 36e5
+      if (INSTALL_TYPE.test(c.jobType || '') && hrs >= 7 && c.status !== 'Done' && c.status !== 'Canceled') t.allDayInstall = true
+      techLoad.set(c.techId, t)
+    }
+    const consumedByInstall = (techId) => Boolean(techLoad.get(Number(techId))?.allDayInstall)
+
     for (const c of calls) {
       if (!c.rankable || c.opportunity < 3) continue
       if (!c.actionable) continue            // already done, working, or on hold
@@ -3071,6 +3085,7 @@ async function computeLiveBoardPayload() {
       const candidates = (scoresByTeam.get(c.businessUnit) || [])
         .filter(s => s.tech_id !== c.techId && s.tier !== 'unranked')
         .filter(s => canWork(s.tech_id, c.windowStart, c.windowEnd))
+        .filter(s => !consumedByInstall(s.tech_id))    // buried on an all-day install
         .filter(s => allowedByRule(c.jobType, s.tech_name))
         .filter(s => Number(s.expected_value || 0) > myEV)
         .map(s => ({ s, t: nearestTravel(s.tech_id, c.geo) }))
@@ -3146,6 +3161,8 @@ async function computeLiveBoardPayload() {
           // OTHER call's window, and skill rules must hold in both directions.
           .filter(u => canWork(u.techId, m.windowStart, m.windowEnd)
             && canWork(m.techId, u.windowStart, u.windowEnd)
+            // Neither side of a swap can be a tech consumed by an all-day install
+            && !consumedByInstall(u.techId) && !consumedByInstall(m.techId)
             && allowedByRule(m.jobType, u.techName)
             && allowedByRule(u.jobType, m.techName))
           .map(u => {
@@ -3292,19 +3309,6 @@ async function computeLiveBoardPayload() {
     // Sort by window open, then by start within the window.
     const ts = (v) => { const t = Date.parse(v || ''); return Number.isNaN(t) ? Infinity : t }
     calls.sort((a, b) => (ts(a.windowStart) - ts(b.windowStart)) || (ts(a.start) - ts(b.start)))
-    // Who can actually take work TODAY. Bench scores carry no availability, so
-    // the analyst brief once told dispatch to route calls to a tech buried on
-    // an all-day install and away from a tech who was off. Every scored tech
-    // gets a plain-language status here, and the brief must respect it.
-    const techLoad = new Map()
-    for (const c of calls) {
-      if (!c.techId || EXCLUDE_CALL.test(c.jobType || '')) continue
-      const t = techLoad.get(c.techId) || { calls: 0, allDayInstall: false }
-      t.calls++
-      const hrs = (Date.parse(c.windowEnd || '') - Date.parse(c.windowStart || '')) / 36e5
-      if (INSTALL_TYPE.test(c.jobType || '') && hrs >= 7) t.allDayInstall = true
-      techLoad.set(c.techId, t)
-    }
     const techsToday = []
     const seenTech = new Set()
     for (const sc of (scores || [])) {
@@ -3571,11 +3575,20 @@ app.post('/api/dispatch/decide', async (req, res) => {
     const capOf = () => (Number(callsPerTech[trade]) || 3)
 
     const loadByTech = new Map(), geosByTech = new Map()
+    // A tech on an all-day install is CONSUMED, whatever their call count says
+    // — Craig Rehm showed "has room · 1/4" while spending 8-6 on a water
+    // heater install. One long install appointment closes the tech's day.
+    const allDayInstall = new Map()   // techId -> job type name
     for (const a of assignments) {
       const j = jobById.get(a.jobId)
       if (!j || !a.technicianId) continue
       const jn = jtName.get(j.jobTypeId) || ''
       if (!EXCLUDE_CALL.test(jn)) loadByTech.set(a.technicianId, (loadByTech.get(a.technicianId) || 0) + 1)
+      const ap = apptById.get(a.appointmentId)
+      const hrs = ap ? (Date.parse(ap.end || '') - Date.parse(ap.start || '')) / 36e5 : 0
+      if (INSTALL_TYPE.test(jn) && hrs >= 7 && ap?.status !== 'Done' && ap?.status !== 'Canceled') {
+        allDayInstall.set(a.technicianId, jn)
+      }
       const g = geoOfLoc.get(j.locationId)
       if (g) { if (!geosByTech.has(a.technicianId)) geosByTech.set(a.technicianId, []); geosByTech.get(a.technicianId).push(g) }
     }
@@ -3661,7 +3674,8 @@ app.post('/api/dispatch/decide', async (req, res) => {
       const ev = Number((jt && jt.expected_value) ?? b.expected_value ?? 0)
       const load = loadByTech.get(b.tech_id) || 0
       const drive = nearestMin(b.tech_id)
-      const hasRoom = load < cap
+      const onInstall = allDayInstall.get(b.tech_id) || null
+      const hasRoom = !onInstall && load < cap
       return {
         techId: b.tech_id, techName: b.tech_name, team: b.business_unit, tier: b.tier,
         expectedValue: Math.round(ev),
@@ -3669,6 +3683,7 @@ app.post('/api/dispatch/decide', async (req, res) => {
         avgSale: Math.round(Number((jt && jt.avg_sale) ?? b.avg_sale ?? 0)),
         onThisJobType: Boolean(jt),
         load, cap, hasRoom,
+        allDayInstall: onInstall,
         driveMinutes: drive == null ? null : Math.round(drive),
       }
     })
@@ -3678,6 +3693,7 @@ app.post('/api/dispatch/decide', async (req, res) => {
     const scoreOption = (o) => {
       let s = o.expectedValue
       if (!o.hasRoom) s -= 400                        // needs a bump
+      if (o.allDayInstall) s -= 100000                // physically not available today
       if (o.driveMinutes != null) s -= o.driveMinutes * 8   // ~$8/min of windshield
       return s
     }
@@ -3729,7 +3745,9 @@ app.post('/api/dispatch/decide', async (req, res) => {
     // already has a commitment. Heuristic (windows overlap each other), so the
     // UI says "looks open" rather than promising.
     const winLabel = (ws, we) => {
-      const f = (iso) => { const d = new Date(iso); const h = d.getHours(); const ap = h >= 12 ? 'PM' : 'AM'; const h12 = h % 12 === 0 ? 12 : h % 12; return `${h12} ${ap}` }
+      // Denver hours, NOT server-local: Railway runs UTC, which rendered the
+      // 7 AM-8 PM all-day window as "1 PM-2 AM".
+      const f = (iso) => new Intl.DateTimeFormat('en-US', { timeZone: 'America/Denver', hour: 'numeric', hour12: true }).format(new Date(iso))
       return `${f(ws)}–${f(we)}`
     }
     const dayWindows = new Map()   // key -> {start,label}
@@ -3768,7 +3786,9 @@ app.post('/api/dispatch/decide', async (req, res) => {
     // Every option carries its bump cost, open windows and day-depth, so the
     // ranking table explains each alternative — not just the chosen one.
     for (const o of options) {
-      o.bump = o.hasRoom ? null : bumpFor(o.techId)
+      // No bump math for a tech on an all-day install: moving their other
+      // calls doesn't free them — they're physically at the install.
+      o.bump = (o.hasRoom || o.allDayInstall) ? null : bumpFor(o.techId)
       o.openWindows = o.hasRoom ? openWindowsFor(o.techId).slice(0, 3) : []
       o.callsRun = runByTech.get(o.techId) || 0
     }

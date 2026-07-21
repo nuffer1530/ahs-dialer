@@ -967,7 +967,9 @@ function DecisionMaker() {
                           earner may be un-bumpable while #2 has a routine call
                           worth trading — which is a better decision, not a bug. */}
                       <div style={{ fontSize:10, fontWeight:400, color:'var(--text-muted)', marginTop:1 }}>
-                        {o.hasRoom
+                        {o.allDayInstall
+                          ? `on an all-day install (${o.allDayInstall}) — not available today`
+                          : o.hasRoom
                           ? `has room${o.openWindows?.length ? ` · ${o.openWindows.slice(0, 2).join(', ')} look open` : ''}`
                           : o.bump ? `full — would bump #${o.bump.jobNumber} (${o.bump.why})`
                           : 'full — nothing movable today'}
@@ -980,7 +982,7 @@ function DecisionMaker() {
                     <td style={{ padding:'7px 12px', textAlign:'right', fontWeight:700 }}>{money(o.expectedValue)}</td>
                     <td style={{ padding:'7px 12px', textAlign:'right' }}>{o.closeRate}%</td>
                     <td style={{ padding:'7px 12px', textAlign:'right', color: o.hasRoom ? 'var(--text-muted)' : '#B45309', fontWeight: o.hasRoom ? 400 : 700 }}>
-                      {o.load}/{o.cap}{o.hasRoom ? '' : ' full'}
+                      {o.allDayInstall ? 'install' : `${o.load}/${o.cap}${o.hasRoom ? '' : ' full'}`}
                     </td>
                     <td style={{ padding:'7px 12px', textAlign:'right', color:'var(--text-muted)' }}>
                       {o.driveMinutes == null ? '—' : `${o.driveMinutes} min`}
