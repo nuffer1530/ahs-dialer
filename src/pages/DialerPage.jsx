@@ -959,7 +959,11 @@ export default function DialerPage() {
   const isOutbound = !!c?.campaign_id
   const isMe = isOutbound ? (c?.claimed_by === currentRep) : true
   const isOther = isOutbound && c?.claimed_by && c.claimed_by !== currentRep
-  const done = c ? (isDone(c) || c.status === 'Max Attempts') : false
+  // "Done" is a CAMPAIGN lifecycle concept — a lead worked to a final outcome.
+  // A customer opened from ST search has no campaign: they can call back and
+  // book another job next week, so their tab never locks. (Booking used to
+  // mark them done forever, which blocked every rebook for that customer.)
+  const done = c ? ((isDone(c) || c.status === 'Max Attempts') && !!c.campaign_id) : false
   const isDNC = c ? dncSet.has(normPhone(c.phone || '')) : false
   const isDup = c ? dupSet.has(c.id) : false
   const cbDue = contacts.filter(x => isCallbackDueToday(x) && !isDone(x))

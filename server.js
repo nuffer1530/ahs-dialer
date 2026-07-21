@@ -1006,19 +1006,31 @@ app.post('/api/st/book', async (req, res) => {
       businessUnitId: parseInt(businessUnitId),
       campaignId: stCampaignId,
       priority: 'Normal',
-      summary: notes || `Outbound booking via Andi — ${repName || 'CSR'}`,
-      body: notes || `Outbound booking via Andi — ${repName || 'CSR'}`,
+      summary: notes || `Booked via Andi — ${repName || 'CSR'}`,
+      body: notes || `Booked via Andi — ${repName || 'CSR'}`,
       tagTypeIds: [],
     }
 
-    // If a specific slot was selected, schedule it with an appointment
-    // The slot times from our availability endpoint are in MT local ISO format
-    // Convert back to UTC for ST API
+    // If a specific slot was selected, schedule it with an appointment.
+    // The availability endpoint hands the browser BARE Denver times with no
+    // offset ("2026-07-21T16:00:00"). new Date() parses those in the SERVER's
+    // zone — UTC on Railway — which booked Brittany's 4-8 PM window as
+    // 16:00Z = 10 AM Denver (job #34734, Deanna Taylor). Convert explicitly
+    // from America/Denver; strings that already carry an offset are trusted.
     if (start && end) {
-      // Parse the local ISO string and convert to UTC
+      const denverWallOffset = (utcMs) => {
+        const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', {
+          timeZone: 'America/Denver', hour12: false,
+          year: 'numeric', month: '2-digit', day: '2-digit',
+          hour: '2-digit', minute: '2-digit', second: '2-digit',
+        }).formatToParts(new Date(utcMs)).map(x => [x.type, x.value]))
+        return Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour % 24, +p.minute, +p.second) - utcMs
+      }
       const toUTC = (localISO) => {
-        // localISO looks like "2026-07-17T08:00:00-06:00"
-        return new Date(localISO).toISOString()
+        const s = String(localISO || '')
+        if (/[Zz]$|[+-]\d{2}:?\d{2}$/.test(s)) return new Date(s).toISOString()
+        const asIfUTC = Date.parse(s + 'Z')            // pin the wall time, then shift
+        return new Date(asIfUTC - denverWallOffset(asIfUTC)).toISOString()
       }
       jobBody.appointments = [{
         start: toUTC(start),
