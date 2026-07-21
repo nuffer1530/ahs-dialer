@@ -3292,11 +3292,39 @@ async function computeLiveBoardPayload() {
     // Sort by window open, then by start within the window.
     const ts = (v) => { const t = Date.parse(v || ''); return Number.isNaN(t) ? Infinity : t }
     calls.sort((a, b) => (ts(a.windowStart) - ts(b.windowStart)) || (ts(a.start) - ts(b.start)))
+    // Who can actually take work TODAY. Bench scores carry no availability, so
+    // the analyst brief once told dispatch to route calls to a tech buried on
+    // an all-day install and away from a tech who was off. Every scored tech
+    // gets a plain-language status here, and the brief must respect it.
+    const techLoad = new Map()
+    for (const c of calls) {
+      if (!c.techId || EXCLUDE_CALL.test(c.jobType || '')) continue
+      const t = techLoad.get(c.techId) || { calls: 0, allDayInstall: false }
+      t.calls++
+      const hrs = (Date.parse(c.windowEnd || '') - Date.parse(c.windowStart || '')) / 36e5
+      if (INSTALL_TYPE.test(c.jobType || '') && hrs >= 7) t.allDayInstall = true
+      techLoad.set(c.techId, t)
+    }
+    const techsToday = []
+    const seenTech = new Set()
+    for (const sc of (scores || [])) {
+      const tid = Number(sc.tech_id)
+      if (!tid || seenTech.has(tid)) continue
+      seenTech.add(tid)
+      const load = techLoad.get(tid) || { calls: 0, allDayInstall: false }
+      let status
+      if (!canWork(tid)) status = 'off today / no working time left'
+      else if (load.allDayInstall) status = 'on an all-day install — cannot take calls'
+      else status = `${load.calls} call${load.calls === 1 ? '' : 's'} on board`
+      techsToday.push({ techId: tid, name: sc.tech_name, status })
+    }
+
     const payload = {
       generatedAt: new Date().toISOString(),
       scoresRefreshedAt: (scores || [])[0]?.refreshed_at || null,
       driveTime: driveTimeEnabled(),
       dayRevenue,
+      techsToday,
       calls, swaps,
       counts: {
         total: calls.length,
@@ -3356,16 +3384,23 @@ async function generateDispatchBrief() {
     completedOutcomes: calls.filter(c => c.outcome).map(c => ({
       job: c.jobNumber, type: c.jobType, tech: c.techName, outcome: c.outcome.text,
     })),
-    benches: Object.values((scores || []).reduce((a, r) => {
-      if (r.tier === 'unranked') return a
-      ;(a[r.business_unit] = a[r.business_unit] || { bench: r.business_unit, techs: [] }).techs.push(
-        { name: r.tech_name, tier: r.tier, evPerOpp: Math.round(r.expected_value || 0) })
-      return a
-    }, {})),
+    benches: (() => {
+      const avail = new Map((board.techsToday || []).map(t => [String(t.techId), t.status]))
+      return Object.values((scores || []).reduce((a, r) => {
+        if (r.tier === 'unranked') return a
+        ;(a[r.business_unit] = a[r.business_unit] || { bench: r.business_unit, techs: [] }).techs.push({
+          name: r.tech_name, tier: r.tier, evPerOpp: Math.round(r.expected_value || 0),
+          today: avail.get(String(r.tech_id)) || 'unknown',
+        })
+        return a
+      }, {}))
+    })(),
     next3DaysCapacity: capacity,
   }
 
   const sys = `You are the dispatch analyst for Awesome Home Services (HVAC, plumbing, electrical, garage doors — Colorado Springs). You are given a JSON snapshot of today's live dispatch board, tech performance benches, and 3-day capacity. Write the read a sharp dispatch manager would give at the huddle: concrete, numbers-first, in plain dispatcher language. Only use what is in the data; never invent jobs, names, or numbers.
+
+Every bench tech carries a 'today' field with their REAL availability right now. Treat it as law: never build an action around routing work to (or comparing against) a tech whose 'today' says they are off, have no working time left, or are on an all-day install — those techs cannot take calls no matter how good their numbers are. Recommendations may only name techs whose 'today' shows calls on board or room.
 
 Submit the analysis via the submit_brief tool. 3-6 actions, ordered by priority; empty arrays are fine. 'now' means act this hour; 'plan' means tomorrow/this week.`
 
