@@ -210,7 +210,9 @@ app.post('/api/st/note', async (req, res) => {
   try {
     const { customerId, note, repName } = req.body
     if (!customerId || !note) return res.status(400).json({ error: 'customerId and note required' })
-    const noteText = `[Andi - ${repName || 'CSR'}] ${note}`
+    // The note AUTHOR in ST is always the API account (ST offers no
+    // impersonation), so the rep's name leads the text where eyes land.
+    const noteText = `${repName || 'CSR'} (via Andi): ${note}`
 
     // Step 1: Get customer's primary location ID
     const locData = await stGet(`/crm/v2/tenant/${ST_TENANT_ID}/locations?customerId=${customerId}&pageSize=1`)
@@ -1047,7 +1049,7 @@ app.post('/api/st/book', async (req, res) => {
 
     // Step 3: Also post a note to the location
     await stPost(`/crm/v2/tenant/${ST_TENANT_ID}/locations/${location.id}/notes`, {
-      text: `[Andi - ${repName || 'CSR'}] Booked: ${notes || 'Outbound call booking'}`,
+      text: `${repName || 'CSR'} (via Andi) booked: ${notes || 'call booking'}`,
       pinToTop: false,
     }).catch(e => console.warn('Note post failed:', e.message))
 
