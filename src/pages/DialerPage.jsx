@@ -986,6 +986,14 @@ export default function DialerPage() {
   const [stJobHistory, setStJobHistory] = useState([])
   const [stJobHistoryLoading, setStJobHistoryLoading] = useState(false)
   const [stCustomerInfo, setStCustomerInfo] = useState(null)
+  // Inbound script/tips — the fallback whenever the customer isn't on a
+  // campaign (inbound calls, ST-searched customers, paid leads with no
+  // script of their own). Editable in Settings → Campaigns.
+  const [inboundScript, setInboundScript] = useState(null)
+  useEffect(() => {
+    sb.from('app_settings').select('value').eq('key', 'inbound_script').maybeSingle()
+      .then(({ data }) => { try { setInboundScript(JSON.parse(data?.value || 'null')) } catch {} })
+  }, [])
 
   // Customer intelligence brief (AI synthesis of ST history)
   const [brief, setBrief] = useState(null)
@@ -1682,23 +1690,28 @@ export default function DialerPage() {
                   <div style={{ flex:1, overflowY:'auto', padding:12 }}>
                     {activeTab === 'script' && (
                       <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
-                        {camp?.script ? (
-                          <div style={{ background:'var(--surface)', border:'1px solid var(--border)', borderLeft:'3px solid var(--accent)', borderRadius:'var(--radius)', padding:'12px 14px', fontSize:12, lineHeight:1.9, whiteSpace:'pre-wrap', color:'var(--text-primary)' }}>
-                            {camp.script}
-                          </div>
+                        {(camp?.script || inboundScript?.script) ? (
+                          <>
+                            {!camp?.script && (
+                              <div style={{ fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color:'var(--text-muted)' }}>Inbound script</div>
+                            )}
+                            <div style={{ background:'var(--surface)', border:'1px solid var(--border)', borderLeft:'3px solid var(--accent)', borderRadius:'var(--radius)', padding:'12px 14px', fontSize:12, lineHeight:1.9, whiteSpace:'pre-wrap', color:'var(--text-primary)' }}>
+                              {camp?.script || inboundScript.script}
+                            </div>
+                          </>
                         ) : (
-                          <div style={{ fontSize:12, color:'var(--text-muted)', fontStyle:'italic', textAlign:'center', paddingTop:16 }}>No script set for this campaign.</div>
+                          <div style={{ fontSize:12, color:'var(--text-muted)', fontStyle:'italic', textAlign:'center', paddingTop:16 }}>{camp ? 'No script set for this campaign.' : 'No inbound script set — add one in Settings → Campaigns.'}</div>
                         )}
                       </div>
                     )}
                     {activeTab === 'tips' && (
                       <div>
-                        {camp?.tips ? (
+                        {(camp?.tips || inboundScript?.tips) ? (
                           <div style={{ background:'#FFFBEB', border:'1px solid #FCD34D', borderRadius:'var(--radius)', padding:'12px 14px', fontSize:12, lineHeight:1.9, whiteSpace:'pre-wrap', color:'#78350F' }}>
-                            {camp.tips}
+                            {camp?.tips || inboundScript.tips}
                           </div>
                         ) : (
-                          <div style={{ fontSize:12, color:'var(--text-muted)', fontStyle:'italic', textAlign:'center', paddingTop:16 }}>No tips set for this campaign.</div>
+                          <div style={{ fontSize:12, color:'var(--text-muted)', fontStyle:'italic', textAlign:'center', paddingTop:16 }}>{camp ? 'No tips set for this campaign.' : 'No inbound tips set — add them in Settings → Campaigns.'}</div>
                         )}
                       </div>
                     )}

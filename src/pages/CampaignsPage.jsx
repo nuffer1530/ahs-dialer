@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useData } from '../lib/DataContext'
 import { useAuth } from '../lib/AuthContext'
 import { useNavigate } from 'react-router-dom'
@@ -25,6 +25,30 @@ export default function CampaignsPage() {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(null)
   const [showScriptModal, setShowScriptModal] = useState(null)
   const [clearConfirmText, setClearConfirmText] = useState('')
+  // Inbound script/tips — the fallback the dialer shows on any call with no
+  // campaign (inbound, ST search, leads without their own script).
+  const [inbForm, setInbForm] = useState(null)
+  const [inbMsg, setInbMsg] = useState('')
+  const [inbDirty, setInbDirty] = useState(false)
+  useEffect(() => {
+    if (!isAdmin) return
+    sb.from('app_settings').select('value').eq('key', 'inbound_script').maybeSingle()
+      .then(({ data }) => { let v = null; try { v = JSON.parse(data?.value || 'null') } catch {}; setInbForm({ script: v?.script || '', tips: v?.tips || '' }) })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAdmin])
+  useEffect(() => {
+    if (!inbDirty || !inbForm) return
+    const t = setTimeout(async () => {
+      setInbDirty(false)
+      try {
+        await sb.from('app_settings').upsert({ key: 'inbound_script', value: JSON.stringify(inbForm) }, { onConflict: 'key' })
+        setInbMsg('Saved'); setTimeout(() => setInbMsg(''), 2500)
+      } catch (e) { setInbMsg('Error: ' + e.message) }
+    }, 900)
+    return () => clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [inbDirty, inbForm])
+
   const fileRef = useRef()
   const pendingCampRef = useRef(null)
 
@@ -200,6 +224,29 @@ export default function CampaignsPage() {
       )}
 
       <input type="file" accept=".csv" ref={fileRef} style={{display:'none'}} onChange={handleFile} />
+
+      {isAdmin && inbForm && (
+        <div className="card" style={{ marginBottom:16 }}>
+          <div className="card-header">
+            <div className="card-title">Inbound call script & tips</div>
+            <span style={{ fontSize:11, color: inbMsg.startsWith('Error') ? 'var(--danger)' : 'var(--text-muted)' }}>
+              {inbMsg || 'Shown on any call without a campaign — inbound calls, ST searches, leads. Saves automatically.'}
+            </span>
+          </div>
+          <div className="card-body" style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14 }}>
+            <div className="form-field">
+              <label className="form-label">Inbound script</label>
+              <textarea className="form-input" rows={7} value={inbForm.script} placeholder="Thank you for calling Awesome Home Services, this is ..."
+                onChange={e => { setInbForm(f => ({ ...f, script: e.target.value })); setInbDirty(true) }} />
+            </div>
+            <div className="form-field">
+              <label className="form-label">Inbound tips</label>
+              <textarea className="form-input" rows={7} value={inbForm.tips} placeholder="Always confirm callback number and address early..."
+                onChange={e => { setInbForm(f => ({ ...f, tips: e.target.value })); setInbDirty(true) }} />
+            </div>
+          </div>
+        </div>
+      )}
 
       <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(320px,1fr))', gap:14 }}>
         {campaigns.map(camp => {
