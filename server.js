@@ -1426,17 +1426,24 @@ async function build3DayBoard() {
   // three days). If the appointment fetch fails we fall back to job status
   // alone rather than blanking the board.
   let liveApptJobs = null
+  // Earliest live appointment start per job per day — lets today's "needed"
+  // decay with the clock (a call already run isn't remaining demand).
+  let apptStartByJobDay = null
   try {
     const horizon = days[days.length - 1].endUtc.getTime()
     const allAppts = (await stPageAll(p => `/jpm/v2/tenant/${ST_TENANT_ID}/appointments?startsOnOrAfter=${days[0].startUtc.toISOString()}&pageSize=500&page=${p}`, 6000))
       .filter(a => { const t = Date.parse(a.start || ''); return !Number.isNaN(t) && t < horizon })
-    liveApptJobs = days.map(d => {
-      const s = new Set()
+    liveApptJobs = days.map(() => new Set())
+    apptStartByJobDay = days.map(() => new Map())
+    days.forEach((d, di) => {
       for (const a of allAppts) {
         const t = Date.parse(a.start || '')
-        if (a.status !== 'Canceled' && a.jobId && t >= d.startUtc.getTime() && t < d.endUtc.getTime()) s.add(a.jobId)
+        if (a.status !== 'Canceled' && a.jobId && t >= d.startUtc.getTime() && t < d.endUtc.getTime()) {
+          liveApptJobs[di].add(a.jobId)
+          const prev = apptStartByJobDay[di].get(a.jobId)
+          if (prev == null || t < prev) apptStartByJobDay[di].set(a.jobId, t)
+        }
       }
-      return s
     })
   } catch (e) { console.warn('board live appointments:', e.message) }
   const jobsByDay = jobsByDayRaw.map((jobs, di) => jobs.filter(j =>
@@ -1461,9 +1468,14 @@ async function build3DayBoard() {
   // Look back 3 days so multi-day installs that STARTED earlier still count.
   const apptLookback = new Date(days[0].startUtc.getTime() - 3 * 864e5)
   let installHours = {}   // `${techId}|${dayIndex}` → hours
+  // Callbacks / permits / follow-ups / phone calls are excluded from the BOOKED
+  // count as non-productive — but they still eat the tech's clock. Leaving them
+  // out of capacity was asymmetric: Jason Tse's callback block read as "room
+  // for 2 more" while his morning was physically spoken for.
+  let excludedHours = {}   // `${techId}|${dayIndex}` → hours
   try {
     const apptRes = await stGet(`/jpm/v2/tenant/${ST_TENANT_ID}/appointments?startsOnOrAfter=${apptLookback.toISOString()}&pageSize=500`)
-    const appts = (apptRes?.data || []).filter(a => a.start && a.end && a.active !== false)
+    const appts = (apptRes?.data || []).filter(a => a.start && a.end && a.active !== false && a.status !== 'Canceled')
 
     // Only appointments that actually overlap a board day are worth resolving.
     const relevant = appts.filter(a => {
@@ -1471,39 +1483,40 @@ async function build3DayBoard() {
       return days.some(d => s < d.endUtc && e > d.startUtc)
     })
 
-    // jobId → business unit, so we can tell install work from service work.
-    const jobBU = {}
-    jobsByDay.flat().forEach(j => { jobBU[j.id] = j.businessUnitId })
+    // jobId → business unit + type, so we can tell install work and
+    // non-productive call types from countable service work.
+    const jobBU = {}, jobTypeOf = {}
+    jobsByDayRaw.flat().forEach(j => { jobBU[j.id] = j.businessUnitId; jobTypeOf[j.id] = j.jobTypeId })
     const missing = [...new Set(relevant.map(a => a.jobId).filter(id => id && jobBU[id] === undefined))]
     for (let i = 0; i < missing.length; i += 50) {
       try {
         const r = await stGet(`/jpm/v2/tenant/${ST_TENANT_ID}/jobs?ids=${missing.slice(i, i + 50).join(',')}&pageSize=50`)
-        ;(r?.data || []).forEach(j => { jobBU[j.id] = j.businessUnitId })
+        ;(r?.data || []).forEach(j => { jobBU[j.id] = j.businessUnitId; jobTypeOf[j.id] = j.jobTypeId })
       } catch (e) { console.warn('board install jobs:', e.message) }
     }
 
     const installBUIds = new Set(Object.values(installBU))
-    const installAppts = relevant.filter(a => installBUIds.has(jobBU[a.jobId]))
-    if (installAppts.length) {
-      const byId = {}
-      installAppts.forEach(a => { byId[a.id] = a })
-      const ids = Object.keys(byId)
-      for (let i = 0; i < ids.length; i += 50) {
-        try {
-          const r = await stGet(`/dispatch/v2/tenant/${ST_TENANT_ID}/appointment-assignments?appointmentIds=${ids.slice(i, i + 50).join(',')}&pageSize=200`)
-          for (const asg of (r?.data || [])) {
-            if (asg.active === false) continue
-            const a = byId[asg.appointmentId]; if (!a) continue
-            days.forEach((d, di) => {
-              const h = overlapHours({ start: new Date(a.start), end: new Date(a.end) }, d)
-              if (h > 0) {
-                const k = `${asg.technicianId}|${di}`
-                installHours[k] = (installHours[k] || 0) + h
-              }
-            })
-          }
-        } catch (e) { console.warn('board assignments:', e.message) }
-      }
+    const byId = {}
+    for (const a of relevant) {
+      if (installBUIds.has(jobBU[a.jobId])) byId[a.id] = { a, bucket: installHours }
+      else if (EXCLUDE_CALL.test(nameByType[String(jobTypeOf[a.jobId])] || '')) byId[a.id] = { a, bucket: excludedHours }
+    }
+    const ids = Object.keys(byId)
+    for (let i = 0; i < ids.length; i += 50) {
+      try {
+        const r = await stGet(`/dispatch/v2/tenant/${ST_TENANT_ID}/appointment-assignments?appointmentIds=${ids.slice(i, i + 50).join(',')}&pageSize=200`)
+        for (const asg of (r?.data || [])) {
+          if (asg.active === false) continue
+          const hit = byId[asg.appointmentId]; if (!hit) continue
+          days.forEach((d, di) => {
+            const h = overlapHours({ start: new Date(hit.a.start), end: new Date(hit.a.end) }, d)
+            if (h > 0) {
+              const k = `${asg.technicianId}|${di}`
+              hit.bucket[k] = (hit.bucket[k] || 0) + h
+            }
+          })
+        }
+      } catch (e) { console.warn('board assignments:', e.message) }
     }
   } catch (e) {
     // Degrade to the old head count rather than failing the whole board — but
@@ -1512,8 +1525,9 @@ async function build3DayBoard() {
     // visible failure.
     console.error('BOARD: install-consumption lookup FAILED, capacity will be overstated:', e.stack || e.message)
     installHours = {}
+    excludedHours = {}
   }
-  console.log(`BOARD: install consumption computed for ${Object.keys(installHours).length} tech-days`)
+  console.log(`BOARD: consumption computed — ${Object.keys(installHours).length} install tech-days, ${Object.keys(excludedHours).length} excluded-call tech-days`)
 
   // HVAC maintenance is an opportunity only when the system is 12+ years old.
   // Find which locations (across all 3 days' HVAC maint jobs) qualify, in as
@@ -1578,6 +1592,8 @@ async function build3DayBoard() {
       // fixed 8h. Only time-off inside their shift reduces them (half-day = 0.5).
       // No working shift that day = not scheduled = 0. Roster kept for drill-down.
       let techsAvail = 0
+      let techsAvailRemaining = 0   // today only: the fraction of capacity still AHEAD of the clock
+      const nowMs = Date.now()
       const techList = []
       for (const techId of svcTechIds) {
         const my = shifts.filter(s => s.tech === techId)
@@ -1591,13 +1607,26 @@ async function build3DayBoard() {
         // hour of install tacked onto a service day shouldn't shave the board.
         const rawInsH = installHours[`${techId}|${di}`] || 0
         const insH = rawInsH >= INSTALL_MIN_HOURS ? Math.min(rawInsH, workH) : 0
-        const avail = Math.max(0, Math.min((workH - offH - insH) / workH, 1))
+        // Non-productive call types (callback/permit/follow-up/phone call) are
+        // excluded from the booked count, so they must ALSO come off capacity —
+        // no threshold: every hour on a callback is an hour nobody can book.
+        const excH = Math.min(excludedHours[`${techId}|${di}`] || 0, Math.max(0, workH - offH - insH))
+        const avail = Math.max(0, Math.min((workH - offH - insH - excH) / workH, 1))
         techsAvail += avail
+        if (di === 0) {
+          // Productive hours that are still ahead of the clock, against the
+          // FULL shift — calls-per-tech is a whole-day rate, so half a day
+          // left means half the tech's calls left.
+          const dayRem = { startUtc: new Date(Math.max(nowMs, day.startUtc.getTime())), endUtc: day.endUtc }
+          const workRemH = my.filter(s => s.type !== 'TimeOff').reduce((a, s) => a + overlapHours(s, dayRem), 0)
+          const productiveH = Math.max(0, workH - offH - insH - excH)
+          techsAvailRemaining += Math.min(productiveH, workRemH) / workH
+        }
         techList.push({
           name: techName(techId),
           off: avail >= 1 ? null
-            : avail <= 0 ? (insH > 0 ? 'on install' : 'off')
-            : `${Math.round(avail * 100)}%${insH > 0 ? ' (install)' : ''}`,
+            : avail <= 0 ? (insH > 0 ? 'on install' : excH > 0 ? 'on callbacks/permits' : 'off')
+            : `${Math.round(avail * 100)}%${insH > 0 ? ' (install)' : excH > 0 ? ' (callbacks/permits)' : ''}`,
         })
       }
       techsAvail = Math.round(techsAvail * 10) / 10
@@ -1609,12 +1638,32 @@ async function build3DayBoard() {
 
       const capacity = Math.round(techsAvail * cpt(trade) * 10) / 10
       const pct = capacity > 0 ? svcJobs.length / capacity : (svcJobs.length > 0 ? 1 : 0)
-      const needed = Math.max(0, Math.round(capacity - svcJobs.length))
+      let needed = Math.max(0, Math.round(capacity - svcJobs.length))
+      // FULL is not CLOSED. When the board is (or becomes) completely filled,
+      // the flag flips to Opportunity Watch: keep booking high-value calls —
+      // dispatch makes room by moving low-value ones.
+      let oppWatch = capacity > 0 && svcJobs.length >= capacity
+      if (di === 0) {
+        // Today's "needed" respects the clock: only capacity still ahead of
+        // now can be filled, and only calls still ahead of now occupy it. At
+        // 11am the morning windows are history — ST's Check Availability and
+        // this number should agree by mid-day.
+        const capRem = techsAvailRemaining * cpt(trade)
+        const bookedRem = svcJobs.filter(j => {
+          const t = apptStartByJobDay?.[0]?.get(j.id)
+          return t != null && t >= nowMs
+        }).length
+        needed = Math.min(needed, Math.max(0, Math.round(capRem - bookedRem)))
+        // Watch flips mid-day when what's left is spoken for — but a quiet
+        // evening (no capacity left at all) is just the day ending, not a
+        // full board.
+        if (capRem >= 0.5 && bookedRem >= capRem) oppWatch = true
+      }
       // Target is 80%: green at/over, amber climbing, red well below.
       const status = capacity === 0 ? 'none' : pct >= 0.8 ? 'good' : pct >= 0.6 ? 'warn' : 'under'
       return {
         date: day.date, techs: techsAvail, calls: svcJobs.length, capacity,
-        pct: Math.round(pct * 100), needed, opps: oppJobs.length, installs: installJobs.length, status,
+        pct: Math.round(pct * 100), needed, oppWatch, opps: oppJobs.length, installs: installJobs.length, status,
         detail: {
           techs: techList,
           calls: svcJobs.map(jobRow),

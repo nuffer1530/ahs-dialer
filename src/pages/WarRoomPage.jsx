@@ -248,18 +248,31 @@ export default function WarRoomPage() {
           {board.board.map(row => {
             const d = row.days[0] || {}
             const col = d.status === 'good' ? C.green : d.status === 'warn' ? C.amber : d.status === 'under' ? C.red : C.dim
+            // Opportunity Watch: the board is FULL, not CLOSED. CSRs keep
+            // booking high-value calls — dispatch makes room by moving
+            // low-value ones. Purple + pulse so the floor can't miss it.
+            const watch = Boolean(d.oppWatch)
             return (
-              <div key={row.trade} style={{ background:C.panel, border:`1px solid ${C.border}`, borderTop:`3px solid ${col}`, borderRadius:14, padding:'12px 16px', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+              <div key={row.trade} style={{ background:C.panel, border:`1px solid ${watch ? '#7C3AED' : C.border}`, borderTop:`3px solid ${watch ? '#7C3AED' : col}`, borderRadius:14, padding:'12px 16px', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
                 <div>
                   <div style={{ fontSize:11, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color:C.muted }}>{row.trade}</div>
                   <div style={{ fontSize:12, color:C.muted, marginTop:3 }}>{d.calls}/{d.capacity} booked · {d.pct}%</div>
                 </div>
-                <div style={{ textAlign:'right' }}>
-                  <div style={{ fontSize:32, fontWeight:800, lineHeight:1, color: d.needed > 0 ? col : C.green, fontVariantNumeric:'tabular-nums' }}>
-                    {d.needed > 0 ? d.needed : '✓'}
+                {watch ? (
+                  <div style={{ textAlign:'right' }}>
+                    <div style={{ fontSize:15, fontWeight:800, lineHeight:1.15, color:'#A78BFA', letterSpacing:.4, animation:'wr-pulse 1.5s infinite' }}>
+                      👁 OPPORTUNITY<br />WATCH
+                    </div>
+                    <div style={{ fontSize:9, color:C.muted, textTransform:'uppercase', letterSpacing:.4, marginTop:2 }}>full — still book strong calls</div>
                   </div>
-                  <div style={{ fontSize:10, color:C.muted, textTransform:'uppercase', letterSpacing:.4 }}>{d.needed > 0 ? 'calls needed' : 'at target'}</div>
-                </div>
+                ) : (
+                  <div style={{ textAlign:'right' }}>
+                    <div style={{ fontSize:32, fontWeight:800, lineHeight:1, color: d.needed > 0 ? col : C.green, fontVariantNumeric:'tabular-nums' }}>
+                      {d.needed > 0 ? d.needed : '✓'}
+                    </div>
+                    <div style={{ fontSize:10, color:C.muted, textTransform:'uppercase', letterSpacing:.4 }}>{d.needed > 0 ? 'calls needed' : 'at target'}</div>
+                  </div>
+                )}
               </div>
             )
           })}

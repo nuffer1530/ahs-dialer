@@ -38,13 +38,26 @@ function Cell({ trade, dayLabel, d, onDrill }) {
         <span style={{ fontSize:13, fontWeight:800, color:s.color, fontVariantNumeric:'tabular-nums' }}>{d.pct}%</span>
         <span style={{ fontSize:10, fontWeight:700, color:s.color, textTransform:'uppercase', letterSpacing:.5 }}>{s.label}</span>
       </div>
-      {/* Hero: calls needed */}
-      <div style={{ padding:'16px 16px 12px', display:'flex', alignItems:'baseline', gap:10 }}>
-        <span style={{ fontSize:46, fontWeight:800, lineHeight:.9, color: d.needed > 0 ? s.color : '#16A34A', fontVariantNumeric:'tabular-nums' }}>
-          {d.needed > 0 ? d.needed : '✓'}
-        </span>
-        <span style={{ fontSize:12, color:'var(--text-muted)', fontWeight:600 }}>{d.needed > 0 ? 'calls needed' : 'at target'}</span>
-      </div>
+      {/* Hero: calls needed — or Opportunity Watch when the board is full.
+          Full is NOT closed: high-value calls still get booked, dispatch
+          makes room by moving low-value ones. The flag keeps CSRs selling. */}
+      {d.oppWatch ? (
+        <div style={{ padding:'16px 16px 12px', display:'flex', flexDirection:'column', gap:4 }}>
+          <span style={{ fontSize:20, fontWeight:800, lineHeight:1, color:'#7C3AED', letterSpacing:.3 }}>
+            👁 Opportunity Watch
+          </span>
+          <span style={{ fontSize:11, color:'var(--text-muted)', fontWeight:600 }}>
+            Board is full — keep booking strong calls, we'll make room
+          </span>
+        </div>
+      ) : (
+        <div style={{ padding:'16px 16px 12px', display:'flex', alignItems:'baseline', gap:10 }}>
+          <span style={{ fontSize:46, fontWeight:800, lineHeight:.9, color: d.needed > 0 ? s.color : '#16A34A', fontVariantNumeric:'tabular-nums' }}>
+            {d.needed > 0 ? d.needed : '✓'}
+          </span>
+          <span style={{ fontSize:12, color:'var(--text-muted)', fontWeight:600 }}>{d.needed > 0 ? 'calls needed' : 'at target'}</span>
+        </div>
+      )}
       {/* Metric strip */}
       <div style={{ display:'flex', borderTop:'1px solid var(--border)', marginTop:'auto' }}>
         <Metric label="Techs" value={d.techs} onClick={() => onDrill(trade, dayLabel, 'Service techs', d.detail.techs, 'tech')} />
