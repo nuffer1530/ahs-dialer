@@ -1277,7 +1277,7 @@ export default function DialerPage() {
               <div style={{ flex:1, display:'grid', gridTemplateColumns:'300px 1fr 300px', overflow:'hidden', minHeight:0 }}>
 
                 {/* -- LEFT: Customer info + Job history -- */}
-                <div style={{ borderRight:'1px solid var(--border)', overflowY:'auto', background:'var(--surface-2)', display:'flex', flexDirection:'column', gap:1 }}>
+                <div style={{ borderRight:'1px solid var(--border)', overflowY:'auto', minHeight:0, background:'var(--surface-2)', display:'flex', flexDirection:'column', gap:1 }}>
 
                   {/* Customer info card */}
                   <div style={sectionCard}>
@@ -1459,7 +1459,7 @@ export default function DialerPage() {
                 </div>
 
                 {/* -- CENTER: Outcome + Booking -- */}
-                <div style={{ overflowY:'auto', padding:14, display:'flex', flexDirection:'column', gap:10 }}>
+                <div style={{ overflowY:'auto', minHeight:0, padding:14, display:'flex', flexDirection:'column', gap:10 }}>
 
                   {/* Recent ST notes — what the last few touches on this account said,
                       right above where the rep decides what to do next. */}
@@ -1636,7 +1636,7 @@ export default function DialerPage() {
                 </div>
 
                 {/* -- RIGHT: Stats + Script + Tips -- */}
-                <div style={{ borderLeft:'1px solid var(--border)', display:'flex', flexDirection:'column', overflow:'hidden', background:'var(--surface-2)' }}>
+                <div style={{ borderLeft:'1px solid var(--border)', display:'flex', flexDirection:'column', overflow:'hidden', minHeight:0, background:'var(--surface-2)' }}>
 
                   {/* Stats -- always visible */}
                   <div style={{ padding:'10px 14px', borderBottom:'1px solid var(--border)', background:'var(--surface)', flexShrink:0 }}>
@@ -1687,7 +1687,7 @@ export default function DialerPage() {
                     ))}
                   </div>
 
-                  <div style={{ flex:1, overflowY:'auto', padding:12 }}>
+                  <div style={{ flex:1, minHeight:0, overflowY:'auto', padding:12 }}>
                     {activeTab === 'script' && (
                       <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
                         {(camp?.script || inboundScript?.script) ? (
