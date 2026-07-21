@@ -672,6 +672,11 @@ export default function AdminPage() {
   const [pwModal, setPwModal] = useState(null) // { profileId, name } or 'me'
   const [busyUser, setBusyUser] = useState(null) // profile id mid deactivate/reactivate
   const [showRemoved, setShowRemoved] = useState(false)
+  // Invite by email
+  const [invEmail, setInvEmail] = useState('')
+  const [invRole, setInvRole] = useState('rep')
+  const [invBusy, setInvBusy] = useState(false)
+  const [invMsg, setInvMsg] = useState(null)   // { ok, text, link? }
   const [newPw, setNewPw] = useState('')
   const [pwMsg, setPwMsg] = useState('')
   const [savingPw, setSavingPw] = useState(false)
@@ -744,6 +749,35 @@ export default function AdminPage() {
       setLoading(false)
     })
   }, [isAdmin])
+
+  const sendInvite = async () => {
+    const email = invEmail.trim()
+    if (!email) return
+    setInvBusy(true); setInvMsg(null)
+    try {
+      const { data: { session } } = await sb.auth.getSession()
+      const r = await fetch('/api/admin/user/invite', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session?.access_token}` },
+        body: JSON.stringify({ email, role: invRole }),
+      })
+      const d = await r.json()
+      if (!r.ok) throw new Error(d.error || 'Invite failed')
+      if (d.emailed) {
+        setInvMsg({ ok: true, text: `Invite emailed to ${email} — they'll set their own name and password.` })
+      } else {
+        // The account and link exist even though the email bounced — hand the
+        // admin the link so they can text/DM it instead of dead-ending.
+        setInvMsg({ ok: true, text: `Invite created, but the email failed (${d.emailError || 'unknown'}). Send them this link yourself:`, link: d.link })
+      }
+      setInvEmail('')
+      const { data: profilesData } = await sb.from('profiles').select('*').order('name')
+      setProfiles(profilesData || [])
+    } catch (e) {
+      setInvMsg({ ok: false, text: e.message })
+    }
+    setInvBusy(false)
+  }
 
   // Load saved statuses
   useEffect(() => {
@@ -1556,13 +1590,41 @@ export default function AdminPage() {
                 <div className="card-header">
                   <div className="card-title">User Management</div>
                   <div style={{ display:'flex', alignItems:'center', gap:12 }}>
-                    <span style={{ fontSize:11, color:'var(--text-muted)' }}>New reps sign up at the login page — set their role and campaigns here</span>
+                    <span style={{ fontSize:11, color:'var(--text-muted)' }}>Invite by email below — they set their own name and password</span>
                     {removedProfiles.length > 0 && (
                       <button className="btn sm" onClick={() => setShowRemoved(v => !v)}>
                         {showRemoved ? 'Hide' : `Show removed (${removedProfiles.length})`}
                       </button>
                     )}
                   </div>
+                </div>
+                {/* Invite a user */}
+                <div style={{ padding:'12px 16px', borderBottom:'1px solid var(--border)', display:'flex', flexDirection:'column', gap:8 }}>
+                  <div style={{ display:'flex', gap:8, alignItems:'center', flexWrap:'wrap' }}>
+                    <input className="form-input" type="email" placeholder="teammate@awesomeservice.com"
+                      value={invEmail} onChange={e => setInvEmail(e.target.value)}
+                      onKeyDown={e => { if (e.key === 'Enter') sendInvite() }}
+                      style={{ flex:1, minWidth:220 }} />
+                    <select className="form-input" value={invRole} onChange={e => setInvRole(e.target.value)} style={{ width:110 }}>
+                      <option value="rep">Rep</option>
+                      <option value="admin">Admin</option>
+                    </select>
+                    <button className="btn primary" onClick={sendInvite} disabled={invBusy || !invEmail.trim()}>
+                      {invBusy ? 'Sending…' : 'Send invite'}
+                    </button>
+                  </div>
+                  {invMsg && (
+                    <div style={{ fontSize:12, color: invMsg.ok ? 'var(--success)' : 'var(--danger)' }}>
+                      {invMsg.text}
+                      {invMsg.link && (
+                        <div style={{ display:'flex', gap:6, alignItems:'center', marginTop:4 }}>
+                          <input className="form-input" readOnly value={invMsg.link} style={{ flex:1, fontSize:11 }}
+                            onFocus={e => e.target.select()} />
+                          <button className="btn sm" onClick={() => navigator.clipboard?.writeText(invMsg.link)}>Copy</button>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
                 {loading ? <div className="card-body"><div className="spinner"></div></div> : (
                   <table className="data-table">

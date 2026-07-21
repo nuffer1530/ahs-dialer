@@ -2,10 +2,14 @@ import { Routes, Route, Navigate } from 'react-router-dom'
 import { useAuth } from './lib/AuthContext'
 import { DataProvider } from './lib/DataContext'
 import LoginPage from './pages/LoginPage'
+import WelcomePage from './pages/WelcomePage'
 import DialerLayout from './pages/DialerLayout'
 
 export default function App() {
   const { user, loading } = useAuth()
+  // Invited users land signed-in but with no password of their own yet —
+  // hold them on the setup screen (whatever URL they arrived at) until done.
+  const needsSetup = Boolean(user?.user_metadata?.invited && !user?.user_metadata?.setup_done)
 
   if (loading) return (
     <div style={{ display:'flex', alignItems:'center', justifyContent:'center', height:'100vh', flexDirection:'column', gap:16 }}>
@@ -27,7 +31,7 @@ export default function App() {
       <Route path="/login" element={user ? <Navigate to="/" replace /> : <LoginPage />} />
       <Route path="/*" element={
         user
-          ? <DataProvider><DialerLayout /></DataProvider>
+          ? (needsSetup ? <WelcomePage /> : <DataProvider><DialerLayout /></DataProvider>)
           : <Navigate to="/login" replace />
       } />
     </Routes>

@@ -1212,6 +1212,74 @@ async function requireAdmin(req, res) {
 // Ban for ~100 years. Supabase has no "ban forever", so this is the idiom.
 const FOREVER = '876000h'
 
+const esc2 = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+
+// ── Invite a user by email. generateLink creates the auth user immediately
+// (the signup trigger writes their profiles row), returns a one-time invite
+// link, and we deliver it through Resend — Supabase's own mailer is rate-
+// limited and unbranded. The invitee sets name + password on /welcome; the
+// `invited` metadata flag (cleared by setup_done) is what routes them there,
+// so the flow works even if the Supabase redirect allowlist sends them to
+// the app root instead.
+app.post('/api/admin/user/invite', async (req, res) => {
+  const admin = await requireAdmin(req, res)
+  if (!admin) return
+  const email = String(req.body?.email || '').trim().toLowerCase()
+  const role = req.body?.role === 'admin' ? 'admin' : 'rep'
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+    return res.status(400).json({ error: 'Enter a valid email address' })
+  }
+  try {
+    const { data, error } = await supabase.auth.admin.generateLink({
+      type: 'invite',
+      email,
+      options: {
+        data: { invited: true },
+        redirectTo: `${appUrl}/welcome`,
+      },
+    })
+    if (error) {
+      const msg = /already|registered|exist/i.test(error.message)
+        ? 'That email already has an account. If they were removed, use Restore instead.'
+        : error.message
+      return res.status(400).json({ error: msg })
+    }
+    const link = data?.properties?.action_link
+    if (!link) return res.status(500).json({ error: 'Supabase returned no invite link' })
+    if (data?.user?.id && role === 'admin') {
+      try { await supabase.from('profiles').update({ role: 'admin' }).eq('id', data.user.id) }
+      catch (e) { console.warn('invite role set:', e.message) }
+    }
+    let emailed = false, emailError = null
+    try {
+      await sendResend({
+        to: email,
+        subject: "You're invited to Andi — Awesome Home Services",
+        html: `
+<div style="font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;max-width:520px;margin:0 auto;padding:28px 20px;color:#111827;">
+  <div style="font-size:22px;font-weight:800;color:#ff751f;margin-bottom:4px;">andi</div>
+  <div style="font-size:15px;font-weight:700;margin-bottom:12px;">You've been invited to join the Awesome Home Services team on Andi.</div>
+  <p style="font-size:13px;color:#374151;line-height:1.5;">Click below to accept the invite and set up your account — you'll pick your own password.</p>
+  <p style="margin:22px 0;">
+    <a href="${link}" style="background:#ff751f;color:#ffffff;text-decoration:none;font-size:14px;font-weight:700;padding:11px 22px;border-radius:8px;display:inline-block;">Accept invite &amp; create account</a>
+  </p>
+  <p style="font-size:11px;color:#9CA3AF;line-height:1.5;">This link is for ${esc2(email)} and expires in 24 hours. If it expires, ask your admin to send a new one. If you weren't expecting this, you can ignore it.</p>
+</div>`,
+      })
+      emailed = true
+    } catch (e) {
+      emailError = e.message
+      console.warn('invite email failed:', e.message)
+    }
+    // If Resend failed the invite still exists — hand the admin the link so
+    // they can deliver it themselves rather than dead-ending.
+    res.json({ ok: true, emailed, ...(emailed ? {} : { link, emailError }) })
+  } catch (e) {
+    console.error('invite error:', e.message)
+    res.status(500).json({ error: e.message })
+  }
+})
+
 // ── Deactivate a user: revoke login, hide them app-wide, free their leads.
 // Their call_logs and commissions are intentionally left untouched — they're
 // historical pay records. Reversible via /reactivate.
