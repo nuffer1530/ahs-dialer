@@ -2938,6 +2938,28 @@ async function computeLiveBoardPayload() {
     // incident). This loop was the page's dominant cost: 2 serial ST calls per
     // install (~24 round-trips at 1-2s each). Now a concurrency-4 pool, so a
     // 12-install day is ~6 waves instead of 24.
+    // Cross-day double-count ledger. If day 2 of an install isn't booked in ST
+    // yet when we compute, the job's last KNOWN appointment is today — so it
+    // counts today, and would count AGAIN tomorrow once day 2 appears (the
+    // Zachary Herman case). A job counted on any earlier date never counts
+    // again, so revenue can land a day early but never lands twice.
+    let counted = {}
+    try {
+      const { data: cRow } = await supabase.from('app_settings').select('value').eq('key', 'board_revenue_counted').maybeSingle()
+      counted = JSON.parse(cRow?.value || '{}')
+    } catch {}
+    // keep the ledger from growing forever — entries older than 14 days drop
+    for (const [jid, d] of Object.entries(counted)) {
+      if (Date.parse(d) < Date.now() - 14 * 864e5) delete counted[jid]
+    }
+    const denverDate = (iso) => {
+      const t = Date.parse(iso || '')
+      if (Number.isNaN(t)) return null
+      // Appointment dates must be compared in DENVER days: slicing the UTC
+      // string put any 6pm+ appointment on "tomorrow" and misfiled the job.
+      return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Denver', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(t))
+    }
+    let ledgerDirty = false
     const installQueue = installJobs.slice(0, 40).filter((c, i, arr) =>
       arr.findIndex(x => x.jobId === c.jobId) === i && !bookedByJob.has(c.jobId))
     let qi = 0
@@ -2945,16 +2967,29 @@ async function computeLiveBoardPayload() {
       while (qi < installQueue.length) {
         const c = installQueue[qi++]
         try {
+          const prior = counted[String(c.jobId)]
+          if (prior && prior !== today.date) continue        // already counted a previous day
           const ja = await stGet(`/jpm/v2/tenant/${ST_TENANT_ID}/appointments?jobId=${c.jobId}&pageSize=20`)
-          const days = (ja?.data || []).map(a => String(a.start || '').slice(0, 10)).filter(Boolean).sort()
+          const days = (ja?.data || [])
+            .filter(a => a.status !== 'Canceled')            // canceled appts don't define the schedule
+            .map(a => denverDate(a.start)).filter(Boolean).sort()
           const lastDay = days[days.length - 1]
           if (lastDay && lastDay !== today.date) continue    // finishes another day
           const iv = await stGet(`/accounting/v2/tenant/${ST_TENANT_ID}/invoices?jobNumber=${encodeURIComponent(c.jobNumber)}&pageSize=5`)
           const tot = (iv?.data || []).reduce((a, x) => a + Number(x.total || 0), 0)
-          if (tot > 0) bookedByJob.set(c.jobId, tot)
+          if (tot > 0) {
+            bookedByJob.set(c.jobId, tot)
+            if (counted[String(c.jobId)] !== today.date) { counted[String(c.jobId)] = today.date; ledgerDirty = true }
+          }
         } catch (e) { /* leave it out rather than guess */ }
       }
     }))
+    if (ledgerDirty) {
+      try {
+        await supabase.from('app_settings').upsert(
+          { key: 'board_revenue_counted', value: JSON.stringify(counted) }, { onConflict: 'key' })
+      } catch (e) { console.warn('revenue ledger save:', e.message) }
+    }
 
     // Outcomes for work that finished today. Fetched as two paged queries and
     // indexed by job rather than per-job lookups, which at ~29 completed calls
