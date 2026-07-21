@@ -1,20 +1,28 @@
 import { useEffect, useState, useRef } from 'react'
 import { sb } from '../lib/supabase'
+import { useAuth } from '../lib/AuthContext'
 
 function Particle({ style }) {
   return <div style={{ position:'fixed', borderRadius:3, ...style, animation:'fall 3s ease-in forwards', pointerEvents:'none' }} />
 }
 
 export default function WinCelebration() {
+  const { profile } = useAuth()
   const [celebration, setCelebration] = useState(null)
   const [particles, setParticles] = useState([])
   const channelRef = useRef(null)
   const timeoutRef = useRef(null)
 
+  // The card says "YOU earned" — so it must only fire for the rep the payout
+  // belongs to. A ref keeps the check current without resubscribing.
+  const myIdRef = useRef(null)
+  useEffect(() => { myIdRef.current = profile?.id || null }, [profile?.id])
+
   useEffect(() => {
     channelRef.current = sb.channel('win-celebrations')
       .on('postgres_changes', { event:'INSERT', schema:'public', table:'commissions' }, payload => {
         const { profile_id, amount, event_type, contact_name, rep_name, also_membership, membership_amount } = payload.new
+        if (!profile_id || profile_id !== myIdRef.current) return   // someone else's win
         triggerCelebration({ repName: rep_name, contactName: contact_name, amount, eventType: event_type, alsoMembership: also_membership, membershipAmount: membership_amount })
       })
       .subscribe()
