@@ -1205,7 +1205,11 @@ export default function DialerPage() {
                 <div style={{ flex:1, minWidth:0 }}>
                   <div style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap' }}>
                     <span style={{ fontSize:15, fontWeight:700, color:'var(--text-primary)' }}>{c.name || '--'}</span>
-                    <Badge status={c.status || 'Pending'} />
+                    {/* 'Pending' and 'Booked' are outbound-campaign lifecycle labels —
+                        meaningless on a customer account now that Andi handles every
+                        interaction type. Other statuses (callbacks, Max Attempts…)
+                        still tell the rep something and stay. */}
+                    {c.status && !['Pending', 'Booked'].includes(c.status) && <Badge status={c.status} />}
                     {isDNC && <span style={{ fontSize:10, fontWeight:700, background:'#FEE2E2', color:'#7F1D1D', border:'1px solid #FECACA', borderRadius:99, padding:'1px 6px' }}>DNC</span>}
                     {isDup && <span style={{ fontSize:10, fontWeight:700, background:'#F3E8FF', color:'#5B21B6', border:'1px solid #DDD6FE', borderRadius:99, padding:'1px 6px' }}>Duplicate</span>}
                     {campName(c) && <span style={{ fontSize:10, background:'var(--surface-2)', color:'var(--text-muted)', border:'1px solid var(--border)', borderRadius:99, padding:'1px 7px' }}>{campName(c)}</span>}
