@@ -154,10 +154,10 @@ const NAV_ITEMS = [
   { to:'/', label:'Dialer', iconKey:'dialer', end:true },
   { to:'/live', label:'Live Dashboard', iconKey:'live' },
   { to:'/callboard', label:'Call Board', iconKey:'board' },
-  { to:'/dispatch', label:'Dispatch', iconKey:'dispatch', adminOnly:true },
+  { to:'/dispatch', label:'Dispatch', iconKey:'dispatch', dispatchOnly:true },
   { to:'/analytics', label:'Analytics', iconKey:'analytics' },
   { to:'/recordings', label:'Recordings', iconKey:'recordings' },
-  { to:'/attendance', label:'WFM', iconKey:'wfm' },
+  { to:'/attendance', label:'WFM', iconKey:'wfm', adminOnly:true },
   { to:'/notes', label:'Notes', iconKey:'notes' },
   { to:'/warroom', label:'Call Center TV', iconKey:'tv' },
 ]
@@ -176,7 +176,7 @@ const PAGE_META = {
   '/notes':       { title: 'Notes',                 subtitle: 'Shared team notes' },
   '/warroom':     { title: 'Call Center TV',        subtitle: 'Big-screen floor view' },
   '/mypage':      { title: 'My Page',               subtitle: 'Your schedule, commissions, and scorecard' },
-  '/settings':    { title: 'Settings',              subtitle: 'Admin and configuration' },
+  '/settings':    { title: 'Settings',              subtitle: 'Your profile and configuration' },
 }
 
 const SETTINGS_ITEMS = [
@@ -246,7 +246,8 @@ export default function DialerLayout() {
 }
 
 function DialerLayoutInner() {
-  const { profile, isAdmin } = useAuth()
+  const { profile, isAdmin, isDispatcher } = useAuth()
+  const canDispatch = isAdmin || isDispatcher
   const { contacts, syncStatus, reload } = useData()
   const { cancelAutoWrap } = usePhone()
   const navigate = useNavigate()
@@ -549,7 +550,7 @@ function DialerLayoutInner() {
 
         {/* Nav links */}
         <div style={{ flex:1, overflowY:'auto', padding:'10px 8px', display:'flex', flexDirection:'column' }}>
-          {NAV_ITEMS.filter(n => !n.adminOnly || isAdmin).map(({ to, label, iconKey, end }) => (
+          {NAV_ITEMS.filter(n => (!n.adminOnly || isAdmin) && (!n.dispatchOnly || canDispatch)).map(({ to, label, iconKey, end }) => (
             <NavLink key={to} to={to} end={end} style={navLinkStyle} title={navCollapsed ? label : undefined}
               onMouseEnter={e => { const isActive = e.currentTarget.style.fontWeight === '600'; handleNavHover(e, isActive) }}
               onMouseLeave={e => { const isActive = e.currentTarget.style.fontWeight === '600'; handleNavLeave(e, isActive) }}>
@@ -586,8 +587,9 @@ function DialerLayoutInner() {
             )}
           </NavLink>
 
-          {/* Settings — admin only */}
-          {isAdmin && (
+          {/* Settings — everyone: reps manage their own name, avatar and
+              password there; the admin-only cards are gated inside the page. */}
+          {(
             <>
               <div style={{ height:1, background:'var(--border)', margin:'8px 0' }} />
               <NavLink to="/settings" style={navLinkStyle} title={navCollapsed ? 'Settings' : undefined}
@@ -709,7 +711,7 @@ function DialerLayoutInner() {
               </div>
               <div style={{ minWidth:0 }}>
                 <div style={{ fontSize:12, fontWeight:700, color:'var(--text-primary)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{profile?.name || profile?.email}</div>
-                {isAdmin && <div style={{ fontSize:9, color:'var(--accent)', fontWeight:700, textTransform:'uppercase', letterSpacing:.5 }}>Admin</div>}
+                {(isAdmin || isDispatcher) && <div style={{ fontSize:9, color:'var(--accent)', fontWeight:700, textTransform:'uppercase', letterSpacing:.5 }}>{isAdmin ? 'Admin' : 'Dispatcher'}</div>}
               </div>
             </div>
 
@@ -734,7 +736,7 @@ function DialerLayoutInner() {
                 { to:'/mypage', label:'My Page' },
                 { to:'/mypage?tab=commissions', label:'Commissions' },
                 { to:'/mypage?tab=scorecard', label:'Scorecard' },
-                ...(isAdmin ? [{ to:'/settings', label:'Settings' }] : []),
+                { to:'/settings', label:'Settings' },
               ].map(({ to, label }) => (
                 <button key={label} onClick={() => { navigate(to); setShowStatusMenu(false) }}
                   onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
@@ -764,14 +766,14 @@ function DialerLayoutInner() {
           <Route path="/" element={<DialerPage />} />
           <Route path="/live" element={<LivePage />} />
           <Route path="/callboard" element={<CallBoardPage />} />
-          {isAdmin && <Route path="/dispatch" element={<DispatchPage />} />}
+          {canDispatch && <Route path="/dispatch" element={<DispatchPage />} />}
           <Route path="/analytics" element={<DashboardPage />} />
           <Route path="/recordings" element={<RecordingsPage />} />
-          <Route path="/attendance" element={<AttendancePage />} />
+          {isAdmin && <Route path="/attendance" element={<AttendancePage />} />}
           <Route path="/notes" element={<NotesPage />} />
           <Route path="/warroom" element={<WarRoomPage />} />
           <Route path="/mypage" element={<MyPage />} />
-          {isAdmin && <Route path="/settings" element={<AdminPage />} />}
+          <Route path="/settings" element={<AdminPage />} />
         </Routes>
       </div>
     </div>

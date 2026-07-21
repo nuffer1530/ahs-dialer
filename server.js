@@ -1209,6 +1209,21 @@ async function requireAdmin(req, res) {
   return prof
 }
 
+// Dispatch surfaces admit admins AND the dispatcher role. Everything else
+// admin-gated stays admin-only — dispatcher is "rep plus the Dispatch tab".
+async function requireDispatch(req, res) {
+  const token = (req.headers.authorization || '').replace(/^Bearer\s+/i, '')
+  if (!token) { res.status(401).json({ error: 'Not signed in' }); return null }
+  const { data: { user }, error } = await supabase.auth.getUser(token)
+  if (error || !user) { res.status(401).json({ error: 'Invalid session' }); return null }
+  const { data: prof } = await supabase
+    .from('profiles').select('id, role, active').eq('id', user.id).maybeSingle()
+  if (!['admin', 'dispatcher'].includes(prof?.role) || prof?.active === false) {
+    res.status(403).json({ error: 'Admins or dispatchers only' }); return null
+  }
+  return prof
+}
+
 // Ban for ~100 years. Supabase has no "ban forever", so this is the idiom.
 const FOREVER = '876000h'
 
@@ -1225,7 +1240,7 @@ app.post('/api/admin/user/invite', async (req, res) => {
   const admin = await requireAdmin(req, res)
   if (!admin) return
   const email = String(req.body?.email || '').trim().toLowerCase()
-  const role = req.body?.role === 'admin' ? 'admin' : 'rep'
+  const role = ['admin', 'dispatcher'].includes(req.body?.role) ? req.body.role : 'rep'
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
     return res.status(400).json({ error: 'Enter a valid email address' })
   }
@@ -1246,8 +1261,8 @@ app.post('/api/admin/user/invite', async (req, res) => {
     }
     const link = data?.properties?.action_link
     if (!link) return res.status(500).json({ error: 'Supabase returned no invite link' })
-    if (data?.user?.id && role === 'admin') {
-      try { await supabase.from('profiles').update({ role: 'admin' }).eq('id', data.user.id) }
+    if (data?.user?.id && role !== 'rep') {
+      try { await supabase.from('profiles').update({ role }).eq('id', data.user.id) }
       catch (e) { console.warn('invite role set:', e.message) }
     }
     let emailed = false, emailError = null
@@ -2751,7 +2766,7 @@ async function refreshDispatchScores() {
 }
 
 app.get('/api/dispatch/batting-order', async (req, res) => {
-  if (!(await requireAdmin(req, res))) return
+  if (!(await requireDispatch(req, res))) return
   try {
     const [{ data: rows }, weights] = await Promise.all([
       supabase.from('dispatch_tech_scores').select('*').order('business_unit').order('rank', { nullsFirst: false }),
@@ -2769,7 +2784,7 @@ app.get('/api/dispatch/batting-order', async (req, res) => {
 })
 
 app.get('/api/dispatch/job-types', async (req, res) => {
-  if (!(await requireAdmin(req, res))) return
+  if (!(await requireDispatch(req, res))) return
   try {
     const { data: rows } = await supabase.from('dispatch_jobtype_scores')
       .select('*').order('job_type').order('expected_value', { ascending: false })
@@ -2779,13 +2794,13 @@ app.get('/api/dispatch/job-types', async (req, res) => {
 })
 
 app.post('/api/dispatch/refresh', async (req, res) => {
-  if (!(await requireAdmin(req, res))) return
+  if (!(await requireDispatch(req, res))) return
   try { res.json(await refreshDispatchScores()) }
   catch (err) { res.status(500).json({ error: err.message }) }
 })
 
 app.post('/api/dispatch/weights', async (req, res) => {
-  if (!(await requireAdmin(req, res))) return
+  if (!(await requireDispatch(req, res))) return
   try {
     const w = req.body?.weights || {}
     const clean = {
@@ -3508,7 +3523,7 @@ async function computeLiveBoardPayload() {
 }
 
 app.get('/api/dispatch/live-board', async (req, res) => {
-  if (!(await requireAdmin(req, res))) return
+  if (!(await requireDispatch(req, res))) return
   try {
     if (req.query.force !== '1' && _liveBoardCache && _liveBoardCache.expires > Date.now()) {
       return res.json({ ..._liveBoardCache.data, cached: true })
@@ -3632,7 +3647,7 @@ Submit the analysis via the submit_brief tool. 3-6 actions, ordered by priority;
 }
 
 app.get('/api/dispatch/brief', async (req, res) => {
-  if (!(await requireAdmin(req, res))) return
+  if (!(await requireDispatch(req, res))) return
   try {
     const { data: row } = await supabase.from('app_settings').select('value').eq('key', 'dispatch_brief').maybeSingle()
     let record = null
@@ -3659,7 +3674,7 @@ app.get('/api/dispatch/brief', async (req, res) => {
 // dispatcher books and assigns. That's deliberate: it never silently rearranges
 // a live board, and it sidesteps assign/reschedule writes entirely.
 app.get('/api/dispatch/all-job-types', async (req, res) => {
-  if (!(await requireAdmin(req, res))) return
+  if (!(await requireDispatch(req, res))) return
   try {
     const cat = await getJobTypeCatalog()
     res.json({ types: cat.map(t => t.name).filter(Boolean).sort() })
@@ -3669,7 +3684,7 @@ app.get('/api/dispatch/all-job-types', async (req, res) => {
 })
 
 app.get('/api/dispatch/geocode-suggest', async (req, res) => {
-  if (!(await requireAdmin(req, res))) return
+  if (!(await requireDispatch(req, res))) return
   try {
     res.json({ suggestions: await suggestAddresses(req.query.q) })
   } catch (err) {
@@ -3678,7 +3693,7 @@ app.get('/api/dispatch/geocode-suggest', async (req, res) => {
 })
 
 app.post('/api/dispatch/decide', async (req, res) => {
-  if (!(await requireAdmin(req, res))) return
+  if (!(await requireDispatch(req, res))) return
   try {
     const jobType = String(req.body?.jobType || '').trim()
     const address = String(req.body?.address || '').trim()

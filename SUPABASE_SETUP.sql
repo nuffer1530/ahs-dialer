@@ -401,3 +401,10 @@ create table if not exists drive_time_cache (
 alter table drive_time_cache enable row level security;
 drop policy if exists "Authenticated read drive cache" on drive_time_cache;
 create policy "Authenticated read drive cache" on drive_time_cache for select to authenticated using (true);
+
+-- ── Dispatcher role (Jul 2026) ──────────────────────────────────────────────
+-- The role check was rep/admin only; dispatcher = everything a rep has plus
+-- the Dispatch for Profit tab. RUN THIS BEFORE assigning anyone the role —
+-- the profiles update fails on the old constraint otherwise.
+alter table profiles drop constraint if exists profiles_role_check;
+alter table profiles add constraint profiles_role_check check (role in ('rep', 'admin', 'dispatcher'));

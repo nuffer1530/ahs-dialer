@@ -1605,8 +1605,9 @@ export default function AdminPage() {
                       value={invEmail} onChange={e => setInvEmail(e.target.value)}
                       onKeyDown={e => { if (e.key === 'Enter') sendInvite() }}
                       style={{ flex:1, minWidth:220 }} />
-                    <select className="form-input" value={invRole} onChange={e => setInvRole(e.target.value)} style={{ width:110 }}>
+                    <select className="form-input" value={invRole} onChange={e => setInvRole(e.target.value)} style={{ width:130 }}>
                       <option value="rep">Rep</option>
+                      <option value="dispatcher">Dispatcher</option>
                       <option value="admin">Admin</option>
                     </select>
                     <button className="btn primary" onClick={sendInvite} disabled={invBusy || !invEmail.trim()}>
@@ -1702,6 +1703,7 @@ export default function AdminPage() {
                   <label className="form-label">Role</label>
                   <select className="form-input" value={editProfile.role || 'rep'} onChange={e => setEditProfile(p => ({ ...p, role: e.target.value }))}>
                     <option value="rep">Rep — can dial, view dashboard, see all stats</option>
+                    <option value="dispatcher">Dispatcher — everything a rep has, plus Dispatch for Profit</option>
                     <option value="admin">Admin — full access including uploads and user management</option>
                   </select>
                 </div>
