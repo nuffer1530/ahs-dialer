@@ -1413,10 +1413,34 @@ async function build3DayBoard() {
   const INSTALL_MIN_HOURS = Number(String(insThRow?.value ?? '').replace(/"/g, '')) || 4
 
   // Jobs per day (one ST call per day). Keep the fields the board + drill-down need.
-  const jobsByDay = await Promise.all(days.map(d =>
+  const jobsByDayRaw = await Promise.all(days.map(d =>
     stGet(`/jpm/v2/tenant/${ST_TENANT_ID}/jobs?appointmentStartsOnOrAfter=${d.startUtc.toISOString()}&appointmentStartsBefore=${d.endUtc.toISOString()}&pageSize=500`)
       .then(r => r?.data || []).catch(() => [])
   ))
+
+  // CANCELED calls must come OFF the board. The jobs query above matches on
+  // appointment dates with no status filter, so a canceled job — or a live
+  // job whose appointment that day was canceled/rescheduled — kept counting.
+  // Two layers: drop Canceled jobs outright, and require a non-canceled
+  // appointment actually ON that day (one paged appointments fetch covers all
+  // three days). If the appointment fetch fails we fall back to job status
+  // alone rather than blanking the board.
+  let liveApptJobs = null
+  try {
+    const horizon = days[days.length - 1].endUtc.getTime()
+    const allAppts = (await stPageAll(p => `/jpm/v2/tenant/${ST_TENANT_ID}/appointments?startsOnOrAfter=${days[0].startUtc.toISOString()}&pageSize=500&page=${p}`, 6000))
+      .filter(a => { const t = Date.parse(a.start || ''); return !Number.isNaN(t) && t < horizon })
+    liveApptJobs = days.map(d => {
+      const s = new Set()
+      for (const a of allAppts) {
+        const t = Date.parse(a.start || '')
+        if (a.status !== 'Canceled' && a.jobId && t >= d.startUtc.getTime() && t < d.endUtc.getTime()) s.add(a.jobId)
+      }
+      return s
+    })
+  } catch (e) { console.warn('board live appointments:', e.message) }
+  const jobsByDay = jobsByDayRaw.map((jobs, di) => jobs.filter(j =>
+    j.jobStatus !== 'Canceled' && (!liveApptJobs || liveApptJobs[di].has(j.id))))
 
   // ── Install consumption ────────────────────────────────────────────────
   // A service tech pulled onto an install is NOT available for service calls,
