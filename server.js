@@ -1761,6 +1761,107 @@ async function build3DayBoard() {
   return { generatedAt: new Date().toISOString(), target: 80, dates: days.map(d => d.date), board }
 }
 
+// ── Weather ─────────────────────────────────────────────────────────────────
+// National Weather Service — free, no key, and it publishes the official
+// alerts (heat advisories, winter storms) for our counties. The server owns
+// the fetch and caches 15 minutes; the browser only ever talks to Andi.
+// Weather is also a demand signal: hot days are no-cool calls, cold snaps
+// are no-heats and burst pipes — the same data feeds the board analyst.
+const WEATHER_CITIES = [
+  { key: 'COS', name: 'Colorado Springs', lat: 38.8339, lng: -104.8214 },
+  { key: 'Pueblo', name: 'Pueblo', lat: 38.2544, lng: -104.6091 },
+  { key: 'Castle Rock', name: 'Castle Rock', lat: 39.3722, lng: -104.8561 },
+]
+const _wxGrid = new Map()   // "lat,lng" → forecast URLs (never change; cached forever)
+let _wxCache = null
+async function nwsGet(url) {
+  const r = await fetch(url, {
+    headers: { 'User-Agent': 'andi-dialer (andi@awesomeservice.com)', Accept: 'application/geo+json' },
+    signal: AbortSignal.timeout(15000),
+  })
+  if (!r.ok) throw new Error(`NWS ${r.status}`)
+  return r.json()
+}
+const wxIcon = (s) => {
+  const t = String(s || '').toLowerCase()
+  if (/thunder|storm/.test(t)) return 'storm'
+  if (/snow|sleet|ice|wintry|blizzard/.test(t)) return 'snow'
+  if (/rain|shower|drizzle/.test(t)) return 'rain'
+  if (/fog|haze|smoke/.test(t)) return 'fog'
+  if (/mostly cloudy|overcast/.test(t)) return 'cloud'
+  if (/partly|mostly sunny/.test(t)) return 'partcloud'
+  return 'sun'
+}
+async function computeWeather() {
+  const cities = await Promise.all(WEATHER_CITIES.map(async (c) => {
+    const gk = `${c.lat},${c.lng}`
+    if (!_wxGrid.has(gk)) {
+      const p = await nwsGet(`https://api.weather.gov/points/${c.lat},${c.lng}`)
+      _wxGrid.set(gk, { forecast: p?.properties?.forecast, hourly: p?.properties?.forecastHourly })
+    }
+    const g = _wxGrid.get(gk)
+    const [fc, hr, al] = await Promise.all([
+      nwsGet(g.forecast),
+      nwsGet(g.hourly).catch(() => null),
+      nwsGet(`https://api.weather.gov/alerts/active?point=${c.lat},${c.lng}`).catch(() => null),
+    ])
+    const periods = fc?.properties?.periods || []
+    const high = periods.find(p => p.isDaytime)?.temperature ?? null
+    const low = periods.find(p => !p.isDaytime)?.temperature ?? null
+    const nowP = (hr?.properties?.periods || [])[0] || {}
+    // Air Quality Alerts run near-daily in CO summers — wallpaper, not signal.
+    const alerts = (al?.features || []).map(f => f.properties)
+      .filter(a => a?.event && !/air quality/i.test(a.event))
+    return {
+      key: c.key, name: c.name,
+      temp: nowP.temperature ?? high, short: nowP.shortForecast || '',
+      icon: wxIcon(nowP.shortForecast), high, low, alerts,
+    }
+  }))
+  // One chip: the most severe active alert across the three counties.
+  const sevRank = { Extreme: 4, Severe: 3, Moderate: 2, Minor: 1 }
+  let best = null
+  for (const c of cities) for (const a of (c.alerts || [])) {
+    const rank = sevRank[a.severity] || 0
+    if (!best || rank > best.rank) best = { rank, a }
+  }
+  let alert = null
+  if (best) {
+    const end = Date.parse(best.a.ends || best.a.expires || '')
+    const until = Number.isNaN(end) ? '' :
+      new Intl.DateTimeFormat('en-US', { timeZone: 'America/Denver', weekday: 'short', hour: 'numeric' }).format(new Date(end))
+    alert = { event: best.a.event, until }
+  }
+  // Demand signal — ours, not NWS's. Thresholds per Brandyn: heat drives
+  // no-cools, deep cold drives no-heats, a hard freeze bursts pipes.
+  const highs = cities.map(c => c.high).filter(n => n != null)
+  const lows = cities.map(c => c.low).filter(n => n != null)
+  const maxHigh = highs.length ? Math.max(...highs) : null
+  const minLow = lows.length ? Math.min(...lows) : null
+  let signal = null
+  if (maxHigh != null && maxHigh >= 95) signal = { kind: 'heat', text: 'No-cool surge likely' }
+  else if (minLow != null && minLow <= 20) signal = { kind: 'cold', text: 'No-heat surge likely' }
+  else if (minLow != null && minLow <= 28) signal = { kind: 'freeze', text: 'Hard freeze — burst pipe risk' }
+  const data = {
+    generatedAt: new Date().toISOString(),
+    cities: cities.map(({ alerts: _a, ...rest }) => rest),
+    alert, signal,
+  }
+  _wxCache = { data, expires: Date.now() + 15 * 60_000 }
+  return data
+}
+app.get('/api/weather', async (req, res) => {
+  try {
+    if (_wxCache && _wxCache.expires > Date.now()) return res.json(_wxCache.data)
+    res.json(await computeWeather())
+  } catch (e) {
+    console.warn('weather:', e.message)
+    // Stale beats blank on a wallboard.
+    if (_wxCache) return res.json({ ..._wxCache.data, stale: true })
+    res.status(502).json({ error: e.message })
+  }
+})
+
 app.get('/api/board/3day', async (req, res) => {
   try {
     res.json(await build3DayBoard())
@@ -3583,6 +3684,16 @@ async function generateDispatchBrief() {
     })(),
     next3DaysCapacity: capacity,
   }
+  // Weather is demand context: a 98° day explains a full HVAC board and
+  // argues for protecting no-cool slots. Failure to fetch never blocks the brief.
+  try {
+    const wx = (_wxCache && _wxCache.expires > Date.now()) ? _wxCache.data : await computeWeather()
+    facts.weather = {
+      cities: (wx.cities || []).map(c => ({ name: c.name, now: c.temp, high: c.high, low: c.low, sky: c.short })),
+      activeAlert: wx.alert ? `${wx.alert.event}${wx.alert.until ? ` until ${wx.alert.until}` : ''}` : null,
+      demandSignal: wx.signal?.text || null,
+    }
+  } catch (e) { console.warn('brief weather:', e.message) }
 
   const sys = `You are the dispatch analyst for Awesome Home Services (HVAC, plumbing, electrical, garage doors — Colorado Springs). You are given a JSON snapshot of today's live dispatch board, tech performance benches, and 3-day capacity. Write the read a sharp dispatch manager would give at the huddle: concrete, numbers-first, in plain dispatcher language. Only use what is in the data; never invent jobs, names, or numbers.
 

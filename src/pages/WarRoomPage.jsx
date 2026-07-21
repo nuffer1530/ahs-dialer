@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
+import WeatherStrip from '../components/WeatherStrip'
 import { sb } from '../lib/supabase'
 import { useData } from '../lib/DataContext'
 import { inboundStats, outboundStats, fmtSecs, SERVICE_LEVEL_SECONDS, SERVICE_LEVEL_TARGET } from '../lib/analytics'
@@ -211,6 +212,7 @@ export default function WarRoomPage() {
           <span style={{ fontSize:12, color:C.muted, letterSpacing:1 }}>LIVE</span>
         </div>
         <div style={{ display:'flex', alignItems:'center', gap:16 }}>
+          <WeatherStrip dark />
           <button onClick={toggleFull} title={isFull ? 'Exit fullscreen' : 'Fullscreen'}
             style={{ background:C.panel, border:`1px solid ${C.border}`, borderRadius:8, color:C.muted, cursor:'pointer', padding:'8px 10px', display:'flex', alignItems:'center' }}>
             {isFull ? (

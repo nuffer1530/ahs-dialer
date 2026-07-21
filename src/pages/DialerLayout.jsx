@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { Routes, Route, NavLink, useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../lib/AuthContext'
+import WeatherStrip from '../components/WeatherStrip'
 import { useData } from '../lib/DataContext'
 import { sb } from '../lib/supabase'
 import { syncWorkerActivity } from '../lib/utils'
@@ -683,6 +684,10 @@ function DialerLayoutInner() {
                 {PAGE_META[location.pathname].subtitle}
               </span>
             )}
+          </div>
+          {/* Weather — centered in the top bar's dead space on every page */}
+          <div style={{ flex:1, display:'flex', justifyContent:'center', minWidth:0, overflow:'hidden', padding:'0 14px' }}>
+            <WeatherStrip />
           </div>
           <div ref={menuRef} style={{ position:'relative' }}>
         <button onClick={() => setShowStatusMenu(v => !v)}
