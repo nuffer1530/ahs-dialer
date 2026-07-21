@@ -261,7 +261,7 @@ export default function WarRoomPage() {
                 {watch ? (
                   <div style={{ textAlign:'right' }}>
                     <div style={{ fontSize:15, fontWeight:800, lineHeight:1.15, color:'#A78BFA', letterSpacing:.4, animation:'wr-pulse 1.5s infinite' }}>
-                      👁 OPPORTUNITY<br />WATCH
+                      👀 OPPORTUNITY<br />WATCH
                     </div>
                     <div style={{ fontSize:9, color:C.muted, textTransform:'uppercase', letterSpacing:.4, marginTop:2 }}>full — still book strong calls</div>
                   </div>

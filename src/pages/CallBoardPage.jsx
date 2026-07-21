@@ -44,7 +44,7 @@ function Cell({ trade, dayLabel, d, onDrill }) {
       {d.oppWatch ? (
         <div style={{ padding:'16px 16px 12px', display:'flex', flexDirection:'column', gap:4 }}>
           <span style={{ fontSize:20, fontWeight:800, lineHeight:1, color:'#7C3AED', letterSpacing:.3 }}>
-            👁 Opportunity Watch
+            👀 Opportunity Watch
           </span>
           <span style={{ fontSize:11, color:'var(--text-muted)', fontWeight:600 }}>
             Board is full — keep booking strong calls, we'll make room
