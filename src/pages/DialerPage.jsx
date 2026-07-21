@@ -1203,7 +1203,11 @@ export default function DialerPage() {
 
           {/* == CONTACT WORKSPACE == */}
           {c && (
-            <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden' }}>
+            // minHeight:0 is load-bearing: without it this flex child grows to
+            // content height and the grid below inherits a giant canvas — the
+            // columns then never scroll, they just get clipped (Brittany's
+            // tab-to-reach-booking bug).
+            <div style={{ flex:1, minHeight:0, display:'flex', flexDirection:'column', overflow:'hidden' }}>
 
               {/* -- CONTACT HEADER -- */}
               <div style={{ padding:'10px 16px', background:'var(--surface)', borderBottom:'1px solid var(--border)', display:'flex', alignItems:'center', gap:12, flexShrink:0 }}>
