@@ -3912,7 +3912,7 @@ app.get('/api/dispatch/all-job-types', async (req, res) => {
 app.get('/api/dispatch/geocode-suggest', async (req, res) => {
   if (!(await requireDispatch(req, res))) return
   try {
-    res.json({ suggestions: await suggestAddresses(req.query.q) })
+    res.json({ suggestions: await suggestAddresses(req.query.q, req.query.types) })
   } catch (err) {
     res.json({ suggestions: [] })
   }

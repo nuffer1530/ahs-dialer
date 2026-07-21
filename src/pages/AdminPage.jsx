@@ -681,6 +681,7 @@ export default function AdminPage() {
   const [wxSugs, setWxSugs] = useState([])
   const [opsMsg, setOpsMsg] = useState('')
   const [opsSaving, setOpsSaving] = useState(false)
+  const [opsDirty, setOpsDirty] = useState(false)
   // Invite by email
   const [invEmail, setInvEmail] = useState('')
   const [invRole, setInvRole] = useState('rep')
@@ -775,22 +776,30 @@ export default function AdminPage() {
   }, [settingsTab, isAdmin, opsForm])
 
   const saveOps = async () => {
-    setOpsSaving(true); setOpsMsg('')
+    setOpsSaving(true)
     try {
       await sb.from('app_settings').upsert({ key: 'ops_config', value: JSON.stringify(opsForm) }, { onConflict: 'key' })
       await sb.from('app_settings').upsert({ key: 'weather_locations', value: JSON.stringify(wxLocs) }, { onConflict: 'key' })
       invalidateOpsConfig(); await loadOpsConfig(true)
-      setOpsMsg('Saved. Live for everyone on their next page load; the weather strip refreshes within 15 minutes.')
+      setOpsMsg('Saved — live on next page load; weather strip within 15 min')
     } catch (e) { setOpsMsg('Error: ' + e.message) }
     setOpsSaving(false)
   }
+  // Autosave: edits mark the form dirty; a beat after the last keystroke it
+  // writes itself. No Save button to forget.
+  useEffect(() => {
+    if (!opsDirty || !opsForm || !wxLocs) return
+    const t = setTimeout(() => { setOpsDirty(false); saveOps() }, 900)
+    return () => clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [opsDirty, opsForm, wxLocs])
 
   const wxSearch = async (q) => {
     setWxQuery(q)
     if (q.trim().length < 3) { setWxSugs([]); return }
     try {
       const { data: { session } } = await sb.auth.getSession()
-      const r = await fetch(`/api/dispatch/geocode-suggest?q=${encodeURIComponent(q.trim())}`,
+      const r = await fetch(`/api/dispatch/geocode-suggest?q=${encodeURIComponent(q.trim())}&types=place,locality,address`,
         { headers: { Authorization: `Bearer ${session?.access_token}` } })
       const d = await r.json()
       setWxSugs(d.suggestions || [])
@@ -1542,7 +1551,6 @@ export default function AdminPage() {
         <div style={{ flex:1, overflowY:'auto', padding:24, display:'flex', flexDirection:'column', gap:20 }}>
           {!opsForm || !wxLocs ? <div className="spinner"></div> : (
             <>
-              {opsMsg && <div style={{ background: opsMsg.startsWith('Error') ? 'var(--danger-bg)' : 'var(--success-bg)', color: opsMsg.startsWith('Error') ? 'var(--danger)' : 'var(--success)', padding:'10px 14px', borderRadius:'var(--radius)', fontSize:13 }}>{opsMsg}</div>}
               <div className="card">
                 <div className="card-header">
                   <div className="card-title">Call center thresholds</div>
@@ -1559,7 +1567,7 @@ export default function AdminPage() {
                     <div key={k} className="form-field">
                       <label className="form-label">{label}</label>
                       <input className="form-input" type="number" min="1" value={opsForm[k]}
-                        onChange={e => setOpsForm(f => ({ ...f, [k]: Number(e.target.value) }))} />
+                        onChange={e => { setOpsForm(f => ({ ...f, [k]: Number(e.target.value) })); setOpsDirty(true) }} />
                       <div style={{ fontSize:10, color:'var(--text-muted)', marginTop:3 }}>{hint}</div>
                     </div>
                   ))}
@@ -1574,23 +1582,23 @@ export default function AdminPage() {
                   {wxLocs.map((l, i) => (
                     <div key={i} style={{ display:'flex', gap:8, alignItems:'center' }}>
                       <input className="form-input" value={l.key} title="Short label shown in the strip"
-                        onChange={e => setWxLocs(ls => ls.map((x, xi) => xi === i ? { ...x, key: e.target.value } : x))}
+                        onChange={e => { setWxLocs(ls => ls.map((x, xi) => xi === i ? { ...x, key: e.target.value } : x)); setOpsDirty(true) }}
                         style={{ width:130 }} />
                       <span style={{ flex:1, fontSize:12, color:'var(--text-muted)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{l.name}</span>
-                      <button className="btn sm" onClick={() => setWxLocs(ls => ls.filter((_, xi) => xi !== i))} disabled={wxLocs.length <= 1}>Remove</button>
+                      <button className="btn sm" onClick={() => { setWxLocs(ls => ls.filter((_, xi) => xi !== i)); setOpsDirty(true) }} disabled={wxLocs.length <= 1}>Remove</button>
                     </div>
                   ))}
                   {wxLocs.length < 5 && (
-                    <div style={{ position:'relative' }}>
+                    <div>
                       <input className="form-input" placeholder="Add a place — city, town or address" value={wxQuery}
                         onChange={e => wxSearch(e.target.value)} />
                       {wxSugs.length > 0 && (
-                        <div style={{ position:'absolute', top:'calc(100% + 4px)', left:0, right:0, background:'var(--surface)', border:'1px solid var(--border)', borderRadius:8, boxShadow:'0 8px 24px rgba(0,0,0,.12)', zIndex:20, overflow:'hidden' }}>
+                        <div style={{ marginTop:4, background:'var(--surface)', border:'1px solid var(--border)', borderRadius:8, overflow:'hidden' }}>
                           {wxSugs.map((sug, si) => (
                             <button key={si} onClick={() => {
                               const short = String(sug.placeName || '').split(',')[0].trim()
                               setWxLocs(ls => [...ls, { key: short, name: sug.placeName, lat: sug.lat, lng: sug.lng }])
-                              setWxQuery(''); setWxSugs([])
+                              setWxQuery(''); setWxSugs([]); setOpsDirty(true)
                             }} style={{ display:'block', width:'100%', textAlign:'left', padding:'8px 12px', background:'transparent', border:'none', cursor:'pointer', fontSize:12, color:'var(--text-primary)' }}
                               onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
                               onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
@@ -1603,8 +1611,8 @@ export default function AdminPage() {
                   )}
                 </div>
               </div>
-              <div>
-                <button className="btn primary" onClick={saveOps} disabled={opsSaving}>{opsSaving ? 'Saving…' : 'Save thresholds'}</button>
+              <div style={{ fontSize:12, color: opsMsg.startsWith('Error') ? 'var(--danger)' : 'var(--text-muted)' }}>
+                {opsSaving ? 'Saving…' : opsMsg || 'Changes save automatically'}
               </div>
             </>
           )}
