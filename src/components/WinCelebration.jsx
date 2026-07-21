@@ -18,11 +18,48 @@ export default function WinCelebration() {
   const myIdRef = useRef(null)
   useEffect(() => { myIdRef.current = profile?.id || null }, [profile?.id])
 
+  // Where the celebration marker lives. Realtime only reaches a tab that's
+  // awake with a live socket at the exact insert moment — the commission sync
+  // usually pays while the rep is mid-call or away, so most wins were never
+  // shown. This marker + the catch-up below guarantee the pop on their next
+  // app load instead.
+  const seenKey = (pid) => `andi_pay_seen:${pid}`
+  const markSeen = (pid, ts) => { try { localStorage.setItem(seenKey(pid), ts || new Date().toISOString()) } catch {} }
+
+  // Catch-up: anything earned since the last shown payout pops now, whatever
+  // page they're on. Looks back 3 days max so a long vacation doesn't replay
+  // ancient history.
+  useEffect(() => {
+    const pid = profile?.id
+    if (!pid) return
+    ;(async () => {
+      let since = null
+      try { since = localStorage.getItem(seenKey(pid)) } catch {}
+      if (!since) { markSeen(pid); return }   // first run: baseline, no replay
+      const floor = new Date(Date.now() - 3 * 864e5).toISOString()
+      const { data } = await sb.from('commissions').select('*')
+        .eq('profile_id', pid).gt('amount', 0)
+        .gt('synced_at', since > floor ? since : floor)
+        .order('synced_at', { ascending: true })
+      if (!data?.length) return
+      const latest = data[data.length - 1]
+      markSeen(pid, latest.synced_at)
+      triggerCelebration({
+        repName: latest.rep_name, contactName: latest.contact_name,
+        amount: Number(latest.amount || 0), eventType: latest.event_type,
+        alsoMembership: latest.also_membership, membershipAmount: latest.membership_amount,
+        extraCount: data.length - 1,
+      })
+    })()
+  }, [profile?.id])
+
   useEffect(() => {
     channelRef.current = sb.channel('win-celebrations')
       .on('postgres_changes', { event:'INSERT', schema:'public', table:'commissions' }, payload => {
-        const { profile_id, amount, event_type, contact_name, rep_name, also_membership, membership_amount } = payload.new
+        const { profile_id, amount, event_type, contact_name, rep_name, also_membership, membership_amount, synced_at } = payload.new
         if (!profile_id || profile_id !== myIdRef.current) return   // someone else's win
+        if (!(Number(amount) > 0)) return                            // reversals don't confetti
+        markSeen(profile_id, synced_at)
         triggerCelebration({ repName: rep_name, contactName: contact_name, amount, eventType: event_type, alsoMembership: also_membership, membershipAmount: membership_amount })
       })
       .subscribe()
@@ -64,7 +101,10 @@ export default function WinCelebration() {
         <div style={{ fontSize:64, marginBottom:4, lineHeight:1 }}>🎉</div>
         <div style={{ fontSize:30, fontWeight:800, color:'#16A34A', marginBottom:6, letterSpacing:-.5 }}>BOOKED!</div>
         <div style={{ fontSize:17, fontWeight:600, color:'#1C1B19', marginBottom:2 }}>{celebration.contactName}</div>
-        <div style={{ fontSize:13, color:'#6B6760', marginBottom:20 }}>{celebration.repName} just closed one! 🔥</div>
+        <div style={{ fontSize:13, color:'#6B6760', marginBottom:20 }}>
+          {celebration.repName} just closed one! 🔥
+          {celebration.extraCount > 0 && <span> (+{celebration.extraCount} more payout{celebration.extraCount === 1 ? '' : 's'} while you were away — see My Page)</span>}
+        </div>
 
         {/* Commission earned */}
         <div style={{ background:'linear-gradient(135deg, #16A34A, #15803D)', borderRadius:16, padding:'16px 24px', marginBottom:20 }}>
