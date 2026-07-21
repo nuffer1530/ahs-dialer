@@ -1278,7 +1278,13 @@ export default function DialerPage() {
               </div>
 
               {/* -- 3-COLUMN BODY -- */}
-              <div style={{ flex:1, display:'grid', gridTemplateColumns:'300px 1fr 300px', overflow:'hidden', minHeight:0 }}>
+              <div style={{ flex:1, display:'grid', gridTemplateColumns:'300px 1fr 300px',
+                // gridTemplateRows is the load-bearing part: without it the single
+                // implicit row sizes to the TALLEST column's content and overflows
+                // the container (which clips it) — so the columns never scroll, no
+                // matter how their own overflow is set. minmax(0,1fr) pins the row
+                // to the container's height and lets each column scroll itself.
+                gridTemplateRows:'minmax(0, 1fr)', overflow:'hidden', minHeight:0 }}>
 
                 {/* -- LEFT: Customer info + Job history -- */}
                 <div style={{ borderRight:'1px solid var(--border)', overflowY:'auto', minHeight:0, background:'var(--surface-2)', display:'flex', flexDirection:'column', gap:1 }}>
