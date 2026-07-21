@@ -847,7 +847,13 @@ async function syncJobCommissions() {
         continue
       }
 
-      const { error: upErr } = await supabase.from('commissions').upsert({
+      // INSERT, not upsert: st_job_id's guard is a PARTIAL unique index,
+      // which Postgres refuses as an ON CONFLICT arbiter (42P10) — the
+      // upsert version threw on the FIRST completed job of every run and
+      // aborted the whole sync, so no job payout ever landed. The index
+      // still enforces no-double-pay; a duplicate insert just means another
+      // replica (or an earlier run) already paid it — settle and move on.
+      const { error: upErr } = await supabase.from('commissions').insert({
         profile_id: booking.profile_id,
         rep_name: booking.csr_name || 'Unknown',
         event_type: 'booking',
@@ -864,8 +870,12 @@ async function syncJobCommissions() {
         also_membership: false,
         membership_amount: 0,
         synced_at: new Date().toISOString(),
-      }, { onConflict: 'st_job_id' })
-      if (upErr) throw new Error(`commission upsert job ${job.id}: ${upErr.message}`)
+      })
+      if (upErr && upErr.code !== '23505' && !/duplicate key/i.test(upErr.message)) {
+        // One poisoned row must not starve every other rep's payout.
+        console.error(`Commission insert failed for job ${job.id}: ${upErr.message}`)
+        continue
+      }
 
       await supabase.from('andi_bookings')
         .update({ job_status: 'Completed', commission_synced_at: new Date().toISOString() })
@@ -922,7 +932,9 @@ async function syncMembershipCommissions() {
       const spiff = spiffByType[String(m.membershipTypeId)]
       const amount = spiff?.amount == null ? 20 : Number(spiff.amount)
 
-      const { error: upErr } = await supabase.from('commissions').upsert({
+      // Same 42P10 trap as job payouts: st_membership_id's unique index is
+      // partial, so INSERT and treat a duplicate as already-paid.
+      const { error: upErr } = await supabase.from('commissions').insert({
         profile_id: mapped.profile_id,
         rep_name: mapped.st_user_name || 'Unknown',
         event_type: 'membership',
@@ -937,9 +949,15 @@ async function syncMembershipCommissions() {
         also_membership: true,
         membership_amount: amount,
         synced_at: new Date().toISOString(),
-      }, { onConflict: 'st_membership_id' })
-      if (upErr) throw new Error(`commission upsert membership ${m.id}: ${upErr.message}`)
-      paid++
+      })
+      if (upErr) {
+        if (upErr.code !== '23505' && !/duplicate key/i.test(upErr.message)) {
+          console.error(`Commission insert failed for membership ${m.id}: ${upErr.message}`)
+          continue
+        }
+      } else {
+        paid++
+      }
     }
   }
 
