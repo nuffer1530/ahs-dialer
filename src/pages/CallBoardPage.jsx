@@ -205,6 +205,12 @@ export default function CallBoardPage() {
                         #{j.jobNumber}{j.id ? ' ↗' : ''}
                       </span>
                       <span style={{ fontWeight:500 }}>{j.type}</span>
+                      {j.note && (
+                        <span style={{ fontSize:10, fontWeight:700, color:'#B45309', background:'rgba(180,83,9,.08)',
+                          border:'1px solid rgba(180,83,9,.25)', borderRadius:4, padding:'1px 6px', alignSelf:'center', whiteSpace:'nowrap' }}>
+                          {j.note} — not an opportunity
+                        </span>
+                      )}
                     </>
                   )
                   const style = { display:'flex', gap:10, padding:'11px 18px', borderBottom:'1px solid var(--border)', fontSize:13 }

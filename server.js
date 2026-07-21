@@ -1519,17 +1519,25 @@ async function build3DayBoard() {
   // An opportunity = a job with a real shot at a repair/replacement sale.
   // Excludes installs, warranty/callback (non_commissionable), the non-productive
   // types above, and maintenance — except HVAC maintenance on a 12+ year system.
+  // The NOTES can also disqualify: job #34454 was a normal-looking No Cool whose
+  // summary said "Coll $: warranty" — a booked call, but nothing to collect.
   const isOpportunity = (j) => {
     const cat = catByType[String(j.jobTypeId)]
     const trade = buMap[j.businessUnitId]?.trade
     const role = buMap[j.businessUnitId]?.role
     if (role === 'install' || cat === 'non_commissionable' || !isCountedCall(j)) return false
+    if (noCollectFromNotes(j)) return false
     if (cat === 'maintenance') return trade === 'HVAC' && oldSystemLocs.has(j.locationId)
     return true
   }
   // id is carried alongside jobNumber because ServiceTitan deep links key on
   // the internal id (#/Job/Index/{id}), not the human-facing job number.
-  const jobRow = (j) => ({ id: j.id, jobNumber: j.jobNumber, type: nameByType[String(j.jobTypeId)] || 'Job' })
+  // `note` marks a call the notes disqualified, so the booked-calls drill-down
+  // can show WHY it isn't in the opportunity count.
+  const jobRow = (j) => ({
+    id: j.id, jobNumber: j.jobNumber, type: nameByType[String(j.jobTypeId)] || 'Job',
+    note: noCollectFromNotes(j) ? 'warranty/no-collect' : undefined,
+  })
 
   // Hours of a shift that fall within a given day.
   const techName = (id) => (techs.find(t => t.id === id)?.name) || `Tech ${id}`
@@ -2689,9 +2697,27 @@ function systemAgeFromNotes(job, nowYear) {
 const HIGH_VALUE_RE = /replace|replacement|install|estimate|system|upgrade|new /i
 const LOW_VALUE_RE = /maintenance|tune|inspection|filter|follow.?up|callback|warranty|permit/i
 
-function scoreOpportunity(jobTypeName, zipTier, isMember, systemAge, isHvac) {
+// Notes that say this visit collects NOTHING: warranty work, recalls, goodwill
+// redos. Job #34454 is the canonical case — "Coll $: warranty" in the summary,
+// booked as a normal No Cool. Still a booked call; not an opportunity.
+// The OPPOSITE phrasings ("out of warranty", "warranty expired", "warranty
+// disclaimer") mean the customer pays, so they must not match.
+const NO_COLLECT_RE = /\bwarranty\b|\brecall\b|\bgood\s*will\b|\bno[- ]charge\b|\bfree of charge\b|\brework\b|\bre[- ]?do\b/i
+const COLLECTS_FINE_RE = /\b(out of|expired|no|not under|past|void(ed)?)\s+warranty\b|\bwarranty\s+(expired|void(ed)?|is (out|up)|disclaimer)\b|\bwarr\w*\s*disclaimer\b/i
+function noCollectFromNotes(job) {
+  const txt = stripHtml(`${job?.summary || ''} ${job?.summaryOfWork || ''}`)
+  if (!txt) return false
+  if (COLLECTS_FINE_RE.test(txt)) return false
+  return NO_COLLECT_RE.test(txt)
+}
+
+function scoreOpportunity(jobTypeName, zipTier, isMember, systemAge, isHvac, noCollect) {
   const reasons = []
   let score = 0
+  // Nothing to collect trumps every other signal — a warranty visit on a
+  // high-ticket zip is still $0. Strongly negative so these surface first as
+  // bump/reschedule candidates and never as opportunities.
+  if (noCollect) { score -= 4; reasons.push('warranty/no-collect per the notes — nothing to collect') }
   // Age is the strongest signal in HVAC — an old system turns a no-cool call
   // into a replacement conversation, which is why a dispatcher will hand a
   // routine-looking maintenance to their best closer.
@@ -2788,7 +2814,7 @@ async function computeLiveBoardPayload() {
       const isMember = j.customerId ? memberCust.has(j.customerId) : null
       const isHvac = /hvac/i.test(bu) || /hvac/i.test(jt)
       const systemAge = systemAgeFromNotes(j, new Date().getFullYear())
-      const opp = scoreOpportunity(jt, zipTier.get(zip), isMember, systemAge, isHvac)
+      const opp = scoreOpportunity(jt, zipTier.get(zip), isMember, systemAge, isHvac, noCollectFromNotes(j))
       const techScore = scoreOf.get(`${a.technicianId}|${bu}`) || null
 
       const ap = apptById.get(a.appointmentId) || {}
@@ -3537,7 +3563,7 @@ app.post('/api/dispatch/decide', async (req, res) => {
 
     const isHvac = trade === 'HVAC'
     const knownAge = givenAge ?? systemAgeFromNotes({ summary: callNotes }, new Date().getFullYear())
-    const opp = scoreOpportunity(jobType, zipTier, null, knownAge, isHvac)
+    const opp = scoreOpportunity(jobType, zipTier, null, knownAge, isHvac, noCollectFromNotes({ summary: callNotes }))
 
     // Today's board: assignments + jobs + tech geos, same gather as the live board.
     const today = boardDay(0)
@@ -3723,7 +3749,7 @@ app.post('/api/dispatch/decide', async (req, res) => {
         .filter(x => !STICKY_TO_TECH.test(x.name) && !INSTALL_TYPE.test(x.name))
         .map(({ j, name }) => {
           const o = scoreOpportunity(name, zipTierMap.get(zipOfLoc.get(j.locationId)) || null, null,
-            systemAgeFromNotes(j, nowYear), /hvac/i.test(name) || trade === 'HVAC')
+            systemAgeFromNotes(j, nowYear), /hvac/i.test(name) || trade === 'HVAC', noCollectFromNotes(j))
           return { jobNumber: j.jobNumber, name, score: o.score, reasons: o.reasons }
         })
         .sort((a, b) => a.score - b.score)
