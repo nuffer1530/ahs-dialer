@@ -9,7 +9,7 @@ import { usePhone } from '../lib/PhoneContext'
 import QueueSelector from '../components/QueueSelector'
 import LeadsRail from '../components/LeadsRail'
 import { useOpenLeads } from '../lib/useOpenLeads'
-import { OUTCOMES, MAX_ATTEMPTS, DONE_OUTCOMES } from '../lib/constants'
+import { OUTCOMES, INBOUND_OUTCOMES, MAX_ATTEMPTS, DONE_OUTCOMES } from '../lib/constants'
 import { RichText } from '../components/RichTextEditor'
 
 const PAGE_SIZE = 50
@@ -57,6 +57,41 @@ const OUTCOME_ICONS = {
   ),
 }
 
+OUTCOME_ICONS['Rescheduled'] = (color) => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+    <rect x="3" y="4" width="18" height="17" rx="2" stroke={color} strokeWidth="1.8" fill="none"/>
+    <path d="M16 2v4M8 2v4M3 10h18" stroke={color} strokeWidth="1.8" strokeLinecap="round"/>
+    <path d="M9 15.5a3 3 0 105.6-1.5" stroke={color} strokeWidth="1.6" strokeLinecap="round" fill="none"/>
+    <path d="M15 12v2.2h-2.2" stroke={color} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
+  </svg>
+)
+OUTCOME_ICONS['Canceled Appt'] = (color) => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+    <rect x="3" y="4" width="18" height="17" rx="2" stroke={color} strokeWidth="1.8" fill="none"/>
+    <path d="M16 2v4M8 2v4M3 10h18" stroke={color} strokeWidth="1.8" strokeLinecap="round"/>
+    <path d="M9.5 13.5l5 5M14.5 13.5l-5 5" stroke={color} strokeWidth="1.8" strokeLinecap="round"/>
+  </svg>
+)
+OUTCOME_ICONS['Question / Info'] = (color) => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+    <path d="M21 12a8 8 0 01-8 8H8l-5 2 1.5-4.5A8 8 0 1121 12z" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
+    <path d="M10.5 10a1.8 1.8 0 113 1.2c-.7.6-1.3 1-1.3 1.8" stroke={color} strokeWidth="1.6" strokeLinecap="round" fill="none"/>
+    <circle cx="12.2" cy="15.6" r="0.9" fill={color}/>
+  </svg>
+)
+OUTCOME_ICONS['Not Booked - Price'] = (color) => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+    <circle cx="12" cy="12" r="9" stroke={color} strokeWidth="1.8" fill="none"/>
+    <path d="M12 6.5v11M14.6 8.8c-.5-.9-1.5-1.3-2.6-1.3-1.5 0-2.6.8-2.6 2s1 1.8 2.6 2.1c1.7.3 2.8 1 2.8 2.3s-1.2 2.1-2.8 2.1c-1.2 0-2.3-.5-2.8-1.4" stroke={color} strokeWidth="1.5" strokeLinecap="round" fill="none"/>
+  </svg>
+)
+OUTCOME_ICONS['Wrong Number'] = (color) => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+    <path d="M5 4h4l2 5-2.5 1.5a11 11 0 005 5L15 13l5 2v4a2 2 0 01-2 2A16 16 0 013 6a2 2 0 012-2z" stroke={color} strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
+    <path d="M16 5l4 4M20 5l-4 4" stroke={color} strokeWidth="1.7" strokeLinecap="round"/>
+  </svg>
+)
+
 const OUTCOME_CONFIG = {
   'No Answer':      { border:'#C87800', bg:'#FFF8E6', color:'#C87800' },
   'Voicemail':      { border:'#7C3AED', bg:'#F3E8FF', color:'#7C3AED' },
@@ -64,6 +99,11 @@ const OUTCOME_CONFIG = {
   'Not Interested': { border:'#DC2626', bg:'#FEE2E2', color:'#DC2626' },
   'DNC':            { border:'#7F1D1D', bg:'#FEF2F2', color:'#7F1D1D' },
   'Bad Data':       { border:'#6B7280', bg:'#F3F4F6', color:'#6B7280' },
+  'Rescheduled':    { border:'#2563EB', bg:'#EFF6FF', color:'#2563EB' },
+  'Canceled Appt':  { border:'#C87800', bg:'#FFF8E6', color:'#C87800' },
+  'Question / Info':{ border:'#0891B2', bg:'#ECFEFF', color:'#0891B2' },
+  'Not Booked - Price': { border:'#DC2626', bg:'#FEE2E2', color:'#DC2626' },
+  'Wrong Number':   { border:'#6B7280', bg:'#F3F4F6', color:'#6B7280' },
 }
 
 function SearchSelect({ label, value, onChange, options, placeholder, disabled }) {
@@ -231,7 +271,7 @@ export default function DialerPage() {
   const {
     twilioReady, callStatus, callDuration, incomingCall,
     makeCall: phoneMakeCall, hangUp, startInteraction, endInteraction,
-    pendingInbound, setPendingInbound,
+    pendingInbound, setPendingInbound, callDirection,
   } = usePhone()
 
   // Skills-based outbound routing. When the rep has selected active campaigns
@@ -561,6 +601,38 @@ export default function DialerPage() {
       source: 'ST search',
     }).select().single()
     if (created) { setContacts(prev => [created, ...prev]); selectContact(created.id) }
+  }
+
+  // Brand-new customer: create them in ServiceTitan without leaving Andi,
+  // link (or create) the local contact, and the normal booking flow takes
+  // over. forContactId links an existing unlinked contact instead.
+  const [newCust, setNewCust] = useState(null)   // { name, phone, email, street, city, state, zip, forContactId }
+  const [newCustBusy, setNewCustBusy] = useState(false)
+  const [newCustErr, setNewCustErr] = useState('')
+  const createStCustomer = async () => {
+    if (!newCust) return
+    setNewCustBusy(true); setNewCustErr('')
+    try {
+      const res = await fetch('/api/st/customer/create', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newCust),
+      })
+      const d = await res.json()
+      if (!res.ok) throw new Error(d.error || 'ServiceTitan rejected the customer')
+      if (newCust.forContactId) {
+        const { data: upd } = await sb.from('contacts').update({ external_id: String(d.id) }).eq('id', newCust.forContactId).select().single()
+        if (upd) setContacts(prev => prev.map(x => x.id === upd.id ? upd : x))
+      } else {
+        const { data: created } = await sb.from('contacts').insert({
+          name: newCust.name, phone: newCust.phone || null, email: newCust.email || null,
+          address: newCust.street || null, city: newCust.city || null, state: newCust.state || 'CO', zip: newCust.zip || null,
+          external_id: String(d.id), status: 'Pending', attempts: 0, source: 'New customer (Andi)',
+        }).select().single()
+        if (created) { setContacts(prev => [created, ...prev]); selectContact(created.id) }
+      }
+      setNewCust(null)
+    } catch (e) { setNewCustErr(e.message) }
+    setNewCustBusy(false)
   }
 
   // Send SMS
@@ -1118,7 +1190,16 @@ export default function DialerPage() {
               {stSearchLoading ? (
                 <div style={{ padding:'14px', textAlign:'center', fontSize:12, color:'var(--text-muted)' }}>Searching...</div>
               ) : stSearchResults.length === 0 ? (
-                <div style={{ padding:'14px', textAlign:'center', fontSize:12, color:'var(--text-muted)' }}>No customers found</div>
+                <div style={{ padding:'12px 14px', textAlign:'center' }}>
+                  <div style={{ fontSize:12, color:'var(--text-muted)', marginBottom:8 }}>No customers found</div>
+                  <button className="btn sm primary" onClick={() => {
+                    const q = stSearch.trim()
+                    const digits = q.replace(/\D/g, '')
+                    setNewCustErr('')
+                    setNewCust({ name: digits.length >= 7 ? '' : q, phone: digits.length >= 7 ? q : '', email: '', street: '', city: 'Colorado Springs', state: 'CO', zip: '' })
+                    setStSearchOpen(false)
+                  }}>＋ Create new ServiceTitan customer</button>
+                </div>
               ) : stSearchResults.map(cust => (
                 <div key={cust.id} onClick={() => openStCustomer(cust)}
                   style={{ padding:'9px 12px', borderBottom:'1px solid var(--border)', cursor:'pointer' }}
@@ -1516,12 +1597,12 @@ export default function DialerPage() {
                       {/* Outcome grid */}
                       <div style={sectionCard}>
                         <div style={sectionHeader}>
-                          <span style={sectionTitle}>Log outcome</span>
+                          <span style={sectionTitle}>{callDirection === 'inbound' ? 'Inbound call — book or classify' : 'Log outcome'}</span>
                           {isOther && <span style={{ fontSize:11, color:'var(--text-muted)' }}>Claimed by {c.claimed_by}</span>}
                         </div>
                         <div style={{ padding:12, display:'flex', flexDirection:'column', gap:10 }}>
                           <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:8 }}>
-                            {OUTCOMES.map(o => {
+                            {(callDirection === 'inbound' ? INBOUND_OUTCOMES : OUTCOMES).map(o => {
                               const sel = selectedOutcome === o.id
                               const cm = OUTCOME_CONFIG[o.id] || {}
                               return (
@@ -1561,6 +1642,15 @@ export default function DialerPage() {
                           {selectedOutcome === 'Booked' && (
                             <div style={{ background:'var(--success-bg)', border:'1px solid var(--success)', borderRadius:'var(--radius)', padding:12, display:'flex', flexDirection:'column', gap:10 }}>
                               <div style={{ fontSize:11, fontWeight:700, color:'var(--success)' }}>ServiceTitan booking details</div>
+                              {!c.external_id && (
+                                <div style={{ background:'#FFFBEB', border:'1px solid #FCD34D', borderRadius:'var(--radius)', padding:'8px 12px', fontSize:12, color:'#92400E', display:'flex', alignItems:'center', justifyContent:'space-between', gap:10 }}>
+                                  <span>Not in ServiceTitan yet — create them to book.</span>
+                                  <button className="btn sm primary" onClick={() => {
+                                    setNewCustErr('')
+                                    setNewCust({ name: c.name || '', phone: c.phone || '', email: c.email || '', street: c.address || '', city: c.city || 'Colorado Springs', state: c.state || 'CO', zip: c.zip || '', forContactId: c.id })
+                                  }}>Create in ST</button>
+                                </div>
+                              )}
                               <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8 }}>
                                 <SearchSelect label="Business unit" value={selectedBU} onChange={v => { setSelectedBU(v); setSelectedJobType(''); setAvailability([]); setBookingResult(null) }} options={buOptions} placeholder="Select..." />
                                 <SearchSelect label="Job type" value={selectedJobType} onChange={v => { setSelectedJobType(v); setAvailability([]); setBookingResult(null) }} options={jtOptions} placeholder="Select..." disabled={!selectedBU} />
@@ -1877,6 +1967,42 @@ export default function DialerPage() {
       )}
 
       {/* TEXT MODAL */}
+      {newCust && (
+        <Modal title={newCust.forContactId ? 'Create this customer in ServiceTitan' : 'New ServiceTitan customer'} onClose={() => setNewCust(null)} width={480}>
+          <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
+            <div className="form-field"><label className="form-label">Full name *</label>
+              <input className="form-input" value={newCust.name} onChange={e => setNewCust(f => ({ ...f, name: e.target.value }))} placeholder="First Last" autoFocus /></div>
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
+              <div className="form-field"><label className="form-label">Phone</label>
+                <input className="form-input" value={newCust.phone} onChange={e => setNewCust(f => ({ ...f, phone: e.target.value }))} placeholder="(719) 555-0123" /></div>
+              <div className="form-field"><label className="form-label">Email</label>
+                <input className="form-input" value={newCust.email} onChange={e => setNewCust(f => ({ ...f, email: e.target.value }))} placeholder="name@email.com" /></div>
+            </div>
+            <div className="form-field"><label className="form-label">Street address *</label>
+              <input className="form-input" value={newCust.street} onChange={e => setNewCust(f => ({ ...f, street: e.target.value }))} placeholder="123 Main St" /></div>
+            <div style={{ display:'grid', gridTemplateColumns:'2fr 70px 1fr', gap:10 }}>
+              <div className="form-field"><label className="form-label">City *</label>
+                <input className="form-input" value={newCust.city} onChange={e => setNewCust(f => ({ ...f, city: e.target.value }))} /></div>
+              <div className="form-field"><label className="form-label">State</label>
+                <input className="form-input" value={newCust.state} onChange={e => setNewCust(f => ({ ...f, state: e.target.value }))} /></div>
+              <div className="form-field"><label className="form-label">Zip *</label>
+                <input className="form-input" value={newCust.zip} onChange={e => setNewCust(f => ({ ...f, zip: e.target.value }))} placeholder="80831" /></div>
+            </div>
+            <div style={{ fontSize:11, color:'var(--text-muted)' }}>
+              Creates the customer and their service location in ServiceTitan, links them here, and the normal booking flow takes over.
+            </div>
+            {newCustErr && <div style={{ fontSize:12, color:'var(--danger)', background:'var(--danger-bg)', padding:'8px 12px', borderRadius:8 }}>{newCustErr}</div>}
+          </div>
+          <div className="modal-actions">
+            <button className="btn" onClick={() => setNewCust(null)}>Cancel</button>
+            <button className="btn primary" onClick={createStCustomer}
+              disabled={newCustBusy || !newCust.name.trim() || !newCust.street.trim() || !newCust.city.trim() || !newCust.zip.trim()}>
+              {newCustBusy ? 'Creating…' : 'Create customer'}
+            </button>
+          </div>
+        </Modal>
+      )}
+
       {showTextModal && c && (
         <Modal title={`Text ${c.name || c.phone}`} onClose={() => { setShowTextModal(false); setTextBody(''); setTextResult(null) }} width={420}>
           <div style={{ fontSize:12, color:'var(--text-muted)', marginBottom:10 }}>To: {c.phone}</div>

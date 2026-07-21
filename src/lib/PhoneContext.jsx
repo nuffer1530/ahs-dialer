@@ -33,6 +33,10 @@ export function PhoneProvider({ children }) {
   // contact tab — that work needs the dialer's own state, so it can't live here,
   // but the answering itself must work from any page.
   const [pendingInbound, setPendingInbound] = useState(null)
+  // 'inbound' | 'outbound' | null — survives hangup through wrap-up so the
+  // dialer can show the right outcome set while the rep dispositions, then
+  // clears when the interaction ends.
+  const [callDirection, setCallDirection] = useState(null)
 
   const currentRep = profile?.name || profile?.email || 'Unknown'
 
@@ -111,6 +115,7 @@ export function PhoneProvider({ children }) {
   // Wrap Up keeps the interaction label (you're wrapping *something*); the
   // auto-return to Available clears it.
   const endInteraction = useCallback(async () => {
+    setCallDirection(null)   // interaction over — outcome grid returns to neutral
     if (callRef.current || !profile?.id) return
     const { data } = await sb.from('profiles').select('status').eq('id', profile.id).maybeSingle()
     if (data?.status !== 'On Call') return
@@ -259,6 +264,7 @@ export function PhoneProvider({ children }) {
       const call = await deviceRef.current.connect({ params })
       callRef.current = call
       setCallStatus('calling')
+      setCallDirection('outbound')
       updateAgentStatus('On Call', meta.interactionType || 'Outbound')
       wireCallEvents(call)
     } catch (err) {
@@ -276,6 +282,7 @@ export function PhoneProvider({ children }) {
     callRef.current = inc.call
     setCallStatus('connected')
     startCallTimer()
+    setCallDirection('inbound')
     updateAgentStatus('On Call', 'Inbound')
     wireCallEvents(inc.call)
     inc.call.accept()
@@ -299,7 +306,7 @@ export function PhoneProvider({ children }) {
 
   return (
     <PhoneContext.Provider value={{
-      twilioReady, incomingCall, callStatus, callDuration,
+      twilioReady, incomingCall, callStatus, callDuration, callDirection,
       makeCall, acceptIncoming, rejectIncoming, hangUp, cancelAutoWrap, startInteraction, endInteraction,
       pendingInbound, setPendingInbound,
       hasActiveCall: () => !!callRef.current,

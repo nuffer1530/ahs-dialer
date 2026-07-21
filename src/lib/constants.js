@@ -24,8 +24,25 @@ export const OUTCOMES = [
   { id: 'Bad Data', emoji: '❓' },
 ]
 
+// On a live INBOUND call, No Answer / Voicemail / Bad Data are nonsense —
+// the rep either books or classifies what the call was. Notes + the chosen
+// classification sync to ServiceTitan exactly like outbound outcomes.
+export const INBOUND_OUTCOMES = [
+  { id: 'Booked', emoji: '✅' },
+  { id: 'Rescheduled', emoji: '🔁' },
+  { id: 'Canceled Appt', emoji: '🗓️' },
+  { id: 'Question / Info', emoji: '💬' },
+  { id: 'Not Booked - Price', emoji: '💲' },
+  { id: 'Wrong Number', emoji: '📵' },
+]
+
 export const STATUS_COLORS = {
   'Pending':        { bg: '#EAF3FB', color: '#0D3D5C' },
+  'Rescheduled':    { bg: '#EAF3FB', color: '#0D3D5C' },
+  'Canceled Appt':  { bg: '#FBF3E0', color: '#8A5A00' },
+  'Question / Info':{ bg: '#EAF3FB', color: '#0D3D5C' },
+  'Not Booked - Price': { bg: '#FBF3E0', color: '#8A5A00' },
+  'Wrong Number':   { bg: '#F3F4F6', color: '#6B7280' },
   'No Answer':      { bg: '#FBF3E0', color: '#8A5A00' },
   'Voicemail':      { bg: '#F0ECFB', color: '#5B3FA0' },
   'Booked':         { bg: '#EAF5EE', color: '#2E7D52' },

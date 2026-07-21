@@ -261,6 +261,39 @@ async function getTagTypes() {
   return map
 }
 
+// Create a brand-new ST customer + primary location so a first-time caller
+// can be booked without leaving Andi. _retry = false: stPost retries on
+// timeout, and a doubled create means a duplicate customer record in ST.
+app.post('/api/st/customer/create', async (req, res) => {
+  try {
+    const { name, phone, email, street, city, state, zip } = req.body || {}
+    if (!String(name || '').trim()) return res.status(400).json({ error: 'Customer name is required' })
+    if (!String(street || '').trim() || !String(city || '').trim() || !String(zip || '').trim()) {
+      return res.status(400).json({ error: 'Street, city and zip are required — ST needs a service location' })
+    }
+    const address = {
+      street: String(street).trim(), city: String(city).trim(),
+      state: String(state || 'CO').trim() || 'CO', zip: String(zip).trim(), country: 'USA',
+    }
+    const contacts = []
+    if (String(phone || '').trim()) contacts.push({ type: 'MobilePhone', value: String(phone).trim() })
+    if (String(email || '').trim()) contacts.push({ type: 'Email', value: String(email).trim() })
+    const body = {
+      name: String(name).trim(),
+      type: 'Residential',
+      address,
+      contacts,
+      locations: [{ name: String(name).trim(), address, contacts }],
+    }
+    const created = await stPost(`/crm/v2/tenant/${ST_TENANT_ID}/customers`, body, false)
+    if (!created?.id) throw new Error('ServiceTitan returned no customer id')
+    res.json({ id: created.id, name: created.name || body.name })
+  } catch (err) {
+    console.error('ST customer create error:', err.message)
+    res.status(500).json({ error: err.message })
+  }
+})
+
 app.get('/api/st/customer/:id', async (req, res) => {
   try {
     const id = req.params.id
