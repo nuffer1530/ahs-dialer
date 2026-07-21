@@ -332,6 +332,11 @@ function LiveBoard() {
           {rev ? ` · ${rev.remaining} still to run · ${rev.done} done` : ''}
           {rev?.working ? ` · ${rev.working} on site` : ''}
           {' · '}auto-refreshes every 15 min
+          {data?.generatedAt && (
+            <span style={{ fontWeight:600, color:'var(--text-primary)' }}>
+              {' · '}updated {new Date(data.generatedAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+            </span>
+          )}
         </div>
         <div style={{ display:'flex', gap:8, alignItems:'center' }}>
           {/* Jumping to what needs attention is the whole job — 95 calls with
