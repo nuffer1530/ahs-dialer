@@ -10,6 +10,7 @@ import QueueSelector from '../components/QueueSelector'
 import LeadsRail from '../components/LeadsRail'
 import { useOpenLeads } from '../lib/useOpenLeads'
 import { OUTCOMES, MAX_ATTEMPTS, DONE_OUTCOMES } from '../lib/constants'
+import { RichText } from '../components/RichTextEditor'
 
 const PAGE_SIZE = 50
 
@@ -1705,9 +1706,8 @@ export default function DialerPage() {
                             {!camp?.script && (
                               <div style={{ fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color:'var(--text-muted)' }}>Inbound script</div>
                             )}
-                            <div style={{ background:'var(--surface)', border:'1px solid var(--border)', borderLeft:'3px solid var(--accent)', borderRadius:'var(--radius)', padding:'12px 14px', fontSize:12, lineHeight:1.9, whiteSpace:'pre-wrap', color:'var(--text-primary)' }}>
-                              {camp?.script || inboundScript.script}
-                            </div>
+                            <RichText html={camp?.script || inboundScript.script}
+                              style={{ background:'var(--surface)', border:'1px solid var(--border)', borderLeft:'3px solid var(--accent)', borderRadius:'var(--radius)', padding:'12px 14px', fontSize:12, lineHeight:1.9, color:'var(--text-primary)' }} />
                           </>
                         ) : (
                           <div style={{ fontSize:12, color:'var(--text-muted)', fontStyle:'italic', textAlign:'center', paddingTop:16 }}>{camp ? 'No script set for this campaign.' : 'No inbound script set — add one in Settings → Campaigns.'}</div>
@@ -1717,9 +1717,8 @@ export default function DialerPage() {
                     {activeTab === 'tips' && (
                       <div>
                         {(camp?.tips || inboundScript?.tips) ? (
-                          <div style={{ background:'#FFFBEB', border:'1px solid #FCD34D', borderRadius:'var(--radius)', padding:'12px 14px', fontSize:12, lineHeight:1.9, whiteSpace:'pre-wrap', color:'#78350F' }}>
-                            {camp?.tips || inboundScript.tips}
-                          </div>
+                          <RichText html={camp?.tips || inboundScript.tips}
+                            style={{ background:'#FFFBEB', border:'1px solid #FCD34D', borderRadius:'var(--radius)', padding:'12px 14px', fontSize:12, lineHeight:1.9, color:'#78350F' }} />
                         ) : (
                           <div style={{ fontSize:12, color:'var(--text-muted)', fontStyle:'italic', textAlign:'center', paddingTop:16 }}>{camp ? 'No tips set for this campaign.' : 'No inbound tips set — add them in Settings → Campaigns.'}</div>
                         )}

@@ -6,6 +6,7 @@ import { sb } from '../lib/supabase'
 import Badge from '../components/Badge'
 import Modal from '../components/Modal'
 import AICampaignModal from '../components/AICampaignModal'
+import RichTextEditor, { RichText } from '../components/RichTextEditor'
 import { isDone, normPhone, findCol, parseLine, cleanPhone } from '../lib/utils'
 
 export default function CampaignsPage() {
@@ -236,13 +237,13 @@ export default function CampaignsPage() {
           <div className="card-body" style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14 }}>
             <div className="form-field">
               <label className="form-label">Inbound script</label>
-              <textarea className="form-input" rows={7} value={inbForm.script} placeholder="Thank you for calling Awesome Home Services, this is ..."
-                onChange={e => { setInbForm(f => ({ ...f, script: e.target.value })); setInbDirty(true) }} />
+              <RichTextEditor value={inbForm.script} minHeight={150} placeholder="Thank you for calling Awesome Home Services, this is ..."
+                onChange={v => { setInbForm(f => ({ ...f, script: v })); setInbDirty(true) }} />
             </div>
             <div className="form-field">
               <label className="form-label">Inbound tips</label>
-              <textarea className="form-input" rows={7} value={inbForm.tips} placeholder="Always confirm callback number and address early..."
-                onChange={e => { setInbForm(f => ({ ...f, tips: e.target.value })); setInbDirty(true) }} />
+              <RichTextEditor value={inbForm.tips} minHeight={150} placeholder="Always confirm callback number and address early..."
+                onChange={v => { setInbForm(f => ({ ...f, tips: v })); setInbDirty(true) }} />
             </div>
           </div>
         </div>
@@ -363,13 +364,13 @@ export default function CampaignsPage() {
           </div>
           <div className="form-field">
             <label className="form-label">Call script</label>
-            <textarea className="form-input" value={campForm.script} onChange={e=>setCampForm(p=>({...p,script:e.target.value}))}
-              placeholder={'Hi, this is [Name] with Awesome Home Services...'} style={{ minHeight:120 }} />
+            <RichTextEditor value={campForm.script} onChange={v=>setCampForm(p=>({...p,script:v}))}
+              placeholder={'Hi, this is [Name] with Awesome Home Services...'} minHeight={120} />
           </div>
           <div className="form-field">
             <label className="form-label">Tips & talking points</label>
-            <textarea className="form-input" value={campForm.tips} onChange={e=>setCampForm(p=>({...p,tips:e.target.value}))}
-              placeholder={'- Emphasize continuity of service\n- Mention the AHS guarantee\n- If they ask about pricing, offer a free quote'} style={{ minHeight:100 }} />
+            <RichTextEditor value={campForm.tips} onChange={v=>setCampForm(p=>({...p,tips:v}))}
+              placeholder={'Emphasize continuity of service...'} minHeight={100} />
           </div>
           <div className="modal-actions">
             <button className="btn" onClick={() => setShowModal(false)}>Cancel</button>
@@ -384,17 +385,13 @@ export default function CampaignsPage() {
           {showScriptModal.script ? (
             <div style={{ marginBottom:20 }}>
               <div style={{ fontSize:11, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color:'var(--text-muted)', marginBottom:8 }}>Call Script</div>
-              <div style={{ background:'var(--surface-2)', borderRadius:'var(--radius)', padding:'14px 16px', fontSize:13, lineHeight:1.7, whiteSpace:'pre-wrap', color:'var(--text-primary)' }}>
-                {showScriptModal.script}
-              </div>
+              <RichText html={showScriptModal.script} style={{ background:'var(--surface-2)', borderRadius:'var(--radius)', padding:'14px 16px', fontSize:13, lineHeight:1.7, color:'var(--text-primary)' }} />
             </div>
           ) : <div style={{ color:'var(--text-muted)', fontSize:13, marginBottom:16 }}>No script added yet.</div>}
           {showScriptModal.tips ? (
             <div>
               <div style={{ fontSize:11, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color:'var(--text-muted)', marginBottom:8 }}>Tips & Talking Points</div>
-              <div style={{ background:'var(--surface-2)', borderRadius:'var(--radius)', padding:'14px 16px', fontSize:13, lineHeight:1.7, whiteSpace:'pre-wrap', color:'var(--text-primary)' }}>
-                {showScriptModal.tips}
-              </div>
+              <RichText html={showScriptModal.tips} style={{ background:'var(--surface-2)', borderRadius:'var(--radius)', padding:'14px 16px', fontSize:13, lineHeight:1.7, color:'var(--text-primary)' }} />
             </div>
           ) : <div style={{ color:'var(--text-muted)', fontSize:13 }}>No tips added yet.</div>}
           <div className="modal-actions">
