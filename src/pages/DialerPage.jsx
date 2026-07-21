@@ -349,10 +349,19 @@ export default function DialerPage() {
   }, [selectedId])
 
   // Reset per-contact: a membership selection left over from the previous
-  // customer must never carry into the next one.
+  // customer must never carry into the next one — and neither can the booking
+  // panel. Rebooking a customer used to reopen with the LAST booking's BU,
+  // job type and time window still selected, one click from a wrong booking.
+  const resetBookingPanel = () => {
+    setSelectedBU(''); setSelectedJobType(''); setStCampaignId(null)
+    setAvailability([]); setSelectedSlot(null); setAvailError(null)
+    setShowAvailModal(false); setAvailWeekOffset(0)
+  }
   useEffect(() => {
-    setNotesVal(''); setBookingResult(null)
+    setNotesVal(''); setBookingResult(null); setSelectedOutcome(null)
     setAlsoMembership(false); setMembershipTypeId(''); setMembershipMsg('')
+    resetBookingPanel()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedId])
 
   // Restore open tabs + active tab on mount (survives refresh)
@@ -785,7 +794,7 @@ export default function DialerPage() {
       // Disposition ends the interaction → wrap-up (60s, then auto-Available).
       // If the call's own hangup already put us in Wrap Up, endInteraction
       // leaves that wrap (and its timer) untouched.
-      setSelectedOutcome(null); setNotesVal(''); endInteraction?.()
+      setSelectedOutcome(null); setNotesVal(''); resetBookingPanel(); endInteraction?.()
       const { data: logs } = await sb.from('call_logs').select('*').eq('contact_id', c.id).order('created_at', { ascending: false })
       setContactLogs(logs || [])
 
