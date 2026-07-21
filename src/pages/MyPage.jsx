@@ -573,13 +573,14 @@ export default function MyPage() {
                               const amt = parseFloat(c.amount || 0)
                               const isAdj = c.event_type === 'adjustment'
                               const isMem = c.event_type === 'membership'
+                              const isRev = c.event_type === 'reversal'
                               return (
                                 <div key={c.id} style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'10px 16px', borderBottom:'1px solid var(--border)', gap:12 }}>
                                   <div style={{ display:'flex', alignItems:'center', gap:10, minWidth:0 }}>
                                     <span style={{ padding:'2px 8px', borderRadius:99, fontSize:10, fontWeight:700, flexShrink:0,
-                                      background: isAdj ? (amt < 0 ? 'var(--danger-bg)' : 'var(--warning-bg)') : isMem ? '#EFF6FF' : 'var(--success-bg)',
-                                      color: isAdj ? (amt < 0 ? 'var(--danger)' : 'var(--warning)') : isMem ? '#3b82f6' : 'var(--success)' }}>
-                                      {isAdj ? 'Adjustment' : isMem ? 'Membership' : 'Booking'}
+                                      background: isRev ? 'var(--danger-bg)' : isAdj ? (amt < 0 ? 'var(--danger-bg)' : 'var(--warning-bg)') : isMem ? '#EFF6FF' : 'var(--success-bg)',
+                                      color: isRev ? 'var(--danger)' : isAdj ? (amt < 0 ? 'var(--danger)' : 'var(--warning)') : isMem ? '#3b82f6' : 'var(--success)' }}>
+                                      {isRev ? 'Reversed' : isAdj ? 'Adjustment' : isMem ? 'Membership' : 'Booking'}
                                     </span>
                                     <div style={{ minWidth:0 }}>
                                       <div style={{ fontSize:12, fontWeight:500, color:'var(--text-primary)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
@@ -628,13 +629,14 @@ export default function MyPage() {
                               const amt = parseFloat(c.amount || 0)
                               const isAdj = c.event_type === 'adjustment'
                               const isMem = c.event_type === 'membership'
+                              const isRev = c.event_type === 'reversal'
                               return (
                                 <tr key={c.id} style={{ borderBottom:'1px solid var(--border)' }}>
                                   <td style={{ padding:'9px 14px' }}>
                                     <span style={{ padding:'2px 7px', borderRadius:99, fontSize:10, fontWeight:700,
-                                      background: isAdj ? (amt < 0 ? 'var(--danger-bg)' : 'var(--warning-bg)') : isMem ? '#EFF6FF' : 'var(--success-bg)',
-                                      color: isAdj ? (amt < 0 ? 'var(--danger)' : 'var(--warning)') : isMem ? '#3b82f6' : 'var(--success)' }}>
-                                      {isAdj ? 'Adjustment' : isMem ? 'Membership' : 'Booking'}
+                                      background: isRev ? 'var(--danger-bg)' : isAdj ? (amt < 0 ? 'var(--danger-bg)' : 'var(--warning-bg)') : isMem ? '#EFF6FF' : 'var(--success-bg)',
+                                      color: isRev ? 'var(--danger)' : isAdj ? (amt < 0 ? 'var(--danger)' : 'var(--warning)') : isMem ? '#3b82f6' : 'var(--success)' }}>
+                                      {isRev ? 'Reversed' : isAdj ? 'Adjustment' : isMem ? 'Membership' : 'Booking'}
                                     </span>
                                   </td>
                                   <td style={{ padding:'9px 14px', color:'var(--text-secondary)' }}>

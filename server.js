@@ -883,7 +883,65 @@ async function syncJobCommissions() {
       paid++
     }
   }
-  return { checked, paid, canceled }
+
+  // ── Clawback pass: a job that PAID and is later canceled in ST reverses.
+  // Paid bookings stay under watch for 14 days after settlement (covers a
+  // bi-weekly pay cycle). A reversal is a NEGATIVE row — the original stays,
+  // so pay history never silently rewrites — with st_job_id null because the
+  // no-double-pay unique index owns that id; linkage lives in job_number.
+  // The booking flips to job_status 'Reversed' so it can't reverse twice.
+  let reversed = 0
+  const watchSince = new Date(Date.now() - 14 * 864e5).toISOString()
+  const { data: paidRows } = await supabase.from('andi_bookings').select('*')
+    .eq('job_status', 'Completed').not('commission_synced_at', 'is', null)
+    .gte('commission_synced_at', watchSince).limit(500)
+  for (const batch of chunk((paidRows || []).filter(b => b.st_job_id), 50)) {
+    let jobs = []
+    try {
+      const ids = batch.map(b => b.st_job_id).join(',')
+      jobs = (await stGet(`/jpm/v2/tenant/${ST_TENANT_ID}/jobs?ids=${ids}&pageSize=50`))?.data || []
+    } catch (e) { console.warn('clawback job fetch:', e.message); continue }
+    for (const job of jobs) {
+      if (job.jobStatus !== 'Canceled') continue
+      try {
+        const { data: orig } = await supabase.from('commissions').select('*')
+          .eq('st_job_id', job.id).eq('event_type', 'booking').maybeSingle()
+        if (!orig || !(Number(orig.amount) > 0)) {
+          await supabase.from('andi_bookings').update({ job_status: 'Reversed' }).eq('st_job_id', job.id)
+          continue
+        }
+        // Crash safety: if the reversal row landed but the flag write didn't,
+        // the next run must not reverse again.
+        const { data: dupe } = await supabase.from('commissions').select('id')
+          .eq('event_type', 'reversal').eq('profile_id', orig.profile_id)
+          .eq('job_number', orig.job_number || String(job.jobNumber || '')).limit(1)
+        if (!dupe?.length) {
+          const { error: revErr } = await supabase.from('commissions').insert({
+            profile_id: orig.profile_id,
+            rep_name: orig.rep_name,
+            event_type: 'reversal',
+            amount: -Math.abs(Number(orig.amount)),
+            contact_name: orig.contact_name,
+            st_job_id: null,
+            st_job_type_id: orig.st_job_type_id,
+            st_customer_id: orig.st_customer_id,
+            job_number: orig.job_number || String(job.jobNumber || '') || null,
+            notes: `Reversed — job ${orig.job_number || job.id} canceled in ServiceTitan after payout`,
+            // Lands in the CURRENT pay period, where the correction belongs.
+            earned_at: new Date().toISOString(),
+            also_membership: false,
+            membership_amount: 0,
+            synced_at: new Date().toISOString(),
+          })
+          if (revErr) { console.error(`clawback insert job ${job.id}: ${revErr.message}`); continue }
+        }
+        await supabase.from('andi_bookings').update({ job_status: 'Reversed' }).eq('st_job_id', job.id)
+        reversed++
+        console.log(`Commission reversed: job ${orig.job_number || job.id} (-$${Math.abs(Number(orig.amount))}) for ${orig.rep_name}`)
+      } catch (e) { console.error(`clawback job ${job.id}: ${e.message}`) }
+    }
+  }
+  return { checked, paid, canceled, reversed }
 }
 
 async function syncMembershipCommissions() {

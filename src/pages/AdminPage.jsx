@@ -559,6 +559,7 @@ function CommissionReport() {
   const typeLabel = (r) => {
     if (r.event_type === 'membership') return membTypes[String(r.st_membership_type_id)] || 'Membership'
     if (r.event_type === 'adjustment') return r.notes || 'Manual adjustment'
+    if (r.event_type === 'reversal') return r.notes || 'Reversed — job canceled'
     return jobTypes[String(r.st_job_type_id)] || 'Job'
   }
 
