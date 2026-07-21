@@ -1288,7 +1288,8 @@ export default function DialerPage() {
                 gridTemplateRows:'minmax(0, 1fr)', overflow:'hidden', minHeight:0 }}>
 
                 {/* -- LEFT: Customer info + Job history -- */}
-                <div style={{ borderRight:'1px solid var(--border)', overflowY:'auto', minHeight:0, background:'var(--surface-2)', display:'flex', flexDirection:'column', gap:1 }}>
+                <div style={{ borderRight:'1px solid var(--border)', overflowY:'auto', minHeight:0, background:'var(--surface-2)' }}>
+                <div style={{ display:'flex', flexDirection:'column', gap:1 }}>
 
                   {/* Customer info card */}
                   <div style={sectionCard}>
@@ -1468,9 +1469,16 @@ export default function DialerPage() {
                     </div>
                   </div>
                 </div>
+                </div>
 
                 {/* -- CENTER: Outcome + Booking -- */}
-                <div style={{ overflowY:'auto', minHeight:0, padding:14, display:'flex', flexDirection:'column', gap:10 }}>
+                {/* Two layers on purpose: the outer div ONLY scrolls; the inner
+                    div does the flex stacking. When one div did both, a short
+                    viewport made the flex children SHRINK (cards are
+                    overflow:hidden, so they may compress to nothing) instead of
+                    overflowing into the scrollbar — Brittany's scrunched panel. */}
+                <div style={{ overflowY:'auto', minHeight:0 }}>
+                <div style={{ padding:14, display:'flex', flexDirection:'column', gap:10 }}>
 
                   {/* Recent ST notes — what the last few touches on this account said,
                       right above where the rep decides what to do next. */}
@@ -1644,6 +1652,7 @@ export default function DialerPage() {
                       Contact complete -- {c.status}
                     </div>
                   )}
+                </div>
                 </div>
 
                 {/* -- RIGHT: Stats + Script + Tips -- */}
