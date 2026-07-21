@@ -776,8 +776,10 @@ export default function DialerPage() {
         }
       }
 
-      // Sync notes to ST customer record
-      if (notes && c.external_id) {
+      // Sync notes to ST customer record. NOT on a booking: /api/st/book
+      // already posts the same notes as its own location note, so this
+      // second write duplicated every booking note in ST.
+      if (notes && c.external_id && selectedOutcome !== 'Booked') {
         fetch('/api/st/note', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ customerId: c.external_id, note: `${selectedOutcome}: ${notes}`, repName: currentRep })
