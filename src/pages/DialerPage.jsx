@@ -1209,6 +1209,16 @@ export default function DialerPage() {
                     {isDNC && <span style={{ fontSize:10, fontWeight:700, background:'#FEE2E2', color:'#7F1D1D', border:'1px solid #FECACA', borderRadius:99, padding:'1px 6px' }}>DNC</span>}
                     {isDup && <span style={{ fontSize:10, fontWeight:700, background:'#F3E8FF', color:'#5B21B6', border:'1px solid #DDD6FE', borderRadius:99, padding:'1px 6px' }}>Duplicate</span>}
                     {campName(c) && <span style={{ fontSize:10, background:'var(--surface-2)', color:'var(--text-muted)', border:'1px solid var(--border)', borderRadius:99, padding:'1px 7px' }}>{campName(c)}</span>}
+                    {/* ServiceTitan customer tags, in ST's own colors */}
+                    {(stCustomerInfo?.tags || []).slice(0, 8).map((t, i) => (
+                      <span key={`sttag-${i}`} title="ServiceTitan tag" style={{ fontSize:10, fontWeight:700, borderRadius:99, padding:'1px 7px',
+                        background: `${t.color || '#888780'}1F`, color: t.color || 'var(--text-secondary)', border: `1px solid ${t.color || 'var(--border)'}` }}>
+                        {t.name}
+                      </span>
+                    ))}
+                    {(stCustomerInfo?.tags || []).length > 8 && (
+                      <span style={{ fontSize:10, color:'var(--text-muted)' }}>+{stCustomerInfo.tags.length - 8} more</span>
+                    )}
                   </div>
                   <div style={{ display:'flex', gap:16, marginTop:3 }}>
                     {[c.phone, c.email, [c.address,c.city,c.state].filter(Boolean).join(', ')].filter(Boolean).map((v,i) => (
@@ -1436,6 +1446,28 @@ export default function DialerPage() {
 
                 {/* -- CENTER: Outcome + Booking -- */}
                 <div style={{ overflowY:'auto', padding:14, display:'flex', flexDirection:'column', gap:10 }}>
+
+                  {/* Recent ST notes — what the last few touches on this account said,
+                      right above where the rep decides what to do next. */}
+                  {(stCustomerInfo?.notes || []).length > 0 && (
+                    <div style={sectionCard}>
+                      <div style={sectionHeader}>
+                        <span style={sectionTitle}>Recent ServiceTitan notes</span>
+                        <span style={{ fontSize:10, color:'var(--text-muted)' }}>latest {stCustomerInfo.notes.length}</span>
+                      </div>
+                      <div style={{ padding:'2px 12px 8px' }}>
+                        {stCustomerInfo.notes.map((n, i) => (
+                          <div key={i} style={{ padding:'7px 0', borderBottom: i < stCustomerInfo.notes.length - 1 ? '1px solid var(--border)' : 'none' }}>
+                            <div style={{ fontSize:11.5, color:'var(--text-primary)', lineHeight:1.45, wordBreak:'break-word',
+                              display:'-webkit-box', WebkitLineClamp:3, WebkitBoxOrient:'vertical', overflow:'hidden' }}>
+                              {n.text}
+                            </div>
+                            {n.createdOn && <div style={{ fontSize:10, color:'var(--text-muted)', marginTop:2 }}>{fmtDate(n.createdOn)}</div>}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
 
                   {/* Banners */}
                   {isDNC && <div style={{ background:'#FEF2F2', border:'1px solid #FECACA', borderRadius:'var(--radius)', padding:'8px 12px', fontSize:12, color:'#7F1D1D', fontWeight:600 }}>DNC -- Do not dial this number</div>}

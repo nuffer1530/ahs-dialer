@@ -245,6 +245,22 @@ app.post('/api/st/note', async (req, res) => {
 })
 
 // ── ST: Get customer by ID (with email + membership status)
+// Tag-type catalog (id → name + ST's hex color). ~Static; cached 6 hours.
+let _tagTypeCache = null
+async function getTagTypes() {
+  if (_tagTypeCache && _tagTypeCache.expires > Date.now()) return _tagTypeCache.map
+  const map = new Map()
+  let p = 1
+  while (p <= 10) {
+    const d = await stGet(`/settings/v2/tenant/${ST_TENANT_ID}/tag-types?pageSize=200&page=${p}`)
+    for (const t of (d?.data || [])) map.set(t.id, { name: t.name, color: t.color || null })
+    if (!d?.hasMore) break
+    p++
+  }
+  _tagTypeCache = { map, expires: Date.now() + 6 * 3600_000 }
+  return map
+}
+
 app.get('/api/st/customer/:id', async (req, res) => {
   try {
     const id = req.params.id
@@ -270,7 +286,28 @@ app.get('/api/st/customer/:id', async (req, res) => {
       }
     } catch (e) { console.warn('ST memberships failed:', e.message) }
 
-    res.json({ ...customer, email, membership })
+    // Customer tags + the 5 freshest notes across the customer AND their
+    // primary location (Andi's own booking notes land on the location).
+    let tags = [], notes = []
+    try {
+      const [tagTypes, custNotes, locData] = await Promise.all([
+        getTagTypes().catch(() => new Map()),
+        stGet(`/crm/v2/tenant/${ST_TENANT_ID}/customers/${id}/notes?pageSize=10`).catch(() => null),
+        stGet(`/crm/v2/tenant/${ST_TENANT_ID}/locations?customerId=${id}&pageSize=1`).catch(() => null),
+      ])
+      const locId = locData?.data?.[0]?.id
+      const locNotes = locId
+        ? await stGet(`/crm/v2/tenant/${ST_TENANT_ID}/locations/${locId}/notes?pageSize=10`).catch(() => null)
+        : null
+      tags = (customer?.tagTypeIds || []).map(tid => tagTypes.get(tid)).filter(Boolean)
+      notes = [...(custNotes?.data || []), ...(locNotes?.data || [])]
+        .filter(n => n?.text)
+        .sort((a, b) => Date.parse(b.createdOn || 0) - Date.parse(a.createdOn || 0))
+        .slice(0, 5)
+        .map(n => ({ text: stripHtml(String(n.text)).trim().slice(0, 600), createdOn: n.createdOn || null }))
+    } catch (e) { console.warn('ST customer tags/notes:', e.message) }
+
+    res.json({ ...customer, email, membership, tags, notes })
   } catch (err) {
     console.error('ST customer error:', err.message)
     res.status(500).json({ error: err.message })
