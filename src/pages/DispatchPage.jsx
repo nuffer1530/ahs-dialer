@@ -246,6 +246,7 @@ function LiveBoard() {
   const [brief, setBrief] = useState(null)
   const [briefBusy, setBriefBusy] = useState(false)
   const [briefErr, setBriefErr] = useState('')
+  const [showRevDetail, setShowRevDetail] = useState(false)   // Expected-revenue receipts popup
   const loadBrief = useCallback(async (refresh = false) => {
     setBriefBusy(true); setBriefErr('')
     try { setBrief(await authed(`/api/dispatch/brief${refresh ? '?refresh=1' : ''}`)) }
@@ -290,7 +291,6 @@ function LiveBoard() {
     : view === 'completed' ? completed
     : onTrack
   const rev = data?.dayRevenue
-  const [showRevDetail, setShowRevDetail] = useState(false)
 
   // Within a window, group by team. Teams with flags sort first so a
   // dispatcher sees the problems without scanning every bench.
