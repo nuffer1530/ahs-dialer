@@ -662,7 +662,12 @@ function CommissionReport() {
 export default function AdminPage() {
   const { profile, isAdmin, refreshProfile } = useAuth()
   const { campaigns } = useData()
-  const [settingsTab, setSettingsTab] = useState('users')
+  const [settingsTab, setSettingsTab] = useState(() => new URLSearchParams(window.location.search).get('tab') || 'users')
+  // Survive hard refresh: the active tab lives in the URL (?tab=), like MyPage.
+  useEffect(() => {
+    const u = new URL(window.location)
+    if (u.searchParams.get('tab') !== settingsTab) { u.searchParams.set('tab', settingsTab); window.history.replaceState({}, '', u) }
+  }, [settingsTab])
   const [showMapping, setShowMapping] = useState(false)
   const [hoveredTab, setHoveredTab] = useState(null)
   const [profiles, setProfiles] = useState([])

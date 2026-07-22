@@ -137,7 +137,12 @@ export default function AttendancePage() {
     return toYMD(monday)
   }
 
-  const [tab, setTab] = useState('schedule')
+  const [tab, setTab] = useState(() => new URLSearchParams(window.location.search).get('tab') || 'schedule')
+  // Survive hard refresh: the active tab lives in the URL (?tab=), like MyPage.
+  useEffect(() => {
+    const u = new URL(window.location)
+    if (u.searchParams.get('tab') !== tab) { u.searchParams.set('tab', tab); window.history.replaceState({}, '', u) }
+  }, [tab])
   const [hoveredTab, setHoveredTab] = useState(null)
   const [profiles, setProfiles] = useState([])
   const [schedules, setSchedules] = useState([])

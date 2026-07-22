@@ -1010,7 +1010,12 @@ function DecisionMaker() {
 }
 
 export default function DispatchPage() {
-  const [tab, setTab] = useState('order')
+  const [tab, setTab] = useState(() => new URLSearchParams(window.location.search).get('tab') || 'order')
+  // Survive hard refresh: the active tab lives in the URL (?tab=), like MyPage.
+  useEffect(() => {
+    const u = new URL(window.location)
+    if (u.searchParams.get('tab') !== tab) { u.searchParams.set('tab', tab); window.history.replaceState({}, '', u) }
+  }, [tab])
   return (
     <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden' }}>
       <div style={{ background:'var(--surface)', borderBottom:'1px solid var(--border)', flexShrink:0, padding:'0 24px', display:'flex', gap:4 }}>
