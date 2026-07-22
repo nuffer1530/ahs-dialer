@@ -412,7 +412,7 @@ export default function LivePage() {
               </tr>
             </thead>
             <tbody>
-              {logs.slice(0, 50).map(l => {
+              {logs.slice(0, 5).map(l => {
                 const contact = contacts.find(c => c.id === l.contact_id)
                 const color = getStatusColor(l.outcome) || '#6b7280'
                 return (
