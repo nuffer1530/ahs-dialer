@@ -3818,6 +3818,12 @@ async function computeLiveBoardPayload() {
     const dayRevenue = {
       booked: Math.round([...bookedByJob.values()].reduce((a, b) => a + b, 0)),
       bookedJobs: bookedByJob.size,
+      // The receipts behind the headline number — the UI opens these on click.
+      bookedDetail: [...bookedByJob.entries()].map(([jid, amt]) => {
+        const call = calls.find(x => x.jobId === jid)
+        return { jobId: jid, jobNumber: call?.jobNumber || null, jobType: call?.jobType || null,
+                 tech: call?.techName || null, amount: Math.round(amt) }
+      }).sort((a, b) => b.amount - a.amount),
       expected: Math.round(calls.reduce((a, c) => a + (c.expectedRevenue || 0), 0)),
       opportunityCalls: calls.filter(c => c.expectedRevenue > 0).length,
       rescheduleCandidates: calls.filter(c => c.rescheduleCandidate).length,
@@ -3984,12 +3990,23 @@ Submit the analysis via the submit_brief tool. 3-6 actions, ordered by priority;
   // Belt and braces: the first live run stuffed the entire answer (JSON
   // syntax included) into `situation`. The schema now constrains it, and this
   // clamp guarantees the panel stays readable even if the model misbehaves.
-  const clean = (t, max) => String(t || '').replace(/["{}\[\]]+/g, '').replace(/\s+/g, ' ').trim().slice(0, max)
-  brief.headline = clean(brief.headline, 160)
-  brief.situation = clean((String(brief.situation || '').match(/[^.!?]+[.!?]/g) || [brief.situation || '']).slice(0, 3).join(' '), 420)
-  brief.actions = (brief.actions || []).slice(0, 6).map(a => ({ priority: a.priority, text: clean(a.text, 140) }))
-  brief.watchouts = (brief.watchouts || []).slice(0, 4).map(w => clean(w, 120))
-  brief.wins = (brief.wins || []).slice(0, 3).map(w => clean(w, 120))
+  // Truncate at a WORD boundary with an ellipsis — the old hard slice cut
+  // sentences mid-word ("don't overbook past", "for any l") which read as
+  // broken. Caps are roomier; the ellipsis is the honest signal when hit.
+  const clean = (t, max) => {
+    let out = String(t || '').replace(/["{}\[\]]+/g, '').replace(/\s+/g, ' ').trim()
+    if (out.length > max) {
+      out = out.slice(0, max)
+      const cut = out.lastIndexOf(' ')
+      out = (cut > max - 30 ? out.slice(0, cut) : out).replace(/[,;:·\-–—]$/, '') + '…'
+    }
+    return out
+  }
+  brief.headline = clean(brief.headline, 180)
+  brief.situation = clean((String(brief.situation || '').match(/[^.!?]+[.!?]/g) || [brief.situation || '']).slice(0, 3).join(' '), 460)
+  brief.actions = (brief.actions || []).slice(0, 6).map(a => ({ priority: a.priority, text: clean(a.text, 220) }))
+  brief.watchouts = (brief.watchouts || []).slice(0, 4).map(w => clean(w, 200))
+  brief.wins = (brief.wins || []).slice(0, 3).map(w => clean(w, 180))
   const record = { brief, generatedAt: new Date().toISOString() }
   await supabase.from('app_settings').upsert(
     { key: 'dispatch_brief', value: JSON.stringify(record) }, { onConflict: 'key' })

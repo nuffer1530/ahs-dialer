@@ -290,6 +290,7 @@ function LiveBoard() {
     : view === 'completed' ? completed
     : onTrack
   const rev = data?.dayRevenue
+  const [showRevDetail, setShowRevDetail] = useState(false)
 
   // Within a window, group by team. Teams with flags sort first so a
   // dispatcher sees the problems without scanning every bench.
@@ -385,28 +386,32 @@ function LiveBoard() {
           </div>
           <div style={{ fontSize:11.5, color:'var(--text-muted)', marginTop:4, lineHeight:1.5 }}>{brief.brief.situation}</div>
           {(brief.brief.actions || []).length > 0 && (
-            <div style={{ marginTop:8, display:'flex', flexDirection:'column', gap:3 }}>
+            <div style={{ marginTop:10, display:'flex', flexDirection:'column', gap:6 }}>
               {brief.brief.actions.map((a, i) => (
-                <div key={i} style={{ display:'flex', gap:7, alignItems:'baseline', fontSize:12 }}>
-                  <span style={{ fontSize:9, fontWeight:700, textTransform:'uppercase', flexShrink:0, padding:'1px 7px', borderRadius:99,
+                <div key={i} style={{ display:'flex', gap:9, alignItems:'flex-start', fontSize:12 }}>
+                  <span style={{ fontSize:9, fontWeight:700, textTransform:'uppercase', flexShrink:0, padding:'2px 0', borderRadius:99, width:52, textAlign:'center', marginTop:1,
                     color: a.priority === 'now' ? '#B91C1C' : a.priority === 'today' ? '#B45309' : 'var(--text-muted)',
                     background: a.priority === 'now' ? '#FBEEEA' : a.priority === 'today' ? '#FBF3E0' : 'var(--surface-2)',
                     border: `1px solid ${a.priority === 'now' ? '#F0C8BE' : a.priority === 'today' ? '#F0DCA8' : 'var(--border)'}` }}>
                     {a.priority}
                   </span>
-                  <span style={{ color:'var(--text-primary)' }}>{a.text}</span>
+                  <span style={{ color:'var(--text-primary)', lineHeight:1.5, flex:1 }}>{a.text}</span>
                 </div>
               ))}
             </div>
           )}
           {((brief.brief.watchouts || []).length > 0 || (brief.brief.wins || []).length > 0) && (
-            <div style={{ display:'flex', gap:18, marginTop:7, flexWrap:'wrap', fontSize:10.5, color:'var(--text-muted)', lineHeight:1.45 }}>
-              {(brief.brief.watchouts || []).length > 0 && (
-                <div>👀 {brief.brief.watchouts.join(' · ')}</div>
-              )}
-              {(brief.brief.wins || []).length > 0 && (
-                <div style={{ color:'#15803D' }}>🏆 {brief.brief.wins.join(' · ')}</div>
-              )}
+            <div style={{ marginTop:10, paddingTop:9, borderTop:'1px solid var(--border)', display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(280px, 1fr))', gap:'6px 24px', fontSize:11, lineHeight:1.5 }}>
+              {(brief.brief.watchouts || []).map((w, i) => (
+                <div key={`w${i}`} style={{ display:'flex', gap:6, alignItems:'flex-start', color:'var(--text-muted)' }}>
+                  <span style={{ flexShrink:0 }}>👀</span><span>{w}</span>
+                </div>
+              ))}
+              {(brief.brief.wins || []).map((w, i) => (
+                <div key={`g${i}`} style={{ display:'flex', gap:6, alignItems:'flex-start', color:'#15803D' }}>
+                  <span style={{ flexShrink:0 }}>🏆</span><span>{w}</span>
+                </div>
+              ))}
             </div>
           )}
         </div>
@@ -414,15 +419,53 @@ function LiveBoard() {
 
       {rev && (
         <div className="card" style={{ padding:'13px 16px', marginBottom:14, display:'flex', gap:24, flexWrap:'wrap', alignItems:'center' }}>
-          <div>
+          <div onClick={() => (rev.bookedDetail || []).length && setShowRevDetail(true)}
+            title="See the jobs behind this number"
+            style={{ cursor: (rev.bookedDetail || []).length ? 'pointer' : 'default', borderRadius:8, padding:'2px 6px', margin:'-2px -6px' }}
+            onMouseEnter={e => { if ((rev.bookedDetail || []).length) e.currentTarget.style.background = 'var(--surface-2)' }}
+            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
             <div style={{ fontSize:20, fontWeight:800, color:'#15803D', lineHeight:1.1 }}>{money(rev.booked)}</div>
             <div style={{ fontSize:10, fontWeight:700, color:'var(--text-primary)', textTransform:'uppercase', letterSpacing:.5, marginTop:2 }}>
-              Expected revenue
+              Expected revenue {(rev.bookedDetail || []).length > 0 && <span style={{ color:'var(--accent)', fontWeight:600, textTransform:'none' }}>· view jobs</span>}
             </div>
             <div style={{ fontSize:10, color:'var(--text-muted)' }}>
               {rev.bookedJobs} install{rev.bookedJobs === 1 ? '' : 's'} finishing today
             </div>
           </div>
+
+          {showRevDetail && (
+            <div onClick={() => setShowRevDetail(false)}
+              style={{ position:'fixed', inset:0, background:'rgba(0,0,0,.45)', zIndex:700, display:'flex', alignItems:'center', justifyContent:'center', padding:20 }}>
+              <div onClick={e => e.stopPropagation()}
+                style={{ background:'var(--surface)', borderRadius:14, width:'100%', maxWidth:520, boxShadow:'0 12px 40px rgba(0,0,0,.25)', overflow:'hidden', display:'flex', flexDirection:'column', maxHeight:'80vh' }}>
+                <div style={{ padding:'14px 18px', borderBottom:'1px solid var(--border)', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+                  <div>
+                    <div style={{ fontSize:14, fontWeight:700 }}>Expected revenue — the receipts</div>
+                    <div style={{ fontSize:11, color:'var(--text-muted)', marginTop:1 }}>Installs whose final day is today · invoice counts once, on the finish day</div>
+                  </div>
+                  <button className="btn sm" onClick={() => setShowRevDetail(false)}>Close</button>
+                </div>
+                <div style={{ overflowY:'auto' }}>
+                  {(rev.bookedDetail || []).map((j, i) => (
+                    <a key={i} href={j.jobId ? ST_JOB_URL(j.jobId) : undefined} target="_blank" rel="noopener noreferrer"
+                      title="Open this job in ServiceTitan"
+                      style={{ display:'flex', alignItems:'center', gap:10, padding:'10px 18px', borderBottom:'1px solid var(--border)', textDecoration:'none', color:'var(--text-primary)' }}
+                      onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
+                      onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                      <span style={{ fontWeight:700, color:'var(--accent)', flexShrink:0, fontSize:12 }}>#{j.jobNumber || j.jobId} ↗</span>
+                      <span style={{ flex:1, minWidth:0, fontSize:12, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                        {j.jobType || 'Install'}{j.tech ? <span style={{ color:'var(--text-muted)' }}> · {j.tech}</span> : null}
+                      </span>
+                      <span style={{ fontWeight:800, fontSize:13, color:'#15803D', flexShrink:0, fontVariantNumeric:'tabular-nums' }}>{money(j.amount)}</span>
+                    </a>
+                  ))}
+                </div>
+                <div style={{ padding:'11px 18px', borderTop:'1px solid var(--border)', display:'flex', justifyContent:'space-between', fontSize:13, fontWeight:800 }}>
+                  <span>Total</span><span style={{ color:'#15803D' }}>{money(rev.booked)}</span>
+                </div>
+              </div>
+            </div>
+          )}
 
           {(rev.soldToday > 0 || rev.invoicedToday > 0) && (
             <>
