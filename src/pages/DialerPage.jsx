@@ -926,17 +926,15 @@ export default function DialerPage() {
     const bg = isToday ? '#FEF2F2' : isSoon ? '#FFFBEB' : 'var(--surface-2)'
     const border = isToday ? '#FCA5A5' : isSoon ? '#FCD34D' : 'var(--border)'
     const color = isToday ? '#991B1B' : isSoon ? '#92400E' : 'var(--text-secondary)'
-    const t = guidance.tech
     return (
       <div style={{ background:bg, border:`1px solid ${border}`, borderRadius:'var(--radius)', padding: compact ? '8px 12px' : '10px 14px', fontSize:12, color, lineHeight:1.5 }}>
         <span style={{ fontWeight:700 }}>
-          {isToday ? '\ud83d\udd25 High opportunity \u2014 get this on the board TODAY.' : isSoon ? 'Decent opportunity \u2014 book it soon.' : 'Routine call \u2014 any open window works.'}
+          {isToday ? '\ud83d\udd25 High opportunity \u2014 worth getting on the board TODAY.'
+            : isSoon ? 'Solid opportunity \u2014 book the earliest window that works.'
+            : 'Routine call \u2014 use the next best available window.'}
         </span>
         {guidance.reasons?.length > 0 && <span> {guidance.reasons.join(' \u00b7 ')}.</span>}
-        {isToday && guidance.boardFull && <span> Today looks full \u2014 <b>book it anyway</b>; dispatch will make room.</span>}
-        {t && (
-          <span> Aim for <b>{t.name}</b>{t.closeRate ? ` (${t.closeRate}% close \u00b7 $${(t.evPerOpp || 0).toLocaleString()}/opp)` : ''}{t.openWindows?.[0] ? ` \u2014 ${t.openWindows[0]} looks open` : ''}.</span>
-        )}
+        {isToday && <span> If you don't see availability today, <b>reach out to dispatch</b> \u2014 they'll move things around.</span>}
       </div>
     )
   }
@@ -979,8 +977,8 @@ export default function DialerPage() {
           repName: currentRep, contactName: c.name, phone: c.phone, zip: c.zip,
           start: selectedSlot?.start || null,
           end: selectedSlot?.end || null,
-          andiRec: guidance?.tech
-            ? `Andi recommends: ${guidance.tech.name} \u2014 ${guidance.urgency === 'today' ? 'HIGH OPPORTUNITY, keep today' : 'best fit'}${guidance.reasons?.length ? ` (${guidance.reasons.join(' \u00b7 ')})` : ''}`
+          andiRec: guidance?.urgency === 'today'
+            ? `Andi: HIGH OPPORTUNITY \u2014 keep this on the board today${guidance.reasons?.length ? ` (${guidance.reasons.join(' \u00b7 ')})` : ''}`
             : null,
         })
       })

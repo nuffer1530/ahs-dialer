@@ -3411,22 +3411,6 @@ async function computeLiveBoardPayload() {
       return [...theirs].sort((a, b) => (a.opportunity - b.opportunity))[0]
     }
 
-    // Book-time recommendation vs actual assignment. The CSR booking flow
-    // stamps "Andi recommends: <tech>" into the job summary; if dispatch put
-    // the call on someone else, surface it — info, not an order.
-    for (const c of calls) {
-      const m = /Andi recommends:\s*([^—\n(]+)/.exec(jobById.get(c.jobId)?.summary || '')
-      if (!m) continue
-      const recName = m[1].trim()
-      if (recName && c.techName && recName.toLowerCase() !== String(c.techName).toLowerCase()) {
-        c.flags.push({
-          level: 'info',
-          text: `Booked with Andi's pick: ${recName} — currently on ${c.techName}`,
-          why: ['The book-time recommendation named a different tech. Fine if deliberate.'],
-        })
-      }
-    }
-
     // Revenue already BOOKED for today: installs carry their invoice from when
     // the sale was made (verified — every install scheduled today has one).
     // The install job's own estimates are empty because the sale happened on a
@@ -4415,18 +4399,15 @@ app.post('/api/booking/guidance', async (req, res) => {
     const out = await computeDispatchDecision(req.body || {})
     if (out?.error) return res.status(out.status || 400).json({ error: out.error })
     const opp = out.opportunity ?? 0
-    const rec = out.recommendation || {}
-    const tech = rec.tech || (out.options || []).find(o => o.hasRoom) || (out.options || [])[0] || null
+    // Per Brandyn: the CSR gets the SIGNAL, the dispatcher keeps the judgment.
+    // No tech names here — a high-opportunity call routes the CSR to dispatch,
+    // who runs it through the Decision Maker and moves the board.
     res.json({
       urgency: opp >= 3 ? 'today' : opp >= 1 ? 'soon' : 'normal',
       opportunity: opp,
       reasons: out.opportunityReasons || [],
       trade: out.trade,
       boardFull: (out.options || []).length > 0 && !(out.options || []).some(o => o.hasRoom),
-      tech: tech ? {
-        name: tech.techName, evPerOpp: tech.expectedValue, closeRate: tech.closeRate,
-        hasRoom: tech.hasRoom, openWindows: tech.openWindows || [],
-      } : null,
     })
   } catch (err) {
     console.error('booking guidance error:', err.message)
