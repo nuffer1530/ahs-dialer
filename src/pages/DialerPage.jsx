@@ -934,7 +934,7 @@ export default function DialerPage() {
             : 'Routine call \u2014 use the next best available window.'}
         </span>
         {guidance.reasons?.length > 0 && <span> {guidance.reasons.join(' \u00b7 ')}.</span>}
-        {isToday && <span> If you don't see availability today, <b>reach out to dispatch</b> \u2014 they'll move things around.</span>}
+        {isToday && <span> If you don't see availability today, <b>reach out to dispatch</b> — they'll move things around.</span>}
       </div>
     )
   }
