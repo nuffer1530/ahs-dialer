@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { sb } from '../lib/supabase'
 import { useAuth } from '../lib/AuthContext'
 
@@ -109,6 +109,18 @@ export default function CallBoardPage() {
   const [drill, setDrill] = useState(null)
   const [config, setConfig] = useState(null)
   const [showConfig, setShowConfig] = useState(false)
+  // Fullscreen — same browser API the Call Center TV uses.
+  const rootRef = useRef(null)
+  const [isFull, setIsFull] = useState(false)
+  const toggleFull = () => {
+    if (document.fullscreenElement) document.exitFullscreen?.()
+    else rootRef.current?.requestFullscreen?.()
+  }
+  useEffect(() => {
+    const onFs = () => setIsFull(!!document.fullscreenElement)
+    document.addEventListener('fullscreenchange', onFs)
+    return () => document.removeEventListener('fullscreenchange', onFs)
+  }, [])
 
   const load = useCallback(async () => {
     try {
@@ -142,7 +154,7 @@ export default function CallBoardPage() {
   const drillItems = drill?.items || []
 
   return (
-    <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden' }}>
+    <div ref={rootRef} style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden', background:'var(--bg)' }}>
       {/* Slim toolbar (page title is already in the top bar) */}
       <div style={{ background:'var(--surface)', borderBottom:'1px solid var(--border)', flexShrink:0, padding:'10px 24px', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
         <span style={{ fontSize:12, color:'var(--text-muted)' }}>Target {data?.target ?? 80}% · live from ServiceTitan</span>
@@ -156,6 +168,14 @@ export default function CallBoardPage() {
             </button>
           )}
           <button className="btn sm" onClick={load}>Refresh</button>
+          <button className="btn sm" onClick={toggleFull} title={isFull ? 'Exit fullscreen' : 'Fullscreen'} style={{ display:'flex', alignItems:'center', gap:5 }}>
+            {isFull ? (
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M9 3v3a3 3 0 01-3 3H3M15 3v3a3 3 0 003 3h3M9 21v-3a3 3 0 00-3-3H3M15 21v-3a3 3 0 013-3h3" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
+            ) : (
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M3 9V5a2 2 0 012-2h4M21 9V5a2 2 0 00-2-2h-4M3 15v4a2 2 0 002 2h4M21 15v4a2 2 0 01-2 2h-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
+            )}
+            {isFull ? 'Exit' : 'Fullscreen'}
+          </button>
         </div>
       </div>
 
