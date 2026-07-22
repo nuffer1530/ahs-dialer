@@ -30,6 +30,7 @@ export default function CampaignsPage() {
   // campaign (inbound, ST search, leads without their own script).
   const [inbForm, setInbForm] = useState(null)
   const [inbMsg, setInbMsg] = useState('')
+  const [inbOpen, setInbOpen] = useState(false)   // collapsed by default — it's set-and-forget config
   const [inbDirty, setInbDirty] = useState(false)
   useEffect(() => {
     if (!isAdmin) return
@@ -228,12 +229,16 @@ export default function CampaignsPage() {
 
       {isAdmin && inbForm && (
         <div className="card" style={{ marginBottom:16 }}>
-          <div className="card-header">
-            <div className="card-title">Inbound call script & tips</div>
+          <div className="card-header" onClick={() => setInbOpen(v => !v)} style={{ cursor:'pointer', userSelect:'none' }}>
+            <div className="card-title" style={{ display:'flex', alignItems:'center', gap:8 }}>
+              <span style={{ display:'inline-block', transition:'transform .15s', transform: inbOpen ? 'rotate(90deg)' : 'none', fontSize:11 }}>▶</span>
+              Inbound call script & tips
+            </div>
             <span style={{ fontSize:11, color: inbMsg.startsWith('Error') ? 'var(--danger)' : 'var(--text-muted)' }}>
-              {inbMsg || 'Shown on any call without a campaign — inbound calls, ST searches, leads. Saves automatically.'}
+              {inbMsg || (inbOpen ? 'Shown on any call without a campaign — inbound calls, ST searches, leads. Saves automatically.' : 'Click to edit')}
             </span>
           </div>
+          {inbOpen && (
           <div className="card-body" style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14 }}>
             <div className="form-field">
               <label className="form-label">Inbound script</label>
@@ -246,6 +251,7 @@ export default function CampaignsPage() {
                 onChange={v => { setInbForm(f => ({ ...f, tips: v })); setInbDirty(true) }} />
             </div>
           </div>
+          )}
         </div>
       )}
 
