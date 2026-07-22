@@ -604,6 +604,47 @@ export default function DialerPage() {
     if (created) { setContacts(prev => [created, ...prev]); selectContact(created.id) }
   }
 
+  // Customer tags: add/remove straight on the ST account. Heavy tags (DNC,
+  // Do Not Service) get a confirm click before they fly.
+  const [tagPicker, setTagPicker] = useState(false)
+  const [tagCatalog, setTagCatalog] = useState(null)
+  const [tagSearch, setTagSearch] = useState('')
+  const [tagBusy, setTagBusy] = useState(false)
+  const [tagErr, setTagErr] = useState('')
+  const DANGER_TAG = /do not service|dnc|do not call/i
+  const openTagPicker = async () => {
+    setTagPicker(true); setTagSearch(''); setTagErr('')
+    if (!tagCatalog) {
+      try {
+        const r = await fetch('/api/st/tag-types')
+        const d = await r.json()
+        setTagCatalog(d.tags || [])
+      } catch { setTagCatalog([]) }
+    }
+  }
+  const mutateTags = async (patch) => {
+    if (!c?.external_id) return
+    setTagBusy(true); setTagErr('')
+    try {
+      const r = await fetch(`/api/st/customer/${c.external_id}/tags`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch),
+      })
+      const d = await r.json()
+      if (!r.ok) throw new Error(d.error || 'Tag update failed')
+      setStCustomerInfo(prev => (prev ? { ...prev, tags: d.tags } : prev))
+    } catch (e) { setTagErr(e.message) }
+    setTagBusy(false)
+  }
+  const addTag = async (t) => {
+    if (DANGER_TAG.test(t.name) && !confirm(`"${t.name}" is a heavy tag — add it to this ServiceTitan account?`)) return
+    await mutateTags({ add: [t.id] })
+    setTagPicker(false)
+  }
+  const removeTag = async (t) => {
+    if (DANGER_TAG.test(t.name) && !confirm(`Remove "${t.name}" from this ServiceTitan account?`)) return
+    await mutateTags({ remove: [t.id] })
+  }
+
   // Brand-new customer: create them in ServiceTitan without leaving Andi,
   // link (or create) the local contact, and the normal booking flow takes
   // over. forContactId links an existing unlinked contact instead.
@@ -1350,15 +1391,25 @@ export default function DialerPage() {
                     {isDup && <span style={{ fontSize:10, fontWeight:700, background:'#F3E8FF', color:'#5B21B6', border:'1px solid #DDD6FE', borderRadius:99, padding:'1px 6px' }}>Duplicate</span>}
                     {campName(c) && <span style={{ fontSize:10, background:'var(--surface-2)', color:'var(--text-muted)', border:'1px solid var(--border)', borderRadius:99, padding:'1px 7px' }}>{campName(c)}</span>}
                     {/* ServiceTitan customer tags, in ST's own colors */}
-                    {(stCustomerInfo?.tags || []).slice(0, 8).map((t, i) => (
-                      <span key={`sttag-${i}`} title="ServiceTitan tag" style={{ fontSize:10, fontWeight:700, borderRadius:99, padding:'1px 7px',
-                        background: `${t.color || '#888780'}1F`, color: t.color || 'var(--text-secondary)', border: `1px solid ${t.color || 'var(--border)'}` }}>
+                    {(stCustomerInfo?.tags || []).map((t, i) => (
+                      <span key={`sttag-${i}`} title="ServiceTitan tag" style={{ fontSize:10, fontWeight:700, borderRadius:99, padding:'1px 4px 1px 7px',
+                        background: `${t.color || '#888780'}1F`, color: t.color || 'var(--text-secondary)', border: `1px solid ${t.color || 'var(--border)'}`,
+                        display:'inline-flex', alignItems:'center', gap:3 }}>
                         {t.name}
+                        <span onClick={() => !tagBusy && removeTag(t)} title="Remove tag from the ST account"
+                          style={{ cursor:'pointer', opacity:.55, fontSize:11, lineHeight:1, padding:'0 2px' }}
+                          onMouseEnter={e => e.currentTarget.style.opacity = 1}
+                          onMouseLeave={e => e.currentTarget.style.opacity = .55}>×</span>
                       </span>
                     ))}
-                    {(stCustomerInfo?.tags || []).length > 8 && (
-                      <span style={{ fontSize:10, color:'var(--text-muted)' }}>+{stCustomerInfo.tags.length - 8} more</span>
+                    {c.external_id && (
+                      <span onClick={openTagPicker} title="Add a ServiceTitan tag"
+                        style={{ fontSize:10, fontWeight:700, borderRadius:99, padding:'1px 8px', cursor:'pointer',
+                          background:'var(--surface-2)', color:'var(--accent)', border:'1px dashed var(--accent)' }}>
+                        + Tag
+                      </span>
                     )}
+                    {tagErr && <span style={{ fontSize:10, color:'var(--danger)' }}>{tagErr}</span>}
                   </div>
                   <div style={{ display:'flex', gap:16, marginTop:3 }}>
                     {[c.phone, c.email, [c.address,c.city,c.state].filter(Boolean).join(', ')].filter(Boolean).map((v,i) => (
@@ -2011,6 +2062,32 @@ export default function DialerPage() {
       )}
 
       {/* TEXT MODAL */}
+      {tagPicker && (
+        <Modal title="Add a ServiceTitan tag" onClose={() => setTagPicker(false)} width={420}>
+          <input className="form-input" placeholder="Search tags..." value={tagSearch} autoFocus
+            onChange={e => setTagSearch(e.target.value)} style={{ marginBottom:10 }} />
+          <div style={{ maxHeight:320, overflowY:'auto', display:'flex', flexDirection:'column' }}>
+            {tagCatalog === null ? (
+              <div style={{ padding:16, textAlign:'center' }}><div className="spinner" /></div>
+            ) : (tagCatalog
+              .filter(t => !(stCustomerInfo?.tags || []).some(x => x.id === t.id))
+              .filter(t => !tagSearch.trim() || t.name.toLowerCase().includes(tagSearch.trim().toLowerCase()))
+              .slice(0, 60)
+              .map(t => (
+                <button key={t.id} onClick={() => addTag(t)} disabled={tagBusy}
+                  style={{ display:'flex', alignItems:'center', gap:8, width:'100%', textAlign:'left', padding:'8px 10px',
+                    background:'transparent', border:'none', borderBottom:'1px solid var(--border)', cursor:'pointer', fontSize:12, color:'var(--text-primary)' }}
+                  onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
+                  onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                  <span style={{ width:10, height:10, borderRadius:'50%', background: t.color || 'var(--border)', flexShrink:0 }} />
+                  {t.name}
+                </button>
+              )))}
+          </div>
+          <div style={{ fontSize:10, color:'var(--text-muted)', marginTop:8 }}>Tags write straight to the ServiceTitan account.</div>
+        </Modal>
+      )}
+
       {newCust && (
         <Modal title={newCust.forContactId ? 'Create this customer in ServiceTitan' : 'New ServiceTitan customer'} onClose={() => setNewCust(null)} width={480}>
           <div style={{ display:'flex', flexDirection:'column', gap:12 }}>

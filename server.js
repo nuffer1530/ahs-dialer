@@ -294,6 +294,41 @@ app.post('/api/st/customer/create', async (req, res) => {
   }
 })
 
+// Full ST tag catalog for the picker (6h-cached upstream).
+app.get('/api/st/tag-types', async (req, res) => {
+  try {
+    const map = await getTagTypes()
+    res.json({ tags: [...map.entries()].map(([id, t]) => ({ id, name: t.name, color: t.color }))
+      .sort((a, b) => String(a.name).localeCompare(String(b.name))) })
+  } catch (err) { res.status(500).json({ error: err.message }) }
+})
+
+// Add/remove customer tags — writes straight to the ST account. Read-modify-
+// write on tagTypeIds; _retry stays on (a repeated PATCH of the same set is
+// idempotent, unlike a create).
+app.post('/api/st/customer/:id/tags', async (req, res) => {
+  try {
+    const id = req.params.id
+    const add = (req.body?.add || []).map(Number).filter(Boolean)
+    const remove = (req.body?.remove || []).map(Number).filter(Boolean)
+    if (!add.length && !remove.length) return res.status(400).json({ error: 'Nothing to change' })
+    const cust = await stGet(`/crm/v2/tenant/${ST_TENANT_ID}/customers/${id}`)
+    const cur = new Set((cust?.tagTypeIds || []).map(Number))
+    add.forEach(t => cur.add(t))
+    remove.forEach(t => cur.delete(t))
+    const updated = await stPatch(`/crm/v2/tenant/${ST_TENANT_ID}/customers/${id}`, { tagTypeIds: [...cur] })
+    const map = await getTagTypes().catch(() => new Map())
+    const tags = (updated?.tagTypeIds || [...cur]).map(tid => {
+      const t = map.get(Number(tid))
+      return t ? { id: Number(tid), ...t } : null
+    }).filter(Boolean)
+    res.json({ ok: true, tags })
+  } catch (err) {
+    console.error('ST tag update error:', err.message)
+    res.status(500).json({ error: err.message })
+  }
+})
+
 app.get('/api/st/customer/:id', async (req, res) => {
   try {
     const id = req.params.id
@@ -332,7 +367,10 @@ app.get('/api/st/customer/:id', async (req, res) => {
       const locNotes = locId
         ? await stGet(`/crm/v2/tenant/${ST_TENANT_ID}/locations/${locId}/notes?pageSize=10`).catch(() => null)
         : null
-      tags = (customer?.tagTypeIds || []).map(tid => tagTypes.get(tid)).filter(Boolean)
+      tags = (customer?.tagTypeIds || []).map(tid => {
+        const t = tagTypes.get(tid)
+        return t ? { id: tid, ...t } : null
+      }).filter(Boolean)
       notes = [...(custNotes?.data || []), ...(locNotes?.data || [])]
         .filter(n => n?.text)
         .sort((a, b) => Date.parse(b.createdOn || 0) - Date.parse(a.createdOn || 0))
