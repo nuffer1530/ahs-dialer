@@ -15,60 +15,64 @@ const DAY_LABELS = ['Today', 'Tomorrow', 'Day 3']
 const ST_JOB_URL = (jobId) => `https://go.servicetitan.com/#/Job/Index/${jobId}`
 
 // One clickable metric column in a cell's footer strip.
-function Metric({ label, value, accent, onClick }) {
+function Metric({ label, value, accent, onClick, tv }) {
+  const fz = (n) => (tv ? Math.round(n * 1.55) : n)
   return (
     <button onClick={onClick} title="Click to see what's counted"
-      style={{ flex:1, minWidth:0, padding:'10px 6px', border:'none', background:'transparent', cursor:'pointer',
-        display:'flex', flexDirection:'column', alignItems:'center', gap:3, borderRadius:6 }}
+      style={{ flex:1, minWidth:0, padding: tv ? '14px 8px' : '10px 6px', border:'none', background:'transparent', cursor:'pointer',
+        display:'flex', flexDirection:'column', alignItems:'center', gap: tv ? 5 : 3, borderRadius:6 }}
       onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
       onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-      <span style={{ fontSize:18, fontWeight:800, color: accent || 'var(--text-primary)', fontVariantNumeric:'tabular-nums', lineHeight:1 }}>{value}</span>
-      <span style={{ fontSize:10, fontWeight:600, textTransform:'uppercase', letterSpacing:.4, color:'var(--text-muted)', whiteSpace:'nowrap' }}>{label}</span>
+      <span style={{ fontSize:fz(18), fontWeight:800, color: accent || 'var(--text-primary)', fontVariantNumeric:'tabular-nums', lineHeight:1 }}>{value}</span>
+      <span style={{ fontSize:fz(10), fontWeight:600, textTransform:'uppercase', letterSpacing:.4, color:'var(--text-muted)', whiteSpace:'nowrap' }}>{label}</span>
     </button>
   )
 }
 
-function Cell({ trade, dayLabel, d, onDrill }) {
+function Cell({ trade, dayLabel, d, onDrill, tv }) {
   const s = STATUS[d.status] || STATUS.none
   const oppRate = d.calls ? Math.round((d.opps / d.calls) * 100) : null
+  // TV mode (fullscreen): everything scales up and the card stretches to
+  // fill its row so the wall monitor is actually readable from the floor.
+  const fz = (n) => (tv ? Math.round(n * 1.55) : n)
   return (
     <div style={{ border:`1px solid var(--border)`, borderRadius:14, overflow:'hidden', background:'var(--surface)', display:'flex', flexDirection:'column' }}>
       {/* Status header */}
-      <div style={{ background:s.bg, padding:'7px 14px', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
-        <span style={{ fontSize:13, fontWeight:800, color:s.color, fontVariantNumeric:'tabular-nums' }}>{d.pct}%</span>
-        <span style={{ fontSize:10, fontWeight:700, color:s.color, textTransform:'uppercase', letterSpacing:.5 }}>{s.label}</span>
+      <div style={{ background:s.bg, padding: tv ? '10px 18px' : '7px 14px', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+        <span style={{ fontSize:fz(13), fontWeight:800, color:s.color, fontVariantNumeric:'tabular-nums' }}>{d.pct}%</span>
+        <span style={{ fontSize:fz(10), fontWeight:700, color:s.color, textTransform:'uppercase', letterSpacing:.5 }}>{s.label}</span>
       </div>
       {/* Hero: calls needed — or Opportunity Watch when the board is full.
           Full is NOT closed: high-value calls still get booked, dispatch
           makes room by moving low-value ones. The flag keeps CSRs selling. */}
       {d.oppWatch ? (
-        <div style={{ padding:'16px 16px 12px', display:'flex', flexDirection:'column', gap:4 }}>
-          <span style={{ fontSize:20, fontWeight:800, lineHeight:1, color:'#7C3AED', letterSpacing:.3 }}>
+        <div style={{ padding: tv ? '22px 20px 16px' : '16px 16px 12px', display:'flex', flexDirection:'column', gap: tv ? 7 : 4, flex: tv ? 1 : undefined, justifyContent: tv ? 'center' : undefined }}>
+          <span style={{ fontSize:fz(20), fontWeight:800, lineHeight:1, color:'#7C3AED', letterSpacing:.3 }}>
             👀 Opportunity Watch
           </span>
-          <span style={{ fontSize:11, color:'var(--text-muted)', fontWeight:600 }}>
+          <span style={{ fontSize:fz(11), color:'var(--text-muted)', fontWeight:600 }}>
             Board is full — keep booking strong calls, we'll make room
           </span>
         </div>
       ) : (
-        <div style={{ padding:'16px 16px 12px', display:'flex', alignItems:'baseline', gap:10 }}>
-          <span style={{ fontSize:46, fontWeight:800, lineHeight:.9, color: d.needed > 0 ? s.color : '#16A34A', fontVariantNumeric:'tabular-nums' }}>
+        <div style={{ padding: tv ? '22px 20px 16px' : '16px 16px 12px', display:'flex', alignItems: tv ? 'center' : 'baseline', gap:10, flex: tv ? 1 : undefined }}>
+          <span style={{ fontSize:fz(46), fontWeight:800, lineHeight:.9, color: d.needed > 0 ? s.color : '#16A34A', fontVariantNumeric:'tabular-nums' }}>
             {d.needed > 0 ? d.needed : '✓'}
           </span>
-          <span style={{ fontSize:12, color:'var(--text-muted)', fontWeight:600 }}>{d.needed > 0 ? 'calls needed' : 'at target'}</span>
+          <span style={{ fontSize:fz(12), color:'var(--text-muted)', fontWeight:600 }}>{d.needed > 0 ? 'calls needed' : 'at target'}</span>
         </div>
       )}
       {/* Metric strip */}
       <div style={{ display:'flex', borderTop:'1px solid var(--border)', marginTop:'auto' }}>
-        <Metric label="Techs" value={d.techs} onClick={() => onDrill(trade, dayLabel, 'Service techs', d.detail.techs, 'tech')} />
+        <Metric tv={tv} label="Techs" value={d.techs} onClick={() => onDrill(trade, dayLabel, 'Service techs', d.detail.techs, 'tech')} />
         <div style={{ width:1, background:'var(--border)' }} />
-        <Metric label="Booked" value={`${d.calls}/${d.capacity}`} onClick={() => onDrill(trade, dayLabel, 'Booked calls', d.detail.calls, 'job')} />
+        <Metric tv={tv} label="Booked" value={`${d.calls}/${d.capacity}`} onClick={() => onDrill(trade, dayLabel, 'Booked calls', d.detail.calls, 'job')} />
         <div style={{ width:1, background:'var(--border)' }} />
-        <Metric label={oppRate != null ? `Opps ${oppRate}%` : 'Opps'} value={d.opps}
+        <Metric tv={tv} label={oppRate != null ? `Opps ${oppRate}%` : 'Opps'} value={d.opps}
           accent={oppRate == null ? undefined : oppRate >= 30 ? '#16A34A' : '#DC2626'}
           onClick={() => onDrill(trade, dayLabel, 'Opportunities', d.detail.opps, 'job')} />
         <div style={{ width:1, background:'var(--border)' }} />
-        <Metric label="Installs" value={d.installs} onClick={() => onDrill(trade, dayLabel, 'Installs', d.detail.installs, 'job')} />
+        <Metric tv={tv} label="Installs" value={d.installs} onClick={() => onDrill(trade, dayLabel, 'Installs', d.detail.installs, 'job')} />
       </div>
     </div>
   )
@@ -160,14 +164,14 @@ export default function CallBoardPage() {
         <span style={{ fontSize:12, color:'var(--text-muted)' }}>Target {data?.target ?? 80}% · live from ServiceTitan</span>
         <div style={{ display:'flex', alignItems:'center', gap:12 }}>
           {refreshedAt && <span style={{ fontSize:11, color:'var(--text-muted)' }}>Updated {refreshedAt.toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' })}</span>}
-          {isAdmin && <button className="btn sm" onClick={openConfig}>Calls / tech</button>}
-          {isAdmin && (
+          {!isFull && isAdmin && <button className="btn sm" onClick={openConfig}>Calls / tech</button>}
+          {!isFull && isAdmin && (
             <button className="btn sm" onClick={emailMe} disabled={emailing}
               title="Send this board to your own email — nobody else receives it">
               {emailing ? 'Sending…' : emailMsg || 'Email me this board'}
             </button>
           )}
-          <button className="btn sm" onClick={load}>Refresh</button>
+          {!isFull && <button className="btn sm" onClick={load}>Refresh</button>}
           <button className="btn sm" onClick={toggleFull} title={isFull ? 'Exit fullscreen' : 'Fullscreen'} style={{ display:'flex', alignItems:'center', gap:5 }}>
             {isFull ? (
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M9 3v3a3 3 0 01-3 3H3M15 3v3a3 3 0 003 3h3M9 21v-3a3 3 0 00-3-3H3M15 21v-3a3 3 0 013-3h3" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
@@ -179,33 +183,35 @@ export default function CallBoardPage() {
         </div>
       </div>
 
-      <div style={{ flex:1, overflow:'auto', padding:'20px 24px', background:'var(--bg)' }}>
+      <div style={{ flex:1, overflow: isFull ? 'hidden' : 'auto', padding: isFull ? '16px 28px 24px' : '20px 24px', background:'var(--bg)' }}>
         {loading ? <div className="spinner lg" style={{ margin:'60px auto' }} /> :
          error ? <div style={{ color:'var(--danger)', fontSize:13, background:'var(--danger-bg)', padding:'12px 16px', borderRadius:'var(--radius)' }}>Couldn’t load the board: {error}</div> :
          !data ? null : (
-          <div style={{ display:'flex', flexDirection:'column', gap:18 }}>
+          <div style={{ display:'flex', flexDirection:'column', gap: isFull ? 14 : 18, height: isFull ? '100%' : undefined }}>
             {/* Day headers */}
-            <div style={{ display:'grid', gridTemplateColumns:'130px repeat(3, 1fr)', gap:16, alignItems:'end' }}>
+            <div style={{ display:'grid', gridTemplateColumns: `${isFull ? 170 : 130}px repeat(3, 1fr)`, gap:16, alignItems:'end', flexShrink:0 }}>
               <div />
               {data.dates.map((date, i) => (
                 <div key={date} style={{ textAlign:'center' }}>
-                  <div style={{ fontSize:15, fontWeight:800 }}>{DAY_LABELS[i]}</div>
-                  <div style={{ fontSize:11, color:'var(--text-muted)' }}>{new Date(date + 'T12:00:00').toLocaleDateString([], { weekday:'long', month:'short', day:'numeric' })}</div>
+                  <div style={{ fontSize: isFull ? 24 : 15, fontWeight:800 }}>{DAY_LABELS[i]}</div>
+                  <div style={{ fontSize: isFull ? 15 : 11, color:'var(--text-muted)' }}>{new Date(date + 'T12:00:00').toLocaleDateString([], { weekday:'long', month:'short', day:'numeric' })}</div>
                 </div>
               ))}
             </div>
-            {/* Trade rows */}
+            {/* Trade rows — in TV mode each row takes an equal share of the screen */}
             {data.board.map(row => (
-              <div key={row.trade} style={{ display:'grid', gridTemplateColumns:'130px repeat(3, 1fr)', gap:16, alignItems:'stretch' }}>
-                <div style={{ display:'flex', alignItems:'center', fontSize:17, fontWeight:800 }}>{row.trade}</div>
-                {row.days.map((d, i) => <Cell key={i} trade={row.trade} dayLabel={DAY_LABELS[i]} d={d} onDrill={(t, day, label, items, kind) => setDrill({ trade:t, day, label, items, kind })} />)}
+              <div key={row.trade} style={{ display:'grid', gridTemplateColumns: `${isFull ? 170 : 130}px repeat(3, 1fr)`, gap:16, alignItems:'stretch', flex: isFull ? 1 : undefined, minHeight:0 }}>
+                <div style={{ display:'flex', alignItems:'center', fontSize: isFull ? 26 : 17, fontWeight:800 }}>{row.trade}</div>
+                {row.days.map((d, i) => <Cell key={i} tv={isFull} trade={row.trade} dayLabel={DAY_LABELS[i]} d={d} onDrill={(t, day, label, items, kind) => setDrill({ trade:t, day, label, items, kind })} />)}
               </div>
             ))}
-            <div style={{ fontSize:11, color:'var(--text-muted)', marginTop:4, lineHeight:1.6 }}>
-              Click any number to see what it counts. Techs = service technicians scheduled (install crews excluded).
-              Booked excludes follow-up, callback, permitting and phone-call jobs.
-              Opps also exclude installs, warranty, and maintenance — except HVAC maintenance on systems 12+ years old.
-            </div>
+            {!isFull && (
+              <div style={{ fontSize:11, color:'var(--text-muted)', marginTop:4, lineHeight:1.6 }}>
+                Click any number to see what it counts. Techs = service technicians scheduled (install crews excluded).
+                Booked excludes follow-up, callback, permitting and phone-call jobs.
+                Opps also exclude installs, warranty, and maintenance — except HVAC maintenance on systems 12+ years old.
+              </div>
+            )}
           </div>
         )}
       </div>
