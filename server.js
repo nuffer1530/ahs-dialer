@@ -355,9 +355,23 @@ app.get('/api/st/availability', async (req, res) => {
       return res.status(400).json({ error: 'jobTypeId and businessUnitId required' })
     }
 
+    // ST's capacity API speaks DENVER WALL TIME with a fake Z suffix (its slot
+    // starts like 16:00:00Z mean 4 PM Denver — verified against the ST UI).
+    // Anchoring the request at true-UTC "now" therefore asked for availability
+    // starting SIX HOURS in the future: today's mid-day windows vanished and
+    // the rest showed slivers ("0.28 open" = minutes left after the phantom
+    // anchor). Convert the anchor instants to Denver wall time first.
+    const denverWallISO = (d) => {
+      const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'America/Denver', hour12: false,
+        year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', second: '2-digit',
+      }).formatToParts(d).map(x => [x.type, x.value]))
+      return `${p.year}-${p.month}-${p.day}T${p.hour === '24' ? '00' : p.hour}:${p.minute}:${p.second}Z`
+    }
     const body = {
-      startsOnOrAfter: from || new Date().toISOString(),
-      endsOnOrBefore: to || new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
+      startsOnOrAfter: denverWallISO(from ? new Date(from) : new Date()),
+      endsOnOrBefore: denverWallISO(to ? new Date(to) : new Date(Date.now() + 14 * 24 * 60 * 60 * 1000)),
       businessUnitIds: [parseInt(businessUnitId)],
       jobTypeId: parseInt(jobTypeId),
       skillBasedAvailability: true,
