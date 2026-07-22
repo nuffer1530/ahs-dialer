@@ -1151,7 +1151,7 @@ app.get('/api/admin/commission/sync-status', async (req, res) => {
 // ── ST: Create booking (direct to dispatch board, unscheduled)
 app.post('/api/st/book', async (req, res) => {
   try {
-    const { customerId, jobTypeId, businessUnitId, notes, repName, contactName, phone, zip, start, end, campaignId } = req.body
+    const { customerId, jobTypeId, businessUnitId, notes, repName, contactName, phone, zip, start, end, campaignId, andiRec } = req.body
     if (!customerId || !jobTypeId || !businessUnitId) {
       return res.status(400).json({ error: 'customerId, jobTypeId, and businessUnitId required' })
     }
@@ -1180,8 +1180,10 @@ app.post('/api/st/book', async (req, res) => {
       businessUnitId: parseInt(businessUnitId),
       campaignId: stCampaignId,
       priority: 'Normal',
-      summary: notes || `Booked via Andi — ${repName || 'CSR'}`,
-      body: notes || `Booked via Andi — ${repName || 'CSR'}`,
+      // The book-time recommendation travels ON the job so dispatch sees it
+      // in ST and the Live Board can flag pick-vs-assignment mismatches.
+      summary: `${notes || `Booked via Andi — ${repName || 'CSR'}`}${andiRec ? `\n\n${andiRec}` : ''}`,
+      body: `${notes || `Booked via Andi — ${repName || 'CSR'}`}${andiRec ? `\n\n${andiRec}` : ''}`,
       tagTypeIds: [],
     }
 
@@ -3409,6 +3411,22 @@ async function computeLiveBoardPayload() {
       return [...theirs].sort((a, b) => (a.opportunity - b.opportunity))[0]
     }
 
+    // Book-time recommendation vs actual assignment. The CSR booking flow
+    // stamps "Andi recommends: <tech>" into the job summary; if dispatch put
+    // the call on someone else, surface it — info, not an order.
+    for (const c of calls) {
+      const m = /Andi recommends:\s*([^—\n(]+)/.exec(jobById.get(c.jobId)?.summary || '')
+      if (!m) continue
+      const recName = m[1].trim()
+      if (recName && c.techName && recName.toLowerCase() !== String(c.techName).toLowerCase()) {
+        c.flags.push({
+          level: 'info',
+          text: `Booked with Andi's pick: ${recName} — currently on ${c.techName}`,
+          why: ['The book-time recommendation named a different tech. Fine if deliberate.'],
+        })
+      }
+    }
+
     // Revenue already BOOKED for today: installs carry their invoice from when
     // the sale was made (verified — every install scheduled today has one).
     // The install job's own estimates are empty because the sale happened on a
@@ -4002,21 +4020,23 @@ app.get('/api/dispatch/geocode-suggest', async (req, res) => {
   }
 })
 
-app.post('/api/dispatch/decide', async (req, res) => {
-  if (!(await requireDispatch(req, res))) return
-  try {
-    const jobType = String(req.body?.jobType || '').trim()
-    const address = String(req.body?.address || '').trim()
-    const urgent = Boolean(req.body?.urgent)   // "must run today" override
+// The decision BRAIN, shared: the Dispatch tab's Decision Maker and the CSR
+// booking-flow guidance call this with the same inputs and get the same
+// answer. Returns { error, status } instead of throwing for input problems.
+async function computeDispatchDecision(input) {
+  {
+    const jobType = String(input?.jobType || '').trim()
+    const address = String(input?.address || '').trim()
+    const urgent = Boolean(input?.urgent)   // "must run today" override
     // What the dispatcher already knows from the call. A new job has no ST
     // notes yet, so this is the only way a "2-year-old no cool" reaches the
     // model. Age can be typed directly or parsed out of the notes text.
-    const givenAge = req.body?.systemAge != null && req.body.systemAge !== '' ? Number(req.body.systemAge) : null
-    const callNotes = String(req.body?.notes || '').trim()
-    if (!jobType) return res.status(400).json({ error: 'A job type is required.' })
+    const givenAge = input?.systemAge != null && input.systemAge !== '' ? Number(input.systemAge) : null
+    const callNotes = String(input?.notes || '').trim()
+    if (!jobType) return { error: 'A job type is required.', status: 400 }
 
     const trade = tradeOfJobType(jobType)
-    if (!trade) return res.status(400).json({ error: `Couldn't tell which trade "${jobType}" belongs to. Try including the trade name.` })
+    if (!trade) return { error: `Couldn't tell which trade "${jobType}" belongs to. Try including the trade name.`, status: 400 }
 
     // Where is it? Zip value + a point to measure drive time from.
     const geo = address ? await geocode(address, supabase) : null
@@ -4358,7 +4378,7 @@ app.post('/api/dispatch/decide', async (req, res) => {
       }
     }
 
-    res.json({
+    return {
       trade, jobType, address: address || null,
       resolvedAddress: geo?.placeName || null,
       shiftDataMissing: geo && !workingTechs ? true : undefined,
@@ -4370,9 +4390,46 @@ app.post('/api/dispatch/decide', async (req, res) => {
       recommendation,
       options: options.slice(0, 6),
       boardContext: { totalAssigned: assignments.length, benchSize: candidates.length, capacity: cap },
-    })
+    }
+  }
+}
+
+app.post('/api/dispatch/decide', async (req, res) => {
+  if (!(await requireDispatch(req, res))) return
+  try {
+    const out = await computeDispatchDecision(req.body || {})
+    if (out?.error) return res.status(out.status || 400).json({ error: out.error })
+    res.json(out)
   } catch (err) {
     console.error('decide error:', err.message)
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// CSR booking guidance — the same decision math the Dispatch tab runs,
+// packaged for the booking panel: how urgent is this call, who should run
+// it, and what to do when the board is already full (book it anyway —
+// dispatch makes room; the bump details stay dispatcher-side).
+app.post('/api/booking/guidance', async (req, res) => {
+  try {
+    const out = await computeDispatchDecision(req.body || {})
+    if (out?.error) return res.status(out.status || 400).json({ error: out.error })
+    const opp = out.opportunity ?? 0
+    const rec = out.recommendation || {}
+    const tech = rec.tech || (out.options || []).find(o => o.hasRoom) || (out.options || [])[0] || null
+    res.json({
+      urgency: opp >= 3 ? 'today' : opp >= 1 ? 'soon' : 'normal',
+      opportunity: opp,
+      reasons: out.opportunityReasons || [],
+      trade: out.trade,
+      boardFull: (out.options || []).length > 0 && !(out.options || []).some(o => o.hasRoom),
+      tech: tech ? {
+        name: tech.techName, evPerOpp: tech.expectedValue, closeRate: tech.closeRate,
+        hasRoom: tech.hasRoom, openWindows: tech.openWindows || [],
+      } : null,
+    })
+  } catch (err) {
+    console.error('booking guidance error:', err.message)
     res.status(500).json({ error: err.message })
   }
 })

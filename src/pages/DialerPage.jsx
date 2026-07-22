@@ -245,6 +245,7 @@ export default function DialerPage() {
   const [bookingResult, setBookingResult] = useState(null)
   const [selectedSlot, setSelectedSlot] = useState(null)
   const [showAvailModal, setShowAvailModal] = useState(false)
+  const [guidance, setGuidance] = useState(null)   // dispatch-brain read of THIS call
   const [availWeekOffset, setAvailWeekOffset] = useState(0)
   const [stLoading, setStLoading] = useState(false)
 
@@ -396,7 +397,7 @@ export default function DialerPage() {
   const resetBookingPanel = () => {
     setSelectedBU(''); setSelectedJobType(''); setStCampaignId(null)
     setAvailability([]); setSelectedSlot(null); setAvailError(null)
-    setShowAvailModal(false); setAvailWeekOffset(0)
+    setShowAvailModal(false); setAvailWeekOffset(0); setGuidance(null)
   }
   useEffect(() => {
     setNotesVal(''); setBookingResult(null); setSelectedOutcome(null)
@@ -893,7 +894,18 @@ export default function DialerPage() {
       const c = selectedContact
       const params = new URLSearchParams({ jobTypeId: selectedJobType, businessUnitId: selectedBU, from, to })
       if (c?.zip) params.set('zip', c.zip)
-      const res = await fetch(`/api/st/availability?${params}`)
+      // Same moment, two brains: the window grid AND the dispatch read of
+      // this exact call (notes -> opportunity, best tech, urgency).
+      const jtName = (jtOptions.find(o => String(o.value) === String(selectedJobType)) || {}).label || ''
+      const addr = [c?.address, c?.city, c?.state, c?.zip].filter(Boolean).join(', ')
+      const [res, g] = await Promise.all([
+        fetch(`/api/st/availability?${params}`),
+        fetch('/api/booking/guidance', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ jobType: jtName, address: addr, notes: notesVal }),
+        }).then(r => (r.ok ? r.json() : null)).catch(() => null),
+      ])
+      setGuidance(g && g.urgency ? g : null)
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Failed to load availability')
       const slots = data?.availabilities || data?.data || []
@@ -904,6 +916,29 @@ export default function DialerPage() {
     } catch (e) {
       setAvailError(e.message)
     } finally { setAvailLoading(false) }
+  }
+
+
+  const GuidanceBanner = ({ compact }) => {
+    if (!guidance) return null
+    const isToday = guidance.urgency === 'today'
+    const isSoon = guidance.urgency === 'soon'
+    const bg = isToday ? '#FEF2F2' : isSoon ? '#FFFBEB' : 'var(--surface-2)'
+    const border = isToday ? '#FCA5A5' : isSoon ? '#FCD34D' : 'var(--border)'
+    const color = isToday ? '#991B1B' : isSoon ? '#92400E' : 'var(--text-secondary)'
+    const t = guidance.tech
+    return (
+      <div style={{ background:bg, border:`1px solid ${border}`, borderRadius:'var(--radius)', padding: compact ? '8px 12px' : '10px 14px', fontSize:12, color, lineHeight:1.5 }}>
+        <span style={{ fontWeight:700 }}>
+          {isToday ? '\ud83d\udd25 High opportunity \u2014 get this on the board TODAY.' : isSoon ? 'Decent opportunity \u2014 book it soon.' : 'Routine call \u2014 any open window works.'}
+        </span>
+        {guidance.reasons?.length > 0 && <span> {guidance.reasons.join(' \u00b7 ')}.</span>}
+        {isToday && guidance.boardFull && <span> Today looks full \u2014 <b>book it anyway</b>; dispatch will make room.</span>}
+        {t && (
+          <span> Aim for <b>{t.name}</b>{t.closeRate ? ` (${t.closeRate}% close \u00b7 $${(t.evPerOpp || 0).toLocaleString()}/opp)` : ''}{t.openWindows?.[0] ? ` \u2014 ${t.openWindows[0]} looks open` : ''}.</span>
+        )}
+      </div>
+    )
   }
 
   const WEEK_DAYS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']
@@ -944,6 +979,9 @@ export default function DialerPage() {
           repName: currentRep, contactName: c.name, phone: c.phone, zip: c.zip,
           start: selectedSlot?.start || null,
           end: selectedSlot?.end || null,
+          andiRec: guidance?.tech
+            ? `Andi recommends: ${guidance.tech.name} \u2014 ${guidance.urgency === 'today' ? 'HIGH OPPORTUNITY, keep today' : 'best fit'}${guidance.reasons?.length ? ` (${guidance.reasons.join(' \u00b7 ')})` : ''}`
+            : null,
         })
       })
       const data = await res.json()
@@ -1648,6 +1686,7 @@ export default function DialerPage() {
                           {selectedOutcome === 'Booked' && (
                             <div style={{ background:'var(--success-bg)', border:'1px solid var(--success)', borderRadius:'var(--radius)', padding:12, display:'flex', flexDirection:'column', gap:10 }}>
                               <div style={{ fontSize:11, fontWeight:700, color:'var(--success)' }}>ServiceTitan booking details</div>
+                              <GuidanceBanner compact />
                               {!c.external_id && (
                                 <div style={{ background:'#FFFBEB', border:'1px solid #FCD34D', borderRadius:'var(--radius)', padding:'8px 12px', fontSize:12, color:'#92400E', display:'flex', alignItems:'center', justifyContent:'space-between', gap:10 }}>
                                   <span>Not in ServiceTitan yet — create them to book.</span>
@@ -1877,6 +1916,7 @@ export default function DialerPage() {
                 </div>
               </div>
               <div style={{ padding:'14px 18px', overflowY:'auto', flex:1 }}>
+                {guidance && <div style={{ marginBottom:12 }}><GuidanceBanner /></div>}
                 <div style={{ display:'grid', gridTemplateColumns:'repeat(7,1fr)', gap:8 }}>
                   {weekDates.map((date, i) => {
                     const isToday = date.toDateString() === new Date().toDateString()
