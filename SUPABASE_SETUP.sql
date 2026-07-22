@@ -408,3 +408,10 @@ create policy "Authenticated read drive cache" on drive_time_cache for select to
 -- the profiles update fails on the old constraint otherwise.
 alter table profiles drop constraint if exists profiles_role_check;
 alter table profiles add constraint profiles_role_check check (role in ('rep', 'admin', 'dispatcher'));
+
+-- ── AI Campaign Builder (Jul 2026) ──────────────────────────────────────────
+-- Stores the audience recipe so a campaign can be re-pulled/refreshed later.
+-- RUN BEFORE using "Build a campaign with AI" — creating a campaign errors
+-- on the missing column otherwise.
+alter table campaigns add column if not exists source_query jsonb;
+notify pgrst, 'reload schema';
