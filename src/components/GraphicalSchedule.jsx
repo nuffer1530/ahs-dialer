@@ -542,8 +542,18 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
 
           </div>
 
-          {/* Agent rows */}
-          {profiles.map(p => {
+          {/* Agent rows — earliest shift first; PTO/sick/holiday next; people
+              with nothing scheduled sink to the bottom, slightly muted. */}
+          {[...profiles].sort((a, b) => {
+            const rank = (p) => {
+              const sc = schedules.find(x => x.profile_id === p.id)
+              if (!sc) return 10000
+              if (['pto','sick','holiday','off'].includes(sc.day_type)) return 9000 + ['pto','sick','holiday','off'].indexOf(sc.day_type)
+              const t = timeToInterval(sc.shift_start)
+              return t == null ? 8500 : t
+            }
+            return rank(a) - rank(b) || String(a.name || a.email || '').localeCompare(String(b.name || b.email || ''))
+          }).map(p => {
             const pBlocks = blocks[p.id] || []
             const adherenceSegs = getAdherenceSegments(p.id)
             const sched = schedules.find(s => s.profile_id === p.id)
@@ -553,8 +563,9 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
               : null
             const adhColor = totalAdh == null ? 'var(--text-muted)' : totalAdh >= 90 ? '#0ca30c' : totalAdh >= 75 ? '#eda100' : '#d03b3b'
 
+            const nothingScheduled = !sched && pBlocks.length === 0
             return (
-              <div key={p.id} style={{ display:'flex', borderBottom:'1px solid var(--border)', minHeight:ROW_HEIGHT + ADHERENCE_HEIGHT + 8 }}
+              <div key={p.id} style={{ display:'flex', borderBottom:'1px solid var(--border)', minHeight:ROW_HEIGHT + ADHERENCE_HEIGHT + 8, opacity: nothingScheduled ? .55 : 1 }}
                 onMouseLeave={() => setTooltip(null)}>
 
                 {/* Agent label */}
