@@ -687,6 +687,8 @@ export default function AdminPage() {
   const [opsMsg, setOpsMsg] = useState('')
   const [opsSaving, setOpsSaving] = useState(false)
   const [opsDirty, setOpsDirty] = useState(false)
+  const [bizHours, setBizHours] = useState(null)     // { mon: {open,close,closed}, ... }
+  const [holidays, setHolidays] = useState(null)     // [{ date, name }]
   // Invite by email
   const [invEmail, setInvEmail] = useState('')
   const [invRole, setInvRole] = useState('rep')
@@ -768,9 +770,25 @@ export default function AdminPage() {
   useEffect(() => {
     if (settingsTab !== 'ops' || !isAdmin || opsForm) return
     ;(async () => {
-      const { data } = await sb.from('app_settings').select('key, value').in('key', ['ops_config', 'weather_locations'])
+      const { data } = await sb.from('app_settings').select('key, value').in('key', ['ops_config', 'weather_locations', 'company_hours', 'company_holidays'])
       const parse = (k) => { try { return JSON.parse(data?.find(r => r.key === k)?.value || 'null') } catch { return null } }
       setOpsForm({ ...OPS_DEFAULTS, ...(parse('ops_config') || {}) })
+      // Hours of operation + holiday calendar. Informational today; the plan
+      // is for Andi's call handling to read these (holiday greeting, closed
+      // routing) once calls flow through it.
+      const H_DEFAULT = {
+        mon: { open: '07:00', close: '20:00', closed: false },
+        tue: { open: '07:00', close: '20:00', closed: false },
+        wed: { open: '07:00', close: '20:00', closed: false },
+        thu: { open: '07:00', close: '20:00', closed: false },
+        fri: { open: '07:00', close: '20:00', closed: false },
+        sat: { open: '07:30', close: '16:00', closed: false },
+        sun: { open: '08:00', close: '17:00', closed: true },
+      }
+      const bh = parse('company_hours')
+      setBizHours({ ...H_DEFAULT, ...(bh || {}) })
+      const hol = parse('company_holidays')
+      setHolidays(Array.isArray(hol) ? hol : [])
       const locs = parse('weather_locations')
       setWxLocs(Array.isArray(locs) && locs.length ? locs : [
         { key: 'COS', name: 'Colorado Springs', lat: 38.8339, lng: -104.8214 },
@@ -785,6 +803,8 @@ export default function AdminPage() {
     try {
       await sb.from('app_settings').upsert({ key: 'ops_config', value: JSON.stringify(opsForm) }, { onConflict: 'key' })
       await sb.from('app_settings').upsert({ key: 'weather_locations', value: JSON.stringify(wxLocs) }, { onConflict: 'key' })
+      if (bizHours) await sb.from('app_settings').upsert({ key: 'company_hours', value: JSON.stringify(bizHours) }, { onConflict: 'key' })
+      if (holidays) await sb.from('app_settings').upsert({ key: 'company_holidays', value: JSON.stringify(holidays) }, { onConflict: 'key' })
       invalidateOpsConfig(); await loadOpsConfig(true)
       setOpsMsg('Saved — live on next page load; weather strip within 15 min')
     } catch (e) { setOpsMsg('Error: ' + e.message) }
@@ -797,7 +817,7 @@ export default function AdminPage() {
     const t = setTimeout(() => { setOpsDirty(false); saveOps() }, 900)
     return () => clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [opsDirty, opsForm, wxLocs])
+  }, [opsDirty, opsForm, wxLocs, bizHours, holidays])
 
   const wxSearch = async (q) => {
     setWxQuery(q)
@@ -1616,6 +1636,58 @@ export default function AdminPage() {
                   )}
                 </div>
               </div>
+              {bizHours && (
+                <div className="card">
+                  <div className="card-header">
+                    <div className="card-title">Hours of operation</div>
+                    <span style={{ fontSize:11, color:'var(--text-muted)' }}>Informational for now — Andi's call handling will read these once calls route through it</span>
+                  </div>
+                  <div className="card-body" style={{ display:'flex', flexDirection:'column', gap:8 }}>
+                    {[['mon','Monday'],['tue','Tuesday'],['wed','Wednesday'],['thu','Thursday'],['fri','Friday'],['sat','Saturday'],['sun','Sunday']].map(([k, label]) => (
+                      <div key={k} style={{ display:'flex', alignItems:'center', gap:12 }}>
+                        <span style={{ width:90, fontSize:12, fontWeight:600 }}>{label}</span>
+                        <label style={{ display:'flex', alignItems:'center', gap:5, fontSize:12, color:'var(--text-muted)' }}>
+                          <input type="checkbox" checked={!!bizHours[k]?.closed}
+                            onChange={e => { setBizHours(h => ({ ...h, [k]: { ...h[k], closed: e.target.checked } })); setOpsDirty(true) }} />
+                          Closed
+                        </label>
+                        {!bizHours[k]?.closed && (
+                          <>
+                            <input className="form-input" type="time" value={bizHours[k]?.open || '08:00'} style={{ width:120 }}
+                              onChange={e => { setBizHours(h => ({ ...h, [k]: { ...h[k], open: e.target.value } })); setOpsDirty(true) }} />
+                            <span style={{ fontSize:12, color:'var(--text-muted)' }}>to</span>
+                            <input className="form-input" type="time" value={bizHours[k]?.close || '17:00'} style={{ width:120 }}
+                              onChange={e => { setBizHours(h => ({ ...h, [k]: { ...h[k], close: e.target.value } })); setOpsDirty(true) }} />
+                          </>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {holidays && (
+                <div className="card">
+                  <div className="card-header">
+                    <div className="card-title">Holiday schedule</div>
+                    <span style={{ fontSize:11, color:'var(--text-muted)' }}>Days the office is closed — future home of the holiday greeting</span>
+                  </div>
+                  <div className="card-body" style={{ display:'flex', flexDirection:'column', gap:8 }}>
+                    {holidays.length === 0 && <div style={{ fontSize:12, color:'var(--text-muted)' }}>No holidays added yet.</div>}
+                    {holidays.map((h, i) => (
+                      <div key={i} style={{ display:'flex', gap:8, alignItems:'center' }}>
+                        <input className="form-input" type="date" value={h.date || ''} style={{ width:160 }}
+                          onChange={e => { setHolidays(hs => hs.map((x, xi) => xi === i ? { ...x, date: e.target.value } : x)); setOpsDirty(true) }} />
+                        <input className="form-input" value={h.name || ''} placeholder="Holiday name" style={{ flex:1 }}
+                          onChange={e => { setHolidays(hs => hs.map((x, xi) => xi === i ? { ...x, name: e.target.value } : x)); setOpsDirty(true) }} />
+                        <button className="btn sm" onClick={() => { setHolidays(hs => hs.filter((_, xi) => xi !== i)); setOpsDirty(true) }}>Remove</button>
+                      </div>
+                    ))}
+                    <div>
+                      <button className="btn sm" onClick={() => { setHolidays(hs => [...hs, { date: '', name: '' }]); setOpsDirty(true) }}>+ Add holiday</button>
+                    </div>
+                  </div>
+                </div>
+              )}
               <div style={{ fontSize:12, color: opsMsg.startsWith('Error') ? 'var(--danger)' : 'var(--text-muted)' }}>
                 {opsSaving ? 'Saving…' : opsMsg || 'Changes save automatically'}
               </div>

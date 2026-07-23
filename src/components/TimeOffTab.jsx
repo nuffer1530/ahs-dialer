@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
 import { sb } from '../lib/supabase'
-import { fmtDate } from '../lib/utils'
 
 // Time off — request PTO/sick from My Page; the manager approves right here.
 // Approval writes the day(s) onto the WFM schedule (schedules.day_type).
@@ -12,6 +11,8 @@ const STATUS_CHIP = {
   denied:   { bg: '#FEE2E2', color: '#B91C1C', label: 'Denied' },
 }
 const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+const niceDay = (s) => s ? new Date(`${s}T12:00:00`).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }) : ''
+const dayCount = (a, b) => Math.round((new Date(`${b || a}T12:00:00`) - new Date(`${a}T12:00:00`)) / 864e5) + 1
 
 async function authedPost(path, body) {
   const { data: { session } } = await sb.auth.getSession()
@@ -28,17 +29,19 @@ async function authedPost(path, body) {
 export default function TimeOffTab({ profile }) {
   const [mine, setMine] = useState([])
   const [queue, setQueue] = useState([])      // pending requests where I'm the manager
-  const [names, setNames] = useState({})      // profile_id -> display name
-  const [modal, setModal] = useState(null)    // { date } when requesting
-  const [form, setForm] = useState({ kind: 'pto', reason: '', endDate: '' })
+  const [names, setNames] = useState({})
+  const [modal, setModal] = useState(null)    // open request modal
+  const [form, setForm] = useState({ kind: 'pto', reason: '', start: '', end: '' })
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const [deciding, setDeciding] = useState(null)
+  // Month being viewed: 0 = this month, up to 12 months out for pre-planning.
+  const [monthOff, setMonthOff] = useState(0)
 
   const load = useCallback(async () => {
     if (!profile?.id) return
     const [{ data: my }, { data: q }, { data: profs }] = await Promise.all([
-      sb.from('pto_requests').select('*').eq('profile_id', profile.id).order('created_at', { ascending: false }).limit(30),
+      sb.from('pto_requests').select('*').eq('profile_id', profile.id).order('created_at', { ascending: false }).limit(50),
       sb.from('pto_requests').select('*').eq('manager_id', profile.id).eq('status', 'pending').order('created_at', { ascending: true }),
       sb.from('profiles').select('id, name, email'),
     ])
@@ -56,12 +59,16 @@ export default function TimeOffTab({ profile }) {
   }, [load])
 
   const submit = async () => {
+    if (!form.start) { setErr('Pick a first day'); return }
+    if (form.end && form.end < form.start) { setErr('Last day is before the first day'); return }
     setBusy(true); setErr('')
     try {
       await authedPost('/api/pto/request', {
-        date: modal.date, endDate: form.endDate || null, kind: form.kind, reason: form.reason.trim(),
+        date: form.start,
+        endDate: form.end && form.end !== form.start ? form.end : null,
+        kind: form.kind, reason: form.reason.trim(),
       })
-      setModal(null); setForm({ kind: 'pto', reason: '', endDate: '' })
+      setModal(null)
       load()
     } catch (e) { setErr(e.message) }
     setBusy(false)
@@ -74,20 +81,28 @@ export default function TimeOffTab({ profile }) {
     setDeciding(null)
   }
 
-  // Six-week click grid starting this week — click a day to request it.
-  const start = new Date(); start.setHours(12, 0, 0, 0)
-  start.setDate(start.getDate() - start.getDay())
-  const weeks = Array.from({ length: 6 }, (_, w) =>
-    Array.from({ length: 7 }, (_, i) => { const d = new Date(start); d.setDate(d.getDate() + w * 7 + i); return d }))
-  const today = ymd(new Date())
+  // ── Month grid (one month at a time, navigable up to a year out) ──
+  const today = new Date(); today.setHours(12, 0, 0, 0)
+  const monthStart = new Date(today.getFullYear(), today.getMonth() + monthOff, 1, 12)
+  const gridStart = new Date(monthStart); gridStart.setDate(1 - monthStart.getDay())
+  const cells = Array.from({ length: 42 }, (_, i) => { const d = new Date(gridStart); d.setDate(d.getDate() + i); return d })
+  const todayStr = ymd(today)
+
   const myByDate = {}
   mine.forEach(r => {
-    const days = [r.date]
-    if (r.end_date) { const d = new Date(`${r.date}T12:00:00`); const e = new Date(`${r.end_date}T12:00:00`); while (d <= e) { days.push(ymd(d)); d.setDate(d.getDate() + 1) } }
-    days.forEach(dd => { if (!myByDate[dd] || r.status === 'approved') myByDate[dd] = r })
+    if (r.status === 'denied') return
+    const d = new Date(`${r.date}T12:00:00`); const e = new Date(`${r.end_date || r.date}T12:00:00`)
+    while (d <= e) { const k = ymd(d); if (!myByDate[k] || r.status === 'approved') myByDate[k] = r; d.setDate(d.getDate() + 1) }
   })
 
-  const span = (r) => r.end_date ? `${fmtDate(r.date)} – ${fmtDate(r.end_date)}` : fmtDate(r.date)
+  const openRequest = (dateStr) => {
+    setErr('')
+    setForm({ kind: 'pto', reason: '', start: dateStr, end: dateStr })
+    setModal(true)
+  }
+
+  const span = (r) => r.end_date ? `${niceDay(r.date)} – ${niceDay(r.end_date)}` : niceDay(r.date)
+  const nDays = form.start ? dayCount(form.start, form.end || form.start) : 0
 
   return (
     <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 20, maxWidth: 980 }}>
@@ -105,9 +120,9 @@ export default function TimeOffTab({ profile }) {
                 <div style={{ flex: 1, minWidth: 220 }}>
                   <div style={{ fontSize: 13, fontWeight: 700 }}>
                     {names[r.profile_id] || 'Unknown'} · {KIND_LABEL[r.kind]} · {span(r)}
+                    <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}> ({dayCount(r.date, r.end_date)} day{dayCount(r.date, r.end_date) === 1 ? '' : 's'})</span>
                   </div>
                   {r.reason && <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>"{r.reason}"</div>}
-                  <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>requested {fmtDate(r.created_at)}</div>
                 </div>
                 <div style={{ display: 'flex', gap: 8 }}>
                   <button className="btn sm" disabled={deciding === r.id}
@@ -124,33 +139,43 @@ export default function TimeOffTab({ profile }) {
         </div>
       )}
 
-      {/* Request grid */}
+      {/* Month calendar — navigate up to a year out */}
       <div className="card">
         <div className="card-header">
           <div className="card-title">Request time off</div>
-          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Click a day · goes to your manager for approval · approved days land on the schedule</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <button className="btn sm" onClick={() => setMonthOff(m => Math.max(0, m - 1))} disabled={monthOff === 0}>‹</button>
+            <span style={{ fontSize: 13, fontWeight: 700, minWidth: 130, textAlign: 'center' }}>
+              {monthStart.toLocaleDateString([], { month: 'long', year: 'numeric' })}
+            </span>
+            <button className="btn sm" onClick={() => setMonthOff(m => Math.min(12, m + 1))} disabled={monthOff === 12}>›</button>
+          </div>
         </div>
         <div className="card-body">
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 10 }}>
+            Click a day to start a request — you can plan up to a year ahead. Approved days land on the schedule automatically.
+          </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 6 }}>
             {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => (
               <div key={d} style={{ textAlign: 'center', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)', padding: '2px 0' }}>{d}</div>
             ))}
-            {weeks.flat().map((d, i) => {
+            {cells.map((d, i) => {
               const key = ymd(d)
-              const past = key < today
+              const inMonth = d.getMonth() === monthStart.getMonth()
+              const past = key < todayStr
               const r = myByDate[key]
               const chip = r ? STATUS_CHIP[r.status] : null
               return (
-                <button key={i} disabled={past}
-                  onClick={() => { setErr(''); setForm({ kind: 'pto', reason: '', endDate: '' }); setModal({ date: key }) }}
-                  title={r ? `${KIND_LABEL[r.kind]} — ${chip.label}` : past ? '' : 'Request this day off'}
-                  style={{ padding: '10px 4px', borderRadius: 8, fontSize: 12, fontWeight: 600, textAlign: 'center',
+                <button key={i} disabled={past || !inMonth}
+                  onClick={() => openRequest(key)}
+                  title={r ? `${KIND_LABEL[r.kind]} — ${chip.label}` : past || !inMonth ? '' : 'Request this day off'}
+                  style={{ padding: '12px 4px', borderRadius: 8, fontSize: 12.5, fontWeight: 600, textAlign: 'center',
                     border: `1px solid ${chip ? chip.color : 'var(--border)'}`,
                     background: chip ? chip.bg : 'var(--surface)',
-                    color: chip ? chip.color : past ? 'var(--text-muted)' : 'var(--text-primary)',
-                    cursor: past ? 'default' : 'pointer', opacity: past ? .45 : 1 }}>
+                    color: chip ? chip.color : (past || !inMonth) ? 'var(--text-muted)' : 'var(--text-primary)',
+                    cursor: (past || !inMonth) ? 'default' : 'pointer',
+                    opacity: !inMonth ? .25 : past ? .45 : 1 }}>
                   <div>{d.getDate()}</div>
-                  {d.getDate() === 1 && <div style={{ fontSize: 9, fontWeight: 700 }}>{d.toLocaleDateString([], { month: 'short' })}</div>}
                   {chip && <div style={{ fontSize: 8.5, fontWeight: 700, textTransform: 'uppercase', marginTop: 1 }}>{KIND_LABEL[r.kind]}</div>}
                 </button>
               )
@@ -181,14 +206,13 @@ export default function TimeOffTab({ profile }) {
         )}
       </div>
 
-      {/* Request modal */}
+      {/* Request modal — explicit first/last day, live day count */}
       {modal && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.45)', zIndex: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}
           onMouseDown={() => setModal(null)}>
           <div onMouseDown={e => e.stopPropagation()}
-            style={{ background: 'var(--surface)', borderRadius: 14, width: '100%', maxWidth: 400, boxShadow: '0 12px 40px rgba(0,0,0,.25)', padding: '20px 22px' }}>
-            <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 2 }}>Request time off</div>
-            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 14 }}>{fmtDate(modal.date)}</div>
+            style={{ background: 'var(--surface)', borderRadius: 14, width: '100%', maxWidth: 420, boxShadow: '0 12px 40px rgba(0,0,0,.25)', padding: '20px 22px' }}>
+            <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 14 }}>Request time off</div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               <div style={{ display: 'flex', gap: 8 }}>
                 {['pto', 'sick'].map(k => (
@@ -201,10 +225,22 @@ export default function TimeOffTab({ profile }) {
                   </button>
                 ))}
               </div>
-              <div className="form-field">
-                <label className="form-label">Through (optional — for multiple days)</label>
-                <input className="form-input" type="date" min={modal.date} value={form.endDate}
-                  onChange={e => setForm(f => ({ ...f, endDate: e.target.value }))} />
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                <div className="form-field">
+                  <label className="form-label">First day off</label>
+                  <input className="form-input" type="date" value={form.start} min={todayStr}
+                    onChange={e => setForm(f => ({ ...f, start: e.target.value, end: f.end && f.end < e.target.value ? e.target.value : f.end }))} />
+                </div>
+                <div className="form-field">
+                  <label className="form-label">Last day off</label>
+                  <input className="form-input" type="date" value={form.end || form.start} min={form.start}
+                    onChange={e => setForm(f => ({ ...f, end: e.target.value }))} />
+                </div>
+              </div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--accent)', background: 'var(--accent-bg)', borderRadius: 8, padding: '8px 12px' }}>
+                {nDays === 1
+                  ? `1 day — ${niceDay(form.start)}`
+                  : `${nDays} days — ${niceDay(form.start)} through ${niceDay(form.end || form.start)}`}
               </div>
               <div className="form-field">
                 <label className="form-label">Reason</label>
@@ -214,7 +250,7 @@ export default function TimeOffTab({ profile }) {
               {err && <div style={{ fontSize: 12, color: 'var(--danger)', background: 'var(--danger-bg)', padding: '8px 12px', borderRadius: 8 }}>{err}</div>}
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
                 <button className="btn" onClick={() => setModal(null)}>Cancel</button>
-                <button className="btn primary" onClick={submit} disabled={busy}>{busy ? 'Sending…' : 'Send request'}</button>
+                <button className="btn primary" onClick={submit} disabled={busy}>{busy ? 'Sending…' : `Send request (${nDays} day${nDays === 1 ? '' : 's'})`}</button>
               </div>
             </div>
           </div>
