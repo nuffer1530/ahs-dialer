@@ -322,7 +322,6 @@ export default function MyPage() {
               </button>
             </div>
           )}
-          {tab === 'time-off' && <TimeOffTab profile={profile} />}
           {ptoDay && (
             <PtoRequestModal initialDate={ptoDay} onClose={() => setPtoDay(null)}
               onSubmitted={() => { setPtoToast('Request sent — your manager has been notified. Track it in the Time Off tab.'); setTimeout(() => setPtoToast(''), 6000) }} />
@@ -390,6 +389,7 @@ export default function MyPage() {
         ) : (
           <>
             {/* MY SCHEDULE */}
+            {tab === 'time-off' && <TimeOffTab profile={profile} />}
             {tab === 'my-schedule' && (
               <div>
                 <div style={{ display:'grid', gridTemplateColumns:'repeat(7, 1fr)', gap:8 }}>
