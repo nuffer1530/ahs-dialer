@@ -2534,26 +2534,11 @@ const pruneCallNotes = () => {
   for (const [k, v] of _callNotes) if (v.at < cutoff) _callNotes.delete(k)
 }
 
-async function transcribeAndDraftNotes({ callSid, contactId, mp3Url, duration }) {
-  if (!OPENAI_KEY || !ANTHROPIC_KEY) return
-  if (duration != null && duration < 15) return   // too short to be a conversation
+// Claude turns a transcript (partial or full) into the house-format note.
+async function draftNotesFromTranscript(transcript) {
+  if (!ANTHROPIC_KEY) return null
 
-  // Twilio recordings need account auth to download.
-  const auth = Buffer.from(`${process.env.TWILIO_ACCOUNT_SID}:${process.env.TWILIO_AUTH_TOKEN}`).toString('base64')
-  const audioRes = await fetch(mp3Url, { headers: { Authorization: `Basic ${auth}` } })
-  if (!audioRes.ok) throw new Error(`recording download ${audioRes.status}`)
-  const audioBuf = Buffer.from(await audioRes.arrayBuffer())
-
-  const fd = new FormData()
-  fd.append('file', new Blob([audioBuf], { type: 'audio/mpeg' }), 'call.mp3')
-  fd.append('model', 'whisper-1')
-  fd.append('language', 'en')
-  const wRes = await fetch('https://api.openai.com/v1/audio/transcriptions', {
-    method: 'POST', headers: { Authorization: `Bearer ${OPENAI_KEY}` }, body: fd,
-  })
-  if (!wRes.ok) throw new Error(`whisper ${wRes.status}: ${(await wRes.text()).slice(0, 160)}`)
-  const transcript = (await wRes.json())?.text || ''
-  if (transcript.trim().length < 40) return   // nothing worth drafting
+  if (String(transcript || "").trim().length < 40) return null
 
   const today = new Date().toLocaleDateString('en-US', { timeZone: 'America/Denver', weekday: 'short', month: 'short', day: 'numeric' })
   const cRes = await fetch('https://api.anthropic.com/v1/messages', {
@@ -2598,10 +2583,100 @@ async function transcribeAndDraftNotes({ callSid, contactId, mp3Url, duration })
   if (n.tech_notes) lines.push(`Tech Setup Notes \u{1F527}: ${n.tech_notes}`)
   lines.push(`Synopsis: ${n.synopsis}`)
 
-  pruneCallNotes()
-  _callNotes.set(callSid, { contactId, text: lines.join('\n'), at: Date.now() })
-  console.log(`Call notes drafted for contact ${contactId} (${callSid})`)
+  return lines.join('\n')
 }
+
+// Post-call pass: Whisper on the finished recording — the final, highest-
+// quality draft (overwrites any live draft for the same call).
+async function transcribeAndDraftNotes({ callSid, contactId, mp3Url, duration }) {
+  if (!OPENAI_KEY || !ANTHROPIC_KEY) return
+  if (duration != null && duration < 15) return   // too short to be a conversation
+  const auth = Buffer.from(`${process.env.TWILIO_ACCOUNT_SID}:${process.env.TWILIO_AUTH_TOKEN}`).toString('base64')
+  const audioRes = await fetch(mp3Url, { headers: { Authorization: `Basic ${auth}` } })
+  if (!audioRes.ok) throw new Error(`recording download ${audioRes.status}`)
+  const audioBuf = Buffer.from(await audioRes.arrayBuffer())
+  const fd = new FormData()
+  fd.append('file', new Blob([audioBuf], { type: 'audio/mpeg' }), 'call.mp3')
+  fd.append('model', 'whisper-1')
+  fd.append('language', 'en')
+  const wRes = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+    method: 'POST', headers: { Authorization: `Bearer ${OPENAI_KEY}` }, body: fd,
+  })
+  if (!wRes.ok) throw new Error(`whisper ${wRes.status}: ${(await wRes.text()).slice(0, 160)}`)
+  const transcript = (await wRes.json())?.text || ''
+  const text = await draftNotesFromTranscript(transcript)
+  if (!text) return
+  pruneCallNotes()
+  _callNotes.set(callSid, { contactId, text, at: Date.now() })
+  console.log(`Call notes drafted (final) for contact ${contactId} (${callSid})`)
+}
+
+// ── LIVE transcription: Twilio Real-Time Transcription streams utterances to
+// a webhook DURING the call; every ~20s of new speech Claude re-drafts the
+// notes so the CSR's box (and the booking guidance that reads it) fills
+// while the customer is still talking.
+const _liveTx = new Map()   // callSid -> { contactId, parts: [], lastRun, running }
+async function startLiveTranscription(callSid, contactId, label) {
+  if (!ANTHROPIC_KEY || !callSid || _liveTx.has(callSid)) return
+  _liveTx.set(callSid, { contactId, parts: [], lastRun: 0, running: false })
+  try {
+    const auth = Buffer.from(`${process.env.TWILIO_ACCOUNT_SID}:${process.env.TWILIO_AUTH_TOKEN}`).toString('base64')
+    const form = new URLSearchParams({
+      StatusCallbackUrl: `${appUrl}/api/twilio/live-transcript`,
+      Track: 'both_tracks',
+      PartialResults: 'false',
+    })
+    const r = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${process.env.TWILIO_ACCOUNT_SID}/Calls/${callSid}/Transcriptions.json`, {
+      method: 'POST', headers: { Authorization: `Basic ${auth}`, 'Content-Type': 'application/x-www-form-urlencoded' }, body: form,
+    })
+    if (!r.ok) {
+      _liveTx.delete(callSid)
+      console.warn(`live transcription start failed (${label}):`, r.status, (await r.text()).slice(0, 160))
+    } else {
+      console.log(`live transcription started (${label}) on ${callSid}`)
+    }
+  } catch (e) { _liveTx.delete(callSid); console.warn('live transcription start:', e.message) }
+}
+
+async function runLiveDraft(callSid) {
+  const e = _liveTx.get(callSid)
+  if (!e || e.running) return
+  const text = e.parts.map(p => `${p.who}: ${p.text}`).join('\n')
+  if (text.length < 80) return
+  e.running = true; e.lastRun = Date.now()
+  try {
+    const draft = await draftNotesFromTranscript(text)
+    if (draft) {
+      pruneCallNotes()
+      _callNotes.set(callSid, { contactId: e.contactId, text: draft, at: Date.now() })
+    }
+  } catch (err) { console.warn('live draft:', err.message) }
+  e.running = false
+}
+
+app.post('/api/twilio/live-transcript', async (req, res) => {
+  res.sendStatus(200)
+  try {
+    const { TranscriptionEvent, CallSid, Track } = req.body
+    if (TranscriptionEvent !== 'transcription-content' || !CallSid) return
+    let data = {}
+    try { data = JSON.parse(req.body.TranscriptionData || '{}') } catch {}
+    const text = String(data.transcript || '').trim()
+    if (!text) return
+    const e = _liveTx.get(CallSid)
+    if (!e) return
+    e.parts.push({ who: Track === 'inbound_track' ? 'Customer' : 'Rep', text })
+    if (Date.now() - e.lastRun > 20_000) runLiveDraft(CallSid)
+  } catch (err) { console.warn('live-transcript webhook:', err.message) }
+})
+
+// Diagnostics: is the pipeline armed, and is anything flowing?
+app.get('/api/call-notes/health', (req, res) => {
+  res.json({
+    openaiKey: Boolean(OPENAI_KEY), anthropicKey: Boolean(ANTHROPIC_KEY),
+    liveCalls: _liveTx.size, drafts: _callNotes.size,
+  })
+})
 
 // The dialer polls this during wrap-up to pre-fill the notes box.
 app.get('/api/call-notes/latest', (req, res) => {
@@ -2646,6 +2721,12 @@ app.post('/api/twilio/recording', async (req, res) => {
       }
       // Wrap-up autopilot: draft the job notes from the recording. Fire and
       // forget — a transcription failure must never break the webhook.
+      // Backfill contact on any live draft that started before we knew it.
+      for (const [sid, v] of _callNotes) {
+        if (!v.contactId && (sid === CallSid)) v.contactId = ac.contact_id
+      }
+      const lt = _liveTx.get(CallSid)
+      if (lt && !lt.contactId) lt.contactId = ac.contact_id
       transcribeAndDraftNotes({
         callSid: CallSid, contactId: ac.contact_id, mp3Url: mp3,
         duration: RecordingDuration ? parseInt(RecordingDuration) : null,
@@ -3233,6 +3314,15 @@ app.post('/api/twilio/taskrouter/events', async (req, res) => {
         agent_profile_id: wattrs.profile_id || null,
         agent_name: wattrs.name || req.body.WorkerName || null,
       }).eq('task_sid', taskSid)
+      // Inbound answered -> live note-taking on the caller's leg.
+      try {
+        const tattrs = JSON.parse(req.body.TaskAttributes || '{}')
+        if (tattrs.call_sid) {
+          const { data: ac } = await supabase.from('active_calls').select('contact_id')
+            .eq('call_sid', tattrs.call_sid).maybeSingle()
+          startLiveTranscription(tattrs.call_sid, ac?.contact_id || null, 'inbound').catch(() => {})
+        }
+      } catch (e) { console.warn('inbound live-tx:', e.message) }
       return
     }
 
@@ -3299,7 +3389,15 @@ app.post('/api/twilio/inbound/complete', async (req, res) => {
 
 // ── Call status updates
 app.post('/api/twilio/status', async (req, res) => {
-  const { CallSid, CallStatus, Duration } = req.body
+  const { CallSid, CallStatus, Duration, ParentCallSid } = req.body
+  // Outbound leg just connected -> begin live note-taking. The active_calls
+  // row is keyed by the PARENT (browser) leg; the transcription rides the
+  // child (customer) leg, which carries both tracks.
+  if (CallStatus === 'in-progress') {
+    const { data: ac } = await supabase.from('active_calls').select('contact_id')
+      .in('call_sid', [ParentCallSid || '', CallSid].filter(Boolean)).not('contact_id', 'is', null).limit(1).maybeSingle()
+    startLiveTranscription(CallSid, ac?.contact_id || null, 'outbound').catch(() => {})
+  }
   await supabase.from('active_calls').update({
     status: CallStatus,
     duration: Duration ? parseInt(Duration) : null,

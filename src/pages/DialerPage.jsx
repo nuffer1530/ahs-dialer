@@ -869,28 +869,38 @@ export default function DialerPage() {
     endInteraction?.()   // letting it go means you're no longer working it
   }
 
+  // Poll for drafted notes DURING the call (live transcription updates every
+  // ~20s) and for a minute after hangup (the Whisper final pass).
   useEffect(() => {
     const was = prevCallStatus.current
     prevCallStatus.current = callStatus
-    const ended = (was === 'connected' || was === 'calling') && (callStatus === 'ended' || callStatus === null)
-    if (!ended || !selectedId) return
+    const live = callStatus === 'connected' || callStatus === 'calling'
+    const justEnded = (was === 'connected' || was === 'calling') && (callStatus === 'ended' || callStatus === null)
+    if ((!live && !justEnded) || !selectedId) return
     const cid = selectedId
     let tries = 0
     const t = setInterval(async () => {
-      if (++tries > 15) { clearInterval(t); return }   // give up after ~60s
+      if (justEnded && ++tries > 15) { clearInterval(t); return }   // post-call: give up after ~60s
       try {
         const r = await fetch(`/api/call-notes/latest?contactId=${cid}`)
         const d = await r.json()
-        if (d?.text) { clearInterval(t); setAutoNote({ contactId: cid, text: d.text }) }
+        if (d?.text) setAutoNote(prev => (prev?.text === d.text ? prev : { contactId: cid, text: d.text, at: d.at }))
       } catch {}
-    }, 4000)
+    }, live ? 6000 : 4000)
     return () => clearInterval(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [callStatus])
 
-  // Fill silently when the box is empty; otherwise the banner offers it.
+  // Fill when the box is empty OR still holds the previous auto-draft — the
+  // moment the rep types their own words, we stop touching the box and the
+  // banner offers the newest draft instead.
+  const lastAutoRef = useRef('')
   useEffect(() => {
-    if (autoNote && autoNote.contactId === selectedId && !notesVal.trim()) setNotesVal(autoNote.text)
+    if (!autoNote || autoNote.contactId !== selectedId) return
+    if (!notesVal.trim() || notesVal === lastAutoRef.current) {
+      setNotesVal(autoNote.text)
+      lastAutoRef.current = autoNote.text
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoNote])
 
@@ -1742,7 +1752,7 @@ export default function DialerPage() {
                           <div>
                             {autoNote && autoNote.contactId === selectedId && (
                               <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:8, background:'#F3E8FF', border:'1px solid #DDD6FE', borderRadius:'var(--radius)', padding:'6px 10px', marginBottom:6, fontSize:11.5, color:'#5B21B6' }}>
-                                <span>✨ Notes drafted from the call — review before saving.</span>
+                                <span>✨ {callStatus === 'connected' || callStatus === 'calling' ? 'Live notes — updating as the call goes' : 'Notes drafted from the call — review before saving.'}</span>
                                 {notesVal.trim() !== autoNote.text && (
                                   <button className="btn sm" onClick={() => setNotesVal(autoNote.text)} style={{ flexShrink:0 }}>Use draft</button>
                                 )}
