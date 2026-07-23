@@ -439,3 +439,6 @@ drop policy if exists "pto_requests all" on pto_requests;
 create policy "pto_requests all" on pto_requests for all using (true) with check (true);
 -- errors harmlessly if already in the publication; needed for the red-dot badge
 alter publication supabase_realtime add table pto_requests;
+
+-- ── Meeting notes on schedule blocks (Jul 2026) ─────────────────────────────
+alter table schedule_blocks add column if not exists note text;
