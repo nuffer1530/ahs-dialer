@@ -120,6 +120,17 @@ export default function MyPage() {
   // Click a day on My Schedule -> request time off for it.
   const [ptoDay, setPtoDay] = useState(null)
   const [ptoToast, setPtoToast] = useState('')
+  // Shift length minus unpaid lunch; paid breaks count as worked time.
+  const schedHours = (sched) => {
+    if (!sched || (sched.day_type && sched.day_type !== 'work') || !sched.shift_start || !sched.shift_end) return 0
+    const [sh, sm] = sched.shift_start.split(':').map(Number)
+    const [eh, em] = sched.shift_end.split(':').map(Number)
+    let h = (eh + (em || 0) / 60) - (sh + (sm || 0) / 60)
+    if (h < 0) h += 24
+    h -= (Number(sched.lunch_duration) || 0) / 60
+    return Math.max(0, h)
+  }
+  const fmtH = (h) => (h % 1 ? h.toFixed(1) : String(h))
   const [weekBase, setWeekBase] = useState(getTodayMonday)
   const [schedules, setSchedules] = useState([])
   const [profiles, setProfiles] = useState([])
@@ -392,6 +403,13 @@ export default function MyPage() {
             {tab === 'time-off' && <TimeOffTab profile={profile} />}
             {tab === 'my-schedule' && (
               <div>
+                <div style={{ display:'flex', alignItems:'center', justifyContent:'flex-end', marginBottom:10, gap:6 }}>
+                  <span style={{ fontSize:12, color:'var(--text-muted)' }}>Scheduled this week:</span>
+                  <span style={{ fontSize:14, fontWeight:800, color:'var(--accent)' }}>
+                    {fmtH(weekDates.reduce((a, dd) => a + schedHours(getSched(profile?.id, dd)), 0))}h
+                  </span>
+                  <span style={{ fontSize:10, color:'var(--text-muted)' }}>(lunch unpaid, breaks paid)</span>
+                </div>
                 <div style={{ display:'grid', gridTemplateColumns:'repeat(7, 1fr)', gap:8 }}>
                   {weekDates.map(date => {
                     const sched = getSched(profile?.id, date)
@@ -432,8 +450,11 @@ export default function MyPage() {
 
                         {sched && dt === 'work' && (
                           <div style={{ marginTop:6 }}>
-                            <div style={{ fontSize:12, fontWeight:600, color:'var(--text-primary)' }}>
-                              {fmt12(sched.shift_start)} - {fmt12(sched.shift_end)}
+                            <div style={{ fontSize:12, fontWeight:600, color:'var(--text-primary)', display:'flex', alignItems:'center', gap:6, flexWrap:'wrap' }}>
+                              <span>{fmt12(sched.shift_start)} - {fmt12(sched.shift_end)}</span>
+                              <span style={{ fontSize:10, fontWeight:700, color:'var(--accent)', background:'var(--accent-bg)', borderRadius:99, padding:'1px 7px' }}>
+                                {fmtH(schedHours(sched))}h
+                              </span>
                             </div>
                             <div style={{ marginTop:8, display:'flex', flexDirection:'column', gap:4 }}>
                               {sched.break1_start && (
