@@ -2521,6 +2521,99 @@ app.post('/api/twilio/twiml/outbound', (req, res) => {
 })
 
 // ── Twilio recording webhook — save the recording URL onto the call log
+// ── Wrap-up autopilot ───────────────────────────────────────────────────────
+// Call ends -> Twilio recording -> Whisper transcript -> Claude drafts the
+// job notes in the house format (Date/Time/Early/Fee/Age/Tech notes/Synopsis)
+// -> the dialer pre-fills the notes box during the rep's wrap-up. Held in
+// memory keyed by call: transcripts land in ~10-30s and wrap-up is a minute,
+// so persistence buys nothing a deploy mid-call would not lose anyway.
+const OPENAI_KEY = process.env.OPENAI_API_KEY
+const _callNotes = new Map()   // callSid -> { contactId, text, at }
+const pruneCallNotes = () => {
+  const cutoff = Date.now() - 30 * 60_000
+  for (const [k, v] of _callNotes) if (v.at < cutoff) _callNotes.delete(k)
+}
+
+async function transcribeAndDraftNotes({ callSid, contactId, mp3Url, duration }) {
+  if (!OPENAI_KEY || !ANTHROPIC_KEY) return
+  if (duration != null && duration < 15) return   // too short to be a conversation
+
+  // Twilio recordings need account auth to download.
+  const auth = Buffer.from(`${process.env.TWILIO_ACCOUNT_SID}:${process.env.TWILIO_AUTH_TOKEN}`).toString('base64')
+  const audioRes = await fetch(mp3Url, { headers: { Authorization: `Basic ${auth}` } })
+  if (!audioRes.ok) throw new Error(`recording download ${audioRes.status}`)
+  const audioBuf = Buffer.from(await audioRes.arrayBuffer())
+
+  const fd = new FormData()
+  fd.append('file', new Blob([audioBuf], { type: 'audio/mpeg' }), 'call.mp3')
+  fd.append('model', 'whisper-1')
+  fd.append('language', 'en')
+  const wRes = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+    method: 'POST', headers: { Authorization: `Bearer ${OPENAI_KEY}` }, body: fd,
+  })
+  if (!wRes.ok) throw new Error(`whisper ${wRes.status}: ${(await wRes.text()).slice(0, 160)}`)
+  const transcript = (await wRes.json())?.text || ''
+  if (transcript.trim().length < 40) return   // nothing worth drafting
+
+  const today = new Date().toLocaleDateString('en-US', { timeZone: 'America/Denver', weekday: 'short', month: 'short', day: 'numeric' })
+  const cRes = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: { 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+    body: JSON.stringify({
+      model: 'claude-haiku-4-5-20251001', max_tokens: 800,
+      system: `You extract job-booking notes from a home-services call transcript (HVAC/plumbing/electrical/garage door company in Colorado Springs). Today is ${today}. Extract ONLY what was actually said — never invent details. Amounts, dates and windows must come from the transcript.`,
+      tools: [{
+        name: 'submit_notes',
+        description: 'Submit the extracted call notes',
+        input_schema: {
+          type: 'object',
+          properties: {
+            booked_window: { type: ['string', 'null'], description: "Date and time window agreed on the call, e.g. 'Thu, Jul 24 · 10-2' or 'tomorrow 8-12'. null if nothing was booked/agreed." },
+            can_go_early: { type: 'string', enum: ['Yes', 'No', 'Not asked'], description: 'Did the customer say the tech may come earlier than the window?' },
+            reason: { type: 'string', description: 'Reason for the call / the issue, one short line' },
+            fee_quoted: { type: 'boolean', description: 'Was a dispatch/service/diagnostic fee stated on the call?' },
+            fee_amount: { type: ['string', 'null'], description: "The fee as said, e.g. '$99' or '$49 member'. null if not stated." },
+            tech_notes: { type: ['string', 'null'], description: 'Details that set the technician up for success: gate codes, pets, prior repairs, access notes, who will be home, equipment location. null if none.' },
+            age_info: { type: ['string', 'null'], description: "Age of the home or equipment if mentioned, e.g. '~20 yr old system', 'home built 2005'. null if not mentioned." },
+            synopsis: { type: 'string', description: 'Two to three sentence plain-English summary of the call' },
+          },
+          required: ['can_go_early', 'reason', 'fee_quoted', 'synopsis'],
+        },
+      }],
+      tool_choice: { type: 'tool', name: 'submit_notes' },
+      messages: [{ role: 'user', content: `Transcript of the call:\n\n${transcript.slice(0, 24000)}` }],
+    }),
+  })
+  if (!cRes.ok) throw new Error(`claude ${cRes.status}: ${(await cRes.text()).slice(0, 160)}`)
+  const n = ((await cRes.json()).content || []).find(b => b.type === 'tool_use')?.input
+  if (!n?.synopsis) return
+
+  // The house format techs and dispatch already read every day.
+  const lines = []
+  if (n.booked_window) lines.push(`Date/Time \u{1F4C5}: ${n.booked_window}`)
+  lines.push(`Can Go Early: ${n.can_go_early}`)
+  lines.push(`Reason for Call \u2757: ${n.reason}`)
+  lines.push(`Dispatch Fee \u{1F4B2}: ${n.fee_quoted ? `Quoted${n.fee_amount ? ` — ${n.fee_amount}` : ''}` : 'Unquoted'}`)
+  if (n.age_info) lines.push(`Home/Equipment Age: ${n.age_info}`)
+  if (n.tech_notes) lines.push(`Tech Setup Notes \u{1F527}: ${n.tech_notes}`)
+  lines.push(`Synopsis: ${n.synopsis}`)
+
+  pruneCallNotes()
+  _callNotes.set(callSid, { contactId, text: lines.join('\n'), at: Date.now() })
+  console.log(`Call notes drafted for contact ${contactId} (${callSid})`)
+}
+
+// The dialer polls this during wrap-up to pre-fill the notes box.
+app.get('/api/call-notes/latest', (req, res) => {
+  const contactId = String(req.query.contactId || '')
+  if (!contactId) return res.json({})
+  let best = null
+  for (const v of _callNotes.values()) {
+    if (String(v.contactId) === contactId && Date.now() - v.at < 15 * 60_000 && (!best || v.at > best.at)) best = v
+  }
+  res.json(best ? { text: best.text, at: best.at } : {})
+})
+
 app.post('/api/twilio/recording', async (req, res) => {
   try {
     const { CallSid, RecordingSid, RecordingUrl, RecordingDuration } = req.body
@@ -2551,6 +2644,12 @@ app.post('/api/twilio/recording', async (req, res) => {
           call_sid: CallSid,
         }).eq('id', recentLog.id)
       }
+      // Wrap-up autopilot: draft the job notes from the recording. Fire and
+      // forget — a transcription failure must never break the webhook.
+      transcribeAndDraftNotes({
+        callSid: CallSid, contactId: ac.contact_id, mp3Url: mp3,
+        duration: RecordingDuration ? parseInt(RecordingDuration) : null,
+      }).catch(e => console.warn('wrap-up autopilot:', e.message))
     }
     res.sendStatus(200)
   } catch (err) {

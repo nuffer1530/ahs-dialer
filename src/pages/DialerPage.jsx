@@ -265,6 +265,11 @@ export default function DialerPage() {
   // Send note to ST
   const [stNoteSending, setStNoteSending] = useState(false)
   const [stNoteResult, setStNoteResult] = useState(null)
+  // Wrap-up autopilot: the server drafts notes from the call recording; we
+  // poll briefly after hangup and pre-fill the notes box (never overwriting
+  // anything the rep already typed — a button offers the draft instead).
+  const [autoNote, setAutoNote] = useState(null)   // { contactId, text }
+  const prevCallStatus = useRef(null)
 
   // Twilio — the phone lives in PhoneContext (mounted in DialerLayout) so it
   // survives navigation. It used to be created here, which meant leaving the
@@ -863,6 +868,31 @@ export default function DialerPage() {
     if (data) setContacts(prev => prev.map(c => c.id === id ? data : c))
     endInteraction?.()   // letting it go means you're no longer working it
   }
+
+  useEffect(() => {
+    const was = prevCallStatus.current
+    prevCallStatus.current = callStatus
+    const ended = (was === 'connected' || was === 'calling') && (callStatus === 'ended' || callStatus === null)
+    if (!ended || !selectedId) return
+    const cid = selectedId
+    let tries = 0
+    const t = setInterval(async () => {
+      if (++tries > 15) { clearInterval(t); return }   // give up after ~60s
+      try {
+        const r = await fetch(`/api/call-notes/latest?contactId=${cid}`)
+        const d = await r.json()
+        if (d?.text) { clearInterval(t); setAutoNote({ contactId: cid, text: d.text }) }
+      } catch {}
+    }, 4000)
+    return () => clearInterval(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [callStatus])
+
+  // Fill silently when the box is empty; otherwise the banner offers it.
+  useEffect(() => {
+    if (autoNote && autoNote.contactId === selectedId && !notesVal.trim()) setNotesVal(autoNote.text)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoNote])
 
   const logOutcome = async (stay) => {
     if (!selectedOutcome || !selectedContact) return
@@ -1710,6 +1740,14 @@ export default function DialerPage() {
 
                           {/* Notes */}
                           <div>
+                            {autoNote && autoNote.contactId === selectedId && (
+                              <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:8, background:'#F3E8FF', border:'1px solid #DDD6FE', borderRadius:'var(--radius)', padding:'6px 10px', marginBottom:6, fontSize:11.5, color:'#5B21B6' }}>
+                                <span>✨ Notes drafted from the call — review before saving.</span>
+                                {notesVal.trim() !== autoNote.text && (
+                                  <button className="btn sm" onClick={() => setNotesVal(autoNote.text)} style={{ flexShrink:0 }}>Use draft</button>
+                                )}
+                              </div>
+                            )}
                             <textarea value={notesVal} onChange={e => setNotesVal(e.target.value)} disabled={!isMe}
                               placeholder={selectedOutcome === 'Booked' ? 'Notes required before booking...' : 'Add call notes...'}
                               style={{ width:'100%', border:`1px solid ${selectedOutcome==='Booked' ? 'var(--accent)' : 'var(--border)'}`, borderRadius:'var(--radius)', padding:'9px 10px', fontSize:12, fontFamily:'inherit', resize:'vertical', minHeight:80, background:'var(--surface)', color:'var(--text-primary)', opacity: isMe ? 1 : .4 }} />
