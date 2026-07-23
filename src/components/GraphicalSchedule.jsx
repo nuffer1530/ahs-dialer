@@ -74,6 +74,12 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
   const [shiftForm, setShiftForm] = useState({ shift_start:'08:00', shift_end:'17:00', break1_start:'10:00', break1_duration:15, lunch_start:'12:00', lunch_duration:30, break2_start:'14:30', break2_duration:15, day_type:'work' })
   const [contextMenu, setContextMenu] = useState(null)
   const [addBlockMenu, setAddBlockMenu] = useState(null)
+  // Recurring weekly blocks (e.g. Team Huddle, 15 min every Wednesday) live in
+  // app_settings.recurring_blocks — they materialize onto every matching
+  // weekday without creating rows. Meeting blocks also carry a note.
+  const [recurringDefs, setRecurringDefs] = useState([])
+  const [meetingModal, setMeetingModal] = useState(null)   // { profileId, start }
+  const [meetingForm, setMeetingForm] = useState({ note: '', repeat: false, durationMin: 15 })
   const [containerWidth, setContainerWidth] = useState(0)
   const [tooltip, setTooltip] = useState(null)
   const tooltipRef = useRef(null)
@@ -102,6 +108,15 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
       setStatusEvents(events || [])
     })
   }, [date])
+
+  useEffect(() => {
+    sb.from('app_settings').select('value').eq('key', 'recurring_blocks').maybeSingle()
+      .then(({ data }) => { try { setRecurringDefs(JSON.parse(data?.value || '[]')) } catch {} })
+  }, [])
+  const saveRecurringDefs = async (defs) => {
+    setRecurringDefs(defs)
+    await sb.from('app_settings').upsert({ key: 'recurring_blocks', value: JSON.stringify(defs) }, { onConflict: 'key' })
+  }
 
   // Current time
   useEffect(() => {
@@ -132,10 +147,18 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
     profiles.forEach(p => {
       const sched = schedules.find(s => s.profile_id === p.id)
       newBlocks[p.id] = []
+      const weekday = new Date(date + 'T12:00:00').getDay()
+      const pushRecurring = () => recurringDefs
+        .filter(d => d.profile_id === p.id && Number(d.weekday) === weekday)
+        .forEach(d => newBlocks[p.id].push({
+          id: `rec-${d.id}`, type: d.type || 'meeting', start: d.start_interval,
+          duration: d.duration_intervals, note: d.note || '', recurring: true, recId: d.id,
+        }))
       if (!sched) {
         extraBlocks.filter(b => b.profile_id === p.id).forEach(b => {
-          newBlocks[p.id].push({ id: b.id, type: b.type, start: b.start_interval, duration: b.duration_intervals, dbId: b.id })
+          newBlocks[p.id].push({ id: b.id, type: b.type, start: b.start_interval, duration: b.duration_intervals, dbId: b.id, note: b.note || '' })
         })
+        pushRecurring()
         return
       }
       if (['pto','sick','holiday','off'].includes(sched.day_type)) {
@@ -160,11 +183,12 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
         if (s !== null) newBlocks[p.id].push({ id:'b2-'+p.id, type:'break', start:s, duration:Math.round((sched.break2_duration||15)/15) })
       }
       extraBlocks.filter(b => b.profile_id === p.id).forEach(b => {
-        newBlocks[p.id].push({ id: b.id, type: b.type, start: b.start_interval, duration: b.duration_intervals, dbId: b.id })
+        newBlocks[p.id].push({ id: b.id, type: b.type, start: b.start_interval, duration: b.duration_intervals, dbId: b.id, note: b.note || '' })
       })
+      pushRecurring()
     })
     setBlocks(newBlocks)
-  }, [schedules, extraBlocks, profiles])
+  }, [schedules, extraBlocks, profiles, recurringDefs, date])
 
   // Drag handling
   useEffect(() => {
@@ -277,6 +301,11 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
 
   const removeBlock = async (profileId, blockId) => {
     const block = (blocks[profileId] || []).find(b => b.id === blockId)
+    if (block?.recurring) {
+      if (!confirm(`This ${block.note ? `"${block.note}"` : 'block'} repeats every week — remove it from ALL weeks?`)) return
+      await saveRecurringDefs(recurringDefs.filter(d => d.id !== block.recId))
+      return
+    }
     if (block?.dbId) {
       await sb.from('schedule_blocks').delete().eq('id', block.dbId)
       setExtraBlocks(prev => prev.filter(b => b.id !== block.dbId))
@@ -295,6 +324,11 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
     const start = startInterval != null ? startInterval : (shiftBlock ? shiftBlock.start + 4 : 8)
     const durations = { outbound:8, meeting:4, break:1, lunch:2, pto:TOTAL_INTERVALS, sick:TOTAL_INTERVALS, holiday:TOTAL_INTERVALS }
     const duration = durations[type] || 2
+    if (type === 'meeting') {
+      setMeetingForm({ note: '', repeat: false, durationMin: 15 })
+      setMeetingModal({ profileId, start })
+      return
+    }
     if (['outbound','meeting'].includes(type)) {
       setSaving(true)
       const { data: inserted } = await sb.from('schedule_blocks').insert({
@@ -312,6 +346,40 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
     const newBlocks = { ...blocks, [profileId]: [...existing, newBlock] }
     setBlocks(newBlocks)
     saveBlocksToDb(profileId, newBlocks)
+  }
+
+  const saveMeeting = async () => {
+    if (!meetingModal) return
+    const { profileId, start } = meetingModal
+    const duration = Math.max(1, Math.round(meetingForm.durationMin / 15))
+    const note = meetingForm.note.trim()
+    setSaving(true)
+    if (meetingForm.repeat) {
+      const def = {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        profile_id: profileId,
+        weekday: new Date(date + 'T12:00:00').getDay(),
+        type: 'meeting', start_interval: start, duration_intervals: duration,
+        note, created_by: profile?.id || null,
+      }
+      await saveRecurringDefs([...recurringDefs, def])
+    } else {
+      let { data: inserted, error } = await sb.from('schedule_blocks').insert({
+        profile_id: profileId, date, type: 'meeting',
+        start_interval: start, duration_intervals: duration, created_by: profile?.id, note,
+      }).select().single()
+      if (error && /note/.test(error.message)) {
+        // schedule_blocks.note migration not run yet — save without the note.
+        alert('Meeting added, but the note could not be saved until the schedule_blocks.note migration is run.')
+        ;({ data: inserted } = await sb.from('schedule_blocks').insert({
+          profile_id: profileId, date, type: 'meeting',
+          start_interval: start, duration_intervals: duration, created_by: profile?.id,
+        }).select().single())
+      }
+      if (inserted) setExtraBlocks(prev => [...prev, inserted])
+    }
+    setSaving(false)
+    setMeetingModal(null)
   }
 
   // Build adherence segments for a profile
@@ -515,13 +583,16 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
                     const isShift = block.type === 'shift'
                     return (
                       <div key={block.id}
-                        onMouseDown={e => { if (!isAdmin) return; e.preventDefault(); e.stopPropagation(); dragStartX.current = e.clientX; setDragging({ profileId:p.id, blockId:block.id, mode:'move' }) }}
-                        onContextMenu={e => { if (!isAdmin) return; e.preventDefault(); e.stopPropagation(); setContextMenu({ x:e.clientX, y:e.clientY, profileId:p.id, block }) }}
+                        onMouseDown={e => { if (!isAdmin || block.recurring) return; e.preventDefault(); e.stopPropagation(); dragStartX.current = e.clientX; setDragging({ profileId:p.id, blockId:block.id, mode:'move' }) }}
+                        onContextMenu={e => { if (!isAdmin) return; e.preventDefault(); e.stopPropagation();
+                          const rowRect = e.currentTarget.parentElement.getBoundingClientRect()
+                          const clicked = Math.max(0, Math.round((e.clientX - rowRect.left) / CELL_WIDTH))
+                          setContextMenu({ x:e.clientX, y:e.clientY, profileId:p.id, block, startInterval: clicked }) }}
                         onMouseEnter={e => {
                           const rect = e.currentTarget.getBoundingClientRect()
                           setTooltip({
                             x: rect.left + rect.width/2, y: rect.top - 8,
-                            content: `${bt.label}: ${fmtTime(intervalToTime(block.start))} – ${fmtTime(intervalToTime(block.start+block.duration))}`
+                            content: `${bt.label}: ${fmtTime(intervalToTime(block.start))} – ${fmtTime(intervalToTime(block.start+block.duration))}${block.note ? ` — ${block.note}` : ''}${block.recurring ? ' · ↻ every week' : ''}`
                           })
                         }}
                         onMouseLeave={() => setTooltip(null)}
@@ -530,9 +601,9 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
                           display:'flex', alignItems:'center', overflow:'hidden',
                           cursor: isAdmin ? 'grab' : 'default', zIndex: isShift ? 2 : 4, userSelect:'none' }}>
                         <span style={{ fontSize:9, fontWeight:700, color:bt.text, paddingLeft:6, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', flex:1 }}>
-                          {block.duration * 15 >= 30 ? bt.label : ''}
+                          {block.recurring ? '↻ ' : ''}{block.duration * 15 >= 30 ? (block.note || bt.label) : ''}
                         </span>
-                        {isAdmin && (
+                        {isAdmin && !block.recurring && (
                           <div onMouseDown={e => { e.preventDefault(); e.stopPropagation(); dragStartX.current = e.clientX; setDragging({ profileId:p.id, blockId:block.id, mode:'resize' }) }}
                             style={{ width:5, height:'100%', background:bt.color, cursor:'ew-resize', flexShrink:0, opacity:.4 }} />
                         )}
@@ -620,7 +691,7 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
 
       {/* Context menu */}
       {contextMenu && (() => {
-        const { x, y, profileId, block } = contextMenu
+        const { x, y, profileId, block, startInterval } = contextMenu
         const bt = BLOCK_TYPES.find(t => t.id === block.type)
         const isShift = block.type === 'shift'
         const isScheduleRow = ['shift','pto','sick','holiday'].includes(block.type)
@@ -632,7 +703,7 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
             </div>
             {[
               { label: isShift ? 'Edit shift' : 'Edit block', action: () => { setContextMenu(null); openShiftModal(profileId) }, danger: false },
-              { label: 'Add event…', action: () => { setAddBlockMenu({ profileId, x, y }); setContextMenu(null) }, danger: false },
+              { label: 'Add event…', action: () => { setAddBlockMenu({ profileId, x, y, startInterval }); setContextMenu(null) }, danger: false },
               { label: isShift ? 'Delete shift' : `Remove ${bt?.label||'block'}`, action: () => { setContextMenu(null); if (isScheduleRow) { if(confirm(`Remove ${bt?.label || block.type}?`)) deleteSchedule(profileId) } else removeBlock(profileId, block.id) }, danger: true },
             ].map(item => (
               <button key={item.label} onMouseDown={item.action}
@@ -666,6 +737,52 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
               </button>
             )
           })}
+        </div>
+      )}
+
+      {/* Meeting dialog — note + optional weekly repeat */}
+      {meetingModal && (
+        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,.45)', zIndex:500, display:'flex', alignItems:'center', justifyContent:'center' }}
+          onMouseDown={() => setMeetingModal(null)}>
+          <div onMouseDown={e => e.stopPropagation()}
+            style={{ background:'var(--surface)', borderRadius:12, padding:22, width:400, boxShadow:'0 8px 32px rgba(0,0,0,.25)' }}>
+            <div style={{ fontSize:15, fontWeight:600, marginBottom:4 }}>Add meeting</div>
+            <div style={{ fontSize:12, color:'var(--text-muted)', marginBottom:14 }}>
+              {profiles.find(p => p.id === meetingModal.profileId)?.name} · starts {fmtTime(intervalToTime(meetingModal.start))}
+            </div>
+            <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
+              <div className="form-field">
+                <label className="form-label">What's the meeting? (shows on hover)</label>
+                <input className="form-input" autoFocus value={meetingForm.note} placeholder="Team Huddle, 1-on-1, training…"
+                  onChange={e => setMeetingForm(f => ({ ...f, note: e.target.value }))} />
+              </div>
+              <div className="form-field">
+                <label className="form-label">Length</label>
+                <div style={{ display:'flex', gap:6 }}>
+                  {[15, 30, 45, 60].map(m => (
+                    <button key={m} onClick={() => setMeetingForm(f => ({ ...f, durationMin: m }))}
+                      style={{ flex:1, padding:'7px 0', borderRadius:8, fontSize:12, fontWeight:700, cursor:'pointer',
+                        border:`2px solid ${meetingForm.durationMin === m ? 'var(--accent)' : 'var(--border)'}`,
+                        background: meetingForm.durationMin === m ? 'var(--accent-bg)' : 'var(--surface-2)',
+                        color: meetingForm.durationMin === m ? 'var(--accent)' : 'var(--text-secondary)' }}>
+                      {m}m
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <label style={{ display:'flex', alignItems:'center', gap:8, fontSize:12.5, cursor:'pointer' }}>
+                <input type="checkbox" checked={meetingForm.repeat}
+                  onChange={e => setMeetingForm(f => ({ ...f, repeat: e.target.checked }))} />
+                <span>Repeats <b>every {new Date(date + 'T12:00:00').toLocaleDateString([], { weekday: 'long' })}</b> — shows on the schedule automatically</span>
+              </label>
+              <div style={{ display:'flex', justifyContent:'flex-end', gap:8 }}>
+                <button className="btn" onClick={() => setMeetingModal(null)}>Cancel</button>
+                <button className="btn primary" onClick={saveMeeting} disabled={saving}>
+                  {saving ? 'Adding…' : meetingForm.repeat ? 'Add weekly meeting' : 'Add meeting'}
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 
