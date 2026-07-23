@@ -70,15 +70,19 @@ export default function WarRoomPage() {
   const [time, setTime] = useState(new Date())
   const [ticker, setTicker] = useState({ enabled: false, messages: [] })
   const [board, setBoard] = useState(null)   // 3-day call board (today column shown)
+  const [sales, setSales] = useState([])     // estimates SOLD today (tech wins)
   const [isFull, setIsFull] = useState(false)
   const rootRef = useRef(null)
 
   // 3-Day Call Board — show today's "calls needed" per trade on the TV.
   useEffect(() => {
     const load = () => fetch('/api/board/3day').then(r => r.json()).then(setBoard).catch(() => {})
+    const loadSales = () => fetch('/api/tv/sales-today').then(r => r.json()).then(d => setSales(d.sales || [])).catch(() => {})
+    loadSales()
+    const ts = setInterval(loadSales, 2 * 60_000)
     load()
     const t = setInterval(load, 90_000)
-    return () => clearInterval(t)
+    return () => { clearInterval(t); clearInterval(ts) }
   }, [])
 
   // Fullscreen the wallboard itself (not the whole app) so the nav drops away.
@@ -174,7 +178,11 @@ export default function WarRoomPage() {
     (STATUS_ORDER[a.status] ?? 6) - (STATUS_ORDER[b.status] ?? 6) || (a.name||'').localeCompare(b.name||''))
 
   // Live feed: bookings pop, everything else scrolls under.
-  const feed = logs.slice(0, 14)
+  // One stream, two kinds of wins: CSR call outcomes and tech SALES.
+  const feed = [
+    ...logs.map(l => ({ kind: 'call', at: l.created_at, ...l })),
+    ...sales.map(x => ({ kind: 'sale', at: x.soldOn, ...x })),
+  ].sort((a, b) => Date.parse(b.at || 0) - Date.parse(a.at || 0)).slice(0, 14)
 
   const slColor = inbound.serviceLevel == null ? C.dim : inbound.serviceLevel >= SERVICE_LEVEL_TARGET ? C.green : inbound.serviceLevel >= 60 ? C.amber : C.red
   const abColor = inbound.abandonRate == null ? C.dim : inbound.abandonRate <= 5 ? C.green : inbound.abandonRate <= 10 ? C.amber : C.red
@@ -389,6 +397,24 @@ export default function WarRoomPage() {
             {feed.length === 0 ? (
               <div style={{ padding:'30px 20px', color:C.muted, fontSize:14, textAlign:'center' }}>Waiting for activity…</div>
             ) : feed.map((l, i) => {
+              if (l.kind === 'sale') {
+                const big = l.amount >= 1000
+                return (
+                  <div key={l.id} style={{ padding:'11px 16px', borderBottom:`1px solid ${C.panel2}`, display:'flex', alignItems:'center', gap:11,
+                    opacity: i > 9 ? 0.45 : 1, background: big ? '#B4530918' : `${C.green}10` }}>
+                    <div style={{ width:9, height:9, borderRadius:'50%', background: big ? '#F59E0B' : C.green, flexShrink:0, boxShadow: big ? '0 0 10px #F59E0B' : 'none' }} />
+                    <div style={{ flex:1, minWidth:0 }}>
+                      <div style={{ fontSize:14, fontWeight:700, color: big ? '#F59E0B' : C.green, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
+                        💰 {l.tech} sold ${l.amount.toLocaleString()}
+                      </div>
+                      <div style={{ fontSize:11, color:C.muted, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
+                        {l.what} · {l.at ? new Date(l.at).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' }) : ''}
+                      </div>
+                    </div>
+                    <span style={{ fontSize:12, fontWeight:700, color: big ? '#F59E0B' : C.green, flexShrink:0 }}>SOLD</span>
+                  </div>
+                )
+              }
               const color = OUTCOME_COLORS[l.outcome] || C.dim
               const c = contacts.find(x => x.id === l.contact_id)
               const booked = l.outcome === 'Booked'

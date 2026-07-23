@@ -2284,6 +2284,47 @@ app.get('/api/weather', async (req, res) => {
   }
 })
 
+// Estimates SOLD today — the Call Center TV celebrates tech sales in its
+// live feed alongside CSR bookings. 2-minute cache; open like the board.
+let _salesTodayCache = null
+app.get('/api/tv/sales-today', async (req, res) => {
+  try {
+    if (_salesTodayCache && _salesTodayCache.expires > Date.now()) return res.json(_salesTodayCache.data)
+    const today = boardDay(0)
+    const rows = []
+    let p = 1
+    while (p <= 6) {
+      const d = await stGet(`/sales/v2/tenant/${ST_TENANT_ID}/estimates?soldAfter=${today.startUtc.toISOString()}&pageSize=200&page=${p}`)
+      rows.push(...(d?.data || []))
+      if (!d?.hasMore) break
+      p++
+    }
+    const techs = await getBoardTechs().catch(() => [])
+    const nameOf = new Map(techs.map(t => [t.id, t.name]))
+    const sales = rows
+      .filter(e => {
+        const st = (e.status && typeof e.status === 'object') ? e.status.name : e.status
+        return st === 'Sold' && Number(e.subtotal || 0) > 0
+      })
+      .map(e => ({
+        id: `est-${e.id}`,
+        soldOn: e.soldOn || null,
+        tech: nameOf.get(e.soldBy) || 'A technician',
+        amount: Math.round(Number(e.subtotal || 0)),
+        what: String(e.name || '').slice(0, 60) || 'an estimate',
+      }))
+      .sort((a, b) => Date.parse(b.soldOn || 0) - Date.parse(a.soldOn || 0))
+      .slice(0, 30)
+    const data = { generatedAt: new Date().toISOString(), sales }
+    _salesTodayCache = { data, expires: Date.now() + 2 * 60_000 }
+    res.json(data)
+  } catch (err) {
+    console.error('sales-today:', err.message)
+    if (_salesTodayCache) return res.json(_salesTodayCache.data)
+    res.status(500).json({ error: err.message })
+  }
+})
+
 app.get('/api/board/3day', async (req, res) => {
   try {
     res.json(await build3DayBoard())
