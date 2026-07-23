@@ -33,19 +33,23 @@ export default function TimeOffTab({ profile }) {
   const [names, setNames] = useState({})
   const [modal, setModal] = useState(null)    // open request modal
   const [deciding, setDeciding] = useState(null)
+  const [teamApproved, setTeamApproved] = useState([])
   // Month being viewed: 0 = this month, up to 12 months out for pre-planning.
   const [monthOff, setMonthOff] = useState(0)
 
   const load = useCallback(async () => {
     if (!profile?.id) return
-    const [{ data: my }, { data: q }, { data: profs }] = await Promise.all([
+    const [{ data: my }, { data: q }, { data: profs }, { data: appr }] = await Promise.all([
       sb.from('pto_requests').select('*').eq('profile_id', profile.id).order('created_at', { ascending: false }).limit(50),
       sb.from('pto_requests').select('*').eq('manager_id', profile.id).eq('status', 'pending').order('created_at', { ascending: true }),
       sb.from('profiles').select('id, name, email'),
+      sb.from('pto_requests').select('*').eq('manager_id', profile.id).eq('status', 'approved')
+        .gte('date', new Date().toISOString().slice(0, 10)).order('date', { ascending: true }),
     ])
     setMine(my || [])
     setQueue(q || [])
     setNames(Object.fromEntries((profs || []).map(p => [p.id, p.name || p.email])))
+    setTeamApproved(appr || [])
   }, [profile?.id])
 
   useEffect(() => {
@@ -55,6 +59,18 @@ export default function TimeOffTab({ profile }) {
       .subscribe()
     return () => sb.removeChannel(ch)
   }, [load])
+
+  const cancel = async (r, asManager) => {
+    const span = r.end_date ? `${r.date} – ${r.end_date}` : r.date
+    const msg = r.status === 'approved'
+      ? `Remove this approved ${KIND_LABEL[r.kind]} (${span})? The day(s) will be cleared from the schedule and ${asManager ? 'they' : 'your manager'} will be notified.`
+      : `Cancel this pending request (${span})?`
+    if (!confirm(msg)) return
+    setDeciding(r.id)
+    try { await authedPost('/api/pto/cancel', { id: r.id }); load() }
+    catch (e) { alert(e.message) }
+    setDeciding(null)
+  }
 
   const decide = async (id, decision) => {
     setDeciding(id)
@@ -110,6 +126,26 @@ export default function TimeOffTab({ profile }) {
                     {deciding === r.id ? 'Saving…' : 'Approve'}
                   </button>
                 </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {teamApproved.length > 0 && (
+        <div className="card">
+          <div className="card-header">
+            <div className="card-title">Your team's upcoming time off</div>
+            <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Remove one if plans changed — the schedule day clears and they're notified</span>
+          </div>
+          <div>
+            {teamApproved.map(r => (
+              <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 18px', borderBottom: '1px solid var(--border)' }}>
+                <span style={{ fontSize: 12.5, fontWeight: 600, flex: 1 }}>
+                  {names[r.profile_id] || 'Unknown'} · {KIND_LABEL[r.kind]} · {span(r)}
+                </span>
+                <button className="btn sm" disabled={deciding === r.id} onClick={() => cancel(r, true)}
+                  style={{ color: 'var(--danger)', borderColor: 'var(--danger)' }}>Remove</button>
               </div>
             ))}
           </div>
@@ -176,6 +212,12 @@ export default function TimeOffTab({ profile }) {
                   <span style={{ fontSize: 12.5, fontWeight: 600 }}>{KIND_LABEL[r.kind]} · {span(r)}</span>
                   {r.reason && <span style={{ fontSize: 11.5, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>"{r.reason}"</span>}
                   {r.decision_note && <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>— {r.decision_note}</span>}
+                  {(r.status === 'pending' || (r.status === 'approved' && (r.end_date || r.date) >= new Date().toISOString().slice(0, 10))) && (
+                    <button className="btn sm" disabled={deciding === r.id} onClick={() => cancel(r, false)}
+                      style={{ marginLeft: 'auto', flexShrink: 0, color: 'var(--danger)', borderColor: 'var(--danger)' }}>
+                      {r.status === 'approved' ? 'Cancel PTO' : 'Cancel'}
+                    </button>
+                  )}
                 </div>
               )
             })}

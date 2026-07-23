@@ -1517,6 +1517,65 @@ app.post('/api/pto/request', async (req, res) => {
   }
 })
 
+// Cancel / remove a request. The requester can cancel their own (pending or
+// upcoming approved — plans change); the manager or an admin can remove any.
+// An approved cancellation CLEARS the schedule day(s) back to unscheduled —
+// the original shift times were overwritten at approval and can't be
+// restored, so WFM re-adds the shift if they're actually working.
+app.post('/api/pto/cancel', async (req, res) => {
+  const me = await requireUser(req, res)
+  if (!me) return
+  try {
+    const { id } = req.body || {}
+    const { data: row } = await supabase.from('pto_requests').select('*').eq('id', id).maybeSingle()
+    if (!row) return res.status(404).json({ error: 'Request not found' })
+    const isRequester = row.profile_id === me.id
+    const isManager = row.manager_id === me.id || me.role === 'admin'
+    if (!isRequester && !isManager) return res.status(403).json({ error: 'Not yours to cancel' })
+    const lastDay = row.end_date || row.date
+    if (row.status === 'approved' && lastDay < new Date().toISOString().slice(0, 10)) {
+      return res.status(400).json({ error: 'That time off is in the past — history stays' })
+    }
+    if (row.status === 'approved') {
+      for (const d of dateRangeDays(row.date, row.end_date)) {
+        await supabase.from('schedules').delete()
+          .eq('profile_id', row.profile_id).eq('date', d).eq('day_type', row.kind)
+      }
+    }
+    const { error } = await supabase.from('pto_requests').delete().eq('id', id)
+    if (error) throw new Error(error.message)
+
+    // Tell the other side — best effort.
+    try {
+      const otherId = isRequester ? row.manager_id : row.profile_id
+      const { data: other } = otherId
+        ? await supabase.from('profiles').select('name, email').eq('id', otherId).maybeSingle()
+        : { data: null }
+      if (other?.email) {
+        const span = row.end_date ? `${row.date} → ${row.end_date}` : row.date
+        const who = me.name || me.email
+        await sendResend({
+          to: other.email,
+          subject: isRequester
+            ? `${who} canceled their ${row.kind === 'sick' ? 'sick time' : 'PTO'} request — ${span}`
+            : `Your ${row.kind === 'sick' ? 'sick time' : 'PTO'} for ${span} was removed`,
+          html: `<div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:520px;margin:0 auto;padding:24px 20px;color:#111827;">
+  <div style="font-size:20px;font-weight:800;color:#ff751f;margin-bottom:10px;">andi</div>
+  <p style="font-size:14px;">${isRequester
+    ? `<b>${esc2(who)}</b> canceled their ${row.kind === 'sick' ? 'sick time' : 'PTO'} request for <b>${esc2(span)}</b>.`
+    : `Your ${row.kind === 'sick' ? 'sick time' : 'PTO'} for <b>${esc2(span)}</b> was removed by ${esc2(who)}.`}</p>
+  ${row.status === 'approved' ? `<p style="font-size:13px;color:#374151;">The day${row.end_date ? 's were' : ' was'} cleared from the schedule — WFM should re-add the shift if ${isRequester ? 'they are' : 'you are'} working.</p>` : ''}
+</div>`,
+        })
+      }
+    } catch (e) { console.warn('pto cancel email:', e.message) }
+    res.json({ ok: true })
+  } catch (err) {
+    console.error('pto cancel:', err.message)
+    res.status(500).json({ error: err.message })
+  }
+})
+
 app.post('/api/pto/decide', async (req, res) => {
   const me = await requireUser(req, res)
   if (!me) return
