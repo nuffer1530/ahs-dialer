@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { sb } from '../lib/supabase'
+import TimeOffTab from '../components/TimeOffTab'
 import { useAuth } from '../lib/AuthContext'
 import { inboundStats, outboundStats, acwStats, ahtOf, fmtSecs, fmtPct, SERVICE_LEVEL_SECONDS, SERVICE_LEVEL_TARGET } from '../lib/analytics'
 import Avatar from '../components/Avatar'
@@ -112,7 +113,7 @@ const RATING_COLORS = {
 export default function MyPage() {
   const { profile } = useAuth()
   const [searchParams, setSearchParams] = useSearchParams()
-  const VALID_TABS = ['my-schedule', 'team-schedule', 'stats', 'commissions', 'scorecard']
+  const VALID_TABS = ['my-schedule', 'team-schedule', 'stats', 'commissions', 'scorecard', 'time-off']
   const initialTab = VALID_TABS.includes(searchParams.get('tab')) ? searchParams.get('tab') : 'my-schedule'
   const [tab, setTab] = useState(initialTab)
   const [weekBase, setWeekBase] = useState(getTodayMonday)
@@ -279,6 +280,7 @@ export default function MyPage() {
     { id: 'stats',         label: 'My Stats' },
     { id: 'commissions',   label: 'Commissions' },
     { id: 'scorecard',     label: 'Scorecard' },
+    { id: 'time-off',      label: 'Time Off' },
   ]
 
   return (
@@ -316,6 +318,7 @@ export default function MyPage() {
               </button>
             </div>
           )}
+          {tab === 'time-off' && <TimeOffTab profile={profile} />}
           {tab === 'scorecard' && (
             <div style={{ display:'flex', alignItems:'center', gap:10, marginTop:2 }}>
               <button onClick={() => navMonth(-1)}

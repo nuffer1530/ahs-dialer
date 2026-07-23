@@ -1054,7 +1054,7 @@ export default function AdminPage() {
     if (!editProfile) return
     setSaving(true)
     try {
-      const { error } = await sb.from('profiles').update({ name: editProfile.name, role: editProfile.role, inbound_skill: !!editProfile.inbound_skill }).eq('id', editProfile.id)
+      const { error } = await sb.from('profiles').update({ name: editProfile.name, role: editProfile.role, inbound_skill: !!editProfile.inbound_skill, manager_id: editProfile.manager_id || null }).eq('id', editProfile.id)
       if (error) throw error
       const { data } = await sb.from('profiles').select('*').eq('id', editProfile.id).maybeSingle()
       if (data) setProfiles(prev => prev.map(p => p.id === data.id ? data : p))
@@ -1838,6 +1838,15 @@ export default function AdminPage() {
                     <option value="rep">Rep — can dial, view dashboard, see all stats</option>
                     <option value="dispatcher">Dispatcher — everything a rep has, plus Dispatch for Profit</option>
                     <option value="admin">Admin — full access including uploads and user management</option>
+                  </select>
+                </div>
+                <div className="form-field">
+                  <label className="form-label">Manager — approves their PTO / sick requests</label>
+                  <select className="form-input" value={editProfile.manager_id || ''}
+                    onChange={e => setEditProfile(p => ({ ...p, manager_id: e.target.value || null }))}>
+                    <option value="">No manager assigned</option>
+                    {profiles.filter(p => p.active !== false && p.id !== editProfile.id)
+                      .map(p => <option key={p.id} value={p.id}>{p.name || p.email}</option>)}
                   </select>
                 </div>
                 <div>

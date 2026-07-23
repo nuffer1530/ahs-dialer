@@ -415,3 +415,27 @@ alter table profiles add constraint profiles_role_check check (role in ('rep', '
 -- on the missing column otherwise.
 alter table campaigns add column if not exists source_query jsonb;
 notify pgrst, 'reload schema';
+
+-- ── PTO / sick requests (Jul 2026) ──────────────────────────────────────────
+-- CSRs request time off from My Page; their manager approves/denies there.
+-- RUN BEFORE the feature works. profiles.manager_id says who approves.
+alter table profiles add column if not exists manager_id uuid references profiles(id);
+create table if not exists pto_requests (
+  id uuid primary key default gen_random_uuid(),
+  profile_id uuid not null references profiles(id),
+  manager_id uuid references profiles(id),
+  date date not null,
+  end_date date,
+  kind text not null default 'pto' check (kind in ('pto','sick')),
+  reason text,
+  status text not null default 'pending' check (status in ('pending','approved','denied')),
+  decided_by uuid references profiles(id),
+  decided_at timestamptz,
+  decision_note text,
+  created_at timestamptz default now()
+);
+alter table pto_requests enable row level security;
+drop policy if exists "pto_requests all" on pto_requests;
+create policy "pto_requests all" on pto_requests for all using (true) with check (true);
+-- errors harmlessly if already in the publication; needed for the red-dot badge
+alter publication supabase_realtime add table pto_requests;

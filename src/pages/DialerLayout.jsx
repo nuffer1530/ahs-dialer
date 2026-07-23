@@ -7,6 +7,7 @@ import { useData } from '../lib/DataContext'
 import { sb } from '../lib/supabase'
 import { syncWorkerActivity } from '../lib/utils'
 import { useOpenLeads } from '../lib/useOpenLeads'
+import { usePtoApprovals } from '../lib/usePtoApprovals'
 import { PhoneProvider, usePhone } from '../lib/PhoneContext'
 import DialerPage from './DialerPage'
 import CampaignsPage from './CampaignsPage'
@@ -287,6 +288,7 @@ function DialerLayoutInner() {
   // claim-on-open, first rep there wins) and it clears the moment the inbox
   // empties — including when a booking is dismissed inside ServiceTitan.
   const openLeads = useOpenLeads()
+  const ptoApprovals = usePtoApprovals(profile?.id)
   const [statusOptions, setStatusOptions] = useState(DEFAULT_STATUS_OPTIONS)
 
   // Load custom statuses from app_settings
@@ -584,8 +586,19 @@ function DialerLayoutInner() {
             onMouseLeave={e => { const isActive = e.currentTarget.style.fontWeight === '600'; handleNavLeave(e, isActive) }}>
             {({ isActive }) => (
               <>
-                <span style={{ flexShrink:0, display:'flex', alignItems:'center' }}>{NAV_ICONS[MY_PAGE_ITEM.iconKey]?.(isActive)}</span>
+                <span style={{ flexShrink:0, display:'flex', alignItems:'center', position:'relative' }}>
+                  {NAV_ICONS[MY_PAGE_ITEM.iconKey]?.(isActive)}
+                  {ptoApprovals > 0 && navCollapsed && (
+                    <span style={{ position:'absolute', top:-2, right:-2, width:8, height:8, borderRadius:'50%', background:'var(--danger)', border:'2px solid var(--surface)' }} />
+                  )}
+                </span>
                 {!navCollapsed && <span>{MY_PAGE_ITEM.label}</span>}
+                {ptoApprovals > 0 && !navCollapsed && (
+                  <span title={`${ptoApprovals} time-off request${ptoApprovals === 1 ? '' : 's'} waiting on you`}
+                    style={{ marginLeft:'auto', fontSize:10, fontWeight:700, background:'var(--danger)', color:'#fff', borderRadius:99, padding:'1px 7px', lineHeight:1.5 }}>
+                    {ptoApprovals}
+                  </span>
+                )}
               </>
             )}
           </NavLink>

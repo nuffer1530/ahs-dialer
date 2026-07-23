@@ -1435,6 +1435,17 @@ async function requireAdmin(req, res) {
   return prof
 }
 
+// Any signed-in ACTIVE user — the gate for self-service routes (PTO etc.).
+async function requireUser(req, res) {
+  const token = (req.headers.authorization || '').replace(/^Bearer\s+/i, '')
+  if (!token) { res.status(401).json({ error: 'Not signed in' }); return null }
+  const { data: { user }, error } = await supabase.auth.getUser(token)
+  if (error || !user) { res.status(401).json({ error: 'Invalid session' }); return null }
+  const { data: prof } = await supabase.from('profiles').select('*').eq('id', user.id).maybeSingle()
+  if (!prof || prof.active === false) { res.status(403).json({ error: 'No active profile' }); return null }
+  return prof
+}
+
 // Dispatch surfaces admit admins AND the dispatcher role. Everything else
 // admin-gated stays admin-only — dispatcher is "rep plus the Dispatch tab".
 async function requireDispatch(req, res) {
@@ -1454,6 +1465,120 @@ async function requireDispatch(req, res) {
 const FOREVER = '876000h'
 
 const esc2 = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+
+// ── PTO / sick requests ─────────────────────────────────────────────────────
+// CSR submits from My Page; the manager on their profile gets an email and a
+// red-dot badge, decides from their own My Page, and an approval writes the
+// day(s) straight onto the WFM schedule (schedules.day_type pto/sick).
+const dateRangeDays = (start, end) => {
+  const out = []
+  const d0 = new Date(`${start}T12:00:00`)
+  const d1 = new Date(`${end || start}T12:00:00`)
+  for (let d = d0; d <= d1 && out.length < 30; d.setDate(d.getDate() + 1)) out.push(d.toISOString().slice(0, 10))
+  return out
+}
+
+app.post('/api/pto/request', async (req, res) => {
+  const me = await requireUser(req, res)
+  if (!me) return
+  try {
+    const { date, endDate, kind, reason } = req.body || {}
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(date || ''))) return res.status(400).json({ error: 'Pick a date' })
+    const k = kind === 'sick' ? 'sick' : 'pto'
+    if (!me.manager_id) return res.status(400).json({ error: 'No manager is set on your profile yet — ask an admin to assign one in Settings → Users.' })
+    const { data: row, error } = await supabase.from('pto_requests').insert({
+      profile_id: me.id, manager_id: me.manager_id,
+      date, end_date: endDate && endDate !== date ? endDate : null,
+      kind: k, reason: String(reason || '').slice(0, 500),
+    }).select().single()
+    if (error) throw new Error(error.message)
+    // Email the manager — best effort, the badge is the reliable channel.
+    try {
+      const { data: mgr } = await supabase.from('profiles').select('name, email').eq('id', me.manager_id).maybeSingle()
+      if (mgr?.email) {
+        const who = me.name || me.email
+        const span = row.end_date ? `${row.date} → ${row.end_date}` : row.date
+        await sendResend({
+          to: mgr.email,
+          subject: `${who} requested ${k === 'sick' ? 'sick time' : 'PTO'} — ${span}`,
+          html: `<div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:520px;margin:0 auto;padding:24px 20px;color:#111827;">
+  <div style="font-size:20px;font-weight:800;color:#ff751f;margin-bottom:10px;">andi</div>
+  <p style="font-size:14px;"><b>${esc2(who)}</b> requested <b>${k === 'sick' ? 'sick time' : 'PTO'}</b> for <b>${esc2(span)}</b>.</p>
+  ${reason ? `<p style="font-size:13px;color:#374151;background:#F9FAFB;border:1px solid #E5E7EB;border-radius:8px;padding:10px 14px;">"${esc2(reason)}"</p>` : ''}
+  <p style="margin:20px 0;"><a href="${appUrl}/mypage?tab=time-off" style="background:#ff751f;color:#fff;text-decoration:none;font-size:13px;font-weight:700;padding:10px 20px;border-radius:8px;">Review in Andi</a></p>
+</div>`,
+        })
+      }
+    } catch (e) { console.warn('pto email:', e.message) }
+    res.json({ ok: true, request: row })
+  } catch (err) {
+    console.error('pto request:', err.message)
+    res.status(500).json({ error: err.message })
+  }
+})
+
+app.post('/api/pto/decide', async (req, res) => {
+  const me = await requireUser(req, res)
+  if (!me) return
+  try {
+    const { id, decision, note } = req.body || {}
+    if (!['approved', 'denied'].includes(decision)) return res.status(400).json({ error: 'Decision must be approved or denied' })
+    const { data: row } = await supabase.from('pto_requests').select('*').eq('id', id).maybeSingle()
+    if (!row) return res.status(404).json({ error: 'Request not found' })
+    if (row.status !== 'pending') return res.status(400).json({ error: `Already ${row.status}` })
+    if (row.manager_id !== me.id && me.role !== 'admin') return res.status(403).json({ error: "Only this person's manager (or an admin) can decide" })
+
+    const { error } = await supabase.from('pto_requests').update({
+      status: decision, decided_by: me.id, decided_at: new Date().toISOString(),
+      decision_note: String(note || '').slice(0, 300) || null,
+    }).eq('id', id)
+    if (error) throw new Error(error.message)
+
+    if (decision === 'approved') {
+      // Write the day(s) onto the WFM schedule. An existing work day flips to
+      // pto/sick (shift fields cleared); a missing day gets a fresh row.
+      for (const d of dateRangeDays(row.date, row.end_date)) {
+        const { data: existing } = await supabase.from('schedules')
+          .select('id').eq('profile_id', row.profile_id).eq('date', d).maybeSingle()
+        if (existing) {
+          await supabase.from('schedules').update({
+            day_type: row.kind, shift_start: null, shift_end: null,
+            break1_start: null, break1_end: null, break2_start: null, break2_end: null,
+            lunch_start: null, lunch_end: null,
+          }).eq('id', existing.id)
+        } else {
+          await supabase.from('schedules').insert({
+            profile_id: row.profile_id, date: d, day_type: row.kind, created_by: me.id,
+          })
+        }
+      }
+    }
+
+    // Tell the requester — best effort.
+    try {
+      const { data: reqr } = await supabase.from('profiles').select('name, email').eq('id', row.profile_id).maybeSingle()
+      if (reqr?.email) {
+        const span = row.end_date ? `${row.date} → ${row.end_date}` : row.date
+        await sendResend({
+          to: reqr.email,
+          subject: `Your ${row.kind === 'sick' ? 'sick time' : 'PTO'} request for ${span} was ${decision}`,
+          html: `<div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:520px;margin:0 auto;padding:24px 20px;color:#111827;">
+  <div style="font-size:20px;font-weight:800;color:#ff751f;margin-bottom:10px;">andi</div>
+  <p style="font-size:14px;">Your <b>${row.kind === 'sick' ? 'sick time' : 'PTO'}</b> request for <b>${esc2(span)}</b> was
+  <b style="color:${decision === 'approved' ? '#16A34A' : '#DC2626'};">${decision}</b> by ${esc2(me.name || me.email)}.</p>
+  ${note ? `<p style="font-size:13px;color:#374151;">"${esc2(String(note))}"</p>` : ''}
+  ${decision === 'approved' ? '<p style="font-size:13px;color:#374151;">It\'s on the schedule.</p>' : ''}
+</div>`,
+        })
+      }
+    } catch (e) { console.warn('pto decision email:', e.message) }
+    res.json({ ok: true })
+  } catch (err) {
+    console.error('pto decide:', err.message)
+    res.status(500).json({ error: err.message })
+  }
+})
+
 
 // ── Invite a user by email. generateLink creates the auth user immediately
 // (the signup trigger writes their profiles row), returns a one-time invite
