@@ -79,6 +79,8 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
   // weekday without creating rows. Meeting blocks also carry a note.
   const [recurringDefs, setRecurringDefs] = useState([])
   const [meetingModal, setMeetingModal] = useState(null)   // { profileId, start }
+  const [bulkModal, setBulkModal] = useState(false)
+  const [bulkForm, setBulkForm] = useState({ type: 'meeting', all: true, profileIds: [], startTime: '09:00', durationMin: 15, note: '', repeat: false })
   const [meetingForm, setMeetingForm] = useState({ note: '', repeat: false, durationMin: 15 })
   const [containerWidth, setContainerWidth] = useState(0)
   const [tooltip, setTooltip] = useState(null)
@@ -382,6 +384,41 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
     setMeetingModal(null)
   }
 
+  // One event, many people: the Add Event button applies a block to selected
+  // reps or the whole floor, one-off or weekly-recurring, in a single pass.
+  const saveBulkEvent = async () => {
+    const targets = bulkForm.all ? profiles.map(p => p.id) : bulkForm.profileIds
+    if (!targets.length) { alert('Pick at least one rep (or Everyone).'); return }
+    const start = timeToInterval(bulkForm.startTime)
+    if (start == null) { alert('Pick a start time inside the schedule day.'); return }
+    const duration = Math.max(1, Math.round(bulkForm.durationMin / 15))
+    const note = bulkForm.note.trim()
+    setSaving(true)
+    if (bulkForm.repeat) {
+      const weekday = new Date(date + 'T12:00:00').getDay()
+      const defs = targets.map(pid => ({
+        id: `${Date.now()}-${pid.slice(0, 6)}-${Math.random().toString(36).slice(2, 6)}`,
+        profile_id: pid, weekday, type: bulkForm.type,
+        start_interval: start, duration_intervals: duration, note, created_by: profile?.id || null,
+      }))
+      await saveRecurringDefs([...recurringDefs, ...defs])
+    } else {
+      const rows = targets.map(pid => ({
+        profile_id: pid, date, type: bulkForm.type,
+        start_interval: start, duration_intervals: duration, created_by: profile?.id,
+        ...(note ? { note } : {}),
+      }))
+      let { data: inserted, error } = await sb.from('schedule_blocks').insert(rows).select()
+      if (error && /note/.test(error.message)) {
+        alert('Events added without notes — run the schedule_blocks.note migration to save notes.')
+        ;({ data: inserted } = await sb.from('schedule_blocks').insert(rows.map(({ note: _n, ...r }) => r)).select())
+      }
+      if (inserted?.length) setExtraBlocks(prev => [...prev, ...inserted])
+    }
+    setSaving(false)
+    setBulkModal(false)
+  }
+
   // Build adherence segments for a profile
   const getAdherenceSegments = (profileId) => {
     const sched = schedules.find(s => s.profile_id === profileId)
@@ -439,8 +476,14 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
             onMouseLeave={e => e.currentTarget.style.background='var(--surface-2)'}>›</button>
         </div>
 
-        {/* Legend */}
+        {/* Legend + bulk add */}
         <div style={{ display:'flex', gap:14, alignItems:'center', flexWrap:'wrap' }}>
+          {isAdmin && (
+            <button className="btn sm primary"
+              onClick={() => { setBulkForm({ type: 'meeting', all: true, profileIds: [], startTime: '09:00', durationMin: 15, note: '', repeat: false }); setBulkModal(true) }}>
+              ＋ Add event
+            </button>
+          )}
           {BLOCK_TYPES.slice(0,5).map(bt => (
             <div key={bt.id} style={{ display:'flex', alignItems:'center', gap:5, fontSize:11, color:'var(--text-secondary)' }}>
               <div style={{ width:10, height:10, borderRadius:2, background:bt.color, opacity:.8 }} />
@@ -737,6 +780,98 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
               </button>
             )
           })}
+        </div>
+      )}
+
+      {/* Bulk event dialog — many reps, one event */}
+      {bulkModal && (
+        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,.45)', zIndex:500, display:'flex', alignItems:'center', justifyContent:'center', padding:20 }}
+          onMouseDown={() => setBulkModal(false)}>
+          <div onMouseDown={e => e.stopPropagation()}
+            style={{ background:'var(--surface)', borderRadius:12, padding:22, width:'100%', maxWidth:460, boxShadow:'0 8px 32px rgba(0,0,0,.25)', maxHeight:'88vh', overflowY:'auto' }}>
+            <div style={{ fontSize:15, fontWeight:600, marginBottom:4 }}>Add event</div>
+            <div style={{ fontSize:12, color:'var(--text-muted)', marginBottom:14 }}>
+              {new Date(date + 'T12:00:00').toLocaleDateString([], { weekday:'long', month:'short', day:'numeric' })}
+            </div>
+            <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
+              <div className="form-field">
+                <label className="form-label">Event type</label>
+                <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
+                  {['meeting','outbound','break','lunch'].map(t => {
+                    const bt = BLOCK_TYPES.find(b => b.id === t)
+                    return (
+                      <button key={t} onClick={() => setBulkForm(f => ({ ...f, type: t }))}
+                        style={{ display:'flex', alignItems:'center', gap:6, padding:'7px 12px', borderRadius:8, fontSize:12, fontWeight:700, cursor:'pointer',
+                          border:`2px solid ${bulkForm.type === t ? 'var(--accent)' : 'var(--border)'}`,
+                          background: bulkForm.type === t ? 'var(--accent-bg)' : 'var(--surface-2)',
+                          color: bulkForm.type === t ? 'var(--accent)' : 'var(--text-secondary)' }}>
+                        <span style={{ width:9, height:9, borderRadius:2, background:bt?.color }} />
+                        {bt?.label || t}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+              <div className="form-field">
+                <label className="form-label">Who</label>
+                <label style={{ display:'flex', alignItems:'center', gap:8, fontSize:12.5, cursor:'pointer', marginBottom:6 }}>
+                  <input type="checkbox" checked={bulkForm.all}
+                    onChange={e => setBulkForm(f => ({ ...f, all: e.target.checked }))} />
+                  <b>Everyone</b> — the whole contact center ({profiles.length})
+                </label>
+                {!bulkForm.all && (
+                  <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:4, maxHeight:180, overflowY:'auto', border:'1px solid var(--border)', borderRadius:8, padding:8 }}>
+                    {profiles.map(p => (
+                      <label key={p.id} style={{ display:'flex', alignItems:'center', gap:6, fontSize:12, cursor:'pointer' }}>
+                        <input type="checkbox" checked={bulkForm.profileIds.includes(p.id)}
+                          onChange={e => setBulkForm(f => ({ ...f, profileIds: e.target.checked ? [...f.profileIds, p.id] : f.profileIds.filter(x => x !== p.id) }))} />
+                        {p.name || p.email}
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
+                <div className="form-field">
+                  <label className="form-label">Starts at</label>
+                  <input className="form-input" type="time" value={bulkForm.startTime} step={900}
+                    onChange={e => setBulkForm(f => ({ ...f, startTime: e.target.value }))} />
+                </div>
+                <div className="form-field">
+                  <label className="form-label">Length</label>
+                  <div style={{ display:'flex', gap:5 }}>
+                    {[15, 30, 45, 60].map(m => (
+                      <button key={m} onClick={() => setBulkForm(f => ({ ...f, durationMin: m }))}
+                        style={{ flex:1, padding:'7px 0', borderRadius:8, fontSize:12, fontWeight:700, cursor:'pointer',
+                          border:`2px solid ${bulkForm.durationMin === m ? 'var(--accent)' : 'var(--border)'}`,
+                          background: bulkForm.durationMin === m ? 'var(--accent-bg)' : 'var(--surface-2)',
+                          color: bulkForm.durationMin === m ? 'var(--accent)' : 'var(--text-secondary)' }}>
+                        {m}m
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              {bulkForm.type === 'meeting' && (
+                <div className="form-field">
+                  <label className="form-label">What's the meeting? (shows on hover)</label>
+                  <input className="form-input" value={bulkForm.note} placeholder="Team Huddle, all-hands, training…"
+                    onChange={e => setBulkForm(f => ({ ...f, note: e.target.value }))} />
+                </div>
+              )}
+              <label style={{ display:'flex', alignItems:'center', gap:8, fontSize:12.5, cursor:'pointer' }}>
+                <input type="checkbox" checked={bulkForm.repeat}
+                  onChange={e => setBulkForm(f => ({ ...f, repeat: e.target.checked }))} />
+                <span>Repeats <b>every {new Date(date + 'T12:00:00').toLocaleDateString([], { weekday:'long' })}</b></span>
+              </label>
+              <div style={{ display:'flex', justifyContent:'flex-end', gap:8 }}>
+                <button className="btn" onClick={() => setBulkModal(false)}>Cancel</button>
+                <button className="btn primary" onClick={saveBulkEvent} disabled={saving}>
+                  {saving ? 'Adding…' : `Add for ${bulkForm.all ? 'everyone' : `${bulkForm.profileIds.length} rep${bulkForm.profileIds.length === 1 ? '' : 's'}`}`}
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 
