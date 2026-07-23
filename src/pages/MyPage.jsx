@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { sb } from '../lib/supabase'
 import TimeOffTab from '../components/TimeOffTab'
+import PtoRequestModal from '../components/PtoRequestModal'
 import { useAuth } from '../lib/AuthContext'
 import { inboundStats, outboundStats, acwStats, ahtOf, fmtSecs, fmtPct, SERVICE_LEVEL_SECONDS, SERVICE_LEVEL_TARGET } from '../lib/analytics'
 import Avatar from '../components/Avatar'
@@ -116,6 +117,9 @@ export default function MyPage() {
   const VALID_TABS = ['my-schedule', 'team-schedule', 'stats', 'commissions', 'scorecard', 'time-off']
   const initialTab = VALID_TABS.includes(searchParams.get('tab')) ? searchParams.get('tab') : 'my-schedule'
   const [tab, setTab] = useState(initialTab)
+  // Click a day on My Schedule -> request time off for it.
+  const [ptoDay, setPtoDay] = useState(null)
+  const [ptoToast, setPtoToast] = useState('')
   const [weekBase, setWeekBase] = useState(getTodayMonday)
   const [schedules, setSchedules] = useState([])
   const [profiles, setProfiles] = useState([])
@@ -319,6 +323,15 @@ export default function MyPage() {
             </div>
           )}
           {tab === 'time-off' && <TimeOffTab profile={profile} />}
+          {ptoDay && (
+            <PtoRequestModal initialDate={ptoDay} onClose={() => setPtoDay(null)}
+              onSubmitted={() => { setPtoToast('Request sent — your manager has been notified. Track it in the Time Off tab.'); setTimeout(() => setPtoToast(''), 6000) }} />
+          )}
+          {ptoToast && (
+            <div style={{ position:'fixed', bottom:20, right:20, zIndex:900, background:'var(--surface)', border:'1px solid var(--success)', color:'var(--success)', borderRadius:10, padding:'10px 16px', fontSize:12.5, fontWeight:600, boxShadow:'0 8px 24px rgba(0,0,0,.15)' }}>
+              ✓ {ptoToast}
+            </div>
+          )}
           {tab === 'scorecard' && (
             <div style={{ display:'flex', alignItems:'center', gap:10, marginTop:2 }}>
               <button onClick={() => navMonth(-1)}
@@ -385,12 +398,19 @@ export default function MyPage() {
                     const isToday = date === today
                     const dt = sched?.day_type
                     const style = DAY_TYPE_STYLES[dt] || DAY_TYPE_STYLES.work
+                    const requestable = date >= today
                     return (
-                      <div key={date} style={{
-                        background: isToday ? 'var(--accent-bg)' : 'var(--surface)',
-                        border: `1px solid ${isToday ? 'var(--accent)' : 'var(--border)'}`,
-                        borderRadius: 'var(--radius-lg)', padding:14, minHeight:120,
-                      }}>
+                      <div key={date}
+                        onClick={() => requestable && setPtoDay(date)}
+                        title={requestable ? 'Click to request time off for this day' : undefined}
+                        style={{
+                          background: isToday ? 'var(--accent-bg)' : 'var(--surface)',
+                          border: `1px solid ${isToday ? 'var(--accent)' : 'var(--border)'}`,
+                          borderRadius: 'var(--radius-lg)', padding:14, minHeight:120,
+                          cursor: requestable ? 'pointer' : 'default',
+                        }}
+                        onMouseEnter={e => { if (requestable) e.currentTarget.style.boxShadow = '0 0 0 2px var(--accent-bg)' }}
+                        onMouseLeave={e => e.currentTarget.style.boxShadow = 'none'}>
                         <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:8 }}>
                           <div style={{ fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color: isToday ? 'var(--accent)' : 'var(--text-muted)' }}>
                             {DAYS[weekDates.indexOf(date)]}

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { sb } from '../lib/supabase'
+import PtoRequestModal from './PtoRequestModal'
 
 // Time off — request PTO/sick from My Page; the manager approves right here.
 // Approval writes the day(s) onto the WFM schedule (schedules.day_type).
@@ -31,9 +32,6 @@ export default function TimeOffTab({ profile }) {
   const [queue, setQueue] = useState([])      // pending requests where I'm the manager
   const [names, setNames] = useState({})
   const [modal, setModal] = useState(null)    // open request modal
-  const [form, setForm] = useState({ kind: 'pto', reason: '', start: '', end: '' })
-  const [busy, setBusy] = useState(false)
-  const [err, setErr] = useState('')
   const [deciding, setDeciding] = useState(null)
   // Month being viewed: 0 = this month, up to 12 months out for pre-planning.
   const [monthOff, setMonthOff] = useState(0)
@@ -58,22 +56,6 @@ export default function TimeOffTab({ profile }) {
     return () => sb.removeChannel(ch)
   }, [load])
 
-  const submit = async () => {
-    if (!form.start) { setErr('Pick a first day'); return }
-    if (form.end && form.end < form.start) { setErr('Last day is before the first day'); return }
-    setBusy(true); setErr('')
-    try {
-      await authedPost('/api/pto/request', {
-        date: form.start,
-        endDate: form.end && form.end !== form.start ? form.end : null,
-        kind: form.kind, reason: form.reason.trim(),
-      })
-      setModal(null)
-      load()
-    } catch (e) { setErr(e.message) }
-    setBusy(false)
-  }
-
   const decide = async (id, decision) => {
     setDeciding(id)
     try { await authedPost('/api/pto/decide', { id, decision }); load() }
@@ -95,14 +77,9 @@ export default function TimeOffTab({ profile }) {
     while (d <= e) { const k = ymd(d); if (!myByDate[k] || r.status === 'approved') myByDate[k] = r; d.setDate(d.getDate() + 1) }
   })
 
-  const openRequest = (dateStr) => {
-    setErr('')
-    setForm({ kind: 'pto', reason: '', start: dateStr, end: dateStr })
-    setModal(true)
-  }
+  const openRequest = (dateStr) => setModal({ date: dateStr })
 
   const span = (r) => r.end_date ? `${niceDay(r.date)} – ${niceDay(r.end_date)}` : niceDay(r.date)
-  const nDays = form.start ? dayCount(form.start, form.end || form.start) : 0
 
   return (
     <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 20, maxWidth: 980 }}>
@@ -206,55 +183,8 @@ export default function TimeOffTab({ profile }) {
         )}
       </div>
 
-      {/* Request modal — explicit first/last day, live day count */}
       {modal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.45)', zIndex: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}
-          onMouseDown={() => setModal(null)}>
-          <div onMouseDown={e => e.stopPropagation()}
-            style={{ background: 'var(--surface)', borderRadius: 14, width: '100%', maxWidth: 420, boxShadow: '0 12px 40px rgba(0,0,0,.25)', padding: '20px 22px' }}>
-            <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 14 }}>Request time off</div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              <div style={{ display: 'flex', gap: 8 }}>
-                {['pto', 'sick'].map(k => (
-                  <button key={k} onClick={() => setForm(f => ({ ...f, kind: k }))}
-                    style={{ flex: 1, padding: '9px 0', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: 'pointer',
-                      border: `2px solid ${form.kind === k ? 'var(--accent)' : 'var(--border)'}`,
-                      background: form.kind === k ? 'var(--accent-bg)' : 'var(--surface-2)',
-                      color: form.kind === k ? 'var(--accent)' : 'var(--text-secondary)' }}>
-                    {KIND_LABEL[k]}
-                  </button>
-                ))}
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-                <div className="form-field">
-                  <label className="form-label">First day off</label>
-                  <input className="form-input" type="date" value={form.start} min={todayStr}
-                    onChange={e => setForm(f => ({ ...f, start: e.target.value, end: f.end && f.end < e.target.value ? e.target.value : f.end }))} />
-                </div>
-                <div className="form-field">
-                  <label className="form-label">Last day off</label>
-                  <input className="form-input" type="date" value={form.end || form.start} min={form.start}
-                    onChange={e => setForm(f => ({ ...f, end: e.target.value }))} />
-                </div>
-              </div>
-              <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--accent)', background: 'var(--accent-bg)', borderRadius: 8, padding: '8px 12px' }}>
-                {nDays === 1
-                  ? `1 day — ${niceDay(form.start)}`
-                  : `${nDays} days — ${niceDay(form.start)} through ${niceDay(form.end || form.start)}`}
-              </div>
-              <div className="form-field">
-                <label className="form-label">Reason</label>
-                <textarea className="form-input" rows={3} value={form.reason} placeholder="Family trip, appointment, not feeling well…"
-                  onChange={e => setForm(f => ({ ...f, reason: e.target.value }))} />
-              </div>
-              {err && <div style={{ fontSize: 12, color: 'var(--danger)', background: 'var(--danger-bg)', padding: '8px 12px', borderRadius: 8 }}>{err}</div>}
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-                <button className="btn" onClick={() => setModal(null)}>Cancel</button>
-                <button className="btn primary" onClick={submit} disabled={busy}>{busy ? 'Sending…' : `Send request (${nDays} day${nDays === 1 ? '' : 's'})`}</button>
-              </div>
-            </div>
-          </div>
-        </div>
+        <PtoRequestModal initialDate={modal.date} onClose={() => setModal(null)} onSubmitted={load} />
       )}
     </div>
   )
