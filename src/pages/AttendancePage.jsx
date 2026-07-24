@@ -168,7 +168,9 @@ export default function AttendancePage() {
   const [editData, setEditData] = useState({})
   const [saving, setSaving] = useState(false)
   const [bulkModal, setBulkModal] = useState(false)
-  const [bulkData, setBulkData] = useState({ profileIds: [], templateId: '', dates: [] })
+  const [bulkCfg, setBulkCfg] = useState({ all: false, ids: [], templateId: '', days: [0,1,2,3,4], overwrite: false })
+  const [bulkBusy, setBulkBusy] = useState(false)
+  const [bulkResult, setBulkResult] = useState(null)
   const [templateModal, setTemplateModal] = useState(false)
   const [editTemplate, setEditTemplate] = useState(null)
   const [publishModal, setPublishModal] = useState(false)
@@ -180,6 +182,10 @@ export default function AttendancePage() {
   const [reportRange, setReportRange] = useState({ start: '', end: '' })
   const [reportData, setReportData] = useState(null)
   const [copyModal, setCopyModal] = useState(false)
+  const [copyCfg, setCopyCfg] = useState({ offset: 1, all: true, ids: [], overwrite: false })
+  const [copyBusy, setCopyBusy] = useState(false)
+  const [copyResult, setCopyResult] = useState(null)
+  const [tplBusy, setTplBusy] = useState(false)
 
   const weekDates = getWeekDates(weekBase)
   const today = new Date().toISOString().split('T')[0]
@@ -198,6 +204,104 @@ export default function AttendancePage() {
     }
     load()
   }, [weekBase])
+
+  const reloadSchedules = async () => {
+    const from = new Date(); from.setDate(from.getDate() - 30)
+    const to = new Date(); to.setDate(to.getDate() + 30)
+    const { data } = await sb.from('schedules').select('*').gte('date', toYMD(from)).lte('date', toYMD(to))
+    setSchedules(data || [])
+  }
+
+  const saveTemplate = async () => {
+    const t = editTemplate
+    if (!t?.name?.trim() || tplBusy) return
+    setTplBusy(true)
+    const payload = {
+      name: t.name.trim(), shift_start: t.shift_start || '08:00', shift_end: t.shift_end || '17:00',
+      break1_start: t.break1_start || null, break1_duration: t.break1_start ? (Number(t.break1_duration) || 15) : null,
+      break2_start: t.break2_start || null, break2_duration: t.break2_start ? (Number(t.break2_duration) || 15) : null,
+      lunch_start: t.lunch_start || null, lunch_duration: t.lunch_start ? (Number(t.lunch_duration) || 30) : null,
+      color: t.color || null,
+    }
+    if (t.id) {
+      const { data } = await sb.from('shift_templates').update(payload).eq('id', t.id).select().single()
+      if (data) setTemplates(prev => prev.map(x => x.id === t.id ? data : x))
+    } else {
+      const { data } = await sb.from('shift_templates').insert(payload).select().single()
+      if (data) setTemplates(prev => [...prev, data].sort((a, b) => (a.name || '').localeCompare(b.name || '')))
+    }
+    setTplBusy(false); setEditTemplate(null)
+  }
+
+  const deleteTemplate = async (id) => {
+    if (!window.confirm('Delete this template? Days already scheduled with it keep their times.')) return
+    await sb.from('shift_templates').delete().eq('id', id)
+    setTemplates(prev => prev.filter(t => t.id !== id))
+  }
+
+  const copyWeek = async () => {
+    if (copyBusy) return
+    const targets = copyCfg.all ? profiles.map(p => p.id) : copyCfg.ids
+    if (!targets.length) { setCopyResult({ error: 'Pick at least one person.' }); return }
+    setCopyBusy(true); setCopyResult(null)
+    const srcDates = weekDates.map(d => {
+      const dt = new Date(d + 'T12:00:00'); dt.setDate(dt.getDate() - 7 * copyCfg.offset); return toYMD(dt)
+    })
+    const [{ data: srcRows }, { data: destRows }] = await Promise.all([
+      sb.from('schedules').select('*').gte('date', srcDates[0]).lte('date', srcDates[6]),
+      sb.from('schedules').select('*').gte('date', weekDates[0]).lte('date', weekDates[6]),
+    ])
+    let copied = 0, skipped = 0
+    for (const pid of targets) {
+      for (let i = 0; i < 7; i++) {
+        const src = (srcRows || []).find(r => r.profile_id === pid && r.date === srcDates[i])
+        if (!src) continue
+        const dest = (destRows || []).find(r => r.profile_id === pid && r.date === weekDates[i])
+        if (dest && !copyCfg.overwrite) { skipped++; continue }
+        const { id, created_at, updated_at, ...fields } = src
+        const payload = { ...fields, date: weekDates[i] }
+        if (dest) await sb.from('schedules').update(payload).eq('id', dest.id)
+        else await sb.from('schedules').insert(payload)
+        copied++
+      }
+    }
+    await reloadSchedules()
+    setCopyBusy(false)
+    setCopyResult({ ok: `Copied ${copied} day${copied === 1 ? '' : 's'}${skipped ? ` \u00b7 ${skipped} skipped (already scheduled)` : ''}` })
+  }
+
+  const bulkApply = async () => {
+    if (bulkBusy) return
+    const t = templates.find(x => x.id === bulkCfg.templateId)
+    if (!t) { setBulkResult({ error: 'Pick a template.' }); return }
+    const targets = bulkCfg.all ? profiles.map(p => p.id) : bulkCfg.ids
+    if (!targets.length) { setBulkResult({ error: 'Pick at least one person.' }); return }
+    const dates = weekDates.filter((_, i) => bulkCfg.days.includes(i))
+    if (!dates.length) { setBulkResult({ error: 'Pick at least one day.' }); return }
+    setBulkBusy(true); setBulkResult(null)
+    const { data: destRows } = await sb.from('schedules').select('*').gte('date', weekDates[0]).lte('date', weekDates[6])
+    let applied = 0, skipped = 0
+    for (const pid of targets) {
+      for (const date of dates) {
+        const dest = (destRows || []).find(r => r.profile_id === pid && r.date === date)
+        if (dest && !bulkCfg.overwrite) { skipped++; continue }
+        const payload = {
+          profile_id: pid, date, day_type: 'work',
+          shift_start: t.shift_start || '08:00', shift_end: t.shift_end || '17:00',
+          break1_start: t.break1_start || null, break1_duration: t.break1_duration || null,
+          break2_start: t.break2_start || null, break2_duration: t.break2_duration || null,
+          lunch_start: t.lunch_start || null, lunch_duration: t.lunch_duration || null,
+          template_color: t.color || null,
+        }
+        if (dest) await sb.from('schedules').update(payload).eq('id', dest.id)
+        else await sb.from('schedules').insert(payload)
+        applied++
+      }
+    }
+    await reloadSchedules()
+    setBulkBusy(false)
+    setBulkResult({ ok: `Scheduled ${applied} day${applied === 1 ? '' : 's'}${skipped ? ` \u00b7 ${skipped} skipped (already scheduled)` : ''}` })
+  }
 
   const publishSchedules = async () => {
     if (publishing) return
@@ -763,6 +867,188 @@ export default function AttendancePage() {
           </div>
         )}
       </div>
+
+      {/* ── TEMPLATES MODAL ── */}
+      {templateModal && (
+        <Modal title={editTemplate ? (editTemplate.id ? 'Edit Template' : 'New Template') : 'Shift Templates'}
+          onClose={() => { setTemplateModal(false); setEditTemplate(null) }} width={520}>
+          {!editTemplate ? (
+            <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+              {templates.length === 0 && <div style={{ fontSize:13, color:'var(--text-muted)' }}>No templates yet — create one and the Bulk Schedule and day-editor pickers will offer it.</div>}
+              {templates.map(t => (
+                <div key={t.id} style={{ display:'flex', alignItems:'center', gap:10, padding:'8px 10px', border:'1px solid var(--border)', borderRadius:'var(--radius)' }}>
+                  <span style={{ width:14, height:14, borderRadius:4, background:t.color || 'var(--surface-2)', border:'1px solid var(--border)', flexShrink:0 }} />
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <div style={{ fontSize:13, fontWeight:600 }}>{t.name}</div>
+                    <div style={{ fontSize:11.5, color:'var(--text-muted)' }}>
+                      {fmt(t.shift_start)} – {fmt(t.shift_end)}
+                      {t.lunch_start ? ` \u00b7 Lunch ${fmt(t.lunch_start)}` : ''}
+                    </div>
+                  </div>
+                  <button className="btn sm" onClick={() => setEditTemplate({ ...t })}>Edit</button>
+                  <button className="btn sm" onClick={() => deleteTemplate(t.id)} style={{ color:'#B91C1C' }}>Delete</button>
+                </div>
+              ))}
+              <button className="btn primary" onClick={() => setEditTemplate({ shift_start:'08:00', shift_end:'17:00', break1_start:'10:00', break1_duration:15, lunch_start:'12:00', lunch_duration:30, break2_start:'14:30', break2_duration:15 })}>
+                + New template
+              </button>
+            </div>
+          ) : (
+            <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
+              <div className="form-field">
+                <label className="form-label">Name</label>
+                <input className="form-input" autoFocus value={editTemplate.name || ''} placeholder="Early shift"
+                  onChange={e => setEditTemplate(t => ({ ...t, name: e.target.value }))} />
+              </div>
+              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
+                <div className="form-field">
+                  <label className="form-label">Shift start</label>
+                  <input type="time" className="form-input" value={editTemplate.shift_start || ''} onChange={e => setEditTemplate(t => ({ ...t, shift_start: e.target.value }))} />
+                </div>
+                <div className="form-field">
+                  <label className="form-label">Shift end</label>
+                  <input type="time" className="form-input" value={editTemplate.shift_end || ''} onChange={e => setEditTemplate(t => ({ ...t, shift_end: e.target.value }))} />
+                </div>
+                <div className="form-field">
+                  <label className="form-label">Break 1</label>
+                  <input type="time" className="form-input" value={editTemplate.break1_start || ''} onChange={e => setEditTemplate(t => ({ ...t, break1_start: e.target.value }))} />
+                </div>
+                <div className="form-field">
+                  <label className="form-label">Lunch</label>
+                  <input type="time" className="form-input" value={editTemplate.lunch_start || ''} onChange={e => setEditTemplate(t => ({ ...t, lunch_start: e.target.value }))} />
+                </div>
+                <div className="form-field">
+                  <label className="form-label">Break 2</label>
+                  <input type="time" className="form-input" value={editTemplate.break2_start || ''} onChange={e => setEditTemplate(t => ({ ...t, break2_start: e.target.value }))} />
+                </div>
+                <div className="form-field">
+                  <label className="form-label">Color</label>
+                  <div style={{ display:'flex', gap:6, alignItems:'center', paddingTop:4 }}>
+                    {['#DBEAFE','#DCFCE7','#FEF3C7','#FCE7F3','#EDE9FE','#FFEDD5'].map(c => (
+                      <button key={c} type="button" onClick={() => setEditTemplate(t => ({ ...t, color: c }))}
+                        style={{ width:22, height:22, borderRadius:6, background:c, cursor:'pointer', border: editTemplate.color === c ? '2px solid var(--accent)' : '1px solid var(--border)' }} />
+                    ))}
+                  </div>
+                </div>
+              </div>
+              <div style={{ display:'flex', justifyContent:'flex-end', gap:8 }}>
+                <button className="btn" onClick={() => setEditTemplate(null)}>Back</button>
+                <button className="btn primary" onClick={saveTemplate} disabled={tplBusy || !editTemplate.name?.trim()}>
+                  {tplBusy ? 'Saving\u2026' : 'Save template'}
+                </button>
+              </div>
+            </div>
+          )}
+        </Modal>
+      )}
+
+      {/* ── COPY WEEK MODAL ── */}
+      {copyModal && (
+        <Modal title={`Copy Week \u2192 week of ${fmtDate(weekDates[0])}`} onClose={() => { setCopyModal(false); setCopyResult(null) }} width={440}>
+          <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
+            <div className="form-field">
+              <label className="form-label">Copy from</label>
+              <select className="form-input" value={copyCfg.offset} onChange={e => setCopyCfg(c => ({ ...c, offset: Number(e.target.value) }))}>
+                {[1,2,3,4].map(n => <option key={n} value={n}>{n === 1 ? 'Last week' : `${n} weeks ago`} (week of {fmtDate(toYMD(new Date(new Date(weekDates[0] + 'T12:00:00').getTime() - n * 7 * 86400000)))})</option>)}
+              </select>
+            </div>
+            <div className="form-field">
+              <label className="form-label">Who</label>
+              <label style={{ display:'flex', alignItems:'center', gap:8, fontSize:13, fontWeight:600, cursor:'pointer', padding:'6px 2px' }}>
+                <input type="checkbox" checked={copyCfg.all} onChange={e => setCopyCfg(c => ({ ...c, all: e.target.checked }))} />
+                Everyone on the floor
+              </label>
+              {!copyCfg.all && (
+                <div style={{ maxHeight:160, overflowY:'auto', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'4px 8px', display:'flex', flexDirection:'column' }}>
+                  {profiles.map(p => (
+                    <label key={p.id} style={{ display:'flex', alignItems:'center', gap:8, fontSize:13, cursor:'pointer', padding:'5px 2px' }}>
+                      <input type="checkbox" checked={copyCfg.ids.includes(p.id)}
+                        onChange={e => setCopyCfg(prev => ({ ...prev, ids: e.target.checked ? [...prev.ids, p.id] : prev.ids.filter(x => x !== p.id) }))} />
+                      {p.name || p.email}
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
+            <label style={{ display:'flex', alignItems:'center', gap:8, fontSize:12.5, cursor:'pointer' }}>
+              <input type="checkbox" checked={copyCfg.overwrite} onChange={e => setCopyCfg(c => ({ ...c, overwrite: e.target.checked }))} />
+              Overwrite days that already have a schedule
+            </label>
+            {copyResult?.error && <div style={{ fontSize:12.5, fontWeight:700, color:'#B91C1C' }}>{copyResult.error}</div>}
+            {copyResult?.ok && <div style={{ fontSize:12.5, fontWeight:600, color:'var(--success)' }}>\u2713 {copyResult.ok}</div>}
+            <div style={{ display:'flex', justifyContent:'flex-end', gap:8 }}>
+              <button className="btn" onClick={() => { setCopyModal(false); setCopyResult(null) }}>{copyResult?.ok ? 'Done' : 'Cancel'}</button>
+              <button className="btn primary" onClick={copyWeek} disabled={copyBusy || (!copyCfg.all && !copyCfg.ids.length)}>
+                {copyBusy ? 'Copying\u2026' : 'Copy week'}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* ── BULK SCHEDULE MODAL ── */}
+      {bulkModal && (
+        <Modal title={`Bulk Schedule \u2014 week of ${fmtDate(weekDates[0])}`} onClose={() => { setBulkModal(false); setBulkResult(null) }} width={460}>
+          <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
+            <div className="form-field">
+              <label className="form-label">Template</label>
+              <select className="form-input" value={bulkCfg.templateId} onChange={e => setBulkCfg(c => ({ ...c, templateId: e.target.value }))}>
+                <option value="">Pick a template\u2026</option>
+                {templates.map(t => <option key={t.id} value={t.id}>{t.name} ({fmt(t.shift_start)} \u2013 {fmt(t.shift_end)})</option>)}
+              </select>
+              {templates.length === 0 && <div style={{ fontSize:11.5, color:'#B45309', marginTop:4 }}>No templates yet — create one under Templates first.</div>}
+            </div>
+            <div className="form-field">
+              <label className="form-label">Days</label>
+              <div style={{ display:'flex', gap:4 }}>
+                {weekDates.map((d, i) => {
+                  const on = bulkCfg.days.includes(i)
+                  return (
+                    <button key={d} type="button"
+                      onClick={() => setBulkCfg(c => ({ ...c, days: on ? c.days.filter(x => x !== i) : [...c.days, i] }))}
+                      style={{ flex:1, padding:'6px 0', fontSize:11.5, fontWeight:600, borderRadius:'var(--radius)', cursor:'pointer',
+                        border: on ? '1px solid var(--accent)' : '1px solid var(--border)',
+                        background: on ? 'var(--accent)' : 'var(--surface-2)', color: on ? '#fff' : 'var(--text-secondary)' }}>
+                      {['Mon','Tue','Wed','Thu','Fri','Sat','Sun'][i]}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+            <div className="form-field">
+              <label className="form-label">Who</label>
+              <label style={{ display:'flex', alignItems:'center', gap:8, fontSize:13, fontWeight:600, cursor:'pointer', padding:'6px 2px' }}>
+                <input type="checkbox" checked={bulkCfg.all} onChange={e => setBulkCfg(c => ({ ...c, all: e.target.checked }))} />
+                Everyone on the floor
+              </label>
+              {!bulkCfg.all && (
+                <div style={{ maxHeight:150, overflowY:'auto', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'4px 8px', display:'flex', flexDirection:'column' }}>
+                  {profiles.map(p => (
+                    <label key={p.id} style={{ display:'flex', alignItems:'center', gap:8, fontSize:13, cursor:'pointer', padding:'5px 2px' }}>
+                      <input type="checkbox" checked={bulkCfg.ids.includes(p.id)}
+                        onChange={e => setBulkCfg(prev => ({ ...prev, ids: e.target.checked ? [...prev.ids, p.id] : prev.ids.filter(x => x !== p.id) }))} />
+                      {p.name || p.email}
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
+            <label style={{ display:'flex', alignItems:'center', gap:8, fontSize:12.5, cursor:'pointer' }}>
+              <input type="checkbox" checked={bulkCfg.overwrite} onChange={e => setBulkCfg(c => ({ ...c, overwrite: e.target.checked }))} />
+              Overwrite days that already have a schedule
+            </label>
+            {bulkResult?.error && <div style={{ fontSize:12.5, fontWeight:700, color:'#B91C1C' }}>{bulkResult.error}</div>}
+            {bulkResult?.ok && <div style={{ fontSize:12.5, fontWeight:600, color:'var(--success)' }}>\u2713 {bulkResult.ok}</div>}
+            <div style={{ display:'flex', justifyContent:'flex-end', gap:8 }}>
+              <button className="btn" onClick={() => { setBulkModal(false); setBulkResult(null) }}>{bulkResult?.ok ? 'Done' : 'Cancel'}</button>
+              <button className="btn primary" onClick={bulkApply}
+                disabled={bulkBusy || !bulkCfg.templateId || (!bulkCfg.all && !bulkCfg.ids.length) || !bulkCfg.days.length}>
+                {bulkBusy ? 'Applying\u2026' : 'Apply schedule'}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
 
       {/* ── PUBLISH + EMAIL MODAL ── */}
       {publishModal && (
