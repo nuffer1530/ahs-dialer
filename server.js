@@ -1265,6 +1265,20 @@ app.post('/api/st/book', async (req, res) => {
       pinToTop: false,
     }).catch(e => console.warn('Note post failed:', e.message))
 
+    // The call notes carry "Can Go Early: Yes" (the live transcription asks).
+    // Remember it per job — dispatch treats those customers as flexible, and
+    // the board AI may only propose window changes on flagged jobs.
+    if (jobId && /can\s*go\s*early\s*[:\-]?\s*yes/i.test(notes || '')) {
+      try {
+        const { data: geRow } = await supabase.from('app_settings').select('value').eq('key', 'can_go_early_jobs').maybeSingle()
+        let ge = {}
+        try { ge = JSON.parse(geRow?.value || '{}') } catch {}
+        for (const [jid, d] of Object.entries(ge)) if (Date.parse(d) < Date.now() - 14 * 864e5) delete ge[jid]
+        ge[String(jobId)] = new Date().toISOString()
+        await supabase.from('app_settings').upsert({ key: 'can_go_early_jobs', value: JSON.stringify(ge) }, { onConflict: 'key' })
+      } catch (e) { console.warn('can-go-early save:', e.message) }
+    }
+
     // Record attribution for the commission engine (best-effort; never blocks booking)
     try {
       if (jobId) {
@@ -4036,6 +4050,11 @@ async function computeLiveBoardPayload(dayOffset = 0) {
       const { data: cRow } = await supabase.from('app_settings').select('value').eq('key', 'board_revenue_counted').maybeSingle()
       counted = JSON.parse(cRow?.value || '{}')
     } catch {}
+    let canGoEarlyJobs = {}
+    try {
+      const { data: geRow } = await supabase.from('app_settings').select('value').eq('key', 'can_go_early_jobs').maybeSingle()
+      canGoEarlyJobs = JSON.parse(geRow?.value || '{}')
+    } catch {}
     // keep the ledger from growing forever — entries older than 14 days drop
     for (const [jid, d] of Object.entries(counted)) {
       if (Date.parse(d) < Date.now() - 14 * 864e5) delete counted[jid]
@@ -4265,7 +4284,10 @@ async function computeLiveBoardPayload(dayOffset = 0) {
           .sort((a, b) => {
             const ta = a.t?.minutes ?? a.t?.miles ?? 999
             const tb = b.t?.minutes ?? b.t?.miles ?? 999
-            return (b.uEV - a.uEV) || (ta - tb)      // strongest partner, then closest
+            // Same arrival window first — the cleanest one-for-one trade —
+            // then strongest partner, then closest.
+            const sw = (x) => (x.u.windowStart === m.windowStart && x.u.windowEnd === m.windowEnd) ? 0 : 1
+            return (sw(a) - sw(b)) || (b.uEV - a.uEV) || (ta - tb)
           })[0]
 
         if (!partner) continue
@@ -4277,7 +4299,11 @@ async function computeLiveBoardPayload(dayOffset = 0) {
           : `~${t.miles} mi between the two jobs (straight line)`
 
         const upside = Math.max(0, Math.round(partner.uEV - mEV))
+        const sameWindow = partner.u.windowStart === m.windowStart && partner.u.windowEnd === m.windowEnd
         const why = [
+          sameWindow
+            ? 'Same arrival window — clean one-for-one, neither customer notices'
+            : 'Techs trade jobs, appointments stay put — both customers keep their promised windows',
           `#${m.jobNumber} scores ${m.opportunity} on opportunity (${m.opportunityReasons.join(' · ') || 'high-value job type'}) but is on ${m.techName}, your lowest earner on this bench`,
           `${partner.u.techName} is rated "deploy here" (${money0(partner.uEV)}/opportunity vs ${money0(mEV)}) and is currently on a routine ${partner.u.jobType}`,
           upside > 0 ? `Expected upside on #${m.jobNumber}: about ${money0(upside)}` : 'Similar earning power — swap only if convenient',
@@ -4286,6 +4312,7 @@ async function computeLiveBoardPayload(dayOffset = 0) {
 
         swaps.push({
           businessUnit: bu,
+          sameWindow,
           travelMinutes: t?.minutes ?? null,
           travelMiles: t?.miles ?? null,
           upside,
@@ -4337,6 +4364,9 @@ async function computeLiveBoardPayload(dayOffset = 0) {
       // Reschedule candidates: what to move when demand walks in. Installs are
       // sold work and phone/follow-ups take no truck time and must happen, so
       // both are out. Ranked by how little the call is likely to produce.
+      // Customer told the CSR the tech may come earlier than the window —
+      // the one kind of call dispatch can shuffle without a broken promise.
+      c.canGoEarly = Boolean(canGoEarlyJobs[String(c.jobId)])
       c.rescheduleCandidate = c.actionable
         && !c.bookedRevenue
         && !STICKY_TO_TECH.test(c.jobType || '')
@@ -4375,6 +4405,7 @@ async function computeLiveBoardPayload(dayOffset = 0) {
         } else {
           why.push('No replacement or upgrade signals on this call')
         }
+        if (c.canGoEarly) why.unshift('Customer said the tech can come early — flexible on timing')
         if (c.isMember) caution = caution || 'Member — worth a courtesy call before moving'
         why.push(c.expectedRevenue > 0
           ? `Only ~$${c.expectedRevenue.toLocaleString()} expected if it runs`
@@ -4485,7 +4516,7 @@ async function gatherDispatchFacts({ allCalls = false } = {}) {
     })),
     swaps: (board.swaps || []).map(x => ({ text: x.text, why: x.why, upside: x.upside })),
     rescheduleCandidates: calls.filter(c => c.rescheduleCandidate)
-      .map(c => ({ job: c.jobNumber, type: c.jobType, tech: c.techName })),
+      .map(c => ({ job: c.jobNumber, type: c.jobType, tech: c.techName, canGoEarly: c.canGoEarly || undefined })),
     completedOutcomes: calls.filter(c => c.outcome).map(c => ({
       job: c.jobNumber, type: c.jobType, tech: c.techName, outcome: c.outcome.text,
     })),
@@ -4510,6 +4541,7 @@ async function gatherDispatchFacts({ allCalls = false } = {}) {
       window: c.windowStart ? `${c.windowStart}${c.windowEnd ? '\u2013' + c.windowEnd : ''}` : null,
       status: c.status, opportunity: c.opportunity ?? null,
       expectedRevenue: c.expectedRevenue ?? null,
+      canGoEarly: c.canGoEarly || undefined,
     }))
   }
   // Weather is demand context: a 98° day explains a full HVAC board and
@@ -4543,6 +4575,8 @@ async function generateDispatchBrief() {
   const sys = `You are the dispatch analyst for Awesome Home Services (HVAC, plumbing, electrical, garage doors — Colorado Springs). You are given a JSON snapshot of today's live dispatch board, tech performance benches, and 3-day capacity. Write the read a sharp dispatch manager would give at the huddle: concrete, numbers-first, in plain dispatcher language. Only use what is in the data; never invent jobs, names, or numbers.
 
 Every bench tech carries a 'today' field with their REAL availability right now. Treat it as law: never build an action around routing work to (or comparing against) a tech whose 'today' says they are off, have no working time left, or are on an all-day install — those techs cannot take calls no matter how good their numbers are. Recommendations may only name techs whose 'today' shows calls on board or room.
+
+Arrival windows are PROMISES to customers — treat them as law too. Trading TECHS between two jobs is always window-safe (appointments stay put). Any move that changes a customer's window or day is only allowed when that job carries canGoEarly=true (the customer said the tech may come earlier) — and even then, say to call the customer first. Never propose shifting a customer's time otherwise; find the move that works within the promised windows instead.
 
 Submit the analysis via the submit_brief tool. 3-6 actions, ordered by priority; empty arrays are fine. 'now' means act this hour; 'plan' means tomorrow/this week.`
 
@@ -5042,7 +5076,7 @@ You are given a JSON snapshot: every assignment on today's board (job number, ty
 
 Scenarios come in two shapes. DISRUPTIONS (a tech out sick, a truck down, a call running long): deal with the affected tech's specific assignments one by one — cover, swap, or push, cheapest move last. GOAL-SEEKING (sales are down, how do we squeeze more out of the board): hunt the profit levers in the data — high-opportunity calls sitting on red-tier techs that belong on green closers, strong closers burning slots on $0 maintenance/callbacks, unrouted swaps, reschedule candidates whose slots could take better calls, and tomorrow's capacity worth protecting. Name the specific moves and the dollar upside where computable.
 
-Rules: a tech whose 'today' says off / no time left / all-day install cannot take work. Protect high-opportunity calls (aging systems, replacements) with the strongest closers; low-opportunity and $0-collect calls are the ones to move or push to another day. If something genuinely can't be covered today, say which call moves to tomorrow and why it's the cheapest move. Submit via submit_plan: 3-8 ordered steps a dispatcher can execute top to bottom.`
+Rules: arrival windows are PROMISES — trading techs between jobs is window-safe (appointments stay put), but changing a customer's window or day is only allowed when that job carries canGoEarly=true (customer said the tech may come earlier), with an explicit 'call the customer to confirm' step; otherwise find moves that keep every customer inside their promised window, and when a cascade is needed, walk each hop and verify every touched customer stays in-window or gets a confirmation call. A tech whose 'today' says off / no time left / all-day install cannot take work. Protect high-opportunity calls (aging systems, replacements) with the strongest closers; low-opportunity and $0-collect calls are the ones to move or push to another day. If something genuinely can't be covered today, say which call moves to tomorrow and why it's the cheapest move. Submit via submit_plan: 3-8 ordered steps a dispatcher can execute top to bottom.`
 
     const r = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
