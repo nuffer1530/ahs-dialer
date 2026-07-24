@@ -9,11 +9,13 @@ import { sb } from '../lib/supabase'
 //  - Live Board: today's assignments scored against those ranks. Flags only —
 //    Andi never writes assignments back to ServiceTitan.
 
+// Baseball, to match the tab name. 'On the Bench' says where to route without
+// branding anyone a bad tech; 'Rookie' keeps thin data from reading as a grade.
 const TIER = {
-  green:    { color:'#15803D', bg:'#EAF5EE', border:'#BBE3C9', label:'Deploy here' },
-  yellow:   { color:'#B45309', bg:'#FBF3E0', border:'#F0DCA8', label:'Standard' },
-  red:      { color:'#B91C1C', bg:'#FBEEEA', border:'#F0C8BE', label:'Not on high-value' },
-  unranked: { color:'#6B7280', bg:'#F3F4F6', border:'#E5E7EB', label:'Not enough data' },
+  green:    { color:'#15803D', bg:'#EAF5EE', border:'#BBE3C9', label:'Heavy Hitter' },
+  yellow:   { color:'#B45309', bg:'#FBF3E0', border:'#F0DCA8', label:'In the Lineup' },
+  red:      { color:'#B91C1C', bg:'#FBEEEA', border:'#F0C8BE', label:'On the Bench' },
+  unranked: { color:'#6B7280', bg:'#F3F4F6', border:'#E5E7EB', label:'Rookie — no stats yet' },
 }
 
 const ST_JOB_URL = (jobId) => `https://go.servicetitan.com/#/Job/Index/${jobId}`
