@@ -1871,11 +1871,11 @@ app.post('/api/assistant/ask', async (req, res) => {
 
     const sys = `You are Ask Andi, the internal assistant for Awesome Home Services (HVAC, plumbing, electrical, garage doors — Colorado Springs). You help CSRs and dispatchers on live calls: policies, objection handling, what to say, how things work.
 
-Answer from the COMPANY KNOWLEDGE below plus general call-center craft. Rules:
-- Company facts (prices, fees, policies, service areas, guarantees) may ONLY come from the knowledge below. If it isn't covered, say plainly "That's not in the knowledge base" and suggest asking a manager — NEVER guess or invent a policy, price, or promise.
-- Objection-handling coaching may combine the knowledge with general sales craft. When the knowledge base HAS a play for the objection, lead with it. When it doesn't, still coach — use proven structure (acknowledge, isolate the real concern, reframe value, close soft) and give actual words to say — but open with "The playbook doesn't cover this one specifically —" so the rep knows it's craft, not company script, and set covered=false.
+Answer from the COMPANY KNOWLEDGE below plus your own call-center and sales expertise, blended seamlessly. Rules:
+- Company FACTS (prices, fees, policies, service areas, guarantees) may ONLY come from the knowledge below. If a needed fact isn't covered, say plainly "That's not in the knowledge base" for that part and suggest asking a manager — NEVER guess or invent a policy, price, or promise. Set covered=false ONLY in that case.
+- Objection handling and coaching: draw on BOTH the company playbook and proven sales craft (acknowledge, isolate the real concern, reframe value, close soft) in one confident answer — no disclaimers about what the playbook does or doesn't cover. Cite the KB articles you drew from in sources, and set usedCraft=true whenever your general expertise contributed beyond the articles.
 - Keep answers tight: a rep is often mid-call. Lead with the answer, no preamble.
-- Cite which knowledge articles you used by their exact titles.
+- FORMAT for fast reading with light markdown: **bold** lead-ins, hyphen bullets for options, numbered steps for sequences, and word-for-word lines in "quotes" on their own line. Short paragraphs with blank lines between — never a wall of text.
 
 COMPANY KNOWLEDGE:${kb}${script || ''}${!kb && !script ? '\n(The knowledge base is empty so far.)' : ''}`
 
@@ -1895,11 +1895,12 @@ COMPANY KNOWLEDGE:${kb}${script || ''}${!kb && !script ? '\n(The knowledge base 
           input_schema: {
             type: 'object',
             properties: {
-              answer: { type: 'string', description: 'The answer, plain text, tight. Line breaks allowed.' },
+              answer: { type: 'string', description: 'The answer in light markdown: **bold**, - bullets, 1. numbered steps, "quoted" word tracks on their own lines, blank lines between short paragraphs.' },
               sources: { type: 'array', items: { type: 'string' }, description: 'Exact titles of knowledge articles used. Empty if none.' },
-              covered: { type: 'boolean', description: 'false if the knowledge base did not cover the company-facts part of this question' },
+              covered: { type: 'boolean', description: 'false ONLY if a needed company fact was missing from the knowledge base' },
+              usedCraft: { type: 'boolean', description: 'true if general sales/call-center expertise contributed beyond the articles' },
             },
-            required: ['answer', 'sources', 'covered'],
+            required: ['answer', 'sources', 'covered', 'usedCraft'],
           },
         }],
         tool_choice: { type: 'tool', name: 'submit_answer' },
@@ -1920,7 +1921,7 @@ COMPANY KNOWLEDGE:${kb}${script || ''}${!kb && !script ? '\n(The knowledge base 
       logId = logRow?.id ?? null
     } catch (e) { console.warn('assistant log:', e.message) }
 
-    res.json({ answer: out.answer, sources: out.sources || [], covered: out.covered !== false, logId })
+    res.json({ answer: out.answer, sources: out.sources || [], covered: out.covered !== false, usedCraft: Boolean(out.usedCraft), logId })
   } catch (err) {
     console.error('assistant ask:', err.message)
     res.status(500).json({ error: err.message })

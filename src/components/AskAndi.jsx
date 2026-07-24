@@ -6,6 +6,35 @@ import { sb } from '../lib/supabase'
 // plus the inbound scripts; company facts are never invented, and every
 // answer cites the articles it used.
 
+// Markdown-lite renderer: **bold**, - bullets, numbered steps, paragraph
+// spacing. The raw text dump read as one jumbled block on a live call.
+function inline(text) {
+  return String(text).split(/\*\*([^*]+)\*\*/g).map((p, i) => (i % 2 ? <strong key={i}>{p}</strong> : p))
+}
+function AnswerText({ text }) {
+  const blocks = []
+  let list = null
+  const flush = () => { if (list) { blocks.push(list); list = null } }
+  for (const raw of String(text || '').split('\n')) {
+    const line = raw.trimEnd()
+    const bullet = line.match(/^\s*[-•]\s+(.*)/)
+    const num = line.match(/^\s*\d+[.)]\s+(.*)/)
+    if (bullet) { if (!list || list.type !== 'ul') { flush(); list = { type: 'ul', items: [] } } list.items.push(bullet[1]) }
+    else if (num) { if (!list || list.type !== 'ol') { flush(); list = { type: 'ol', items: [] } } list.items.push(num[1]) }
+    else if (!line.trim()) { flush(); blocks.push({ type: 'gap' }) }
+    else { flush(); blocks.push({ type: 'p', text: line }) }
+  }
+  flush()
+  return (
+    <div>
+      {blocks.map((b, i) => b.type === 'gap' ? <div key={i} style={{ height: 7 }} />
+        : b.type === 'p' ? <div key={i} style={{ marginBottom: 2 }}>{inline(b.text)}</div>
+        : b.type === 'ul' ? <ul key={i} style={{ margin: '3px 0', paddingLeft: 17 }}>{b.items.map((t, j) => <li key={j} style={{ marginBottom: 3 }}>{inline(t)}</li>)}</ul>
+        : <ol key={i} style={{ margin: '3px 0', paddingLeft: 19 }}>{b.items.map((t, j) => <li key={j} style={{ marginBottom: 3 }}>{inline(t)}</li>)}</ol>)}
+    </div>
+  )
+}
+
 export default function AskAndi() {
   const [open, setOpen] = useState(false)
   const [msgs, setMsgs] = useState([])   // { role, content, sources?, covered?, logId?, fb? }
@@ -33,7 +62,7 @@ export default function AskAndi() {
       })
       const d = await r.json()
       if (!r.ok) throw new Error(d.error || 'Something went wrong')
-      setMsgs(prev => [...prev, { role: 'assistant', content: d.answer, sources: d.sources, covered: d.covered, logId: d.logId }])
+      setMsgs(prev => [...prev, { role: 'assistant', content: d.answer, sources: d.sources, covered: d.covered, usedCraft: d.usedCraft, logId: d.logId }])
     } catch (e) {
       setMsgs(prev => [...prev, { role: 'assistant', content: `⚠️ ${e.message}`, sources: [] }])
     }
@@ -97,11 +126,12 @@ export default function AskAndi() {
             )}
             {msgs.map((m, i) => (
               <div key={i} style={{ alignSelf: m.role === 'user' ? 'flex-end' : 'flex-start', maxWidth: '88%' }}>
-                <div style={{ padding: '9px 12px', borderRadius: 12, fontSize: 12.5, lineHeight: 1.55, whiteSpace: 'pre-wrap',
+                <div style={{ padding: '9px 12px', borderRadius: 12, fontSize: 12.5, lineHeight: 1.55,
+                  whiteSpace: m.role === 'user' ? 'pre-wrap' : 'normal',
                   background: m.role === 'user' ? 'var(--accent)' : 'var(--surface-2)',
                   color: m.role === 'user' ? '#fff' : 'var(--text-primary)',
                   border: m.role === 'user' ? 'none' : '1px solid var(--border)' }}>
-                  {m.content}
+                  {m.role === 'user' ? m.content : <AnswerText text={m.content} />}
                 </div>
                 {m.role === 'assistant' && (m.sources?.length > 0 || m.logId != null) && (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 4, flexWrap: 'wrap' }}>
@@ -111,10 +141,18 @@ export default function AskAndi() {
                         📄 {t}
                       </span>
                     ))}
+                    {m.usedCraft && (
+                      <span title="Blends your playbook with general sales expertise"
+                        style={{ fontSize: 9.5, fontWeight: 700, padding: '1px 8px', borderRadius: 99,
+                        background: 'var(--tone-purple-bg)', color: 'var(--tone-purple-tx)', border: '1px solid var(--tone-purple-bd)' }}>
+                        🧠 sales craft
+                      </span>
+                    )}
                     {m.covered === false && (
-                      <span style={{ fontSize: 9.5, fontWeight: 700, padding: '1px 8px', borderRadius: 99,
+                      <span title="A company fact needed here isn't in the knowledge base yet"
+                        style={{ fontSize: 9.5, fontWeight: 700, padding: '1px 8px', borderRadius: 99,
                         background: 'var(--tone-amber-bg)', color: 'var(--tone-amber-tx)', border: '1px solid var(--tone-amber-bd)' }}>
-                        not in knowledge base
+                        fact not in KB
                       </span>
                     )}
                     {m.logId != null && (
