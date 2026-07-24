@@ -174,6 +174,7 @@ export default function AttendancePage() {
   const [publishModal, setPublishModal] = useState(false)
   const [publishing, setPublishing] = useState(false)
   const [publishResult, setPublishResult] = useState(null)
+  const [pubSel, setPubSel] = useState({ all: true, ids: [] })
   const [pointModal, setPointModal] = useState(null)
   const [pointData, setPointData] = useState({ reason: 'late', points: 0.5, notes: '', date: new Date().toISOString().split('T')[0] })
   const [reportRange, setReportRange] = useState({ start: '', end: '' })
@@ -197,6 +198,25 @@ export default function AttendancePage() {
     }
     load()
   }, [weekBase])
+
+  const publishSchedules = async () => {
+    if (publishing) return
+    if (!pubSel.all && !pubSel.ids.length) { setPublishResult({ error: 'Pick at least one person.' }); return }
+    setPublishing(true); setPublishResult(null)
+    try {
+      const { data: { session } } = await sb.auth.getSession()
+      const r = await fetch('/api/schedule/publish', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session?.access_token}` },
+        body: JSON.stringify({ weekStart: weekDates[0], profileIds: pubSel.all ? 'all' : pubSel.ids, from: profile?.name || profile?.email || 'your manager' }),
+      })
+      const d = await r.json()
+      if (!r.ok) throw new Error(d.error || 'Publish failed')
+      setPublishResult(d)
+    } catch (e) {
+      setPublishResult({ error: e.message })
+    } finally { setPublishing(false) }
+  }
 
   const getSchedule = (profileId, date) => schedules.find(s => s.profile_id === profileId && s.date === date)
   const getEvents = (profileId, date) => statusEvents.filter(e => e.profile_id === profileId && e.started_at.startsWith(date)).sort((a, b) => new Date(a.started_at) - new Date(b.started_at))
@@ -743,6 +763,54 @@ export default function AttendancePage() {
           </div>
         )}
       </div>
+
+      {/* ── PUBLISH + EMAIL MODAL ── */}
+      {publishModal && (
+        <Modal title={`Publish + Email — week of ${fmtDate(weekDates[0])}`} onClose={() => { setPublishModal(false); setPublishResult(null) }} width={440}>
+          <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
+            <div style={{ fontSize:12.5, color:'var(--text-muted)' }}>
+              Each person gets an email with <b>their own schedule</b> for this week — shift, breaks, lunch, and total hours.
+            </div>
+            <div className="form-field">
+              <label className="form-label">Who</label>
+              <label style={{ display:'flex', alignItems:'center', gap:8, fontSize:13, fontWeight:600, cursor:'pointer', padding:'6px 2px' }}>
+                <input type="checkbox" checked={pubSel.all}
+                  onChange={e => setPubSel(p => ({ ...p, all: e.target.checked }))} />
+                Everyone on the floor
+              </label>
+              {!pubSel.all && (
+                <div style={{ maxHeight:180, overflowY:'auto', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'4px 8px', display:'flex', flexDirection:'column' }}>
+                  {profiles.map(p => (
+                    <label key={p.id} style={{ display:'flex', alignItems:'center', gap:8, fontSize:13, cursor:'pointer', padding:'5px 2px' }}>
+                      <input type="checkbox" checked={pubSel.ids.includes(p.id)}
+                        onChange={e => setPubSel(prev => ({ ...prev, ids: e.target.checked ? [...prev.ids, p.id] : prev.ids.filter(x => x !== p.id) }))} />
+                      {p.name || p.email}
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
+            {publishResult?.error && <div style={{ fontSize:12.5, fontWeight:700, color:'#B91C1C' }}>{publishResult.error}</div>}
+            {publishResult && !publishResult.error && (
+              <div style={{ fontSize:12.5, fontWeight:600, color:'var(--success)' }}>
+                ✓ Emailed {publishResult.sent} schedule{publishResult.sent === 1 ? '' : 's'}
+                {publishResult.skipped?.length > 0 && (
+                  <span style={{ color:'#B45309' }}> — skipped (no email or bounce): {publishResult.skipped.join(', ')}</span>
+                )}
+              </div>
+            )}
+            <div style={{ display:'flex', justifyContent:'flex-end', gap:8 }}>
+              <button className="btn" onClick={() => { setPublishModal(false); setPublishResult(null) }}>
+                {publishResult && !publishResult.error ? 'Done' : 'Cancel'}
+              </button>
+              <button className="btn primary" onClick={publishSchedules}
+                disabled={publishing || (!pubSel.all && !pubSel.ids.length)}>
+                {publishing ? 'Sending\u2026' : pubSel.all ? 'Email everyone' : `Email (${pubSel.ids.length})`}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
 
       {/* ── EDIT SCHEDULE MODAL ── */}
       {editCell && (

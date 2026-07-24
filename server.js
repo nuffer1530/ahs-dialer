@@ -5052,6 +5052,84 @@ async function sendResend({ to, subject, html }) {
   return body
 }
 
+// 📆 Publish + Email the week's schedule. Each selected person gets THEIR OWN
+// week — shift, breaks, lunch, daily and weekly hours — straight from the
+// same schedules rows the WFM grid shows.
+app.post('/api/schedule/publish', async (req, res) => {
+  const prof = await requireAdmin(req, res)
+  if (!prof) return
+  try {
+    const weekStart = String(req.body?.weekStart || '')
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(weekStart)) return res.status(400).json({ error: 'weekStart (YYYY-MM-DD) required' })
+    const dates = Array.from({ length: 7 }, (_, i) => {
+      const d = new Date(weekStart + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + i)
+      return d.toISOString().split('T')[0]
+    })
+    const ids = req.body?.profileIds === 'all' ? null
+      : Array.isArray(req.body?.profileIds) ? req.body.profileIds.filter(Boolean) : []
+    if (ids && !ids.length) return res.status(400).json({ error: 'Pick at least one person' })
+
+    let q = supabase.from('profiles').select('id, name, email').eq('active', true).order('name')
+    if (ids) q = q.in('id', ids)
+    const { data: people } = await q
+    const { data: scheds } = await supabase.from('schedules').select('*').gte('date', dates[0]).lte('date', dates[6])
+
+    const fmt12 = (t) => { if (!t) return ''; const [h, m] = String(t).split(':').map(Number); return `${h % 12 || 12}:${String(m || 0).padStart(2, '0')} ${h >= 12 ? 'PM' : 'AM'}` }
+    const dayLabel = (ds) => new Date(ds + 'T12:00:00Z').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' })
+    const OFF_LABEL = { pto: 'PTO', sick: 'Sick', holiday: 'Holiday', off: 'Off' }
+    const hoursOf = (sd) => {
+      if (!sd?.shift_start || !sd?.shift_end) return 0
+      const [sh, sm] = sd.shift_start.split(':').map(Number); const [eh, em] = sd.shift_end.split(':').map(Number)
+      let h = (eh + (em || 0) / 60) - (sh + (sm || 0) / 60); if (h < 0) h += 24
+      return Math.max(0, h - (Number(sd.lunch_duration) || 0) / 60)
+    }
+    const weekTitle = `week of ${dayLabel(dates[0])}`
+
+    let sent = 0
+    const skipped = []
+    for (const person of (people || [])) {
+      if (!person.email) { skipped.push(person.name || person.id); continue }
+      let total = 0
+      const rows = dates.map(ds => {
+        const sd = scheds?.find(x => x.profile_id === person.id && x.date === ds)
+        const off = !sd || (sd.day_type && sd.day_type !== 'work') || !sd.shift_start
+        let cell
+        if (off) {
+          cell = `<span style="color:#94A3B8">${OFF_LABEL[sd?.day_type] || 'Off'}</span>`
+        } else {
+          const h = hoursOf(sd); total += h
+          const extras = [
+            sd.break1_start ? `Break ${fmt12(sd.break1_start)}` : null,
+            sd.lunch_start ? `Lunch ${fmt12(sd.lunch_start)}` : null,
+            sd.break2_start ? `Break ${fmt12(sd.break2_start)}` : null,
+          ].filter(Boolean).join(' · ')
+          cell = `<strong>${fmt12(sd.shift_start)} – ${fmt12(sd.shift_end)}</strong>` +
+            ` <span style="color:#64748B">(${h % 1 ? h.toFixed(1) : h}h)</span>` +
+            (extras ? `<br><span style="font-size:12px;color:#64748B">${extras}</span>` : '')
+        }
+        return `<tr><td style="padding:8px 12px;border-bottom:1px solid #E2E8F0;font-weight:600;white-space:nowrap">${dayLabel(ds)}</td>` +
+          `<td style="padding:8px 12px;border-bottom:1px solid #E2E8F0">${cell}</td></tr>`
+      }).join('')
+      const html = `<div style="font-family:-apple-system,Segoe UI,Arial,sans-serif;max-width:520px;margin:0 auto;color:#0F172A">` +
+        `<h2 style="margin:18px 0 2px">Your schedule — ${weekTitle}</h2>` +
+        `<p style="margin:0 0 14px;color:#64748B">${total % 1 ? total.toFixed(1) : total} scheduled hours this week</p>` +
+        `<table style="border-collapse:collapse;width:100%;font-size:14px">${rows}</table>` +
+        `<p style="margin:16px 0;color:#94A3B8;font-size:12px">Sent from Andi by ${String(req.body?.from || 'your manager')}. Questions? Ask your manager.</p></div>`
+      try {
+        await sendResend({ to: person.email, subject: `Your schedule — ${weekTitle}`, html })
+        sent++
+      } catch (e) {
+        console.warn('schedule publish email:', person.email, e.message)
+        skipped.push(person.name || person.email)
+      }
+    }
+    res.json({ sent, skipped })
+  } catch (err) {
+    console.error('schedule publish:', err.message)
+    res.status(500).json({ error: err.message })
+  }
+})
+
 async function buildBoardEmail() {
   const data = await build3DayBoard()
   return {
