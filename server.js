@@ -4433,8 +4433,9 @@ app.get('/api/dispatch/live-board', async (req, res) => {
 // happening, what to do about it, in dispatcher language. Cached in
 // app_settings so it survives restarts; regenerated on demand or when stale.
 let _briefBusy = false
-async function generateDispatchBrief() {
-  if (!ANTHROPIC_KEY) throw new Error('No ANTHROPIC_API_KEY configured')
+// Shared by the daily brief and Scenario AI: one signal-dense snapshot of
+// today's board, benches, capacity, and weather.
+async function gatherDispatchFacts({ allCalls = false } = {}) {
   const board = (_liveBoardCache && _liveBoardCache.expires > Date.now())
     ? _liveBoardCache.data : await computeLiveBoardPayload()
   const { data: scores } = await supabase.from('dispatch_tech_scores').select('*')
@@ -4476,6 +4477,16 @@ async function generateDispatchBrief() {
     })(),
     next3DaysCapacity: capacity,
   }
+  // Scenario AI needs the WHOLE board, not just the flagged slice — "Arber
+  // called in sick" is about Arber's perfectly unflagged assignments.
+  if (allCalls) {
+    facts.assignments = calls.map(c => ({
+      job: c.jobNumber, type: c.jobType, tech: c.techName, tier: c.techTier,
+      window: c.windowStart ? `${c.windowStart}${c.windowEnd ? '\u2013' + c.windowEnd : ''}` : null,
+      status: c.status, opportunity: c.opportunity ?? null,
+      expectedRevenue: c.expectedRevenue ?? null,
+    }))
+  }
   // Weather is demand context: a 98° day explains a full HVAC board and
   // argues for protecting no-cool slots. Failure to fetch never blocks the brief.
   try {
@@ -4486,6 +4497,23 @@ async function generateDispatchBrief() {
       demandSignal: wx.signal?.text || null,
     }
   } catch (e) { console.warn('brief weather:', e.message) }
+  return facts
+}
+
+// Word-boundary clamp shared by brief + scenario output cleaning.
+function cleanBriefText(t, max) {
+  let out = String(t || '').replace(/["{}\[\]]+/g, '').replace(/\s+/g, ' ').trim()
+  if (out.length > max) {
+    out = out.slice(0, max)
+    const cut = out.lastIndexOf(' ')
+    out = (cut > max - 30 ? out.slice(0, cut) : out).replace(/[,;:\u00b7\-\u2013\u2014]$/, '') + '\u2026'
+  }
+  return out
+}
+
+async function generateDispatchBrief() {
+  if (!ANTHROPIC_KEY) throw new Error('No ANTHROPIC_API_KEY configured')
+  const facts = await gatherDispatchFacts()
 
   const sys = `You are the dispatch analyst for Awesome Home Services (HVAC, plumbing, electrical, garage doors — Colorado Springs). You are given a JSON snapshot of today's live dispatch board, tech performance benches, and 3-day capacity. Write the read a sharp dispatch manager would give at the huddle: concrete, numbers-first, in plain dispatcher language. Only use what is in the data; never invent jobs, names, or numbers.
 
@@ -4540,15 +4568,7 @@ Submit the analysis via the submit_brief tool. 3-6 actions, ordered by priority;
   // Truncate at a WORD boundary with an ellipsis — the old hard slice cut
   // sentences mid-word ("don't overbook past", "for any l") which read as
   // broken. Caps are roomier; the ellipsis is the honest signal when hit.
-  const clean = (t, max) => {
-    let out = String(t || '').replace(/["{}\[\]]+/g, '').replace(/\s+/g, ' ').trim()
-    if (out.length > max) {
-      out = out.slice(0, max)
-      const cut = out.lastIndexOf(' ')
-      out = (cut > max - 30 ? out.slice(0, cut) : out).replace(/[,;:·\-–—]$/, '') + '…'
-    }
-    return out
-  }
+  const clean = cleanBriefText
   brief.headline = clean(brief.headline, 180)
   brief.situation = clean((String(brief.situation || '').match(/[^.!?]+[.!?]/g) || [brief.situation || '']).slice(0, 3).join(' '), 460)
   brief.actions = (brief.actions || []).slice(0, 6).map(a => ({ priority: a.priority, text: clean(a.text, 220) }))
@@ -4979,6 +4999,99 @@ async function computeDispatchDecision(input) {
     }
   }
 }
+
+// 🎭 Scenario AI — the dispatcher describes a situation ("Arber called in
+// sick — what do I do with his calls?") and gets a step-by-step walk-through
+// of the profit-maximizing response, grounded in the live board snapshot.
+app.post('/api/dispatch/scenario', async (req, res) => {
+  if (!(await requireDispatch(req, res))) return
+  try {
+    if (!ANTHROPIC_KEY) return res.status(500).json({ error: 'No ANTHROPIC_API_KEY configured' })
+    const scenario = String(req.body?.scenario || '').trim().slice(0, 600)
+    if (scenario.length < 5) return res.status(400).json({ error: 'Describe the scenario first.' })
+    const facts = await gatherDispatchFacts({ allCalls: true })
+
+    const sys = `You are the dispatch coach for Awesome Home Services (HVAC, plumbing, electrical, garage doors \u2014 Colorado Springs). The dispatcher describes a scenario; you walk them step by step through the correct decision-making to maximize profitable dispatch.
+
+You are given a JSON snapshot: every assignment on today's board (job number, type, tech, window, opportunity score, expected revenue), flagged calls, reschedule candidates, tech performance benches with REAL availability in 'today', 3-day capacity, and weather. Ground every step in this data \u2014 name real techs and job numbers; never invent any.
+
+Rules: a tech whose 'today' says off / no time left / all-day install cannot take work. Protect high-opportunity calls (aging systems, replacements) with the strongest closers; low-opportunity and $0-collect calls are the ones to move or push to another day. If the scenario removes a tech, deal with THEIR specific assignments one by one. If something genuinely can't be covered today, say which call moves to tomorrow and why it's the cheapest move. Submit via submit_plan: 3-8 ordered steps a dispatcher can execute top to bottom.`
+
+    const r = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+      body: JSON.stringify({
+        model: 'claude-sonnet-5', max_tokens: 1600, system: sys,
+        tools: [{
+          name: 'submit_plan',
+          description: 'Submit the scenario walk-through',
+          input_schema: {
+            type: 'object',
+            properties: {
+              headline: { type: 'string', maxLength: 160, description: 'One sentence: the shape of the answer' },
+              situation: { type: 'string', maxLength: 400, description: 'At most 3 plain sentences sizing up the impact. No JSON or brackets.' },
+              steps: {
+                type: 'array',
+                items: { type: 'string', description: 'One concrete move, naming tech and job number where possible, max 30 words' },
+                description: 'Ordered — the dispatcher executes top to bottom',
+              },
+              watchouts: { type: 'array', items: { type: 'string' } },
+            },
+            required: ['headline', 'situation', 'steps', 'watchouts'],
+          },
+        }],
+        tool_choice: { type: 'tool', name: 'submit_plan' },
+        messages: [{ role: 'user', content: `SCENARIO: ${scenario}\n\nBOARD DATA:\n${JSON.stringify(facts)}` }],
+      }),
+    })
+    if (!r.ok) throw new Error(`Claude ${r.status}: ${(await r.text()).slice(0, 160)}`)
+    const plan = ((await r.json()).content || []).find(b => b.type === 'tool_use')?.input
+    if (!plan?.steps?.length) throw new Error('No plan came back \u2014 try rewording the scenario')
+    plan.headline = cleanBriefText(plan.headline, 180)
+    plan.situation = cleanBriefText(plan.situation, 460)
+    plan.steps = (plan.steps || []).slice(0, 8).map(t => cleanBriefText(t, 260))
+    plan.watchouts = (plan.watchouts || []).slice(0, 4).map(t => cleanBriefText(t, 200))
+    res.json({ plan, generatedAt: new Date().toISOString() })
+  } catch (err) {
+    console.error('scenario error:', err.message)
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// 📝 Tech Info notes — dispatcher intel about specific techs, keyed by ST tech
+// id in app_settings (no migration). Batting Order shows them on hover.
+app.get('/api/dispatch/tech-notes', async (req, res) => {
+  if (!(await requireDispatch(req, res))) return
+  try {
+    const [{ data: row }, techs] = await Promise.all([
+      supabase.from('app_settings').select('value').eq('key', 'tech_notes').maybeSingle(),
+      getBoardTechs().catch(() => []),
+    ])
+    let notes = {}
+    try { notes = JSON.parse(row?.value || '{}') } catch {}
+    res.json({
+      notes,
+      techs: techs.filter(t => t.team !== 'Leadership')
+        .map(t => ({ id: t.id, name: t.name, team: t.team || 'Other' }))
+        .sort((a, b) => (a.team || '').localeCompare(b.team || '') || (a.name || '').localeCompare(b.name || '')),
+    })
+  } catch (err) { res.status(500).json({ error: err.message }) }
+})
+app.post('/api/dispatch/tech-notes', async (req, res) => {
+  if (!(await requireDispatch(req, res))) return
+  try {
+    const techId = String(req.body?.techId || '')
+    if (!techId) return res.status(400).json({ error: 'techId required' })
+    const note = String(req.body?.note || '').trim().slice(0, 500)
+    const { data: row } = await supabase.from('app_settings').select('value').eq('key', 'tech_notes').maybeSingle()
+    let notes = {}
+    try { notes = JSON.parse(row?.value || '{}') } catch {}
+    if (note) notes[techId] = note
+    else delete notes[techId]
+    await supabase.from('app_settings').upsert({ key: 'tech_notes', value: JSON.stringify(notes) }, { onConflict: 'key' })
+    res.json({ ok: true, notes })
+  } catch (err) { res.status(500).json({ error: err.message }) }
+})
 
 app.post('/api/dispatch/decide', async (req, res) => {
   if (!(await requireDispatch(req, res))) return

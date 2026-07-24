@@ -91,8 +91,67 @@ function TierPill({ tier }) {
   )
 }
 
+// 📝 Tech Info — dispatcher intel on specific techs. Notes save per tech and
+// surface as hover tooltips on the Batting Order.
+function TechInfo() {
+  const [data, setData] = useState(null)
+  const [err, setErr] = useState('')
+  const [drafts, setDrafts] = useState({})
+  const [savedAt, setSavedAt] = useState({})
+  useEffect(() => {
+    authed('/api/dispatch/tech-notes')
+      .then(d => { setData(d); setDrafts(d.notes || {}) })
+      .catch(e => setErr(e.message))
+  }, [])
+  const save = async (techId) => {
+    const note = (drafts[techId] || '').trim()
+    if ((data?.notes?.[techId] || '') === note) return
+    try {
+      const d = await authed('/api/dispatch/tech-notes', { method:'POST', body: JSON.stringify({ techId, note }) })
+      setData(prev => ({ ...prev, notes: d.notes }))
+      setSavedAt(prev => ({ ...prev, [techId]: Date.now() }))
+      setTimeout(() => setSavedAt(prev => ({ ...prev, [techId]: null })), 2500)
+    } catch (e) { setErr(e.message) }
+  }
+  if (err) return <div style={{ padding:20, color:'var(--danger)', fontSize:13 }}>{err}</div>
+  if (!data) return <div className="spinner lg" style={{ margin:'60px auto' }} />
+  const teams = [...new Set((data.techs || []).map(t => t.team))]
+  return (
+    <div>
+      <div style={{ fontSize:12, color:'var(--text-muted)', marginBottom:14 }}>
+        Notes about specific techs \u2014 strengths, quirks, customer feedback, anything dispatch should remember.
+        They pop up on hover (\ud83d\udcdd) on the Batting Order. Saves when you click away.
+      </div>
+      {teams.map(team => (
+        <div key={team} style={{ marginBottom:20 }}>
+          <div style={{ fontSize:13, fontWeight:700, marginBottom:8 }}>{team}</div>
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(320px, 1fr))', gap:10 }}>
+            {(data.techs || []).filter(t => t.team === team).map(t => (
+              <div key={t.id} className="card" style={{ padding:'10px 12px' }}>
+                <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:6 }}>
+                  <span style={{ fontSize:12.5, fontWeight:700 }}>{t.name}</span>
+                  {savedAt[t.id] && <span style={{ fontSize:10.5, fontWeight:700, color:'var(--success)' }}>\u2713 Saved</span>}
+                </div>
+                <textarea className="form-input" rows={2} value={drafts[t.id] || ''}
+                  placeholder="No notes yet\u2026"
+                  onChange={e => setDrafts(prev => ({ ...prev, [t.id]: e.target.value }))}
+                  onBlur={() => save(t.id)}
+                  style={{ fontSize:12, resize:'vertical' }} />
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 function BattingOrder() {
   const [data, setData] = useState(null)
+  const [techNotes, setTechNotes] = useState({})
+  useEffect(() => {
+    authed('/api/dispatch/tech-notes').then(d => setTechNotes(d.notes || {})).catch(() => {})
+  }, [])
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
   const [weights, setWeights] = useState(null)
@@ -206,7 +265,10 @@ function BattingOrder() {
                   {ranked.map(r => (
                     <tr key={r.tech_id} style={{ background: r.tier === 'green' ? 'rgba(21,128,61,.04)' : 'transparent' }}>
                       <td style={{ padding:'7px 12px', color:'var(--text-muted)' }}>{r.rank}</td>
-                      <td style={{ padding:'7px 12px', fontWeight:600, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }} title={r.tech_name}>{r.tech_name}</td>
+                      <td style={{ padding:'7px 12px', fontWeight:600, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}
+                        title={techNotes[r.tech_id] ? `${r.tech_name}\n\n\ud83d\udcdd ${techNotes[r.tech_id]}` : r.tech_name}>
+                        {r.tech_name}{techNotes[r.tech_id] && <span style={{ marginLeft:5, cursor:'help' }}>\ud83d\udcdd</span>}
+                      </td>
                       <td style={{ padding:'7px 12px' }}><TierPill tier={r.tier} /></td>
                       <td style={{ padding:'7px 12px', textAlign:'right', fontWeight:700 }}>{money(r.expected_value)}</td>
                       <td style={{ padding:'7px 12px', textAlign:'right' }}>{pct(r.close_rate)}</td>
@@ -247,6 +309,20 @@ function LiveBoard() {
   const [briefBusy, setBriefBusy] = useState(false)
   const [briefErr, setBriefErr] = useState('')
   const [showRevDetail, setShowRevDetail] = useState(false)   // Expected-revenue receipts popup
+  const [b3, setB3] = useState(null)            // 3-day capacity strip
+  const [scenario, setScenario] = useState('')
+  const [scBusy, setScBusy] = useState(false)
+  const [scErr, setScErr] = useState('')
+  const [scPlan, setScPlan] = useState(null)
+  useEffect(() => {
+    fetch('/api/board/3day').then(r => r.json()).then(setB3).catch(() => {})
+  }, [])
+  const askScenario = async () => {
+    if (scBusy || scenario.trim().length < 5) return
+    setScBusy(true); setScErr(''); setScPlan(null)
+    try { setScPlan(await authed('/api/dispatch/scenario', { method: 'POST', body: JSON.stringify({ scenario: scenario.trim() }) })) }
+    catch (e) { setScErr(e.message) } finally { setScBusy(false) }
+  }
   const loadBrief = useCallback(async (refresh = false) => {
     setBriefBusy(true); setBriefErr('')
     try { setBrief(await authed(`/api/dispatch/brief${refresh ? '?refresh=1' : ''}`)) }
@@ -414,6 +490,76 @@ function LiveBoard() {
               ))}
             </div>
           )}
+        </div>
+      )}
+
+      {/* 🎭 Scenario AI — "Arber called in sick, what do I do with his calls?" */}
+      <div className="card" style={{ padding:'11px 15px', marginBottom:12 }}>
+        <div style={{ display:'flex', gap:8, alignItems:'center' }}>
+          <span style={{ fontSize:15, flexShrink:0 }}>\ud83c\udfad</span>
+          <input className="form-input" value={scenario} style={{ flex:1 }}
+            placeholder='Run a scenario\u2026 e.g. "Arber called in sick \u2014 what do I do with his calls?"'
+            onChange={e => setScenario(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') askScenario() }} />
+          <button className="btn primary sm" onClick={askScenario} disabled={scBusy || scenario.trim().length < 5} style={{ flexShrink:0 }}>
+            {scBusy ? 'Working the board\u2026' : 'Walk me through it'}
+          </button>
+        </div>
+        {scErr && <div style={{ fontSize:12, color:'var(--danger)', marginTop:8 }}>{scErr}</div>}
+        {scBusy && <div style={{ fontSize:12, color:'var(--text-muted)', marginTop:8 }}>\ud83e\udde0 Thinking through every assignment on the board \u2014 15\u201330 seconds\u2026</div>}
+        {scPlan?.plan && (
+          <div style={{ marginTop:10, paddingTop:10, borderTop:'1px solid var(--border)' }}>
+            <div style={{ fontSize:13, fontWeight:800 }}>{scPlan.plan.headline}</div>
+            <div style={{ fontSize:11.5, color:'var(--text-muted)', marginTop:3, lineHeight:1.5 }}>{scPlan.plan.situation}</div>
+            <div style={{ marginTop:8, display:'flex', flexDirection:'column', gap:6 }}>
+              {scPlan.plan.steps.map((t, i) => (
+                <div key={i} style={{ display:'flex', gap:9, alignItems:'flex-start', fontSize:12 }}>
+                  <span style={{ flexShrink:0, width:20, height:20, borderRadius:'50%', background:'var(--accent)', color:'#fff', fontSize:10.5, fontWeight:700, display:'flex', alignItems:'center', justifyContent:'center', marginTop:1 }}>{i + 1}</span>
+                  <span style={{ lineHeight:1.5, flex:1, color:'var(--text-primary)' }}>{t}</span>
+                </div>
+              ))}
+            </div>
+            {(scPlan.plan.watchouts || []).length > 0 && (
+              <div style={{ marginTop:8, paddingTop:8, borderTop:'1px solid var(--border)', display:'flex', flexDirection:'column', gap:4 }}>
+                {scPlan.plan.watchouts.map((w, i) => (
+                  <div key={i} style={{ display:'flex', gap:6, fontSize:11, color:'var(--text-muted)', lineHeight:1.5 }}>
+                    <span style={{ flexShrink:0 }}>\ud83d\udc40</span><span>{w}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Next 3 days — booked vs capacity per trade, so the huddle is proactive */}
+      {b3?.board?.length > 0 && (
+        <div className="card" style={{ padding:'11px 15px', marginBottom:12 }}>
+          <div style={{ fontSize:10.5, fontWeight:700, textTransform:'uppercase', letterSpacing:.5, color:'var(--text-muted)', marginBottom:8 }}>
+            Next 3 days \u2014 booked / capacity
+          </div>
+          <div style={{ display:'grid', gridTemplateColumns:`minmax(90px, auto) repeat(${(b3.dates || []).length}, 1fr)`, gap:'6px 14px', fontSize:12, alignItems:'center' }}>
+            <span />
+            {(b3.dates || []).map((d, i) => (
+              <span key={d} style={{ fontSize:10.5, fontWeight:700, color:'var(--text-muted)' }}>
+                {i === 0 ? 'Today' : i === 1 ? 'Tomorrow' : new Date(d + 'T12:00:00').toLocaleDateString('en-US', { weekday:'short', month:'short', day:'numeric' })}
+              </span>
+            ))}
+            {b3.board.map(row => (
+              [<span key={row.trade} style={{ fontWeight:700, fontSize:12 }}>{row.trade}</span>,
+                ...(row.days || []).map((d, i) => {
+                  const col = d.status === 'good' ? '#15803D' : d.status === 'warn' ? '#B45309' : d.status === 'none' ? 'var(--text-muted)' : '#B91C1C'
+                  return (
+                    <span key={`${row.trade}${i}`} style={{ display:'flex', alignItems:'center', gap:6 }}>
+                      <span style={{ fontWeight:800, color:col }}>{d.calls}/{Math.round(d.capacity)}</span>
+                      {d.oppWatch
+                        ? <span title="Board full \u2014 Opportunity Watch: keep booking strong calls, dispatch makes room" style={{ fontSize:11 }}>\ud83d\udc40</span>
+                        : d.needed > 0 && <span style={{ fontSize:10.5, color:'var(--text-muted)' }}>need {d.needed}</span>}
+                    </span>
+                  )
+                })]
+            ))}
+          </div>
         </div>
       )}
 
@@ -1062,7 +1208,7 @@ export default function DispatchPage() {
   return (
     <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden' }}>
       <div style={{ background:'var(--surface)', borderBottom:'1px solid var(--border)', flexShrink:0, padding:'0 24px', display:'flex', gap:4 }}>
-        {[['order','Batting Order'],['jobtype','By Job Type'],['live','Live Board Analyzer'],['decide','Decision Maker']].map(([id,label]) => (
+        {[['order','Batting Order'],['jobtype','By Job Type'],['live','Live Board Analyzer'],['decide','Decision Maker'],['techinfo','Tech Info']].map(([id,label]) => (
           <button key={id} onClick={() => setTab(id)}
             style={{ padding:'12px 14px', border:'none', background:'transparent', cursor:'pointer', fontSize:13,
               fontWeight: tab===id ? 700 : 500, color: tab===id ? 'var(--accent)' : 'var(--text-muted)',
@@ -1072,7 +1218,7 @@ export default function DispatchPage() {
         ))}
       </div>
       <div style={{ flex:1, overflow:'auto', padding:'20px 24px', background:'var(--bg)' }}>
-        {tab === 'order' ? <BattingOrder /> : tab === 'jobtype' ? <ByJobType /> : tab === 'decide' ? <DecisionMaker /> : <LiveBoard />}
+        {tab === 'order' ? <BattingOrder /> : tab === 'jobtype' ? <ByJobType /> : tab === 'decide' ? <DecisionMaker /> : tab === 'techinfo' ? <TechInfo /> : <LiveBoard />}
       </div>
     </div>
   )
