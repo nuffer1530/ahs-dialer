@@ -123,7 +123,8 @@ export default function MyPage() {
   // 📣 Admin floor alert — broadcast to everyone or one person; pops like a
   // schedule alert on their screen.
   const [announceOpen, setAnnounceOpen] = useState(false)
-  const [announce, setAnnounce] = useState({ to: 'all', message: '' })
+  const [announce, setAnnounce] = useState({ all: true, ids: [], message: '' })
+  const [announceBusy, setAnnounceBusy] = useState(false)
   const [announceMsg, setAnnounceMsg] = useState('')
   const [annProfiles, setAnnProfiles] = useState([])
   useEffect(() => {
@@ -132,16 +133,30 @@ export default function MyPage() {
       .then(({ data }) => setAnnProfiles(data || []))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [announceOpen])
+  // Sent through the server — this page already holds the 'floor-alerts'
+  // subscription and Supabase won't join the same topic twice on one
+  // connection, so a browser-side send hung forever. The server's broadcast
+  // also pops on the sender's own screen, which is the delivery receipt.
   const sendAnnouncement = async () => {
     const message = announce.message.trim()
-    if (!message) return
-    const ch = sb.channel('floor-alerts')
-    await new Promise(resolve => ch.subscribe(status => { if (status === 'SUBSCRIBED') resolve() }))
-    await ch.send({ type: 'broadcast', event: 'announce', payload: { to: announce.to, from: profile?.name || profile?.email || 'Admin', message } })
-    sb.removeChannel(ch)
-    setAnnounceMsg(announce.to === 'all' ? 'Sent to the whole floor 📣' : 'Sent 📣')
-    setAnnounce({ to: 'all', message: '' })
-    setTimeout(() => { setAnnounceMsg(''); setAnnounceOpen(false) }, 1600)
+    if (!message || announceBusy) return
+    if (!announce.all && !announce.ids.length) { setAnnounceMsg('Pick at least one person.'); return }
+    setAnnounceBusy(true); setAnnounceMsg('')
+    try {
+      const { data: { session } } = await sb.auth.getSession()
+      const toNames = announce.all ? '' : annProfiles.filter(p => announce.ids.includes(p.id)).map(p => p.name || p.email).join(', ')
+      const r = await fetch('/api/admin/notify-floor', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session?.access_token}` },
+        body: JSON.stringify({ to: announce.all ? 'all' : announce.ids, toNames, from: profile?.name || profile?.email || 'Admin', message }),
+      })
+      const d = await r.json()
+      if (!r.ok) throw new Error(d.error || 'Send failed')
+      setAnnounce({ all: true, ids: [], message: '' })
+      setAnnounceOpen(false)
+    } catch (e) {
+      setAnnounceMsg(e.message)
+    } finally { setAnnounceBusy(false) }
   }
   // Shift length minus unpaid lunch; paid breaks count as worked time.
   const schedHours = (sched) => {
@@ -366,10 +381,22 @@ export default function MyPage() {
                 <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
                   <div className="form-field">
                     <label className="form-label">Who</label>
-                    <select className="form-input" value={announce.to} onChange={e => setAnnounce(a => ({ ...a, to: e.target.value }))}>
-                      <option value="all">📢 Everyone on the floor</option>
-                      {annProfiles.map(p => <option key={p.id} value={p.id}>{p.name || p.email}</option>)}
-                    </select>
+                    <label style={{ display:'flex', alignItems:'center', gap:8, fontSize:13, fontWeight:600, cursor:'pointer', padding:'6px 2px' }}>
+                      <input type="checkbox" checked={announce.all}
+                        onChange={e => setAnnounce(a => ({ ...a, all: e.target.checked }))} />
+                      Everyone on the floor
+                    </label>
+                    {!announce.all && (
+                      <div style={{ maxHeight:170, overflowY:'auto', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'4px 8px', display:'flex', flexDirection:'column' }}>
+                        {annProfiles.map(p => (
+                          <label key={p.id} style={{ display:'flex', alignItems:'center', gap:8, fontSize:13, cursor:'pointer', padding:'5px 2px' }}>
+                            <input type="checkbox" checked={announce.ids.includes(p.id)}
+                              onChange={e => setAnnounce(a => ({ ...a, ids: e.target.checked ? [...a.ids, p.id] : a.ids.filter(x => x !== p.id) }))} />
+                            {p.name || p.email}
+                          </label>
+                        ))}
+                      </div>
+                    )}
                   </div>
                   <div className="form-field">
                     <label className="form-label">Message</label>
@@ -377,12 +404,21 @@ export default function MyPage() {
                       placeholder="Huddle in 5 · Pizza in the break room · Great job on the push this morning!"
                       onChange={e => setAnnounce(a => ({ ...a, message: e.target.value }))}
                       onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) sendAnnouncement() }} />
+                    <div style={{ display:'flex', gap:4, flexWrap:'wrap', marginTop:6 }}>
+                      {['📣','🎉','👏','🔥','💪','🍕','☕','⏰','🚨','✅','🙌','😂'].map(em => (
+                        <button key={em} type="button" onClick={() => setAnnounce(a => ({ ...a, message: a.message + em }))}
+                          style={{ border:'1px solid var(--border)', background:'var(--surface-2)', borderRadius:8, padding:'3px 7px', fontSize:15, cursor:'pointer', lineHeight:1 }}>
+                          {em}
+                        </button>
+                      ))}
+                    </div>
                   </div>
-                  {announceMsg && <div style={{ fontSize:12.5, fontWeight:700, color:'var(--success)' }}>{announceMsg}</div>}
+                  {announceMsg && <div style={{ fontSize:12.5, fontWeight:700, color:'#B91C1C' }}>{announceMsg}</div>}
                   <div style={{ display:'flex', justifyContent:'flex-end', gap:8 }}>
                     <button className="btn" onClick={() => setAnnounceOpen(false)}>Cancel</button>
-                    <button className="btn primary" onClick={sendAnnouncement} disabled={!announce.message.trim()}>
-                      Send {announce.to === 'all' ? 'to everyone' : ''}
+                    <button className="btn primary" onClick={sendAnnouncement}
+                      disabled={announceBusy || !announce.message.trim() || (!announce.all && !announce.ids.length)}>
+                      {announceBusy ? 'Sending\u2026' : announce.all ? 'Send to everyone' : `Send (${announce.ids.length})`}
                     </button>
                   </div>
                 </div>
@@ -421,14 +457,7 @@ export default function MyPage() {
 
         {/* Tab bar */}
         <div style={{ display:'flex', alignItems:'center', padding:'0 24px', marginTop:10 }}>
-          {isAdmin && (
-            <button className="btn sm" onClick={() => { setAnnounceMsg(''); setAnnounceOpen(true) }}
-              style={{ marginRight:14, display:'flex', alignItems:'center', gap:6 }}
-              title="Send a pop-up alert to the floor or one person">
-              📣 Notify team
-            </button>
-          )}
-          <div style={{ display:'flex', gap:0 }}>
+          <div style={{ display:'flex', gap:0, flex:1 }}>
             {TABS.map(t => {
               const isActive = tab === t.id
               const isHov = hoveredTab === t.id && !isActive
@@ -451,6 +480,13 @@ export default function MyPage() {
               )
             })}
           </div>
+          {isAdmin && (
+            <button className="btn sm" onClick={() => { setAnnounceMsg(''); setAnnounceOpen(true) }}
+              style={{ marginLeft:'auto' }}
+              title="Send a pop-up alert to the floor or selected people">
+              Notify team
+            </button>
+          )}
         </div>
       </div>
 

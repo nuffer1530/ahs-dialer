@@ -1646,6 +1646,42 @@ app.post('/api/pto/decide', async (req, res) => {
 // `invited` metadata flag (cleared by setup_done) is what routes them there,
 // so the flow works even if the Supabase redirect allowlist sends them to
 // the app root instead.
+// 📣 Floor notification send. The browser can't send these itself: every page
+// already holds the 'floor-alerts' subscription (ScheduleAlerts) and Supabase
+// won't join the same topic twice on one connection — the client-side send
+// hung forever. The server has its own connection, and its broadcast reaches
+// the SENDER's screen too, which doubles as the delivery receipt.
+app.post('/api/admin/notify-floor', async (req, res) => {
+  const prof = await requireAdmin(req, res)
+  if (!prof) return
+  try {
+    const message = String(req.body?.message || '').trim().slice(0, 300)
+    if (!message) return res.status(400).json({ error: 'Message required' })
+    const to = req.body?.to === 'all' ? 'all'
+      : Array.isArray(req.body?.to) ? req.body.to.filter(Boolean).slice(0, 100) : []
+    if (to !== 'all' && !to.length) return res.status(400).json({ error: 'Pick at least one person' })
+    const ch = supabase.channel('floor-alerts')
+    await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('realtime timeout')), 8000)
+      ch.subscribe(st => {
+        if (st === 'SUBSCRIBED') { clearTimeout(timer); resolve() }
+        else if (st === 'CHANNEL_ERROR' || st === 'TIMED_OUT') { clearTimeout(timer); reject(new Error(st)) }
+      })
+    })
+    await ch.send({ type: 'broadcast', event: 'announce', payload: {
+      to, fromId: prof.id,
+      from: String(req.body?.from || 'Admin').slice(0, 80),
+      toNames: String(req.body?.toNames || '').slice(0, 200),
+      message,
+    } })
+    supabase.removeChannel(ch)
+    res.json({ ok: true })
+  } catch (err) {
+    console.error('notify-floor:', err.message)
+    res.status(500).json({ error: err.message })
+  }
+})
+
 app.post('/api/admin/user/invite', async (req, res) => {
   const admin = await requireAdmin(req, res)
   if (!admin) return

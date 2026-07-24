@@ -176,9 +176,16 @@ export default function ScheduleAlerts() {
     const ch = sb.channel('floor-alerts')
       .on('broadcast', { event: 'announce' }, ({ payload }) => {
         if (!payload?.message) return
-        if (payload.to !== 'all' && payload.to !== profile.id) return
+        const to = payload.to
+        const forMe = to === 'all' || (Array.isArray(to) ? to.includes(profile.id) : to === profile.id)
+        const isSender = payload.fromId === profile.id
+        if (!forMe && !isSender) return
         const id = `ann:${Date.now()}`
-        setAlerts(prev => [...prev, { id, kind: 'announce', from: payload.from || 'Admin', message: String(payload.message).slice(0, 300) }])
+        // The sender gets the same popup as a delivery receipt.
+        const from = isSender && !forMe
+          ? `Sent \u2713${payload.toNames ? ' \u2192 ' + payload.toNames : ''}`
+          : (payload.from || 'Admin')
+        setAlerts(prev => [...prev, { id, kind: 'announce', from, message: String(payload.message).slice(0, 300) }])
         playChime()
         setTimeout(() => setAlerts(prev => prev.filter(a => a.id !== id)), 25000)
       })
