@@ -269,7 +269,6 @@ export default function DialerPage() {
   // poll briefly after hangup and pre-fill the notes box (never overwriting
   // anything the rep already typed — a button offers the draft instead).
   const [autoNote, setAutoNote] = useState(null)   // { contactId, text }
-  const prevCallStatus = useRef(null)
 
   // Twilio — the phone lives in PhoneContext (mounted in DialerLayout) so it
   // survives navigation. It used to be created here, which meant leaving the
@@ -869,28 +868,28 @@ export default function DialerPage() {
     endInteraction?.()   // letting it go means you're no longer working it
   }
 
-  // Poll for drafted notes DURING the call (live transcription updates every
-  // ~20s) and for a minute after hangup (the Whisper final pass).
+  // Poll for drafted notes whenever a contact tab is open. Keying this off
+  // call-status transitions broke inbound: status flips to 'connected' BEFORE
+  // the caller's tab is selected, so the poller captured the wrong tab (or
+  // none) and never restarted. The server only serves drafts <15 min old, so
+  // idle polls are cheap no-ops.
   useEffect(() => {
-    const was = prevCallStatus.current
-    prevCallStatus.current = callStatus
-    const live = callStatus === 'connected' || callStatus === 'calling'
-    const justEnded = (was === 'connected' || was === 'calling') && (callStatus === 'ended' || callStatus === null)
-    if ((!live && !justEnded) || !selectedId) return
+    if (!selectedId) return
     const cid = selectedId
     const cphone = (contacts.find(x => x.id === cid)?.phone) || ''
-    let tries = 0
-    const t = setInterval(async () => {
-      if (justEnded && ++tries > 15) { clearInterval(t); return }   // post-call: give up after ~60s
+    const live = callStatus === 'connected' || callStatus === 'calling'
+    const poll = async () => {
       try {
         const r = await fetch(`/api/call-notes/latest?contactId=${cid}&phone=${encodeURIComponent(cphone)}`)
         const d = await r.json()
         if (d?.text) setAutoNote(prev => (prev?.text === d.text ? prev : { contactId: cid, text: d.text, at: d.at }))
       } catch {}
-    }, live ? 6000 : 4000)
+    }
+    poll()   // immediate — a tab opened mid-call shows notes right away
+    const t = setInterval(poll, live ? 6000 : 12000)
     return () => clearInterval(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [callStatus])
+  }, [callStatus, selectedId])
 
   // Fill when the box is empty OR still holds the previous auto-draft — the
   // moment the rep types their own words, we stop touching the box and the
