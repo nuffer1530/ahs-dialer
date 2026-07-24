@@ -135,6 +135,23 @@ export function PhoneProvider({ children }) {
     })
   }, [startCallTimer, stopCallTimer, enterWrapUp])
 
+  // Watchdog: a missed disconnect event left the chip showing 'connected'
+  // after the caller hung up. While the UI thinks a call is live, reconcile
+  // with the SDK's own call state every few seconds and self-correct.
+  useEffect(() => {
+    if (!['calling', 'ringing', 'connected'].includes(callStatus)) return
+    const t = setInterval(() => {
+      const c = callRef.current
+      if (!c || c.status?.() === 'closed') {
+        callRef.current = null
+        setCallStatus('ended'); stopCallTimer()
+        setTimeout(() => setCallStatus(null), 2000)
+        enterWrapUp()
+      }
+    }, 3000)
+    return () => clearInterval(t)
+  }, [callStatus, stopCallTimer, enterWrapUp])
+
   // Register the Device once per rep, for the whole session.
   useEffect(() => {
     if (!profile?.id || currentRep === 'Unknown') return

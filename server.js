@@ -2594,9 +2594,13 @@ const _wu = (sid, msg) => { _wuTrace.push({ at: new Date().toISOString(), sid: S
 
 // Post-call pass: Whisper on the finished recording — the final, highest-
 // quality draft (overwrites any live draft for the same call).
+const _whispered = new Set()
 async function transcribeAndDraftNotes({ callSid, contactId, phone, mp3Url, duration }) {
   if (!OPENAI_KEY || !ANTHROPIC_KEY) { _wu(callSid, 'skipped: key missing'); return }
   if (duration != null && duration < 15) { _wu(callSid, `skipped: ${duration}s too short`); return }   // too short to be a conversation
+  if (_whispered.has(callSid)) { _wu(callSid, 'skipped: already transcribed'); return }
+  _whispered.add(callSid)
+  if (_whispered.size > 500) _whispered.delete(_whispered.values().next().value)
   _wu(callSid, 'start')
   const auth = Buffer.from(`${process.env.TWILIO_ACCOUNT_SID}:${process.env.TWILIO_AUTH_TOKEN}`).toString('base64')
   const audioRes = await fetch(mp3Url, { headers: { Authorization: `Basic ${auth}` } })
@@ -2647,8 +2651,8 @@ async function startLiveTranscription(callSid, contactId, label, phone) {
   } catch (e) { _liveTx.delete(callSid); console.warn('live transcription start:', e.message) }
 }
 
-async function runLiveDraft(callSid) {
-  const e = _liveTx.get(callSid)
+async function runLiveDraft(callSid, entry) {
+  const e = entry || _liveTx.get(callSid)
   if (!e || e.running) return
   const text = e.parts.map(p => `${p.who}: ${p.text}`).join('\n')
   if (text.length < 80) return
@@ -2663,11 +2667,52 @@ async function runLiveDraft(callSid) {
   e.running = false
 }
 
+// TaskRouter's dequeue instruction records the call but supports NO recording
+// status callback — the recording_status_callback keys in the assignment
+// response are silently ignored, so /api/twilio/recording never fires for
+// inbound. Twilio DOES tell us when the call ends (transcription-stopped), so
+// we fetch the recording by REST and run the same final pass from here.
+async function finalPassFromRest(callSid, e) {
+  const auth = Buffer.from(`${process.env.TWILIO_ACCOUNT_SID}:${process.env.TWILIO_AUTH_TOKEN}`).toString('base64')
+  let rec = null
+  for (const delay of [10_000, 20_000]) {   // recording finishes processing a few seconds after hangup
+    await new Promise(r => setTimeout(r, delay))
+    try {
+      const r = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${process.env.TWILIO_ACCOUNT_SID}/Recordings.json?CallSid=${callSid}`, {
+        headers: { Authorization: `Basic ${auth}` } })
+      const d = await r.json()
+      rec = (d.recordings || []).find(x => x.status === 'completed') || null
+      if (rec) break
+    } catch (err) { _wu(callSid, `rest recordings: ${err.message}`) }
+  }
+  if (!rec) { _wu(callSid, 'no recording via REST'); return }
+  const mp3 = `https://api.twilio.com${rec.uri.replace('.json', '.mp3')}`
+  const dur = rec.duration ? parseInt(rec.duration) : null
+  // Attach to the rep's call log so inbound recordings show in the app too.
+  if (e.contactId) {
+    const { data: recentLog } = await supabase.from('call_logs').select('id')
+      .eq('contact_id', e.contactId).is('recording_url', null)
+      .order('created_at', { ascending: false }).limit(1).maybeSingle()
+    if (recentLog) await supabase.from('call_logs').update({ recording_url: mp3, recording_duration: dur, call_sid: callSid }).eq('id', recentLog.id)
+  }
+  await transcribeAndDraftNotes({ callSid, contactId: e.contactId, phone: e.phone, mp3Url: mp3, duration: dur })
+}
+
 app.post('/api/twilio/live-transcript', async (req, res) => {
   res.sendStatus(200)
   try {
     const { TranscriptionEvent, CallSid, Track } = req.body
-    if (TranscriptionEvent !== 'transcription-content' || !CallSid) return
+    if (!CallSid) return
+    if (TranscriptionEvent === 'transcription-stopped') {
+      const e = _liveTx.get(CallSid)
+      _liveTx.delete(CallSid)
+      if (e) {
+        runLiveDraft(CallSid, e)   // flush any tail utterances into the live draft
+        finalPassFromRest(CallSid, e).catch(err => _wu(CallSid, `final pass: ${err.message}`.slice(0, 200)))
+      }
+      return
+    }
+    if (TranscriptionEvent !== 'transcription-content') return
     let data = {}
     try { data = JSON.parse(req.body.TranscriptionData || '{}') } catch {}
     const text = String(data.transcript || '').trim()
