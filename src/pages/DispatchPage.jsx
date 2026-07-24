@@ -85,6 +85,22 @@ async function authed(path, opts = {}) {
   return data
 }
 
+// Native title tooltips inside the table showed a '?' cursor and often no
+// popup at all. This one appears instantly and follows the pointer.
+function HoverTip({ tip }) {
+  if (!tip) return null
+  const left = tip.x + 300 > window.innerWidth ? tip.x - 296 : tip.x + 14
+  return (
+    <div style={{ position:'fixed', left, top: Math.min(tip.y + 14, window.innerHeight - 120), zIndex: 900,
+      maxWidth: 280, background:'var(--surface)', border:'1px solid var(--border)', borderRadius:10,
+      boxShadow:'0 10px 30px rgba(0,0,0,.25)', padding:'9px 12px', fontSize:12, lineHeight:1.5,
+      color:'var(--text-primary)', pointerEvents:'none', whiteSpace:'pre-wrap' }}>
+      {tip.title && <div style={{ fontSize:10.5, fontWeight:700, color:'var(--text-muted)', marginBottom:3 }}>{tip.title}</div>}
+      {tip.text}
+    </div>
+  )
+}
+
 function TierPill({ tier }) {
   const t = TIER[tier] || TIER.unranked
   return (
@@ -167,6 +183,8 @@ function BattingOrder() {
   const [data, setData] = useState(null)
   const [techNotes, setTechNotes] = useState({})
   const [techReviews, setTechReviews] = useState({})
+  const [tip, setTip] = useState(null)
+  const showTip = (e, title, text) => setTip({ x: e.clientX, y: e.clientY, title, text })
   useEffect(() => {
     authed('/api/dispatch/tech-notes')
       .then(d => { setTechNotes(d.notes || {}); setTechReviews(d.reviews || {}) })
@@ -204,6 +222,7 @@ function BattingOrder() {
 
   return (
     <div>
+      <HoverTip tip={tip} />
       <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', flexWrap:'wrap', gap:10, marginBottom:14 }}>
         <div style={{ fontSize:12, color:'var(--text-muted)' }}>
           Ranked by expected revenue per opportunity (close rate × average sale) within each dispatch team ·
@@ -285,9 +304,12 @@ function BattingOrder() {
                   {ranked.map(r => (
                     <tr key={r.tech_id} style={{ background: r.tier === 'green' ? 'rgba(21,128,61,.04)' : 'transparent' }}>
                       <td style={{ padding:'7px 12px', color:'var(--text-muted)' }}>{r.rank}</td>
-                      <td style={{ padding:'7px 12px', fontWeight:600, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}
-                        title={techNotes[r.tech_id] ? `${r.tech_name}\n\n📝 ${techNotes[r.tech_id]}` : r.tech_name}>
-                        {r.tech_name}{techNotes[r.tech_id] && <span style={{ marginLeft:5, cursor:'help' }}>📝</span>}
+                      <td style={{ padding:'7px 12px', fontWeight:600, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap',
+                          cursor: techNotes[r.tech_id] ? 'pointer' : 'default' }}
+                        onMouseEnter={e => techNotes[r.tech_id] && showTip(e, `📝 ${r.tech_name}`, techNotes[r.tech_id])}
+                        onMouseMove={e => techNotes[r.tech_id] && showTip(e, `📝 ${r.tech_name}`, techNotes[r.tech_id])}
+                        onMouseLeave={() => setTip(null)}>
+                        {r.tech_name}{techNotes[r.tech_id] && <span style={{ marginLeft:5 }}>📝</span>}
                       </td>
                       <td style={{ padding:'7px 12px' }}><TierPill tier={r.tier} /></td>
                       <td style={{ padding:'7px 12px', textAlign:'right', fontWeight:700 }}>{money(r.expected_value)}</td>
@@ -299,7 +321,8 @@ function BattingOrder() {
                       <td style={{ padding:'7px 12px', textAlign:'right' }}>
                         {techReviews[r.tech_id]
                           ? <span style={{ color:'#B45309', fontWeight:700 }}
-                              title={`${techReviews[r.tech_id].n} review${techReviews[r.tech_id].n === 1 ? '' : 's'} in the window · avg ${techReviews[r.tech_id].avg}★`}>
+                              onMouseEnter={e => showTip(e, '⭐ Reviews (ServiceTitan)', `${techReviews[r.tech_id].n} review${techReviews[r.tech_id].n === 1 ? '' : 's'} in the window · ${techReviews[r.tech_id].n5} five-star · avg ${techReviews[r.tech_id].avg}★`)}
+                              onMouseLeave={() => setTip(null)}>
                               {techReviews[r.tech_id].perJobs}%
                             </span>
                           : <span style={{ color:'var(--text-muted)' }}>—</span>}
