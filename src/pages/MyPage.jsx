@@ -194,6 +194,18 @@ export default function MyPage() {
   }
   const fmtH = (h) => (h % 1 ? h.toFixed(1) : String(h))
   const [weekBase, setWeekBase] = useState(getTodayMonday)
+  // My Schedule: week cards or a month calendar.
+  const [schedView, setSchedView] = useState('week')
+  const [schedMonth, setSchedMonth] = useState(() => { const d = new Date(); return { y: d.getFullYear(), m: d.getMonth() } })
+  const [monthScheds, setMonthScheds] = useState([])
+  useEffect(() => {
+    if (schedView !== 'month' || !profile?.id) return
+    const first = new Date(schedMonth.y, schedMonth.m, 1)
+    const last = new Date(schedMonth.y, schedMonth.m + 1, 0)
+    sb.from('schedules').select('*').eq('profile_id', profile.id)
+      .gte('date', toYMD(first)).lte('date', toYMD(last))
+      .then(({ data }) => setMonthScheds(data || []))
+  }, [schedView, schedMonth.y, schedMonth.m, profile?.id])
   const [schedules, setSchedules] = useState([])
   const [profiles, setProfiles] = useState([])
   const [statusEvents, setStatusEvents] = useState([])
@@ -376,7 +388,7 @@ export default function MyPage() {
               <div style={{ fontSize:12, color:'var(--text-muted)', marginTop:2 }}>My Page</div>
             </div>
           </div>
-          {(tab === 'my-schedule' || tab === 'team-schedule' || tab === 'commissions') && (
+          {((tab === 'my-schedule' && schedView === 'week') || tab === 'team-schedule' || tab === 'commissions') && (
             <div style={{ display:'flex', alignItems:'center', gap:10, marginTop:2 }}>
               <button onClick={() => tab === 'commissions' ? navCommWeek(-1) : (() => { const d = new Date(weekBase + 'T00:00:00'); d.setDate(d.getDate()-7); setWeekBase(toYMD(d)) })()}
                 style={{ width:32, height:32, border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface-2)', cursor:'pointer', fontSize:16, color:'var(--text-secondary)', display:'flex', alignItems:'center', justifyContent:'center' }}
@@ -554,13 +566,89 @@ export default function MyPage() {
             {tab === 'time-off' && <TimeOffTab profile={profile} />}
             {tab === 'my-schedule' && (
               <div>
-                <div style={{ display:'flex', alignItems:'center', justifyContent:'flex-end', marginBottom:10, gap:6 }}>
-                  <span style={{ fontSize:12, color:'var(--text-muted)' }}>Scheduled this week:</span>
-                  <span style={{ fontSize:14, fontWeight:800, color:'var(--accent)' }}>
-                    {fmtH(weekDates.reduce((a, dd) => a + schedHours(getSched(profile?.id, dd)), 0))}h
-                  </span>
-                  <span style={{ fontSize:10, color:'var(--text-muted)' }}>(lunch unpaid, breaks paid)</span>
+                <div style={{ display:'flex', alignItems:'center', marginBottom:10, gap:10, flexWrap:'wrap' }}>
+                  <div style={{ display:'flex', border:'1px solid var(--border)', borderRadius:99, overflow:'hidden' }}>
+                    {[['week','Week'],['month','Month']].map(([v, label]) => (
+                      <button key={v} onClick={() => setSchedView(v)}
+                        style={{ padding:'5px 16px', border:'none', cursor:'pointer', fontSize:11.5, fontWeight:700,
+                          background: schedView === v ? 'var(--accent)' : 'transparent',
+                          color: schedView === v ? '#fff' : 'var(--text-muted)' }}>
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                  {schedView === 'month' && (
+                    <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                      <button className="btn sm" onClick={() => setSchedMonth(({ y, m }) => (m === 0 ? { y: y - 1, m: 11 } : { y, m: m - 1 }))}>‹</button>
+                      <span style={{ fontSize:13, fontWeight:700, minWidth:130, textAlign:'center' }}>
+                        {new Date(schedMonth.y, schedMonth.m, 1).toLocaleDateString([], { month:'long', year:'numeric' })}
+                      </span>
+                      <button className="btn sm" onClick={() => setSchedMonth(({ y, m }) => (m === 11 ? { y: y + 1, m: 0 } : { y, m: m + 1 }))}>›</button>
+                    </div>
+                  )}
+                  <div style={{ marginLeft:'auto', display:'flex', alignItems:'center', gap:6 }}>
+                    <span style={{ fontSize:12, color:'var(--text-muted)' }}>Scheduled this {schedView}:</span>
+                    <span style={{ fontSize:14, fontWeight:800, color:'var(--accent)' }}>
+                      {schedView === 'week'
+                        ? fmtH(weekDates.reduce((a, dd) => a + schedHours(getSched(profile?.id, dd)), 0))
+                        : fmtH(monthScheds.reduce((a, sd) => a + schedHours(sd), 0))}h
+                    </span>
+                    <span style={{ fontSize:10, color:'var(--text-muted)' }}>(lunch unpaid, breaks paid)</span>
+                  </div>
                 </div>
+                {schedView === 'month' && (() => {
+                  const first = new Date(schedMonth.y, schedMonth.m, 1)
+                  const lead = (first.getDay() + 6) % 7   // Monday-first grid, like the week view
+                  const daysIn = new Date(schedMonth.y, schedMonth.m + 1, 0).getDate()
+                  const cells = [...Array(lead).fill(null), ...Array.from({ length: daysIn }, (_, i) => i + 1)]
+                  while (cells.length % 7) cells.push(null)
+                  const short = (t) => fmt12(t).replace(':00', '').replace(' AM', 'a').replace(' PM', 'p')
+                  const schedOf = (d) => monthScheds.find(sd => sd.date === toYMD(new Date(schedMonth.y, schedMonth.m, d)))
+                  return (
+                    <div>
+                      <div style={{ display:'grid', gridTemplateColumns:'repeat(7, 1fr)', gap:6, marginBottom:6 }}>
+                        {DAYS.map(d => (
+                          <div key={d} style={{ textAlign:'center', fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:.5, color:'var(--text-muted)' }}>{d}</div>
+                        ))}
+                      </div>
+                      <div style={{ display:'grid', gridTemplateColumns:'repeat(7, 1fr)', gap:6 }}>
+                        {cells.map((d, i) => {
+                          if (!d) return <div key={`e${i}`} />
+                          const dateStr = toYMD(new Date(schedMonth.y, schedMonth.m, d))
+                          const sched = schedOf(d)
+                          const dt = sched?.day_type
+                          const style = DAY_TYPE_STYLES[dt] || DAY_TYPE_STYLES.work
+                          const isToday = dateStr === today
+                          const requestable = dateStr >= today
+                          return (
+                            <div key={dateStr}
+                              onClick={() => requestable && setPtoDay(dateStr)}
+                              title={requestable ? 'Click to request time off for this day' : undefined}
+                              style={{ background: isToday ? 'var(--accent-bg)' : 'var(--surface)',
+                                border:`1px solid ${isToday ? 'var(--accent)' : 'var(--border)'}`,
+                                borderRadius:8, padding:'8px 9px', minHeight:64,
+                                cursor: requestable ? 'pointer' : 'default', opacity: dateStr < today ? .55 : 1 }}>
+                              <div style={{ fontSize:11, fontWeight: isToday ? 800 : 600, color: isToday ? 'var(--accent)' : 'var(--text-secondary)' }}>{d}</div>
+                              {sched && dt && dt !== 'work' && (
+                                <div style={{ marginTop:4, padding:'1px 6px', borderRadius:5, background: style.bg, color: style.color, fontSize:9.5, fontWeight:700, display:'inline-block' }}>
+                                  {style.label}
+                                </div>
+                              )}
+                              {sched && dt === 'work' && sched.shift_start && (
+                                <div style={{ marginTop:4 }}>
+                                  <div style={{ fontSize:10.5, fontWeight:700, color:'var(--text-primary)' }}>{short(sched.shift_start)}–{short(sched.shift_end)}</div>
+                                  <div style={{ fontSize:9, fontWeight:700, color:'var(--accent)' }}>{fmtH(schedHours(sched))}h</div>
+                                </div>
+                              )}
+                              {!sched && <div style={{ marginTop:4, fontSize:9.5, color:'var(--text-muted)' }}>Off</div>}
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )
+                })()}
+                {schedView === 'week' && (
                 <div style={{ display:'grid', gridTemplateColumns:'repeat(7, 1fr)', gap:8 }}>
                   {weekDates.map(date => {
                     const sched = getSched(profile?.id, date)
@@ -630,6 +718,7 @@ export default function MyPage() {
                     )
                   })}
                 </div>
+                )}
               </div>
             )}
 
