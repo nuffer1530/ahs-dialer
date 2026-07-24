@@ -135,6 +135,16 @@ export function PhoneProvider({ children }) {
     })
   }, [startCallTimer, stopCallTimer, enterWrapUp])
 
+  // A refresh or tab-close kills the call — the WebRTC line lives in this
+  // page. Can't prevent that, but we can make it deliberate: the browser asks
+  // "Leave site?" while a call is live.
+  useEffect(() => {
+    if (!['calling', 'ringing', 'connected'].includes(callStatus)) return
+    const warn = (e) => { e.preventDefault(); e.returnValue = '' }
+    window.addEventListener('beforeunload', warn)
+    return () => window.removeEventListener('beforeunload', warn)
+  }, [callStatus])
+
   // Watchdog: a missed disconnect event left the chip showing 'connected'
   // after the caller hung up. While the UI thinks a call is live, reconcile
   // with the SDK's own call state every few seconds and self-correct.
