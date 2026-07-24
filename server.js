@@ -1442,7 +1442,7 @@ async function requireAdmin(req, res) {
   if (error || !user) { res.status(401).json({ error: 'Invalid session' }); return null }
 
   const { data: prof } = await supabase
-    .from('profiles').select('id, role, active').eq('id', user.id).maybeSingle()
+    .from('profiles').select('id, name, role, active').eq('id', user.id).maybeSingle()
   if (prof?.role !== 'admin' || prof?.active === false) {
     res.status(403).json({ error: 'Admins only' }); return null
   }
@@ -1686,6 +1686,163 @@ async function loadFloorScheduled() {
 async function saveFloorScheduled(list) {
   await supabase.from('app_settings').upsert({ key: FLOOR_SCHED_KEY, value: JSON.stringify(list.slice(0, 50)) }, { onConflict: 'key' })
 }
+
+// ═══ ASK ANDI — internal knowledge assistant ═══════════════════════════════
+// KB lives in kb_articles (admin-edited, revisioned); every Q&A is logged
+// with the article titles it cited, so what the floor is being told is
+// auditable and knowledge gaps show up as real questions.
+app.get('/api/kb/list', async (req, res) => {
+  if (!(await requireUser(req, res))) return
+  try {
+    const { data } = await supabase.from('kb_articles').select('*').order('category').order('title')
+    res.json({ articles: data || [] })
+  } catch (err) { res.status(500).json({ error: err.message }) }
+})
+
+app.post('/api/kb/save', async (req, res) => {
+  const prof = await requireAdmin(req, res)
+  if (!prof) return
+  try {
+    const { id, title, body, category, active, note } = req.body || {}
+    if (!String(title || '').trim()) return res.status(400).json({ error: 'Title required' })
+    const fields = {
+      title: String(title).trim().slice(0, 200),
+      body: String(body || '').slice(0, 20000),
+      category: String(category || 'general').slice(0, 40),
+      active: active !== false,
+      updated_by: prof.name || prof.id,
+      updated_at: new Date().toISOString(),
+      last_reviewed_at: new Date().toISOString(),
+    }
+    if (id) {
+      // Revision first — the ledger of what the assistant was being fed.
+      const { data: prev } = await supabase.from('kb_articles').select('*').eq('id', id).maybeSingle()
+      if (prev) {
+        await supabase.from('kb_revisions').insert({
+          article_id: id, title: prev.title, body: prev.body, category: prev.category,
+          edited_by: fields.updated_by, note: String(note || '').slice(0, 300) || null,
+        })
+      }
+      const { data, error } = await supabase.from('kb_articles').update(fields).eq('id', id).select().single()
+      if (error) throw new Error(error.message)
+      return res.json({ article: data })
+    }
+    const { data, error } = await supabase.from('kb_articles').insert(fields).select().single()
+    if (error) throw new Error(error.message)
+    res.json({ article: data })
+  } catch (err) { res.status(500).json({ error: err.message }) }
+})
+
+app.post('/api/kb/delete', async (req, res) => {
+  if (!(await requireAdmin(req, res))) return
+  try {
+    await supabase.from('kb_articles').delete().eq('id', String(req.body?.id || ''))
+    res.json({ ok: true })
+  } catch (err) { res.status(500).json({ error: err.message }) }
+})
+
+app.get('/api/kb/revisions', async (req, res) => {
+  if (!(await requireAdmin(req, res))) return
+  try {
+    const { data } = await supabase.from('kb_revisions').select('*')
+      .eq('article_id', String(req.query.articleId || '')).order('edited_at', { ascending: false }).limit(30)
+    res.json({ revisions: data || [] })
+  } catch (err) { res.status(500).json({ error: err.message }) }
+})
+
+app.post('/api/assistant/ask', async (req, res) => {
+  const prof = await requireUser(req, res)
+  if (!prof) return
+  try {
+    if (!ANTHROPIC_KEY) return res.status(500).json({ error: 'No ANTHROPIC_API_KEY configured' })
+    const question = String(req.body?.question || '').trim().slice(0, 1000)
+    if (question.length < 2) return res.status(400).json({ error: 'Ask something first' })
+    const history = Array.isArray(req.body?.history) ? req.body.history.slice(-8) : []
+
+    const [{ data: articles }, { data: scriptRow }] = await Promise.all([
+      supabase.from('kb_articles').select('title, category, body, updated_at').eq('active', true),
+      supabase.from('app_settings').select('value').eq('key', 'inbound_script').maybeSingle(),
+    ])
+    let kb = ''
+    for (const a of (articles || [])) {
+      const chunk = `\n\n## ${a.title} [${a.category}] (updated ${String(a.updated_at).slice(0, 10)})\n${stripHtml(a.body)}`
+      if (kb.length + chunk.length > 150_000) break
+      kb += chunk
+    }
+    let script = ''
+    try {
+      const inb = JSON.parse(scriptRow?.value || '{}')
+      if (inb.script) script += `\n\n## Inbound call script [scripts]\n${stripHtml(inb.script)}`
+      if (inb.tips) script += `\n\n## Inbound call tips [scripts]\n${stripHtml(inb.tips)}`
+    } catch {}
+
+    const sys = `You are Ask Andi, the internal assistant for Awesome Home Services (HVAC, plumbing, electrical, garage doors — Colorado Springs). You help CSRs and dispatchers on live calls: policies, objection handling, what to say, how things work.
+
+Answer from the COMPANY KNOWLEDGE below plus general call-center craft. Rules:
+- Company facts (prices, fees, policies, service areas, guarantees) may ONLY come from the knowledge below. If it isn't covered, say plainly "That's not in the knowledge base" and suggest asking a manager — NEVER guess or invent a policy, price, or promise.
+- Objection-handling coaching may combine the knowledge with general sales craft — make it concrete, give actual words to say.
+- Keep answers tight: a rep is often mid-call. Lead with the answer, no preamble.
+- Cite which knowledge articles you used by their exact titles.
+
+COMPANY KNOWLEDGE:${kb}${script || ''}${!kb && !script ? '\n(The knowledge base is empty so far.)' : ''}`
+
+    const messages = [
+      ...history.filter(m => m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string')
+        .map(m => ({ role: m.role, content: String(m.content).slice(0, 2000) })),
+      { role: 'user', content: question },
+    ]
+    const r = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+      body: JSON.stringify({
+        model: 'claude-sonnet-5', max_tokens: 1200, system: sys,
+        tools: [{
+          name: 'submit_answer',
+          description: 'Submit the answer for the rep',
+          input_schema: {
+            type: 'object',
+            properties: {
+              answer: { type: 'string', description: 'The answer, plain text, tight. Line breaks allowed.' },
+              sources: { type: 'array', items: { type: 'string' }, description: 'Exact titles of knowledge articles used. Empty if none.' },
+              covered: { type: 'boolean', description: 'false if the knowledge base did not cover the company-facts part of this question' },
+            },
+            required: ['answer', 'sources', 'covered'],
+          },
+        }],
+        tool_choice: { type: 'tool', name: 'submit_answer' },
+        messages,
+      }),
+    })
+    if (!r.ok) throw new Error(`Claude ${r.status}: ${(await r.text()).slice(0, 160)}`)
+    const out = ((await r.json()).content || []).find(b => b.type === 'tool_use')?.input
+    if (!out?.answer) throw new Error('No answer came back — try again')
+
+    let logId = null
+    try {
+      const { data: logRow } = await supabase.from('assistant_logs').insert({
+        profile_id: prof.id, rep_name: prof.name || null,
+        question, answer: String(out.answer).slice(0, 8000),
+        sources: (out.sources || []).slice(0, 10), covered: out.covered !== false,
+      }).select('id').single()
+      logId = logRow?.id ?? null
+    } catch (e) { console.warn('assistant log:', e.message) }
+
+    res.json({ answer: out.answer, sources: out.sources || [], covered: out.covered !== false, logId })
+  } catch (err) {
+    console.error('assistant ask:', err.message)
+    res.status(500).json({ error: err.message })
+  }
+})
+
+app.post('/api/assistant/feedback', async (req, res) => {
+  if (!(await requireUser(req, res))) return
+  try {
+    const { logId, helpful } = req.body || {}
+    if (logId == null) return res.status(400).json({ error: 'logId required' })
+    await supabase.from('assistant_logs').update({ helpful: Boolean(helpful) }).eq('id', logId)
+    res.json({ ok: true })
+  } catch (err) { res.status(500).json({ error: err.message }) }
+})
 
 app.post('/api/admin/notify-floor', async (req, res) => {
   const prof = await requireAdmin(req, res)

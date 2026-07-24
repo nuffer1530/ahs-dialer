@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { Routes, Route, NavLink, useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../lib/AuthContext'
 import WeatherStrip from '../components/WeatherStrip'
+import AskAndi from '../components/AskAndi'
 import { loadOpsConfig } from '../lib/opsConfig'
 import { useData } from '../lib/DataContext'
 import { sb } from '../lib/supabase'
@@ -715,6 +716,7 @@ function DialerLayoutInner() {
           </div>
         )}
         {/* Top bar — reserves its own height; hidden on the War Room (full-screen TV) route */}
+        {location.pathname !== '/warroom' && <AskAndi />}
         {location.pathname !== '/warroom' && (
         <div style={{ height:53, minHeight:53, boxSizing:'border-box', flexShrink:0, borderBottom:'1px solid var(--border)', background:'var(--surface)', display:'flex', alignItems:'center', justifyContent:'space-between', padding:'0 16px', position:'relative', zIndex:100 }}>
           {/* Contextual page header */}

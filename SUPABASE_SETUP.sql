@@ -442,3 +442,74 @@ alter publication supabase_realtime add table pto_requests;
 
 -- ── Meeting notes on schedule blocks (Jul 2026) ─────────────────────────────
 alter table schedule_blocks add column if not exists note text;
+
+
+-- ═══ Ask Andi knowledge assistant (Jul 2026) ═══════════════════════════════
+create table if not exists kb_articles (
+  id uuid primary key default gen_random_uuid(),
+  title text not null,
+  body text not null default '',
+  category text not null default 'general',
+  source text not null default 'manual',
+  source_url text,
+  active boolean not null default true,
+  review_days int default 90,
+  last_reviewed_at timestamptz default now(),
+  updated_by text,
+  updated_at timestamptz default now(),
+  created_at timestamptz default now()
+);
+
+create table if not exists kb_revisions (
+  id bigint generated always as identity primary key,
+  article_id uuid references kb_articles(id) on delete cascade,
+  title text, body text, category text,
+  edited_by text,
+  edited_at timestamptz default now(),
+  note text
+);
+
+create table if not exists assistant_logs (
+  id bigint generated always as identity primary key,
+  profile_id uuid,
+  rep_name text,
+  question text,
+  answer text,
+  sources text[],
+  covered boolean default true,
+  helpful boolean,
+  created_at timestamptz default now()
+);
+
+-- Starter articles: objection craft is generic and safe; policy articles are
+-- DRAFTS with [FILL IN] markers so the assistant never invents company facts
+-- (it treats the whole article as company knowledge once you edit it).
+insert into kb_articles (title, category, body, updated_by) values
+('Objection: I want to think about it', 'objections',
+'Acknowledge first, never argue: "Totally fair — it''s your home and your money."
+
+Then find the real objection: "So I make sure I''ve done my job — is it the timing, the price, or something I didn''t explain well?"
+
+If timing: remind them the diagnostic locks in today''s findings, and the problem usually grows ("no-cools rarely fix themselves in July").
+If price: move to the dispatch-fee framing — they''re deciding on a diagnosis, not a repair.
+Close soft: "How about I hold tomorrow''s 8–12 window while you talk it over? Cancelling is one call."', 'seed'),
+('Objection: I already have a company I use', 'objections',
+'Never knock the other company. "That''s great — sounds like they''ve taken care of you."
+
+Position as a second opinion, not a switch: "A lot of folks keep us as their second set of eyes. If your regular company quoted a big repair, a free second look can only help you."
+
+If they''re calling US while having "a company" — point that out gently: something made them call. "Since you''re on the phone anyway, let''s at least get you on the board — no commitment past the visit."', 'seed'),
+('Objection: The dispatch fee is too much', 'objections',
+'[FILL IN the actual fee amount and waive policy before relying on this]
+
+Frame it as a professional visit, not a fee: a licensed tech, a stocked truck, and a full diagnosis at their house.
+
+If we waive it with repair: lead with that — "and if you move forward with the work, that fee disappears entirely."
+
+Compare the alternative: guessing at the problem or a DIY fix that grows. "The fee is the cheapest part of any HVAC problem."', 'seed'),
+('Service areas', 'product',
+'[DRAFT — FILL IN before relying on this]
+We serve Colorado Springs, Pueblo, and Castle Rock and surrounding areas. List exact zips/areas we do NOT serve, and any trip-charge rules for the edges of the territory.', 'seed'),
+('Dispatch fee policy', 'policy',
+'[DRAFT — FILL IN before relying on this]
+Standard dispatch/diagnostic fee: $___. Waived when: ___. Member rate: $___. After-hours/emergency rate: $___.', 'seed');
