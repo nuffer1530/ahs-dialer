@@ -71,6 +71,10 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
   const [currentInterval, setCurrentInterval] = useState(null)
   const [saving, setSaving] = useState(false)
   const [shiftModal, setShiftModal] = useState(null)
+  const [shiftTemplates, setShiftTemplates] = useState([])
+  useEffect(() => {
+    sb.from('shift_templates').select('*').order('name').then(({ data }) => setShiftTemplates(data || []))
+  }, [])
   const [shiftForm, setShiftForm] = useState({ shift_start:'08:00', shift_end:'17:00', break1_start:'10:00', break1_duration:15, lunch_start:'12:00', lunch_duration:30, break2_start:'14:30', break2_duration:15, day_type:'work' })
   const [contextMenu, setContextMenu] = useState(null)
   const [addBlockMenu, setAddBlockMenu] = useState(null)
@@ -258,8 +262,8 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
       break1_start: sched.break1_start || '10:00', break1_duration: sched.break1_duration || 15,
       lunch_start: sched.lunch_start || '12:00', lunch_duration: sched.lunch_duration || 30,
       break2_start: sched.break2_start || '14:30', break2_duration: sched.break2_duration || 15,
-      day_type: sched.day_type || 'work',
-    } : { shift_start:'08:00', shift_end:'17:00', break1_start:'10:00', break1_duration:15, lunch_start:'12:00', lunch_duration:30, break2_start:'14:30', break2_duration:15, day_type:'work' })
+      day_type: sched.day_type || 'work', template_color: sched.template_color || null,
+    } : { shift_start:'08:00', shift_end:'17:00', break1_start:'10:00', break1_duration:15, lunch_start:'12:00', lunch_duration:30, break2_start:'14:30', break2_duration:15, day_type:'work', template_color:null })
     setShiftModal(profileId)
   }
 
@@ -280,6 +284,7 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
       lunch_start: isOff ? null : shiftForm.lunch_start || null,
       lunch_end: isOff ? null : shiftForm.lunch_start ? addMins(shiftForm.lunch_start, shiftForm.lunch_duration) : null,
       lunch_duration: shiftForm.lunch_duration,
+      template_color: isOff ? null : shiftForm.template_color || null,
       created_by: profile?.id,
     }
     await sb.from('schedules').upsert(payload, { onConflict: 'profile_id,date' })
@@ -951,6 +956,31 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
                 </button>
               ))}
             </div>
+
+            {shiftForm.day_type === 'work' && shiftTemplates.length > 0 && (
+              <div style={{ marginBottom:14 }}>
+                <label style={{ fontSize:10, fontWeight:600, textTransform:'uppercase', letterSpacing:.5, color:'var(--text-muted)', display:'block', marginBottom:6 }}>
+                  Templates — one click fills the times, tweak anything after
+                </label>
+                <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
+                  {shiftTemplates.map(t => (
+                    <button key={t.id}
+                      onClick={() => setShiftForm(p => ({ ...p,
+                        shift_start: t.shift_start || p.shift_start, shift_end: t.shift_end || p.shift_end,
+                        break1_start: t.break1_start || '', break1_duration: t.break1_duration || 15,
+                        lunch_start: t.lunch_start || '', lunch_duration: t.lunch_duration || 30,
+                        break2_start: t.break2_start || '', break2_duration: t.break2_duration || 15,
+                        template_color: t.color || null }))}
+                      title={`${t.name}: ${t.shift_start}\u2013${t.shift_end}`}
+                      style={{ display:'flex', alignItems:'center', gap:6, padding:'5px 11px', borderRadius:99, fontSize:11.5, fontWeight:600,
+                        border:'1px solid var(--border)', background:'var(--surface-2)', color:'var(--text-primary)', cursor:'pointer' }}>
+                      <span style={{ width:10, height:10, borderRadius:3, background:t.color || 'var(--border)', flexShrink:0 }} />
+                      {t.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {shiftForm.day_type === 'work' && (
               <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
