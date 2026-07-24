@@ -251,6 +251,25 @@ export default function DialerLayout() {
 function DialerLayoutInner() {
   const { profile, isAdmin, isDispatcher } = useAuth()
   useEffect(() => { loadOpsConfig() }, [])   // pull admin thresholds into the live bindings
+  // Deploy watcher: open tabs run old code until reloaded, which turned every
+  // fix into 'hard refresh first'. Poll the bundle name; when it changes, show
+  // a reload banner (never auto-reload — reps may be mid-call).
+  const [updateReady, setUpdateReady] = useState(false)
+  useEffect(() => {
+    let initial = null
+    const check = async () => {
+      try {
+        const html = await fetch('/', { cache: 'no-store' }).then(r => r.text())
+        const m = html.match(/assets\/index-[^"]+\.js/)
+        if (!m) return
+        if (initial === null) initial = m[0]
+        else if (m[0] !== initial) setUpdateReady(true)
+      } catch {}
+    }
+    check()
+    const t = setInterval(check, 4 * 60_000)
+    return () => clearInterval(t)
+  }, [])
   const canDispatch = isAdmin || isDispatcher
   const { contacts, syncStatus, reload } = useData()
   const { cancelAutoWrap } = usePhone()
@@ -686,6 +705,15 @@ function DialerLayoutInner() {
 
       {/* ── MAIN CONTENT (with a real top bar so the profile menu never overlaps pages) ── */}
       <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden', minWidth:0 }}>
+        {updateReady && (
+          <div style={{ background:'#7C3AED', color:'#fff', padding:'7px 16px', display:'flex', alignItems:'center', justifyContent:'center', gap:12, fontSize:12.5, fontWeight:600, flexShrink:0, zIndex:200 }}>
+            <span>✨ Andi was updated — reload to get the latest (finish your call first).</span>
+            <button onClick={() => window.location.reload()}
+              style={{ background:'#fff', color:'#7C3AED', border:'none', borderRadius:99, padding:'3px 14px', fontSize:12, fontWeight:700, cursor:'pointer' }}>
+              Reload now
+            </button>
+          </div>
+        )}
         {/* Top bar — reserves its own height; hidden on the War Room (full-screen TV) route */}
         {location.pathname !== '/warroom' && (
         <div style={{ height:53, minHeight:53, boxSizing:'border-box', flexShrink:0, borderBottom:'1px solid var(--border)', background:'var(--surface)', display:'flex', alignItems:'center', justifyContent:'space-between', padding:'0 16px', position:'relative', zIndex:100 }}>
