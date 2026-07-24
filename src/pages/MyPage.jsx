@@ -112,7 +112,7 @@ const RATING_COLORS = {
 }
 
 export default function MyPage() {
-  const { profile } = useAuth()
+  const { profile, isAdmin } = useAuth()
   const [searchParams, setSearchParams] = useSearchParams()
   const VALID_TABS = ['my-schedule', 'team-schedule', 'stats', 'commissions', 'scorecard', 'time-off']
   const initialTab = VALID_TABS.includes(searchParams.get('tab')) ? searchParams.get('tab') : 'my-schedule'
@@ -120,6 +120,29 @@ export default function MyPage() {
   // Click a day on My Schedule -> request time off for it.
   const [ptoDay, setPtoDay] = useState(null)
   const [ptoToast, setPtoToast] = useState('')
+  // 📣 Admin floor alert — broadcast to everyone or one person; pops like a
+  // schedule alert on their screen.
+  const [announceOpen, setAnnounceOpen] = useState(false)
+  const [announce, setAnnounce] = useState({ to: 'all', message: '' })
+  const [announceMsg, setAnnounceMsg] = useState('')
+  const [annProfiles, setAnnProfiles] = useState([])
+  useEffect(() => {
+    if (!announceOpen || annProfiles.length) return
+    sb.from('profiles').select('id, name, email').eq('active', true).order('name')
+      .then(({ data }) => setAnnProfiles(data || []))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [announceOpen])
+  const sendAnnouncement = async () => {
+    const message = announce.message.trim()
+    if (!message) return
+    const ch = sb.channel('floor-alerts')
+    await new Promise(resolve => ch.subscribe(status => { if (status === 'SUBSCRIBED') resolve() }))
+    await ch.send({ type: 'broadcast', event: 'announce', payload: { to: announce.to, from: profile?.name || profile?.email || 'Admin', message } })
+    sb.removeChannel(ch)
+    setAnnounceMsg(announce.to === 'all' ? 'Sent to the whole floor 📣' : 'Sent 📣')
+    setAnnounce({ to: 'all', message: '' })
+    setTimeout(() => { setAnnounceMsg(''); setAnnounceOpen(false) }, 1600)
+  }
   // Shift length minus unpaid lunch; paid breaks count as worked time.
   const schedHours = (sched) => {
     if (!sched || (sched.day_type && sched.day_type !== 'work') || !sched.shift_start || !sched.shift_end) return 0
@@ -333,6 +356,39 @@ export default function MyPage() {
               </button>
             </div>
           )}
+          {announceOpen && (
+            <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,.45)', zIndex:700, display:'flex', alignItems:'center', justifyContent:'center', padding:20 }}
+              onMouseDown={() => setAnnounceOpen(false)}>
+              <div onMouseDown={e => e.stopPropagation()}
+                style={{ background:'var(--surface)', borderRadius:14, width:'100%', maxWidth:420, boxShadow:'0 12px 40px rgba(0,0,0,.25)', padding:'20px 22px' }}>
+                <div style={{ fontSize:15, fontWeight:700, marginBottom:2 }}>📣 Notify the team</div>
+                <div style={{ fontSize:12, color:'var(--text-muted)', marginBottom:14 }}>Pops on their screen like a schedule alert — with a chime.</div>
+                <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
+                  <div className="form-field">
+                    <label className="form-label">Who</label>
+                    <select className="form-input" value={announce.to} onChange={e => setAnnounce(a => ({ ...a, to: e.target.value }))}>
+                      <option value="all">📢 Everyone on the floor</option>
+                      {annProfiles.map(p => <option key={p.id} value={p.id}>{p.name || p.email}</option>)}
+                    </select>
+                  </div>
+                  <div className="form-field">
+                    <label className="form-label">Message</label>
+                    <textarea className="form-input" rows={3} autoFocus value={announce.message}
+                      placeholder="Huddle in 5 · Pizza in the break room · Great job on the push this morning!"
+                      onChange={e => setAnnounce(a => ({ ...a, message: e.target.value }))}
+                      onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) sendAnnouncement() }} />
+                  </div>
+                  {announceMsg && <div style={{ fontSize:12.5, fontWeight:700, color:'var(--success)' }}>{announceMsg}</div>}
+                  <div style={{ display:'flex', justifyContent:'flex-end', gap:8 }}>
+                    <button className="btn" onClick={() => setAnnounceOpen(false)}>Cancel</button>
+                    <button className="btn primary" onClick={sendAnnouncement} disabled={!announce.message.trim()}>
+                      Send {announce.to === 'all' ? 'to everyone' : ''}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
           {ptoDay && (
             <PtoRequestModal initialDate={ptoDay} onClose={() => setPtoDay(null)}
               onSubmitted={() => { setPtoToast('Request sent — your manager has been notified. Track it in the Time Off tab.'); setTimeout(() => setPtoToast(''), 6000) }} />
@@ -365,6 +421,13 @@ export default function MyPage() {
 
         {/* Tab bar */}
         <div style={{ display:'flex', alignItems:'center', padding:'0 24px', marginTop:10 }}>
+          {isAdmin && (
+            <button className="btn sm" onClick={() => { setAnnounceMsg(''); setAnnounceOpen(true) }}
+              style={{ marginRight:14, display:'flex', alignItems:'center', gap:6 }}
+              title="Send a pop-up alert to the floor or one person">
+              📣 Notify team
+            </button>
+          )}
           <div style={{ display:'flex', gap:0 }}>
             {TABS.map(t => {
               const isActive = tab === t.id

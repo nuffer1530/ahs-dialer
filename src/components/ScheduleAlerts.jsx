@@ -169,6 +169,23 @@ export default function ScheduleAlerts() {
     return () => clearInterval(t)
   }, [profile?.id])
 
+  // 📣 Floor announcements — an admin sends from My Page; pops for everyone
+  // (or just the person it targets). Realtime broadcast, no table behind it.
+  useEffect(() => {
+    if (!profile?.id) return
+    const ch = sb.channel('floor-alerts')
+      .on('broadcast', { event: 'announce' }, ({ payload }) => {
+        if (!payload?.message) return
+        if (payload.to !== 'all' && payload.to !== profile.id) return
+        const id = `ann:${Date.now()}`
+        setAlerts(prev => [...prev, { id, kind: 'announce', from: payload.from || 'Admin', message: String(payload.message).slice(0, 300) }])
+        playChime()
+        setTimeout(() => setAlerts(prev => prev.filter(a => a.id !== id)), 25000)
+      })
+      .subscribe()
+    return () => sb.removeChannel(ch)
+  }, [profile?.id])
+
   // "You Got Paid!" — pops when the commission sync records a new payout for
   // this rep (a booked job ServiceTitan just marked completed). Realtime INSERT
   // only, so old commissions don't replay on load.
@@ -211,6 +228,25 @@ export default function ScheduleAlerts() {
                 <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--text-primary)' }}>
                   ${a.amount.toFixed(2)}{a.jobNumber ? <span style={{ fontWeight: 500, color: 'var(--text-muted)', fontSize: 13 }}> · Job #{a.jobNumber}</span> : null}
                 </div>
+              </div>
+              <button onClick={() => dismiss(a.id)}
+                style={{ width: 24, height: 24, borderRadius: 6, border: 'none', background: 'var(--surface-2)', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 14, flexShrink: 0 }}
+                title="Dismiss">×</button>
+            </div>
+          )
+        }
+        if (a.kind === 'announce') {
+          const c = '#7C3AED'
+          return (
+            <div key={a.id} style={{
+              background: 'var(--surface)', border: `2px solid ${c}`, borderRadius: 'var(--radius-lg)',
+              boxShadow: '0 10px 32px rgba(0,0,0,.22)', padding: '12px 14px',
+              display: 'flex', alignItems: 'center', gap: 12, animation: 'sched-in .18s ease-out',
+            }}>
+              <div style={{ width: 34, height: 34, borderRadius: '50%', background: c + '1f', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, fontSize: 17 }}>📣</div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: .5, textTransform: 'uppercase', color: c }}>{a.from}</div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', wordBreak: 'break-word' }}>{a.message}</div>
               </div>
               <button onClick={() => dismiss(a.id)}
                 style={{ width: 24, height: 24, borderRadius: 6, border: 'none', background: 'var(--surface-2)', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 14, flexShrink: 0 }}
