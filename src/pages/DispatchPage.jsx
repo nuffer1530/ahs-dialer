@@ -35,8 +35,8 @@ const BO_COLS = [
   { key:'opps',  label:'Opps',           width:'6%',  align:'right',
     title:'Opportunities run in the window' },
   { key:'memb',  label:'Membership',     width:'7%',  align:'right' },
-  { key:'rev',   label:'Reviews',        width:'7%',  align:'right',
-    title:'Dispatcher-entered rating from the Tech Info tab — weighted into the ranking' },
+  { key:'rev',   label:'5★ Reviews',     width:'7%',  align:'right',
+    title:'Five-star reviews per jobs ran (from ServiceTitan) — weighted into the ranking like Membership' },
   { key:'jobs',  label:'Jobs',           width:'5%',  align:'right',
     title:'Total jobs run — the sample size behind the ranking' },
 ]
@@ -118,23 +118,16 @@ function TechInfo() {
       flashSaved(techId)
     } catch (e) { setErr(e.message) }
   }
-  const rate = async (techId, rating) => {
-    // Clicking the current rating clears it.
-    const next = (data?.reviews?.[techId] === rating) ? null : rating
-    try {
-      const d = await authed('/api/dispatch/tech-notes', { method:'POST', body: JSON.stringify({ techId, rating: next }) })
-      setData(prev => ({ ...prev, reviews: d.reviews }))
-      flashSaved(techId)
-    } catch (e) { setErr(e.message) }
-  }
+
   if (err) return <div style={{ padding:20, color:'var(--danger)', fontSize:13 }}>{err}</div>
   if (!data) return <div className="spinner lg" style={{ margin:'60px auto' }} />
   const teams = [...new Set((data.techs || []).map(t => t.team))]
   return (
     <div>
       <div style={{ fontSize:12, color:'var(--text-muted)', marginBottom:14 }}>
-        Notes and review ratings for the techs dispatch actually sends (install crews excluded).
-        Notes pop up when you hover a 📝 name on the Batting Order; the ★ rating is weighted into the ranking via the Reviews weight.
+        Notes for the techs dispatch actually sends (install crews excluded) — they pop up when you
+        hover a 📝 name on the Batting Order. Review stats come straight from ServiceTitan and are
+        weighted into the ranking (5★ reviews per jobs ran, like Membership); nobody enters them by hand.
       </div>
       {teams.map(team => (
         <div key={team} style={{ marginBottom:20 }}>
@@ -146,14 +139,14 @@ function TechInfo() {
                   <span style={{ fontSize:12.5, fontWeight:700, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{t.name}</span>
                   <span style={{ display:'flex', alignItems:'center', gap:6, flexShrink:0 }}>
                     {savedAt[t.id] && <span style={{ fontSize:10.5, fontWeight:700, color:'var(--success)' }}>✓ Saved</span>}
-                    <span title="Review rating — weighted into the Batting Order ranking. Click the current star again to clear.">
-                      {[1,2,3,4,5].map(n => (
-                        <span key={n} onClick={() => rate(t.id, n)}
-                          style={{ cursor:'pointer', fontSize:14, color: n <= (data.reviews?.[t.id] || 0) ? '#B45309' : 'var(--border)' }}>
-                          ★
-                        </span>
-                      ))}
-                    </span>
+                    {data.reviews?.[t.id] ? (
+                      <span title={`From ServiceTitan${data.reviewWindowDays ? ` — last ${data.reviewWindowDays} days` : ''}: ${data.reviews[t.id].n} reviews, ${data.reviews[t.id].n5} five-star, ${data.reviews[t.id].perJobs}% of jobs ran`}
+                        style={{ fontSize:11.5, fontWeight:700, color:'#B45309', cursor:'help' }}>
+                        ★ {data.reviews[t.id].avg} ({data.reviews[t.id].n})
+                      </span>
+                    ) : (
+                      <span style={{ fontSize:10.5, color:'var(--text-muted)' }}>no reviews yet</span>
+                    )}
                   </span>
                 </div>
                 <textarea className="form-input" rows={2} value={drafts[t.id] || ''}
@@ -305,7 +298,10 @@ function BattingOrder() {
                       <td style={{ padding:'7px 12px', textAlign:'right' }}>{pct(r.membership_pct)}</td>
                       <td style={{ padding:'7px 12px', textAlign:'right' }}>
                         {techReviews[r.tech_id]
-                          ? <span style={{ color:'#B45309', fontWeight:700 }}>★ {techReviews[r.tech_id]}</span>
+                          ? <span style={{ color:'#B45309', fontWeight:700 }}
+                              title={`${techReviews[r.tech_id].n} review${techReviews[r.tech_id].n === 1 ? '' : 's'} in the window · avg ${techReviews[r.tech_id].avg}★`}>
+                              {techReviews[r.tech_id].perJobs}%
+                            </span>
                           : <span style={{ color:'var(--text-muted)' }}>—</span>}
                       </td>
                       <td style={{ padding:'7px 12px', textAlign:'right', color:'var(--text-muted)' }}>{r.jobs}</td>

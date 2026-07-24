@@ -3578,17 +3578,19 @@ async function assignmentsForAppointments(appointmentIds) {
 
 async function fetchDispatchWindow(days = DISPATCH_WINDOW_DAYS) {
   const since = new Date(Date.now() - days * 864e5).toISOString().slice(0, 10)
-  const [jobs, estimates, invoices, memberships, buRes, jtRes] = await Promise.all([
+  const [jobs, estimates, invoices, memberships, buRes, jtRes, reviews] = await Promise.all([
     stPageAll(p => `/jpm/v2/tenant/${ST_TENANT_ID}/jobs?jobStatus=Completed&completedOnOrAfter=${since}&pageSize=200&page=${p}`, 20000),
     stPageAll(p => `/sales/v2/tenant/${ST_TENANT_ID}/estimates?createdOnOrAfter=${since}&pageSize=500&page=${p}`, 20000),
     stPageAll(p => `/accounting/v2/tenant/${ST_TENANT_ID}/invoices?createdOnOrAfter=${since}&pageSize=500&page=${p}`, 20000),
     stPageAll(p => `/memberships/v2/tenant/${ST_TENANT_ID}/memberships?createdOnOrAfter=${since}&pageSize=500&page=${p}`, 20000),
     stGet(`/settings/v2/tenant/${ST_TENANT_ID}/technicians?pageSize=500`),
     stGet(`/jpm/v2/tenant/${ST_TENANT_ID}/job-types?pageSize=500`),
+    // Marketing Reputation: Google/Facebook reviews, ~2/3 matched to a tech.
+    stPageAll(p => `/marketingreputation/v2/tenant/${ST_TENANT_ID}/reviews?fromDate=${since}&pageSize=200&page=${p}`, 20000).catch(e => { console.warn('reviews fetch:', e.message); return [] }),
   ])
   const appts = await stPageAll(p => `/jpm/v2/tenant/${ST_TENANT_ID}/appointments?startsOnOrAfter=${since}T00:00:00Z&pageSize=500&page=${p}`, 20000)
   const assignments = await assignmentsForAppointments(appts.map(a => a.id))
-  return { jobs, estimates, invoices, memberships, assignments,
+  return { jobs, estimates, invoices, memberships, assignments, reviews,
            technicians: buRes?.data || [], jobTypes: jtRes?.data || [] }
 }
 
@@ -3597,11 +3599,22 @@ async function refreshDispatchScores() {
   try {
     const weights = await getDispatchWeights()
     const data = await fetchDispatchWindow()
-    try {
-      const { data: rrow } = await supabase.from('app_settings').select('value').eq('key', 'tech_reviews').maybeSingle()
-      data.reviews = JSON.parse(rrow?.value || '{}')
-    } catch { data.reviews = {} }
     const ranked = computeBattingOrder(data, weights, { now: Date.now() })
+    // Per-tech review stats for the UI (Batting Order column, Tech Info tab) —
+    // app_settings so no schema change. Keyed by tech id; a tech on two
+    // benches writes the same stats twice, harmlessly.
+    try {
+      const revStats = {}
+      for (const r of ranked) {
+        if (r.reviewsN) revStats[r.techId] = {
+          n: r.reviewsN, n5: r.reviewsN5,
+          avg: Math.round((r.reviewAvg || 0) * 100) / 100,
+          perJobs: Math.round((r.reviewPct || 0) * 10) / 10,
+        }
+      }
+      await supabase.from('app_settings').upsert(
+        { key: 'tech_review_stats', value: JSON.stringify({ windowDays: DISPATCH_WINDOW_DAYS, stats: revStats }) }, { onConflict: 'key' })
+    } catch (e) { console.warn('review stats save:', e.message) }
     const stamp = new Date().toISOString()
 
     if (ranked.length) {
@@ -5070,14 +5083,18 @@ app.get('/api/dispatch/tech-notes', async (req, res) => {
   try {
     const [{ data: row }, { data: rrow }, techs] = await Promise.all([
       supabase.from('app_settings').select('value').eq('key', 'tech_notes').maybeSingle(),
-      supabase.from('app_settings').select('value').eq('key', 'tech_reviews').maybeSingle(),
+      supabase.from('app_settings').select('value').eq('key', 'tech_review_stats').maybeSingle(),
       getBoardTechs().catch(() => []),
     ])
-    let notes = {}, reviews = {}
+    let notes = {}, reviews = {}, reviewWindowDays = null
     try { notes = JSON.parse(row?.value || '{}') } catch {}
-    try { reviews = JSON.parse(rrow?.value || '{}') } catch {}
+    try {
+      const rs = JSON.parse(rrow?.value || '{}')
+      reviews = rs.stats || {}
+      reviewWindowDays = rs.windowDays || null
+    } catch {}
     res.json({
-      notes, reviews,
+      notes, reviews, reviewWindowDays,
       // Dispatch picks service techs — install crews and leadership aren't
       // dispatchable and just add scroll.
       techs: techs.filter(t => t.team !== 'Leadership' && !/install/i.test(t.team || ''))
@@ -5101,16 +5118,6 @@ app.post('/api/dispatch/tech-notes', async (req, res) => {
       else delete notes[techId]
       await supabase.from('app_settings').upsert({ key: 'tech_notes', value: JSON.stringify(notes) }, { onConflict: 'key' })
       out.notes = notes
-    }
-    if ('rating' in (req.body || {})) {
-      const rating = req.body.rating == null ? null : Math.min(5, Math.max(1, Math.round(Number(req.body.rating))))
-      const { data: rrow } = await supabase.from('app_settings').select('value').eq('key', 'tech_reviews').maybeSingle()
-      let reviews = {}
-      try { reviews = JSON.parse(rrow?.value || '{}') } catch {}
-      if (rating) reviews[techId] = rating
-      else delete reviews[techId]
-      await supabase.from('app_settings').upsert({ key: 'tech_reviews', value: JSON.stringify(reviews) }, { onConflict: 'key' })
-      out.reviews = reviews
     }
     res.json(out)
   } catch (err) { res.status(500).json({ error: err.message }) }
