@@ -3806,9 +3806,10 @@ function scoreOpportunity(jobTypeName, zipTier, isMember, systemAge, isHvac, noC
 // response for 3 minutes so ten open tabs cost one compute, not ten — the UI
 // only auto-refreshes every 15 minutes anyway. The manual Refresh button
 // sends ?force=1 to bypass.
-let _liveBoardCache = null
-async function computeLiveBoardPayload() {
-    const today = boardDay(0)
+const _liveBoardCache = new Map()   // dayOffset -> { data, expires }
+async function computeLiveBoardPayload(dayOffset = 0) {
+    const isToday = dayOffset === 0
+    const today = boardDay(dayOffset)   // 'today' = the day being viewed
     const appts = (await stPageAll(p => `/jpm/v2/tenant/${ST_TENANT_ID}/appointments?startsOnOrAfter=${today.startUtc.toISOString()}&pageSize=500&page=${p}`, 3000))
       .filter(a => {
         const t = Date.parse(a.start || '')
@@ -4055,7 +4056,9 @@ async function computeLiveBoardPayload() {
         const c = installQueue[qi++]
         try {
           const prior = counted[String(c.jobId)]
-          if (prior && prior !== today.date) continue        // already counted a previous day
+          // Ledger rules only bind the REAL today: a future-day preview shows
+          // whatever finishes that day and must never mark anything counted.
+          if (isToday && prior && prior !== today.date) continue   // already counted a previous day
           const ja = await stGet(`/jpm/v2/tenant/${ST_TENANT_ID}/appointments?jobId=${c.jobId}&pageSize=20`)
           const days = (ja?.data || [])
             .filter(a => a.status !== 'Canceled')            // canceled appts don't define the schedule
@@ -4066,12 +4069,12 @@ async function computeLiveBoardPayload() {
           const tot = (iv?.data || []).reduce((a, x) => a + Number(x.total || 0), 0)
           if (tot > 0) {
             bookedByJob.set(c.jobId, tot)
-            if (counted[String(c.jobId)] !== today.date) { counted[String(c.jobId)] = today.date; ledgerDirty = true }
+            if (isToday && counted[String(c.jobId)] !== today.date) { counted[String(c.jobId)] = today.date; ledgerDirty = true }
           }
         } catch (e) { /* leave it out rather than guess */ }
       }
     }))
-    if (ledgerDirty) {
+    if (ledgerDirty && isToday) {
       try {
         await supabase.from('app_settings').upsert(
           { key: 'board_revenue_counted', value: JSON.stringify(counted) }, { onConflict: 'key' })
@@ -4417,6 +4420,8 @@ async function computeLiveBoardPayload() {
     }
 
     const payload = {
+      day: dayOffset,
+      date: today.date,
       generatedAt: new Date().toISOString(),
       scoresRefreshedAt: (scores || [])[0]?.refreshed_at || null,
       driveTime: driveTimeEnabled(),
@@ -4429,17 +4434,19 @@ async function computeLiveBoardPayload() {
         unrankedTechs: calls.filter(c => c.techTier === 'unranked').length,
       },
     }
-    _liveBoardCache = { data: payload, expires: Date.now() + 3 * 60_000 }
-  return _liveBoardCache.data
+    _liveBoardCache.set(dayOffset, { data: payload, expires: Date.now() + 3 * 60_000 })
+  return payload
 }
 
 app.get('/api/dispatch/live-board', async (req, res) => {
   if (!(await requireDispatch(req, res))) return
   try {
-    if (req.query.force !== '1' && _liveBoardCache && _liveBoardCache.expires > Date.now()) {
-      return res.json({ ..._liveBoardCache.data, cached: true })
+    const day = Math.min(2, Math.max(0, parseInt(req.query.day) || 0))
+    const hit = _liveBoardCache.get(day)
+    if (req.query.force !== '1' && hit && hit.expires > Date.now()) {
+      return res.json({ ...hit.data, cached: true })
     }
-    res.json(await computeLiveBoardPayload())
+    res.json(await computeLiveBoardPayload(day))
   } catch (err) {
     console.error('live-board error:', err.message)
     res.status(500).json({ error: err.message })
@@ -4454,8 +4461,8 @@ let _briefBusy = false
 // Shared by the daily brief and Scenario AI: one signal-dense snapshot of
 // today's board, benches, capacity, and weather.
 async function gatherDispatchFacts({ allCalls = false } = {}) {
-  const board = (_liveBoardCache && _liveBoardCache.expires > Date.now())
-    ? _liveBoardCache.data : await computeLiveBoardPayload()
+  const hit = _liveBoardCache.get(0)
+  const board = (hit && hit.expires > Date.now()) ? hit.data : await computeLiveBoardPayload(0)
   const { data: scores } = await supabase.from('dispatch_tech_scores').select('*')
   let capacity = []
   try {
@@ -5033,13 +5040,15 @@ app.post('/api/dispatch/scenario', async (req, res) => {
 
 You are given a JSON snapshot: every assignment on today's board (job number, type, tech, window, opportunity score, expected revenue), flagged calls, reschedule candidates, tech performance benches with REAL availability in 'today', 3-day capacity, and weather. Ground every step in this data \u2014 name real techs and job numbers; never invent any.
 
-Rules: a tech whose 'today' says off / no time left / all-day install cannot take work. Protect high-opportunity calls (aging systems, replacements) with the strongest closers; low-opportunity and $0-collect calls are the ones to move or push to another day. If the scenario removes a tech, deal with THEIR specific assignments one by one. If something genuinely can't be covered today, say which call moves to tomorrow and why it's the cheapest move. Submit via submit_plan: 3-8 ordered steps a dispatcher can execute top to bottom.`
+Scenarios come in two shapes. DISRUPTIONS (a tech out sick, a truck down, a call running long): deal with the affected tech's specific assignments one by one — cover, swap, or push, cheapest move last. GOAL-SEEKING (sales are down, how do we squeeze more out of the board): hunt the profit levers in the data — high-opportunity calls sitting on red-tier techs that belong on green closers, strong closers burning slots on $0 maintenance/callbacks, unrouted swaps, reschedule candidates whose slots could take better calls, and tomorrow's capacity worth protecting. Name the specific moves and the dollar upside where computable.
+
+Rules: a tech whose 'today' says off / no time left / all-day install cannot take work. Protect high-opportunity calls (aging systems, replacements) with the strongest closers; low-opportunity and $0-collect calls are the ones to move or push to another day. If something genuinely can't be covered today, say which call moves to tomorrow and why it's the cheapest move. Submit via submit_plan: 3-8 ordered steps a dispatcher can execute top to bottom.`
 
     const r = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
       body: JSON.stringify({
-        model: 'claude-sonnet-5', max_tokens: 1600, system: sys,
+        model: 'claude-sonnet-5', max_tokens: 3000, system: sys,
         tools: [{
           name: 'submit_plan',
           description: 'Submit the scenario walk-through',
@@ -5063,8 +5072,14 @@ Rules: a tech whose 'today' says off / no time left / all-day install cannot tak
       }),
     })
     if (!r.ok) throw new Error(`Claude ${r.status}: ${(await r.text()).slice(0, 160)}`)
-    const plan = ((await r.json()).content || []).find(b => b.type === 'tool_use')?.input
-    if (!plan?.steps?.length) throw new Error('No plan came back \u2014 try rewording the scenario')
+    const rj = await r.json()
+    const plan = (rj.content || []).find(b => b.type === 'tool_use')?.input
+    if (!plan?.steps?.length) {
+      console.error('scenario empty:', rj.stop_reason, JSON.stringify(rj.content || []).slice(0, 400))
+      throw new Error(rj.stop_reason === 'max_tokens'
+        ? 'The answer ran long and got cut off \u2014 hit the button again'
+        : 'No plan came back \u2014 try rewording the scenario')
+    }
     plan.headline = cleanBriefText(plan.headline, 180)
     plan.situation = cleanBriefText(plan.situation, 460)
     plan.steps = (plan.steps || []).slice(0, 8).map(t => cleanBriefText(t, 260))

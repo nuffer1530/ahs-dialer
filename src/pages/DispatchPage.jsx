@@ -360,14 +360,11 @@ function LiveBoard() {
   const [briefBusy, setBriefBusy] = useState(false)
   const [briefErr, setBriefErr] = useState('')
   const [showRevDetail, setShowRevDetail] = useState(false)   // Expected-revenue receipts popup
-  const [b3, setB3] = useState(null)            // 3-day capacity strip
+  const [day, setDay] = useState(0)             // 0=today, 1=tomorrow, 2=+2
   const [scenario, setScenario] = useState('')
   const [scBusy, setScBusy] = useState(false)
   const [scErr, setScErr] = useState('')
   const [scPlan, setScPlan] = useState(null)
-  useEffect(() => {
-    fetch('/api/board/3day').then(r => r.json()).then(setB3).catch(() => {})
-  }, [])
   const askScenario = async () => {
     if (scBusy || scenario.trim().length < 5) return
     setScBusy(true); setScErr(''); setScPlan(null)
@@ -383,9 +380,9 @@ function LiveBoard() {
   useEffect(() => { loadBrief() }, [loadBrief])
 
   const load = useCallback(async (force = false) => {
-    try { setData(await authed(`/api/dispatch/live-board${force ? '?force=1' : ''}`)); setErr('') }
+    try { setData(await authed(`/api/dispatch/live-board?day=${day}${force ? '&force=1' : ''}`)); setErr('') }
     catch (e) { setErr(e.message) } finally { setLoading(false) }
-  }, [])
+  }, [day])
   useEffect(() => {
     load()
     const t = setInterval(() => load(), 15 * 60_000)   // 15-minute refresh, per spec
@@ -455,8 +452,22 @@ function LiveBoard() {
   return (
     <div>
       <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', flexWrap:'wrap', gap:10, marginBottom:14 }}>
+        <div style={{ display:'flex', border:'1px solid var(--border)', borderRadius:99, overflow:'hidden', flexShrink:0 }}>
+          {[0, 1, 2].map(d => {
+            const label = d === 0 ? 'Today' : d === 1 ? 'Tomorrow'
+              : new Date(Date.now() + 2 * 864e5).toLocaleDateString('en-US', { weekday:'short', month:'short', day:'numeric' })
+            return (
+              <button key={d} onClick={() => { setDay(d); setLoading(true) }}
+                style={{ padding:'5px 13px', border:'none', cursor:'pointer', fontSize:11, fontWeight:700, whiteSpace:'nowrap',
+                  background: day === d ? 'var(--text-primary)' : 'transparent',
+                  color: day === d ? 'var(--surface)' : 'var(--text-muted)' }}>
+                {label}
+              </button>
+            )
+          })}
+        </div>
         <div style={{ fontSize:12, color:'var(--text-muted)' }}>
-          {data?.counts?.total ?? 0} calls on today's board
+          {data?.counts?.total ?? 0} calls on {day === 0 ? "today's" : day === 1 ? "tomorrow's" : "that day's"} board
           {rev ? ` · ${rev.remaining} still to run · ${rev.done} done` : ''}
           {rev?.working ? ` · ${rev.working} on site` : ''}
           {' · '}auto-refreshes every 15 min
@@ -488,7 +499,7 @@ function LiveBoard() {
         </div>
       </div>
 
-      {!brief?.brief && (briefBusy || briefErr) && (
+      {day === 0 && !brief?.brief && (briefBusy || briefErr) && (
         <div className="card" style={{ padding:'13px 18px', marginBottom:14, borderLeft:'4px solid var(--accent)', fontSize:12.5,
           color: briefErr ? 'var(--danger)' : 'var(--text-muted)' }}>
           {briefBusy
@@ -498,7 +509,7 @@ function LiveBoard() {
         </div>
       )}
 
-      {brief?.brief && (
+      {day === 0 && brief?.brief && (
         <div className="card" style={{ padding:'11px 15px', marginBottom:12, borderLeft:'3px solid var(--accent)' }}>
           <div style={{ display:'flex', alignItems:'baseline', justifyContent:'space-between', gap:10, flexWrap:'wrap' }}>
             <div style={{ fontSize:13, fontWeight:800, color:'var(--text-primary)' }}>
@@ -544,8 +555,8 @@ function LiveBoard() {
         </div>
       )}
 
-      {/* 🎭 Scenario AI — "Arber called in sick, what do I do with his calls?" */}
-      <div className="card" style={{ padding:'11px 15px', marginBottom:12 }}>
+      {/* 🎭 Scenario AI — disruptions AND goal-seeking ("sales are down…") */}
+      {day === 0 && <div className="card" style={{ padding:'11px 15px', marginBottom:12 }}>
         <div style={{ display:'flex', gap:8, alignItems:'center' }}>
           <span style={{ fontSize:15, flexShrink:0 }}>🎭</span>
           <input className="form-input" value={scenario} style={{ flex:1 }}
@@ -581,38 +592,7 @@ function LiveBoard() {
             )}
           </div>
         )}
-      </div>
-
-      {/* Next 3 days — booked vs capacity per trade, so the huddle is proactive */}
-      {b3?.board?.length > 0 && (
-        <div className="card" style={{ padding:'11px 15px', marginBottom:12 }}>
-          <div style={{ fontSize:10.5, fontWeight:700, textTransform:'uppercase', letterSpacing:.5, color:'var(--text-muted)', marginBottom:8 }}>
-            Next 3 days — booked / capacity
-          </div>
-          <div style={{ display:'grid', gridTemplateColumns:`minmax(90px, auto) repeat(${(b3.dates || []).length}, 1fr)`, gap:'6px 14px', fontSize:12, alignItems:'center' }}>
-            <span />
-            {(b3.dates || []).map((d, i) => (
-              <span key={d} style={{ fontSize:10.5, fontWeight:700, color:'var(--text-muted)' }}>
-                {i === 0 ? 'Today' : i === 1 ? 'Tomorrow' : new Date(d + 'T12:00:00').toLocaleDateString('en-US', { weekday:'short', month:'short', day:'numeric' })}
-              </span>
-            ))}
-            {b3.board.map(row => (
-              [<span key={row.trade} style={{ fontWeight:700, fontSize:12 }}>{row.trade}</span>,
-                ...(row.days || []).map((d, i) => {
-                  const col = d.status === 'good' ? '#15803D' : d.status === 'warn' ? '#B45309' : d.status === 'none' ? 'var(--text-muted)' : '#B91C1C'
-                  return (
-                    <span key={`${row.trade}${i}`} style={{ display:'flex', alignItems:'center', gap:6 }}>
-                      <span style={{ fontWeight:800, color:col }}>{d.calls}/{Math.round(d.capacity)}</span>
-                      {d.oppWatch
-                        ? <span title="Board full — Opportunity Watch: keep booking strong calls, dispatch makes room" style={{ fontSize:11 }}>👀</span>
-                        : d.needed > 0 && <span style={{ fontSize:10.5, color:'var(--text-muted)' }}>need {d.needed}</span>}
-                    </span>
-                  )
-                })]
-            ))}
-          </div>
-        </div>
-      )}
+      </div>}
 
       {rev && (
         <div className="card" style={{ padding:'13px 16px', marginBottom:14, display:'flex', gap:24, flexWrap:'wrap', alignItems:'center' }}>
