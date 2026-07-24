@@ -3590,7 +3590,9 @@ async function assignmentsForAppointments(appointmentIds) {
   return out
 }
 
+let _reviewsFetchError = null   // surfaced in tech_review_stats for diagnosis
 async function fetchDispatchWindow(days = DISPATCH_WINDOW_DAYS) {
+  _reviewsFetchError = null
   const since = new Date(Date.now() - days * 864e5).toISOString().slice(0, 10)
   const [jobs, estimates, invoices, memberships, buRes, jtRes, reviews] = await Promise.all([
     stPageAll(p => `/jpm/v2/tenant/${ST_TENANT_ID}/jobs?jobStatus=Completed&completedOnOrAfter=${since}&pageSize=200&page=${p}`, 20000),
@@ -3600,7 +3602,7 @@ async function fetchDispatchWindow(days = DISPATCH_WINDOW_DAYS) {
     stGet(`/settings/v2/tenant/${ST_TENANT_ID}/technicians?pageSize=500`),
     stGet(`/jpm/v2/tenant/${ST_TENANT_ID}/job-types?pageSize=500`),
     // Marketing Reputation: Google/Facebook reviews, ~2/3 matched to a tech.
-    stPageAll(p => `/marketingreputation/v2/tenant/${ST_TENANT_ID}/reviews?fromDate=${since}&pageSize=200&page=${p}`, 20000).catch(e => { console.warn('reviews fetch:', e.message); return [] }),
+    stPageAll(p => `/marketingreputation/v2/tenant/${ST_TENANT_ID}/reviews?fromDate=${since}&pageSize=200&page=${p}`, 20000).catch(e => { _reviewsFetchError = e.message; console.warn('reviews fetch:', e.message); return [] }),
   ])
   const appts = await stPageAll(p => `/jpm/v2/tenant/${ST_TENANT_ID}/appointments?startsOnOrAfter=${since}T00:00:00Z&pageSize=500&page=${p}`, 20000)
   const assignments = await assignmentsForAppointments(appts.map(a => a.id))
@@ -3627,7 +3629,13 @@ async function refreshDispatchScores() {
         }
       }
       await supabase.from('app_settings').upsert(
-        { key: 'tech_review_stats', value: JSON.stringify({ windowDays: DISPATCH_WINDOW_DAYS, stats: revStats }) }, { onConflict: 'key' })
+        { key: 'tech_review_stats', value: JSON.stringify({
+          windowDays: DISPATCH_WINDOW_DAYS, stats: revStats,
+          fetched: (data.reviews || []).length,
+          matched: (data.reviews || []).filter(r => r.technicianId).length,
+          fetchError: _reviewsFetchError,
+          at: new Date().toISOString(),
+        }) }, { onConflict: 'key' })
     } catch (e) { console.warn('review stats save:', e.message) }
     const stamp = new Date().toISOString()
 
