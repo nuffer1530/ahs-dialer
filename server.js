@@ -5095,9 +5095,9 @@ app.get('/api/dispatch/tech-notes', async (req, res) => {
     } catch {}
     res.json({
       notes, reviews, reviewWindowDays,
-      // Dispatch picks service techs — install crews and leadership aren't
-      // dispatchable and just add scroll.
-      techs: techs.filter(t => t.team !== 'Leadership' && !/install/i.test(t.team || ''))
+      // Dispatch picks service techs — install crews, apprentices, and
+      // leadership aren't dispatchable and just add scroll.
+      techs: techs.filter(t => t.team !== 'Leadership' && !/install|apprentice/i.test(t.team || ''))
         .map(t => ({ id: t.id, name: t.name, team: t.team || 'Other' }))
         .sort((a, b) => (a.team || '').localeCompare(b.team || '') || (a.name || '').localeCompare(b.name || '')),
     })
