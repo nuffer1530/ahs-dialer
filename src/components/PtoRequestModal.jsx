@@ -9,29 +9,56 @@ const niceDay = (s) => s ? new Date(`${s}T12:00:00`).toLocaleDateString([], { we
 const dayCount = (a, b) => Math.round((new Date(`${b || a}T12:00:00`) - new Date(`${a}T12:00:00`)) / 864e5) + 1
 const todayYmd = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` }
 
+// Walk the range day by day; skipping weekends splits it into contiguous
+// weekday segments — each becomes its own request row, so the approval flow
+// and schedule write-back need no changes at all.
+function buildSegments(start, end, excludeWeekends) {
+  const segs = []
+  let cur = null
+  const d = new Date(`${start}T12:00:00`)
+  const last = new Date(`${end || start}T12:00:00`)
+  while (d <= last) {
+    const dow = d.getDay()
+    const ymd = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    if (excludeWeekends && (dow === 0 || dow === 6)) {
+      cur = null
+    } else {
+      if (!cur) { cur = { start: ymd, end: ymd }; segs.push(cur) }
+      else cur.end = ymd
+    }
+    d.setDate(d.getDate() + 1)
+  }
+  return segs
+}
+
 export default function PtoRequestModal({ initialDate, onClose, onSubmitted }) {
-  const [form, setForm] = useState({ kind: 'pto', reason: '', start: initialDate, end: initialDate })
+  const [form, setForm] = useState({ kind: 'pto', reason: '', start: initialDate, end: initialDate, excludeWeekends: true })
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
-  const nDays = form.start ? dayCount(form.start, form.end || form.start) : 0
+  const segments = form.start ? buildSegments(form.start, form.end || form.start, form.excludeWeekends) : []
+  const nDays = segments.reduce((a, s2) => a + dayCount(s2.start, s2.end), 0)
+  const rawDays = form.start ? dayCount(form.start, form.end || form.start) : 0
 
   const submit = async () => {
     if (!form.start) { setErr('Pick a first day'); return }
     if (form.end && form.end < form.start) { setErr('Last day is before the first day'); return }
+    if (!segments.length) { setErr('Only weekend days are selected — uncheck "skip weekends" if you need them off.'); return }
     setBusy(true); setErr('')
     try {
       const { data: { session } } = await sb.auth.getSession()
-      const r = await fetch('/api/pto/request', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session?.access_token}` },
-        body: JSON.stringify({
-          date: form.start,
-          endDate: form.end && form.end !== form.start ? form.end : null,
-          kind: form.kind, reason: form.reason.trim(),
-        }),
-      })
-      const d = await r.json().catch(() => ({}))
-      if (!r.ok) throw new Error(d.error || 'Request failed')
+      for (const seg of segments) {
+        const r = await fetch('/api/pto/request', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session?.access_token}` },
+          body: JSON.stringify({
+            date: seg.start,
+            endDate: seg.end !== seg.start ? seg.end : null,
+            kind: form.kind, reason: form.reason.trim(),
+          }),
+        })
+        const d = await r.json().catch(() => ({}))
+        if (!r.ok) throw new Error(d.error || 'Request failed')
+      }
       onSubmitted?.()
       onClose()
     } catch (e) { setErr(e.message) }
@@ -68,10 +95,19 @@ export default function PtoRequestModal({ initialDate, onClose, onSubmitted }) {
                 onChange={e => setForm(f => ({ ...f, end: e.target.value }))} />
             </div>
           </div>
+          {rawDays > 1 && (
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, fontWeight: 600, cursor: 'pointer' }}>
+              <input type="checkbox" checked={form.excludeWeekends}
+                onChange={e => setForm(f => ({ ...f, excludeWeekends: e.target.checked }))} />
+              Skip weekends — only request workdays
+            </label>
+          )}
           <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--accent)', background: 'var(--accent-bg)', borderRadius: 8, padding: '8px 12px' }}>
-            {nDays === 1
-              ? `1 day — ${niceDay(form.start)}`
-              : `${nDays} days — ${niceDay(form.start)} through ${niceDay(form.end || form.start)}`}
+            {nDays === 0
+              ? 'Only weekend days in this range'
+              : nDays === 1
+                ? `1 day — ${niceDay(segments[0]?.start || form.start)}`
+                : `${nDays}${form.excludeWeekends && rawDays !== nDays ? ' work' : ''} days — ${niceDay(form.start)} through ${niceDay(form.end || form.start)}${form.excludeWeekends && rawDays !== nDays ? ' (weekends skipped)' : ''}`}
           </div>
           <div className="form-field">
             <label className="form-label">Reason</label>

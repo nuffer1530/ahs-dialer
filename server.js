@@ -1665,6 +1665,28 @@ app.post('/api/pto/decide', async (req, res) => {
 // won't join the same topic twice on one connection — the client-side send
 // hung forever. The server has its own connection, and its broadcast reaches
 // the SENDER's screen too, which doubles as the delivery receipt.
+async function sendFloorAnnounce(payload) {
+  const ch = supabase.channel('floor-alerts')
+  await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('realtime timeout')), 8000)
+    ch.subscribe(st => {
+      if (st === 'SUBSCRIBED') { clearTimeout(timer); resolve() }
+      else if (st === 'CHANNEL_ERROR' || st === 'TIMED_OUT') { clearTimeout(timer); reject(new Error(st)) }
+    })
+  })
+  await ch.send({ type: 'broadcast', event: 'announce', payload })
+  supabase.removeChannel(ch)
+}
+
+const FLOOR_SCHED_KEY = 'floor_scheduled_msgs'
+async function loadFloorScheduled() {
+  const { data } = await supabase.from('app_settings').select('value').eq('key', FLOOR_SCHED_KEY).maybeSingle()
+  try { return JSON.parse(data?.value || '[]') } catch { return [] }
+}
+async function saveFloorScheduled(list) {
+  await supabase.from('app_settings').upsert({ key: FLOOR_SCHED_KEY, value: JSON.stringify(list.slice(0, 50)) }, { onConflict: 'key' })
+}
+
 app.post('/api/admin/notify-floor', async (req, res) => {
   const prof = await requireAdmin(req, res)
   if (!prof) return
@@ -1674,26 +1696,45 @@ app.post('/api/admin/notify-floor', async (req, res) => {
     const to = req.body?.to === 'all' ? 'all'
       : Array.isArray(req.body?.to) ? req.body.to.filter(Boolean).slice(0, 100) : []
     if (to !== 'all' && !to.length) return res.status(400).json({ error: 'Pick at least one person' })
-    const ch = supabase.channel('floor-alerts')
-    await new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error('realtime timeout')), 8000)
-      ch.subscribe(st => {
-        if (st === 'SUBSCRIBED') { clearTimeout(timer); resolve() }
-        else if (st === 'CHANNEL_ERROR' || st === 'TIMED_OUT') { clearTimeout(timer); reject(new Error(st)) }
-      })
-    })
-    await ch.send({ type: 'broadcast', event: 'announce', payload: {
+    const payload = {
       to, fromId: prof.id,
       from: String(req.body?.from || 'Admin').slice(0, 80),
       toNames: String(req.body?.toNames || '').slice(0, 200),
       message,
-    } })
-    supabase.removeChannel(ch)
+    }
+    const sendAt = req.body?.sendAt ? Date.parse(req.body.sendAt) : null
+    if (sendAt && sendAt > Date.now() + 60_000) {
+      // Scheduled: persisted, a 60s sweep sends it — survives deploys.
+      const list = await loadFloorScheduled()
+      const id = `fs_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+      list.push({ id, ...payload, sendAt: new Date(sendAt).toISOString(), createdAt: new Date().toISOString() })
+      await saveFloorScheduled(list)
+      return res.json({ ok: true, scheduled: true, id })
+    }
+    await sendFloorAnnounce(payload)
     res.json({ ok: true })
   } catch (err) {
     console.error('notify-floor:', err.message)
     res.status(500).json({ error: err.message })
   }
+})
+
+app.get('/api/admin/notify-floor/scheduled', async (req, res) => {
+  if (!(await requireAdmin(req, res))) return
+  try {
+    const list = await loadFloorScheduled()
+    res.json({ items: list.filter(x => Date.parse(x.sendAt) > Date.now()).sort((a, b) => Date.parse(a.sendAt) - Date.parse(b.sendAt)) })
+  } catch (err) { res.status(500).json({ error: err.message }) }
+})
+
+app.post('/api/admin/notify-floor/unschedule', async (req, res) => {
+  if (!(await requireAdmin(req, res))) return
+  try {
+    const id = String(req.body?.id || '')
+    const list = await loadFloorScheduled()
+    await saveFloorScheduled(list.filter(x => x.id !== id))
+    res.json({ ok: true })
+  } catch (err) { res.status(500).json({ error: err.message }) }
 })
 
 app.post('/api/admin/user/invite', async (req, res) => {
@@ -6183,6 +6224,19 @@ if (BOARD_EMAIL_TO && RESEND_KEY) {
 if (DISPATCH_REFRESH_HOURS > 0) {
   setTimeout(() => {
     refreshDispatchScores().catch(() => {})
+    // Scheduled floor notifications: sweep every 60s, send what's due.
+    setInterval(async () => {
+      try {
+        const list = await loadFloorScheduled()
+        const due = list.filter(x => Date.parse(x.sendAt) <= Date.now())
+        if (!due.length) return
+        await saveFloorScheduled(list.filter(x => Date.parse(x.sendAt) > Date.now()))
+        for (const m of due) {
+          const { id, sendAt, createdAt, ...payload } = m
+          await sendFloorAnnounce(payload).catch(e => console.warn('scheduled announce:', e.message))
+        }
+      } catch (e) { console.warn('floor sweep:', e.message) }
+    }, 60_000)
     setInterval(() => refreshDispatchScores().catch(() => {}), DISPATCH_REFRESH_HOURS * 3600_000)
   }, 120_000)
   console.log(`Dispatch scores refresh every ${DISPATCH_REFRESH_HOURS}h (${DISPATCH_WINDOW_DAYS}d window)`)

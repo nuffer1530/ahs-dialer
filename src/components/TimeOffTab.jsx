@@ -98,7 +98,7 @@ export default function TimeOffTab({ profile }) {
   const span = (r) => r.end_date ? `${niceDay(r.date)} – ${niceDay(r.end_date)}` : niceDay(r.date)
 
   return (
-    <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 20, maxWidth: 980 }}>
+    <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 20, width: '100%', maxWidth: 1120, margin: '0 auto' }}>
 
       {/* Manager approvals — only shows when something needs you */}
       {queue.length > 0 && (
@@ -151,6 +151,9 @@ export default function TimeOffTab({ profile }) {
           </div>
         </div>
       )}
+
+      {/* Calendar and history side by side on wide screens */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))', gap: 20, alignItems: 'start' }}>
 
       {/* Month calendar — navigate up to a year out */}
       <div className="card">
@@ -224,6 +227,8 @@ export default function TimeOffTab({ profile }) {
           </div>
         )}
       </div>
+
+      </div>{/* /grid */}
 
       {modal && (
         <PtoRequestModal initialDate={modal.date} onClose={() => setModal(null)} onSubmitted={load} />

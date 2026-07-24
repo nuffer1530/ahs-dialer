@@ -123,7 +123,26 @@ export default function MyPage() {
   // 📣 Admin floor alert — broadcast to everyone or one person; pops like a
   // schedule alert on their screen.
   const [announceOpen, setAnnounceOpen] = useState(false)
-  const [announce, setAnnounce] = useState({ all: true, ids: [], message: '' })
+  const [announce, setAnnounce] = useState({ all: true, ids: [], message: '', sendAt: '' })
+  const [annScheduled, setAnnScheduled] = useState([])
+  const loadAnnScheduled = async () => {
+    try {
+      const { data: { session } } = await sb.auth.getSession()
+      const r = await fetch('/api/admin/notify-floor/scheduled', { headers: { Authorization: `Bearer ${session?.access_token}` } })
+      const d = await r.json()
+      if (r.ok) setAnnScheduled(d.items || [])
+    } catch {}
+  }
+  const unscheduleAnn = async (id) => {
+    try {
+      const { data: { session } } = await sb.auth.getSession()
+      await fetch('/api/admin/notify-floor/unschedule', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session?.access_token}` },
+        body: JSON.stringify({ id }),
+      })
+      setAnnScheduled(prev => prev.filter(x => x.id !== id))
+    } catch {}
+  }
   const [announceBusy, setAnnounceBusy] = useState(false)
   const [announceMsg, setAnnounceMsg] = useState('')
   const [annProfiles, setAnnProfiles] = useState([])
@@ -148,12 +167,17 @@ export default function MyPage() {
       const r = await fetch('/api/admin/notify-floor', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session?.access_token}` },
-        body: JSON.stringify({ to: announce.all ? 'all' : announce.ids, toNames, from: profile?.name || profile?.email || 'Admin', message }),
+        body: JSON.stringify({ to: announce.all ? 'all' : announce.ids, toNames, from: profile?.name || profile?.email || 'Admin', message, sendAt: announce.sendAt || null }),
       })
       const d = await r.json()
       if (!r.ok) throw new Error(d.error || 'Send failed')
-      setAnnounce({ all: true, ids: [], message: '' })
-      setAnnounceOpen(false)
+      if (d.scheduled) {
+        setAnnounce(a => ({ ...a, message: '', sendAt: '' }))
+        loadAnnScheduled()   // stays open so they see it queued
+      } else {
+        setAnnounce({ all: true, ids: [], message: '', sendAt: '' })
+        setAnnounceOpen(false)
+      }
     } catch (e) {
       setAnnounceMsg(e.message)
     } finally { setAnnounceBusy(false) }
@@ -413,12 +437,39 @@ export default function MyPage() {
                       ))}
                     </div>
                   </div>
+                  <div className="form-field">
+                    <label className="form-label">When</label>
+                    <div style={{ display:'flex', gap:8, alignItems:'center' }}>
+                      <input className="form-input" type="datetime-local" value={announce.sendAt}
+                        min={new Date(Date.now() + 2 * 60_000).toISOString().slice(0, 16)}
+                        onChange={e => setAnnounce(a => ({ ...a, sendAt: e.target.value }))} style={{ flex:1 }} />
+                      {announce.sendAt && <button className="btn sm" onClick={() => setAnnounce(a => ({ ...a, sendAt: '' }))}>Send now instead</button>}
+                    </div>
+                    <div style={{ fontSize:10.5, color:'var(--text-muted)', marginTop:3 }}>Leave empty to send immediately.</div>
+                  </div>
+                  {annScheduled.length > 0 && (
+                    <div style={{ border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'6px 10px', display:'flex', flexDirection:'column', gap:4 }}>
+                      <div style={{ fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:.5, color:'var(--text-muted)' }}>Scheduled</div>
+                      {annScheduled.map(m => (
+                        <div key={m.id} style={{ display:'flex', alignItems:'center', gap:8, fontSize:11.5 }}>
+                          <span style={{ fontWeight:700, flexShrink:0 }}>
+                            {new Date(m.sendAt).toLocaleString([], { month:'short', day:'numeric', hour:'numeric', minute:'2-digit' })}
+                          </span>
+                          <span style={{ color:'var(--text-muted)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', flex:1 }}>
+                            {m.to === 'all' ? 'Everyone' : m.toNames || 'Selected'} — {m.message}
+                          </span>
+                          <button onClick={() => unscheduleAnn(m.id)} title="Cancel this scheduled message"
+                            style={{ border:'none', background:'none', color:'var(--danger)', cursor:'pointer', fontSize:13, flexShrink:0 }}>×</button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                   {announceMsg && <div style={{ fontSize:12.5, fontWeight:700, color:'var(--tone-red-tx)' }}>{announceMsg}</div>}
                   <div style={{ display:'flex', justifyContent:'flex-end', gap:8 }}>
                     <button className="btn" onClick={() => setAnnounceOpen(false)}>Cancel</button>
                     <button className="btn primary" onClick={sendAnnouncement}
                       disabled={announceBusy || !announce.message.trim() || (!announce.all && !announce.ids.length)}>
-                      {announceBusy ? 'Sending…' : announce.all ? 'Send to everyone' : `Send (${announce.ids.length})`}
+                      {announceBusy ? 'Sending…' : announce.sendAt ? '📅 Schedule it' : announce.all ? 'Send to everyone' : `Send (${announce.ids.length})`}
                     </button>
                   </div>
                 </div>
@@ -481,9 +532,10 @@ export default function MyPage() {
             })}
           </div>
           {isAdmin && (
-            <button className="btn sm" onClick={() => { setAnnounceMsg(''); setAnnounceOpen(true) }}
-              style={{ marginLeft:'auto' }}
-              title="Send a pop-up alert to the floor or selected people">
+            <button onClick={() => { setAnnounceMsg(''); setAnnounceOpen(true); loadAnnScheduled() }}
+              title="Send or schedule a pop-up alert to the floor or selected people"
+              style={{ marginLeft:'auto', padding:'9px 22px', fontSize:13, fontWeight:700, border:'none', borderRadius:'var(--radius)',
+                background:'var(--accent)', color:'#fff', cursor:'pointer' }}>
               Notify team
             </button>
           )}
