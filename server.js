@@ -2587,14 +2587,20 @@ async function draftNotesFromTranscript(transcript) {
   return lines.join('\n')
 }
 
+// Whisper-pass breadcrumbs: this runs fire-and-forget from a webhook, so
+// failures were invisible outside Railway logs. Health exposes the last few.
+const _wuTrace = []
+const _wu = (sid, msg) => { _wuTrace.push({ at: new Date().toISOString(), sid: String(sid || '').slice(-8), msg }); if (_wuTrace.length > 20) _wuTrace.shift() }
+
 // Post-call pass: Whisper on the finished recording — the final, highest-
 // quality draft (overwrites any live draft for the same call).
 async function transcribeAndDraftNotes({ callSid, contactId, phone, mp3Url, duration }) {
-  if (!OPENAI_KEY || !ANTHROPIC_KEY) return
-  if (duration != null && duration < 15) return   // too short to be a conversation
+  if (!OPENAI_KEY || !ANTHROPIC_KEY) { _wu(callSid, 'skipped: key missing'); return }
+  if (duration != null && duration < 15) { _wu(callSid, `skipped: ${duration}s too short`); return }   // too short to be a conversation
+  _wu(callSid, 'start')
   const auth = Buffer.from(`${process.env.TWILIO_ACCOUNT_SID}:${process.env.TWILIO_AUTH_TOKEN}`).toString('base64')
   const audioRes = await fetch(mp3Url, { headers: { Authorization: `Basic ${auth}` } })
-  if (!audioRes.ok) throw new Error(`recording download ${audioRes.status}`)
+  if (!audioRes.ok) { _wu(callSid, `download failed ${audioRes.status}`); throw new Error(`recording download ${audioRes.status}`) }
   const audioBuf = Buffer.from(await audioRes.arrayBuffer())
   const fd = new FormData()
   fd.append('file', new Blob([audioBuf], { type: 'audio/mpeg' }), 'call.mp3')
@@ -2603,12 +2609,14 @@ async function transcribeAndDraftNotes({ callSid, contactId, phone, mp3Url, dura
   const wRes = await fetch('https://api.openai.com/v1/audio/transcriptions', {
     method: 'POST', headers: { Authorization: `Bearer ${OPENAI_KEY}` }, body: fd,
   })
-  if (!wRes.ok) throw new Error(`whisper ${wRes.status}: ${(await wRes.text()).slice(0, 160)}`)
+  if (!wRes.ok) { const t = (await wRes.text()).slice(0, 160); _wu(callSid, `whisper ${wRes.status}: ${t}`); throw new Error(`whisper ${wRes.status}: ${t}`) }
   const transcript = (await wRes.json())?.text || ''
+  _wu(callSid, `whisper ok, ${transcript.length} chars`)
   const text = await draftNotesFromTranscript(transcript)
-  if (!text) return
+  if (!text) { _wu(callSid, 'no draft (transcript too thin)'); return }
   pruneCallNotes()
   _callNotes.set(callSid, { contactId, phone: last10(phone), text, at: Date.now() })
+  _wu(callSid, `drafted final, ${text.length} chars`)
   console.log(`Call notes drafted (final) for contact ${contactId} (${callSid})`)
 }
 
@@ -2675,7 +2683,7 @@ app.post('/api/twilio/live-transcript', async (req, res) => {
 app.get('/api/call-notes/health', (req, res) => {
   res.json({
     openaiKey: Boolean(OPENAI_KEY), anthropicKey: Boolean(ANTHROPIC_KEY),
-    liveCalls: _liveTx.size, drafts: _callNotes.size,
+    liveCalls: _liveTx.size, drafts: _callNotes.size, whisper: _wuTrace,
     entries: [..._callNotes.entries()].map(([sid, v]) => ({
       sid: sid.slice(-8), contactId: v.contactId, phone: v.phone || null,
       chars: v.text.length, ageSec: Math.round((Date.now() - v.at) / 1000),
@@ -2719,6 +2727,7 @@ app.post('/api/twilio/recording', async (req, res) => {
       const { data: ct } = await supabase.from('call_tasks').select('contact_id, from_number').eq('call_sid', CallSid).maybeSingle()
       if (ct?.contact_id) ac = { contact_id: ct.contact_id, from_number: ct.from_number }
     }
+    if (!ac?.contact_id) _wu(CallSid, 'no contact match — whisper skipped')
     if (ac?.contact_id) {
       const { data: recentLog } = await supabase
         .from('call_logs')
@@ -2746,7 +2755,7 @@ app.post('/api/twilio/recording', async (req, res) => {
       transcribeAndDraftNotes({
         callSid: CallSid, contactId: ac.contact_id, phone: ac.from_number, mp3Url: mp3,
         duration: RecordingDuration ? parseInt(RecordingDuration) : null,
-      }).catch(e => console.warn('wrap-up autopilot:', e.message))
+      }).catch(e => { _wu(CallSid, `error: ${e.message}`.slice(0, 200)); console.warn('wrap-up autopilot:', e.message) })
     }
     res.sendStatus(200)
   } catch (err) {
