@@ -3694,6 +3694,8 @@ function systemAgeFromNotes(job, nowYear) {
 }
 
 const HIGH_VALUE_RE = /replace|replacement|install|estimate|system|upgrade|new /i
+// A breakdown call, as opposed to routine/maintenance work.
+const DISTRESS_RE = /no.?cool|not.?cooling|no.?heat|not.?heating|no.?hot.?water|no.?power|leak|emergency|breakdown|stopped.?working|not.?working/i
 const LOW_VALUE_RE = /maintenance|tune|inspection|filter|follow.?up|callback|warranty|permit/i
 
 // Notes that say this visit collects NOTHING: warranty work, recalls, goodwill
@@ -3737,6 +3739,12 @@ function scoreOpportunity(jobTypeName, zipTier, isMember, systemAge, isHvac, noC
   if (zipTier === 'high') { score += 2; reasons.push('high-ticket zip') }
   if (zipTier === 'low') { score -= 1 }
   if (isMember === false) { score += 1; reasons.push('non-member — membership opportunity') }
+  // Aging system + breakdown = a replacement conversation regardless of zip.
+  // Without this floor, a low-tier zip discounted a 23-yr-old no-cool to
+  // 'solid' — the exact call the board should never soft-pedal.
+  if (!noCollect && systemAge != null && systemAge >= 12 && DISTRESS_RE.test(jobTypeName || '')) {
+    if (score < 3) { score = 3; reasons.push('aging system in distress — top-priority call') }
+  }
   return { score, reasons }
 }
 
