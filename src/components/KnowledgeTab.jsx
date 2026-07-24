@@ -10,6 +10,7 @@ const CATEGORIES = [
   ['objections', 'Objection handling'],
   ['product', 'Services & pricing'],
   ['servicetitan', 'ServiceTitan how-to'],
+  ['website', 'Website'],
   ['general', 'General'],
 ]
 const CAT_LABEL = Object.fromEntries(CATEGORIES)
@@ -33,9 +34,28 @@ export default function KnowledgeTab() {
   const [filter, setFilter] = useState('all')
   const [search, setSearch] = useState('')
   const [revs, setRevs] = useState(null)   // revisions for the open article
+  const [importing, setImporting] = useState(false)
+  const [importMsg, setImportMsg] = useState('')
+  const [gaps, setGaps] = useState([])
+  const [gapsOpen, setGapsOpen] = useState(false)
 
   const load = () => authed('/api/kb/list').then(d => setArticles(d.articles)).catch(e => setErr(e.message))
-  useEffect(() => { load() }, [])
+  useEffect(() => {
+    load()
+    authed('/api/kb/gaps').then(d => setGaps(d.gaps || [])).catch(() => {})
+  }, [])
+
+  const importWebsite = async () => {
+    if (importing) return
+    if (!window.confirm('Pull in pages from awesomeservice.com? New pages become Website articles; changed pages get updated with a revision; unchanged pages are left alone.')) return
+    setImporting(true); setImportMsg('')
+    try {
+      const d = await authed('/api/kb/import-website', { method: 'POST', body: JSON.stringify({}) })
+      setImportMsg(`✓ ${d.added} added · ${d.changed} updated · ${d.unchanged} unchanged · ${d.skipped} skipped`)
+      load()
+    } catch (e) { setImportMsg(`⚠️ ${e.message}`) }
+    setImporting(false)
+  }
 
   const openEdit = (a) => {
     setRevs(null)
@@ -82,8 +102,37 @@ export default function KnowledgeTab() {
           <option value="all">All categories</option>
           {CATEGORIES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
         </select>
+        <button className="btn" onClick={importWebsite} disabled={importing}>
+          {importing ? 'Importing…' : '🌐 Import website'}
+        </button>
         <button className="btn primary" onClick={() => openEdit(null)}>+ New article</button>
       </div>
+      {importMsg && <div style={{ fontSize:12, fontWeight:600, marginBottom:10, color: importMsg.startsWith('✓') ? 'var(--success)' : 'var(--tone-red-tx)' }}>{importMsg}</div>}
+
+      {gaps.length > 0 && (
+        <div className="card" style={{ padding:'10px 14px', marginBottom:12, borderLeft:'3px solid var(--tone-amber-bd)' }}>
+          <div onClick={() => setGapsOpen(o => !o)} style={{ display:'flex', alignItems:'center', gap:8, cursor:'pointer' }}>
+            <span style={{ fontSize:12.5, fontWeight:700 }}>
+              🔍 {gaps.length} question{gaps.length === 1 ? '' : 's'} the knowledge base couldn't answer (last 30 days)
+            </span>
+            <span style={{ fontSize:11, color:'var(--text-muted)' }}>— your "what to write next" list</span>
+            <span style={{ marginLeft:'auto', fontSize:11, color:'var(--text-muted)' }}>{gapsOpen ? '▾ hide' : '▸ show'}</span>
+          </div>
+          {gapsOpen && (
+            <div style={{ marginTop:8, display:'flex', flexDirection:'column', gap:5, maxHeight:220, overflowY:'auto' }}>
+              {gaps.map(g => (
+                <div key={g.id} style={{ display:'flex', alignItems:'center', gap:8, fontSize:12 }}>
+                  <span style={{ flex:1 }}>{g.question}</span>
+                  {g.helpful === false && <span title="Rep gave this answer a thumbs-down" style={{ flexShrink:0 }}>👎</span>}
+                  <span style={{ fontSize:10.5, color:'var(--text-muted)', flexShrink:0 }}>
+                    {g.rep_name || 'someone'} · {String(g.created_at).slice(5, 10)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {shown.length === 0 && (
         <div style={{ padding: '40px 20px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>

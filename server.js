@@ -1750,6 +1750,99 @@ app.get('/api/kb/revisions', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }) }
 })
 
+// 🌐 Website import: crawl the public site into kb_articles (source=website,
+// keyed by URL). Re-imports DIFF: changed pages get a revision + update,
+// unchanged pages are left alone — the site never silently rewrites the KB.
+const htmlToText = (html) => {
+  let t = String(html || '')
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<(nav|footer|header)[\s\S]*?<\/\1>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&#39;|&apos;/g, "'")
+    .replace(/&quot;/g, '"').replace(/&gt;/g, '>').replace(/&lt;/g, '<')
+  return t.replace(/\s+/g, ' ').trim()
+}
+
+app.post('/api/kb/import-website', async (req, res) => {
+  const prof = await requireAdmin(req, res)
+  if (!prof) return
+  try {
+    const rootUrl = String(req.body?.url || 'https://awesomeservice.com').replace(/\/$/, '')
+    const host = new URL(rootUrl).host
+    const fetchPage = async (u) => {
+      const r = await fetch(u, { signal: AbortSignal.timeout(15000), headers: { 'User-Agent': 'AndiKB/1.0 (internal knowledge import)' } })
+      if (!r.ok) throw new Error(`${r.status}`)
+      return r.text()
+    }
+    const rootHtml = await fetchPage(rootUrl)
+    const links = new Set([rootUrl])
+    for (const m of rootHtml.matchAll(/href=["']([^"'#?]+)["']/gi)) {
+      let u = m[1]
+      try {
+        u = new URL(u, rootUrl + '/').toString().replace(/\/$/, '')
+        if (new URL(u).host !== host) continue
+        if (/\.(pdf|jpg|jpeg|png|gif|svg|css|js|ico|xml|webp|mp4)$/i.test(u)) continue
+        links.add(u)
+      } catch {}
+      if (links.size >= 30) break
+    }
+    const { data: existing } = await supabase.from('kb_articles').select('id, source_url, body').eq('source', 'website')
+    const byUrl = new Map((existing || []).map(a => [a.source_url, a]))
+    let added = 0, changed = 0, unchanged = 0, skipped = 0
+    const pages = []
+    for (const u of links) {
+      try {
+        const html = u === rootUrl ? rootHtml : await fetchPage(u)
+        const title = htmlToText((html.match(/<title[^>]*>([\s\S]*?)<\/title>/i) || [])[1] || '') ||
+          decodeURIComponent(u.split('/').pop() || 'Home')
+        const text = htmlToText(html).slice(0, 12000)
+        if (text.length < 250) { skipped++; continue }
+        const body = `From ${u}\n\n${text}`
+        const prev = byUrl.get(u)
+        if (prev) {
+          if (prev.body === body) { unchanged++; continue }
+          await supabase.from('kb_revisions').insert({
+            article_id: prev.id, body: prev.body, edited_by: prof.name || 'website import',
+            note: 'Website re-import — page content changed',
+          })
+          await supabase.from('kb_articles').update({
+            body, title: `Website: ${title}`.slice(0, 200),
+            updated_by: prof.name || 'website import', updated_at: new Date().toISOString(),
+          }).eq('id', prev.id)
+          changed++
+        } else {
+          await supabase.from('kb_articles').insert({
+            title: `Website: ${title}`.slice(0, 200), body, category: 'website',
+            source: 'website', source_url: u, updated_by: prof.name || 'website import',
+          })
+          added++
+        }
+        pages.push(title)
+      } catch (e) { skipped++ }
+    }
+    res.json({ added, changed, unchanged, skipped, pages: pages.slice(0, 30) })
+  } catch (err) {
+    console.error('website import:', err.message)
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// Knowledge gaps: real questions the KB couldn't cover (or answers that got a
+// thumbs-down) — the "what to write next" list.
+app.get('/api/kb/gaps', async (req, res) => {
+  if (!(await requireAdmin(req, res))) return
+  try {
+    const since = new Date(Date.now() - 30 * 864e5).toISOString()
+    const { data } = await supabase.from('assistant_logs')
+      .select('id, rep_name, question, covered, helpful, created_at')
+      .gte('created_at', since)
+      .or('covered.eq.false,helpful.eq.false')
+      .order('created_at', { ascending: false }).limit(50)
+    res.json({ gaps: data || [] })
+  } catch (err) { res.status(500).json({ error: err.message }) }
+})
+
 app.post('/api/assistant/ask', async (req, res) => {
   const prof = await requireUser(req, res)
   if (!prof) return
@@ -1780,7 +1873,7 @@ app.post('/api/assistant/ask', async (req, res) => {
 
 Answer from the COMPANY KNOWLEDGE below plus general call-center craft. Rules:
 - Company facts (prices, fees, policies, service areas, guarantees) may ONLY come from the knowledge below. If it isn't covered, say plainly "That's not in the knowledge base" and suggest asking a manager — NEVER guess or invent a policy, price, or promise.
-- Objection-handling coaching may combine the knowledge with general sales craft — make it concrete, give actual words to say.
+- Objection-handling coaching may combine the knowledge with general sales craft. When the knowledge base HAS a play for the objection, lead with it. When it doesn't, still coach — use proven structure (acknowledge, isolate the real concern, reframe value, close soft) and give actual words to say — but open with "The playbook doesn't cover this one specifically —" so the rep knows it's craft, not company script, and set covered=false.
 - Keep answers tight: a rep is often mid-call. Lead with the answer, no preamble.
 - Cite which knowledge articles you used by their exact titles.
 
