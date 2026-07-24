@@ -91,7 +91,8 @@ export default function KnowledgeTab() {
     (!search.trim() || (a.title + ' ' + a.body).toLowerCase().includes(search.toLowerCase())))
 
   return (
-    <div style={{ padding: 24, maxWidth: 1000, margin: '0 auto' }}>
+    <div style={{ flex: 1, overflowY: 'auto' }}>
+    <div style={{ padding: 24, maxWidth: 1100, margin: '0 auto' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14, flexWrap: 'wrap' }}>
         <div style={{ fontSize: 12, color: 'var(--text-muted)', flex: 1, minWidth: 260 }}>
           Everything Ask Andi 💡 is allowed to say about company facts lives here. Edits go live on the very
@@ -141,29 +142,36 @@ export default function KnowledgeTab() {
         </div>
       )}
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {shown.map(a => (
-          <div key={a.id} className="card" style={{ padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 12, opacity: a.active ? 1 : .55 }}>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 13, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 8 }}>
-                {a.title}
-                <span style={{ fontSize: 9.5, fontWeight: 700, padding: '1px 8px', borderRadius: 99, background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--text-muted)' }}>
-                  {CAT_LABEL[a.category] || a.category}
-                </span>
-                {!a.active && <span style={{ fontSize: 9.5, fontWeight: 700, color: 'var(--tone-amber-tx)' }}>hidden from answers</span>}
-              </div>
-              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {a.body.replace(/<[^>]*>/g, ' ').slice(0, 140)}
-              </div>
-              <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>
-                updated {String(a.updated_at).slice(0, 10)}{a.updated_by ? ` by ${a.updated_by}` : ''}
-              </div>
-            </div>
-            <button className="btn sm" onClick={() => openEdit(a)}>Edit</button>
-            <button className="btn sm" onClick={() => remove(a)} style={{ color: 'var(--danger)' }}>Delete</button>
+      {CATEGORIES.filter(([v]) => shown.some(a => a.category === v)).map(([v, label]) => (
+        <div key={v} style={{ marginBottom: 22 }}>
+          <div style={{ fontSize: 12, fontWeight: 800, textTransform: 'uppercase', letterSpacing: .6, color: 'var(--text-muted)', marginBottom: 8 }}>
+            {label} <span style={{ fontWeight: 600 }}>· {shown.filter(a => a.category === v).length}</span>
           </div>
-        ))}
-      </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))', gap: 10 }}>
+            {shown.filter(a => a.category === v).map(a => (
+              <div key={a.id} className="card" onClick={() => openEdit(a)}
+                onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--accent)'; e.currentTarget.style.transform = 'translateY(-1px)' }}
+                onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.transform = 'none' }}
+                style={{ padding: '12px 14px', cursor: 'pointer', opacity: a.active ? 1 : .55, transition: 'all .1s',
+                  display: 'flex', flexDirection: 'column', gap: 6, minHeight: 110 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, lineHeight: 1.35 }}>{a.title}</div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.5, flex: 1,
+                  display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                  {a.body.replace(/<[^>]*>/g, ' ').slice(0, 220)}
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 9.5, color: 'var(--text-muted)' }}>
+                  <span>{String(a.updated_at).slice(0, 10)}</span>
+                  {a.updated_by && <span>· {a.updated_by}</span>}
+                  {!a.active && (
+                    <span style={{ marginLeft: 'auto', fontWeight: 700, color: 'var(--tone-amber-tx)' }}>hidden</span>
+                  )}
+                  {a.source === 'website' && <span style={{ marginLeft: a.active ? 'auto' : 0 }}>🌐</span>}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
 
       {edit && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.45)', zIndex: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}
@@ -222,16 +230,23 @@ export default function KnowledgeTab() {
                 </div>
               )}
               {err && <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--tone-red-tx)' }}>{err}</div>}
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-                <button className="btn" onClick={() => setEdit(null)}>Cancel</button>
-                <button className="btn primary" onClick={save} disabled={saving || !edit.title.trim()}>
-                  {saving ? 'Saving…' : 'Save'}
-                </button>
+              <div style={{ display: 'flex', gap: 8 }}>
+                {edit.id && (
+                  <button className="btn" onClick={() => { const a = articles.find(x => x.id === edit.id); if (a) { remove(a); setEdit(null) } }}
+                    style={{ color: 'var(--danger)' }}>Delete</button>
+                )}
+                <div style={{ display: 'flex', gap: 8, marginLeft: 'auto' }}>
+                  <button className="btn" onClick={() => setEdit(null)}>Cancel</button>
+                  <button className="btn primary" onClick={save} disabled={saving || !edit.title.trim()}>
+                    {saving ? 'Saving…' : 'Save'}
+                  </button>
+                </div>
               </div>
             </div>
           </div>
         </div>
       )}
+    </div>
     </div>
   )
 }
