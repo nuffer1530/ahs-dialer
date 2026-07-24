@@ -93,17 +93,17 @@ OUTCOME_ICONS['Wrong Number'] = (color) => (
 )
 
 const OUTCOME_CONFIG = {
-  'No Answer':      { border:'#C87800', bg:'#FFF8E6', color:'#C87800' },
+  'No Answer':      { border:'var(--tone-amber-tx)', bg:'var(--tone-amber-bg)', color:'var(--tone-amber-tx)' },
   'Voicemail':      { border:'#7C3AED', bg:'#F3E8FF', color:'#7C3AED' },
-  'Booked':         { border:'#16A34A', bg:'#DCFCE7', color:'#16A34A' },
+  'Booked':         { border:'var(--success)', bg:'var(--tone-green-bg)', color:'var(--success)' },
   'Not Interested': { border:'#DC2626', bg:'#FEE2E2', color:'#DC2626' },
-  'DNC':            { border:'#7F1D1D', bg:'#FEF2F2', color:'#7F1D1D' },
-  'Bad Data':       { border:'#6B7280', bg:'#F3F4F6', color:'#6B7280' },
+  'DNC':            { border:'#7F1D1D', bg:'var(--tone-red-bg)', color:'#7F1D1D' },
+  'Bad Data':       { border:'var(--tone-gray-tx)', bg:'var(--tone-gray-bg)', color:'var(--tone-gray-tx)' },
   'Rescheduled':    { border:'#2563EB', bg:'#EFF6FF', color:'#2563EB' },
-  'Canceled Appt':  { border:'#C87800', bg:'#FFF8E6', color:'#C87800' },
+  'Canceled Appt':  { border:'var(--tone-amber-tx)', bg:'var(--tone-amber-bg)', color:'var(--tone-amber-tx)' },
   'Question / Info':{ border:'#0891B2', bg:'#ECFEFF', color:'#0891B2' },
   'Not Booked - Price': { border:'#DC2626', bg:'#FEE2E2', color:'#DC2626' },
-  'Wrong Number':   { border:'#6B7280', bg:'#F3F4F6', color:'#6B7280' },
+  'Wrong Number':   { border:'var(--tone-gray-tx)', bg:'var(--tone-gray-bg)', color:'var(--tone-gray-tx)' },
 }
 
 function SearchSelect({ label, value, onChange, options, placeholder, disabled }) {
@@ -1004,9 +1004,9 @@ export default function DialerPage() {
     if (!guidance) return null
     const isToday = guidance.urgency === 'today'
     const isSoon = guidance.urgency === 'soon'
-    const bg = isToday ? '#FEF2F2' : isSoon ? '#FFFBEB' : 'var(--surface-2)'
-    const border = isToday ? '#FCA5A5' : isSoon ? '#FCD34D' : 'var(--border)'
-    const color = isToday ? '#991B1B' : isSoon ? '#92400E' : 'var(--text-secondary)'
+    const bg = isToday ? 'var(--tone-red-bg)' : isSoon ? 'var(--tone-amber-bg)' : 'var(--surface-2)'
+    const border = isToday ? 'var(--tone-red-bd)' : isSoon ? 'var(--tone-amber-bd)' : 'var(--border)'
+    const color = isToday ? 'var(--tone-red-tx)' : isSoon ? 'var(--tone-amber-tx)' : 'var(--text-secondary)'
     return (
       <div style={{ background:bg, border:`1px solid ${border}`, borderRadius:'var(--radius)', padding: compact ? '8px 12px' : '10px 14px', fontSize:12, color, lineHeight:1.5 }}>
         <span style={{ fontWeight:700 }}>
@@ -1267,7 +1267,7 @@ export default function DialerPage() {
         <button className="btn primary" onClick={navNextPending} style={{fontSize:11,padding:'4px 11px',fontWeight:600}}>Next pending</button>
         <QueueSelector />
         <button onClick={() => setShowDialpad(true)}
-          style={{ display:'flex', alignItems:'center', gap:5, padding:'5px 12px', background: twilioReady ? '#16A34A' : 'var(--border)', border:'none', borderRadius:'var(--radius)', cursor: twilioReady ? 'pointer' : 'not-allowed', fontSize:11, fontWeight:600, color:'#fff' }}>
+          style={{ display:'flex', alignItems:'center', gap:5, padding:'5px 12px', background: twilioReady ? 'var(--success)' : 'var(--border)', border:'none', borderRadius:'var(--radius)', cursor: twilioReady ? 'pointer' : 'not-allowed', fontSize:11, fontWeight:600, color:'#fff' }}>
           <svg width="12" height="12" viewBox="0 0 24 24" fill="white"><path d="M6.6 10.8c1.4 2.8 3.8 5.1 6.6 6.6l2.2-2.2c.3-.3.7-.4 1-.2 1.1.4 2.3.6 3.6.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1C10.6 21 3 13.4 3 4c0-.6.4-1 1-1h3.5c.6 0 1 .4 1 1 0 1.3.2 2.5.6 3.6.1.3 0 .7-.2 1L6.6 10.8z"/></svg>
           Manual Dial
         </button>
@@ -1278,9 +1278,9 @@ export default function DialerPage() {
         )}
         {callStatus && (
           <div style={{ display:'flex', alignItems:'center', gap:6, padding:'4px 10px', borderRadius:'var(--radius)', fontSize:11, fontWeight:600,
-            background: callStatus==='connected' ? '#DCFCE7' : callStatus==='ended' ? 'var(--surface-2)' : '#FFF8E6',
-            border:`1px solid ${callStatus==='connected' ? '#16A34A' : callStatus==='ended' ? 'var(--border)' : '#C87800'}`,
-            color: callStatus==='connected' ? '#16A34A' : callStatus==='ended' ? 'var(--text-muted)' : '#C87800' }}>
+            background: callStatus==='connected' ? 'var(--tone-green-bg)' : callStatus==='ended' ? 'var(--surface-2)' : 'var(--tone-amber-bg)',
+            border:`1px solid ${callStatus==='connected' ? 'var(--success)' : callStatus==='ended' ? 'var(--border)' : 'var(--tone-amber-tx)'}`,
+            color: callStatus==='connected' ? 'var(--success)' : callStatus==='ended' ? 'var(--text-muted)' : 'var(--tone-amber-tx)' }}>
             <span style={{ width:6, height:6, borderRadius:'50%', background:'currentColor', display:'inline-block' }}></span>
             {callStatus==='calling' ? 'Dialing...' : callStatus==='ringing' ? 'Ringing...' : callStatus==='connected' ? fmtDuration(callDuration) : 'Ended'}
             {['calling','ringing','connected'].includes(callStatus) && (
@@ -1339,7 +1339,7 @@ export default function DialerPage() {
         </div>
 
         <div style={{ flex:1 }} />
-        {cbDue.length > 0 && <div style={{ fontSize:11, fontWeight:600, color:'#C87800', padding:'3px 8px', background:'#FFFBEB', border:'1px solid #FCD34D', borderRadius:99 }}>CB: {cbDue.length}</div>}
+        {cbDue.length > 0 && <div style={{ fontSize:11, fontWeight:600, color:'var(--tone-amber-tx)', padding:'3px 8px', background:'var(--tone-amber-bg)', border:'1px solid #FCD34D', borderRadius:99 }}>CB: {cbDue.length}</div>}
       </div>
 
       {/* == BODY == */}
@@ -1388,9 +1388,9 @@ export default function DialerPage() {
               <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:12, width:'100%', maxWidth:560 }}>
                 {[
                   { label:'Calls today', value:myStats.calls, color:'var(--accent)' },
-                  { label:'Booked today', value:myStats.booked, color:'#16A34A' },
+                  { label:'Booked today', value:myStats.booked, color:'var(--success)' },
                   { label:'Booking rate', value:todayLogs.length ? Math.round((myStats.booked/todayLogs.length)*100)+'%' : '--', color:'#7C3AED' },
-                  { label:'Callbacks due', value:cbDue.length, color:'#C87800', click:()=>setFilter('callback') },
+                  { label:'Callbacks due', value:cbDue.length, color:'var(--tone-amber-tx)', click:()=>setFilter('callback') },
                 ].map(({ label, value, color, click }) => (
                   <div key={label} onClick={click} style={{ background:'var(--surface)', border:'1px solid var(--border)', borderTop:`3px solid ${color}`, borderRadius:'var(--radius)', padding:'12px 14px', cursor: click ? 'pointer' : 'default' }}>
                     <div style={{ fontSize:9, textTransform:'uppercase', letterSpacing:.6, color:'var(--text-muted)', marginBottom:4 }}>{label}</div>
@@ -1463,10 +1463,10 @@ export default function DialerPage() {
                 </div>
                 {/* Action buttons */}
                 <div style={{ display:'flex', gap:6, flexShrink:0, alignItems:'center' }}>
-                  {c.callback_at && <span style={{ fontSize:10, padding:'4px 8px', background:'#FFF8E6', border:'1px solid #FCD34D', borderRadius:'var(--radius)', color:'#92400E' }}>CB: {fmtDate(c.callback_at)}</span>}
+                  {c.callback_at && <span style={{ fontSize:10, padding:'4px 8px', background:'var(--tone-amber-bg)', border:'1px solid #FCD34D', borderRadius:'var(--radius)', color:'var(--tone-amber-tx)' }}>CB: {fmtDate(c.callback_at)}</span>}
                   {c.phone && (
                     <button onClick={() => makeCall(c.phone)} disabled={!twilioReady || !!callStatus}
-                      style={{ display:'flex', alignItems:'center', gap:6, padding:'8px 18px', border:'none', borderRadius:'var(--radius)', background: twilioReady && !callStatus ? '#16A34A' : 'var(--border)', cursor: twilioReady && !callStatus ? 'pointer' : 'not-allowed', fontSize:13, fontWeight:700, color:'#fff' }}>
+                      style={{ display:'flex', alignItems:'center', gap:6, padding:'8px 18px', border:'none', borderRadius:'var(--radius)', background: twilioReady && !callStatus ? 'var(--success)' : 'var(--border)', cursor: twilioReady && !callStatus ? 'pointer' : 'not-allowed', fontSize:13, fontWeight:700, color:'#fff' }}>
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="white"><path d="M6.6 10.8c1.4 2.8 3.8 5.1 6.6 6.6l2.2-2.2c.3-.3.7-.4 1-.2 1.1.4 2.3.6 3.6.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1C10.6 21 3 13.4 3 4c0-.6.4-1 1-1h3.5c.6 0 1 .4 1 1 0 1.3.2 2.5.6 3.6.1.3 0 .7-.2 1L6.6 10.8z"/></svg>
                       Call
                     </button>
@@ -1511,8 +1511,8 @@ export default function DialerPage() {
                       <span style={sectionTitle}>Customer info</span>
                       {stCustomerInfo?.membership && (
                         <span style={{ fontSize:10, fontWeight:700, borderRadius:99, padding:'2px 8px',
-                          background: stCustomerInfo.membership.active ? '#DCFCE7' : '#F3F4F6',
-                          color: stCustomerInfo.membership.active ? '#15803D' : '#6B7280',
+                          background: stCustomerInfo.membership.active ? 'var(--tone-green-bg)' : 'var(--tone-gray-bg)',
+                          color: stCustomerInfo.membership.active ? 'var(--tone-green-tx)' : 'var(--tone-gray-tx)',
                           border: `1px solid ${stCustomerInfo.membership.active ? '#86EFAC' : 'var(--border)'}` }}>
                           {stCustomerInfo.membership.active ? (stCustomerInfo.membership.name || 'Member') : 'Non-Member'}
                         </span>
@@ -1525,7 +1525,7 @@ export default function DialerPage() {
                         </div></div>
                         <div><L text="Source" /><div style={{ fontSize:12, color:'var(--text-primary)' }}>{c.source || '--'}</div></div>
                         <div><L text="Membership" /><div style={{ fontSize:12, fontWeight:600,
-                          color: stCustomerInfo?.membership?.active ? '#16A34A' : stCustomerInfo ? 'var(--text-muted)' : 'var(--text-muted)' }}>
+                          color: stCustomerInfo?.membership?.active ? 'var(--success)' : stCustomerInfo ? 'var(--text-muted)' : 'var(--text-muted)' }}>
                           {stCustomerInfo?.membership
                             ? (stCustomerInfo.membership.active ? (stCustomerInfo.membership.name || 'Active') : 'Non-Member')
                             : stCustomerInfo?.notInSt ? 'New — not in ST'
@@ -1569,14 +1569,14 @@ export default function DialerPage() {
                           {Array.isArray(briefFacts?.pinnedNotes) && briefFacts.pinnedNotes.length > 0 ? (
                             <div style={{ marginBottom:10, display:'flex', flexDirection:'column', gap:6 }}>
                               {briefFacts.pinnedNotes.map((note, i) => (
-                                <div key={i} style={{ background:'#FFFBEB', border:'1px solid #FCD34D', borderRadius:'var(--radius)', padding:'8px 10px', display:'flex', gap:7, alignItems:'flex-start' }}>
+                                <div key={i} style={{ background:'var(--tone-amber-bg)', border:'1px solid #FCD34D', borderRadius:'var(--radius)', padding:'8px 10px', display:'flex', gap:7, alignItems:'flex-start' }}>
                                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#B45309" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink:0, marginTop:1 }}><path d="m12 2 1.5 6.5L20 10l-6.5 1.5L12 18l-1.5-6.5L4 10l6.5-1.5z"/></svg>
                                   <div style={{ fontSize:12, lineHeight:1.5, color:'#78350F', fontWeight:500 }}>{note}</div>
                                 </div>
                               ))}
                             </div>
                           ) : briefData?.flag ? (
-                            <div style={{ marginBottom:10, background:'#FFFBEB', border:'1px solid #FCD34D', borderRadius:'var(--radius)', padding:'8px 10px', display:'flex', gap:7, alignItems:'flex-start' }}>
+                            <div style={{ marginBottom:10, background:'var(--tone-amber-bg)', border:'1px solid #FCD34D', borderRadius:'var(--radius)', padding:'8px 10px', display:'flex', gap:7, alignItems:'flex-start' }}>
                               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#B45309" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink:0, marginTop:1 }}><path d="m12 2 1.5 6.5L20 10l-6.5 1.5L12 18l-1.5-6.5L4 10l6.5-1.5z"/></svg>
                               <div style={{ fontSize:12, lineHeight:1.5, color:'#78350F', fontWeight:500 }}>{briefData.flag}</div>
                             </div>
@@ -1671,8 +1671,8 @@ export default function DialerPage() {
                             </div>
                             <div style={{ textAlign:'right', flexShrink:0 }}>
                               <div style={{ fontSize:10, padding:'2px 7px', borderRadius:99, fontWeight:600, display:'inline-block',
-                                background: isComplete ? '#DCFCE7' : '#F3F4F6',
-                                color: isComplete ? '#15803D' : '#6B7280' }}>
+                                background: isComplete ? 'var(--tone-green-bg)' : 'var(--tone-gray-bg)',
+                                color: isComplete ? 'var(--tone-green-tx)' : 'var(--tone-gray-tx)' }}>
                                 {job.jobStatus || 'Unknown'}
                               </div>
                               <div style={{ fontSize:10, color:'var(--text-muted)', marginTop:3 }}>{jobDate ? fmtDate(jobDate) : ''}</div>
@@ -1717,9 +1717,9 @@ export default function DialerPage() {
                   )}
 
                   {/* Banners */}
-                  {isDNC && <div style={{ background:'#FEF2F2', border:'1px solid #FECACA', borderRadius:'var(--radius)', padding:'8px 12px', fontSize:12, color:'#7F1D1D', fontWeight:600 }}>DNC -- Do not dial this number</div>}
+                  {isDNC && <div style={{ background:'var(--tone-red-bg)', border:'1px solid #FECACA', borderRadius:'var(--radius)', padding:'8px 12px', fontSize:12, color:'#7F1D1D', fontWeight:600 }}>DNC -- Do not dial this number</div>}
                   {c.callback_at && (
-                    <div style={{ background:'#FFFBEB', border:'1px solid #FCD34D', borderRadius:'var(--radius)', padding:'8px 12px', fontSize:12, color:'#92400E', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+                    <div style={{ background:'var(--tone-amber-bg)', border:'1px solid #FCD34D', borderRadius:'var(--radius)', padding:'8px 12px', fontSize:12, color:'var(--tone-amber-tx)', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
                       <span><strong>Callback:</strong> {fmtDate(c.callback_at)}{c.callback_note ? ` -- ${c.callback_note}` : ''}</span>
                       <button className="btn sm" onClick={() => clearCallback(c.id)}>Clear</button>
                     </div>
@@ -1767,7 +1767,7 @@ export default function DialerPage() {
                               </div>
                               <div style={{ display:'flex', alignItems:'center', gap:8 }}>
                                 {stNoteResult && (
-                                  <span style={{ fontSize:11, fontWeight:600, color: stNoteResult.ok ? '#16A34A' : '#DC2626' }}>
+                                  <span style={{ fontSize:11, fontWeight:600, color: stNoteResult.ok ? 'var(--success)' : '#DC2626' }}>
                                     {stNoteResult.ok ? 'Sent to ST' : stNoteResult.error}
                                   </span>
                                 )}
@@ -1785,7 +1785,7 @@ export default function DialerPage() {
                               <div style={{ fontSize:11, fontWeight:700, color:'var(--success)' }}>ServiceTitan booking details</div>
                               <GuidanceBanner compact />
                               {!c.external_id && (
-                                <div style={{ background:'#FFFBEB', border:'1px solid #FCD34D', borderRadius:'var(--radius)', padding:'8px 12px', fontSize:12, color:'#92400E', display:'flex', alignItems:'center', justifyContent:'space-between', gap:10 }}>
+                                <div style={{ background:'var(--tone-amber-bg)', border:'1px solid #FCD34D', borderRadius:'var(--radius)', padding:'8px 12px', fontSize:12, color:'var(--tone-amber-tx)', display:'flex', alignItems:'center', justifyContent:'space-between', gap:10 }}>
                                   <span>Not in ServiceTitan yet — create them to book.</span>
                                   <button className="btn sm primary" onClick={() => {
                                     setNewCustErr('')
@@ -1834,17 +1834,17 @@ export default function DialerPage() {
                               )}
 
                               <button onClick={checkAvailability} disabled={!selectedJobType || !selectedBU || availLoading}
-                                style={{ width:'100%', padding:'8px 0', border:'1px solid #16A34A', borderRadius:'var(--radius)', background:'var(--surface)', color:'#16A34A', fontSize:12, fontWeight:600, cursor: selectedJobType && selectedBU ? 'pointer' : 'not-allowed', opacity: selectedJobType && selectedBU ? 1 : .5, display:'flex', alignItems:'center', justifyContent:'center', gap:6 }}>
+                                style={{ width:'100%', padding:'8px 0', border:'1px solid #16A34A', borderRadius:'var(--radius)', background:'var(--surface)', color:'var(--success)', fontSize:12, fontWeight:600, cursor: selectedJobType && selectedBU ? 'pointer' : 'not-allowed', opacity: selectedJobType && selectedBU ? 1 : .5, display:'flex', alignItems:'center', justifyContent:'center', gap:6 }}>
                                 {availLoading ? <><div className="spinner" style={{width:12,height:12,borderWidth:2}}></div> Loading...</> : 'Check availability'}
                               </button>
                               {availError && <div style={{ fontSize:11, color:'var(--danger)', padding:'5px 8px', background:'var(--danger-bg)', borderRadius:'var(--radius)' }}>{availError}</div>}
 
                               {selectedSlot && (
-                                <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'7px 10px', background:'#DCFCE7', border:'1px solid #16A34A', borderRadius:'var(--radius)' }}>
-                                  <span style={{ fontSize:12, fontWeight:600, color:'#15803D' }}>
+                                <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'7px 10px', background:'var(--tone-green-bg)', border:'1px solid #16A34A', borderRadius:'var(--radius)' }}>
+                                  <span style={{ fontSize:12, fontWeight:600, color:'var(--tone-green-tx)' }}>
                                     {new Date(selectedSlot.start).toLocaleDateString('en-US', { weekday:'short', month:'short', day:'numeric' })} . {new Date(selectedSlot.start).toLocaleTimeString('en-US', { hour:'numeric', minute:'2-digit' })} - {new Date(selectedSlot.end).toLocaleTimeString('en-US', { hour:'numeric', minute:'2-digit' })}
                                   </span>
-                                  <button onClick={() => { setSelectedSlot(null); setShowAvailModal(true) }} style={{ fontSize:10, padding:'2px 8px', background:'#16A34A', color:'#fff', border:'none', borderRadius:4, cursor:'pointer' }}>Change</button>
+                                  <button onClick={() => { setSelectedSlot(null); setShowAvailModal(true) }} style={{ fontSize:10, padding:'2px 8px', background:'var(--success)', color:'#fff', border:'none', borderRadius:4, cursor:'pointer' }}>Change</button>
                                 </div>
                               )}
 
@@ -1854,7 +1854,7 @@ export default function DialerPage() {
 
                           {/* Booking confirmation (persists after the panel closes on log) */}
                           {bookingResult && (
-                            <div style={{ padding:'7px 10px', borderRadius:'var(--radius)', fontSize:11, fontWeight:500, background: bookingResult.ok ? '#DCFCE7' : '#FEE2E2', border:`1px solid ${bookingResult.ok ? '#16A34A' : '#DC2626'}`, color: bookingResult.ok ? '#15803D' : '#DC2626' }}>
+                            <div style={{ padding:'7px 10px', borderRadius:'var(--radius)', fontSize:11, fontWeight:500, background: bookingResult.ok ? 'var(--tone-green-bg)' : '#FEE2E2', border:`1px solid ${bookingResult.ok ? 'var(--success)' : '#DC2626'}`, color: bookingResult.ok ? 'var(--tone-green-tx)' : '#DC2626' }}>
                               {bookingResult.ok ? `Job #${bookingResult.jobNumber||bookingResult.jobId} created in ServiceTitan` : bookingResult.error}
                             </div>
                           )}
@@ -1864,14 +1864,14 @@ export default function DialerPage() {
                             <button className="btn" disabled={!isMe} onClick={openCallbackModal} style={{fontSize:12}}>Callback</button>
                             {selectedOutcome === 'Booked' ? (
                               <button onClick={bookAndLog} disabled={!isMe || !c.external_id || !selectedJobType || !selectedBU || !stCampaignId || booking || saving}
-                                style={{ padding:'10px 22px', border:'none', borderRadius:'var(--radius)', background: (c.external_id && selectedJobType && selectedBU && stCampaignId) ? '#16A34A' : 'var(--border)', color:'#fff', fontSize:13, fontWeight:700, cursor: (c.external_id && selectedJobType && selectedBU && stCampaignId && !booking && !saving) ? 'pointer' : 'not-allowed', display:'flex', alignItems:'center', justifyContent:'center', gap:6 }}>
+                                style={{ padding:'10px 22px', border:'none', borderRadius:'var(--radius)', background: (c.external_id && selectedJobType && selectedBU && stCampaignId) ? 'var(--success)' : 'var(--border)', color:'#fff', fontSize:13, fontWeight:700, cursor: (c.external_id && selectedJobType && selectedBU && stCampaignId && !booking && !saving) ? 'pointer' : 'not-allowed', display:'flex', alignItems:'center', justifyContent:'center', gap:6 }}>
                                 {(booking || saving) ? <><div className="spinner" style={{width:13,height:13,borderWidth:2,borderTopColor:'#fff'}}></div> Booking...</> :
                                   selectedSlot ? `Book ${new Date(selectedSlot.start).toLocaleDateString('en-US', { weekday:'short', month:'short', day:'numeric' })} ${new Date(selectedSlot.start).toLocaleTimeString('en-US', { hour:'numeric', minute:'2-digit' })} & log` :
                                   'Book in ServiceTitan & log'}
                               </button>
                             ) : (
                               <button onClick={() => logOutcome(true)} disabled={!isMe || !selectedOutcome || saving}
-                                style={{ padding:'10px 22px', border:'none', borderRadius:'var(--radius)', background: selectedOutcome ? '#16A34A' : 'var(--border)', color:'#fff', fontSize:13, fontWeight:600, cursor: (selectedOutcome && !saving) ? 'pointer' : 'not-allowed' }}>
+                                style={{ padding:'10px 22px', border:'none', borderRadius:'var(--radius)', background: selectedOutcome ? 'var(--success)' : 'var(--border)', color:'#fff', fontSize:13, fontWeight:600, cursor: (selectedOutcome && !saving) ? 'pointer' : 'not-allowed' }}>
                                 {saving ? 'Saving...' : selectedOutcome ? 'Log outcome' : 'Pick an outcome'}
                               </button>
                             )}
@@ -1880,7 +1880,7 @@ export default function DialerPage() {
                       </div>
                     </>
                   ) : (
-                    <div style={{ background:'#DCFCE7', border:'1px solid #BBF7D0', borderRadius:'var(--radius)', padding:'12px 16px', fontSize:13, color:'#15803D', fontWeight:500 }}>
+                    <div style={{ background:'var(--tone-green-bg)', border:'1px solid #BBF7D0', borderRadius:'var(--radius)', padding:'12px 16px', fontSize:13, color:'var(--tone-green-tx)', fontWeight:500 }}>
                       Contact complete -- {c.status}
                     </div>
                   )}
@@ -1895,7 +1895,7 @@ export default function DialerPage() {
                     <div style={{ display:'grid', gridTemplateColumns:'repeat(2,1fr)', gap:8, marginBottom:8 }}>
                       {[
                         { l:'Calls today', v:myStats.calls, col:'var(--text-primary)' },
-                        { l:'Booked', v:myStats.booked, col:'#16A34A' },
+                        { l:'Booked', v:myStats.booked, col:'var(--success)' },
                         { l:'Booking rate', v:todayLogs.length ? Math.round((myStats.booked/todayLogs.length)*100)+'%' : '--', col:'#7C3AED' },
                         { l:'Commission', v:'$'+dailyEarnings.toFixed(2), col:'#2563eb' },
                       ].map(({ l, v, col }) => {
@@ -1959,7 +1959,7 @@ export default function DialerPage() {
                       <div>
                         {(camp?.tips || inboundScript?.tips) ? (
                           <RichText html={camp?.tips || inboundScript.tips}
-                            style={{ background:'#FFFBEB', border:'1px solid #FCD34D', borderRadius:'var(--radius)', padding:'12px 14px', fontSize:12, lineHeight:1.9, color:'#78350F' }} />
+                            style={{ background:'var(--tone-amber-bg)', border:'1px solid #FCD34D', borderRadius:'var(--radius)', padding:'12px 14px', fontSize:12, lineHeight:1.9, color:'#78350F' }} />
                         ) : (
                           <div style={{ fontSize:12, color:'var(--text-muted)', fontStyle:'italic', textAlign:'center', paddingTop:16 }}>{camp ? 'No tips set for this campaign.' : 'No inbound tips set — add them in Settings → Campaigns.'}</div>
                         )}
@@ -2031,10 +2031,10 @@ export default function DialerPage() {
                               const pctOpen = total ? Math.round((open/total)*100) : 0
                               const isSel = selectedSlot?.start === slot.start, hasOpen = open > 0
                               let bg, border, tc, bc
-                              if (isSel) { bg='#16A34A'; border='2px solid #16A34A'; tc='#fff'; bc='rgba(255,255,255,.4)' }
+                              if (isSel) { bg='var(--success)'; border='2px solid #16A34A'; tc='#fff'; bc='rgba(255,255,255,.4)' }
                               else if (!hasOpen) { bg='var(--surface-2)'; border='1px solid var(--border)'; tc='var(--text-muted)'; bc='var(--border)' }
-                              else if (pctOpen < 50) { bg='#FEF3C7'; border='1px solid #F59E0B'; tc='#92400E'; bc='#F59E0B' }
-                              else { bg='#DCFCE7'; border='1px solid #16A34A'; tc='#15803D'; bc='#16A34A' }
+                              else if (pctOpen < 50) { bg='#FEF3C7'; border='1px solid #F59E0B'; tc='var(--tone-amber-tx)'; bc='#F59E0B' }
+                              else { bg='var(--tone-green-bg)'; border='1px solid #16A34A'; tc='var(--tone-green-tx)'; bc='var(--success)' }
                               return (
                                 <div key={si} onClick={() => { if(!hasOpen) return; setSelectedSlot(isSel?null:slot); if(!isSel) setShowAvailModal(false) }}
                                   style={{ padding:'7px 8px', borderRadius:'var(--radius)', background:bg, border, cursor:hasOpen?'pointer':'default', transition:'all .12s' }}
@@ -2055,7 +2055,7 @@ export default function DialerPage() {
                   })}
                 </div>
                 <div style={{ display:'flex', gap:14, marginTop:14, paddingTop:10, borderTop:'1px solid var(--border)' }}>
-                  {[['#DCFCE7','#16A34A','Available'],['#FEF3C7','#F59E0B','Filling up'],['var(--surface-2)','var(--border)','Full']].map(([bg,bdr,lbl]) => (
+                  {[['var(--tone-green-bg)','var(--success)','Available'],['#FEF3C7','#F59E0B','Filling up'],['var(--surface-2)','var(--border)','Full']].map(([bg,bdr,lbl]) => (
                     <div key={lbl} style={{ display:'flex', alignItems:'center', gap:5 }}>
                       <div style={{ width:10,height:10,borderRadius:3,background:bg,border:`1px solid ${bdr}` }} />
                       <span style={{ fontSize:11, color:'var(--text-muted)' }}>{lbl}</span>
@@ -2064,11 +2064,11 @@ export default function DialerPage() {
                 </div>
               </div>
               {selectedSlot ? (
-                <div style={{ padding:'10px 18px', borderTop:'1px solid var(--border)', background:'#DCFCE7', display:'flex', alignItems:'center', justifyContent:'space-between', flexShrink:0 }}>
-                  <span style={{ fontSize:12, fontWeight:600, color:'#15803D' }}>
+                <div style={{ padding:'10px 18px', borderTop:'1px solid var(--border)', background:'var(--tone-green-bg)', display:'flex', alignItems:'center', justifyContent:'space-between', flexShrink:0 }}>
+                  <span style={{ fontSize:12, fontWeight:600, color:'var(--tone-green-tx)' }}>
                     {new Date(selectedSlot.start).toLocaleDateString('en-US', { weekday:'long', month:'short', day:'numeric' })} . {new Date(selectedSlot.start).toLocaleTimeString('en-US', { hour:'numeric', minute:'2-digit' })} - {new Date(selectedSlot.end).toLocaleTimeString('en-US', { hour:'numeric', minute:'2-digit' })}
                   </span>
-                  <button onClick={() => setShowAvailModal(false)} style={{ padding:'6px 16px', background:'#16A34A', color:'#fff', border:'none', borderRadius:'var(--radius)', fontSize:12, fontWeight:600, cursor:'pointer' }}>Confirm slot</button>
+                  <button onClick={() => setShowAvailModal(false)} style={{ padding:'6px 16px', background:'var(--success)', color:'#fff', border:'none', borderRadius:'var(--radius)', fontSize:12, fontWeight:600, cursor:'pointer' }}>Confirm slot</button>
                 </div>
               ) : (
                 <div style={{ padding:'10px 18px', borderTop:'1px solid var(--border)', flexShrink:0 }}>
@@ -2181,7 +2181,7 @@ export default function DialerPage() {
           <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginTop:6 }}>
             <span style={{ fontSize:11, color:'var(--text-muted)' }}>{textBody.length} / 320</span>
             {textResult && (
-              <span style={{ fontSize:12, fontWeight:600, color: textResult.ok ? '#16A34A' : '#DC2626' }}>
+              <span style={{ fontSize:12, fontWeight:600, color: textResult.ok ? 'var(--success)' : '#DC2626' }}>
                 {textResult.ok ? 'Message sent' : textResult.error}
               </span>
             )}
@@ -2233,7 +2233,7 @@ export default function DialerPage() {
               style={{ flex:1, padding:'10px 0', border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface-2)', cursor:'pointer', fontSize:15, color:'var(--text-muted)' }}>Del</button>
             <button onClick={() => { if(dialpadNumber.length>=10){makeCall(dialpadNumber);setShowDialpad(false)} }}
               disabled={dialpadNumber.length<10}
-              style={{ flex:2, padding:'10px 0', border:'none', borderRadius:'var(--radius)', background:dialpadNumber.length>=10?'#16A34A':'var(--border)', cursor:dialpadNumber.length>=10?'pointer':'not-allowed', fontSize:14, fontWeight:700, color:'#fff' }}>
+              style={{ flex:2, padding:'10px 0', border:'none', borderRadius:'var(--radius)', background:dialpadNumber.length>=10?'var(--success)':'var(--border)', cursor:dialpadNumber.length>=10?'pointer':'not-allowed', fontSize:14, fontWeight:700, color:'#fff' }}>
               Call
             </button>
           </div>

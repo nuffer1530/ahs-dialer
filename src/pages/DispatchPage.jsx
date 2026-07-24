@@ -12,10 +12,10 @@ import { sb } from '../lib/supabase'
 // Baseball, to match the tab name. 'On the Bench' says where to route without
 // branding anyone a bad tech; 'Rookie' keeps thin data from reading as a grade.
 const TIER = {
-  green:    { color:'#15803D', bg:'#EAF5EE', border:'#BBE3C9', label:'Heavy Hitter' },
-  yellow:   { color:'#B45309', bg:'#FBF3E0', border:'#F0DCA8', label:'In the Lineup' },
-  red:      { color:'#B91C1C', bg:'#FBEEEA', border:'#F0C8BE', label:'On the Bench' },
-  unranked: { color:'#6B7280', bg:'#F3F4F6', border:'#E5E7EB', label:'Rookie — no stats yet' },
+  green:    { color:'var(--tone-green-tx)', bg:'var(--tone-green-bg)', border:'var(--tone-green-bd)', label:'Heavy Hitter' },
+  yellow:   { color:'var(--tone-amber-tx)', bg:'var(--tone-amber-bg)', border:'var(--tone-amber-bd)', label:'In the Lineup' },
+  red:      { color:'var(--tone-red-tx)', bg:'var(--tone-red-bg)', border:'var(--tone-red-bd)', label:'On the Bench' },
+  unranked: { color:'var(--tone-gray-tx)', bg:'var(--tone-gray-bg)', border:'var(--tone-gray-bd)', label:'Rookie — no stats yet' },
 }
 
 const ST_JOB_URL = (jobId) => `https://go.servicetitan.com/#/Job/Index/${jobId}`
@@ -159,7 +159,7 @@ function TechInfo() {
                     {savedAt[t.id] && <span style={{ fontSize:10.5, fontWeight:700, color:'var(--success)' }}>✓ Saved</span>}
                     {data.reviews?.[t.id] ? (
                       <span title={`From ServiceTitan${data.reviewWindowDays ? ` — last ${data.reviewWindowDays} days` : ''}: ${data.reviews[t.id].n} reviews, ${data.reviews[t.id].n5} five-star, ${data.reviews[t.id].perJobs}% of jobs ran`}
-                        style={{ fontSize:11.5, fontWeight:700, color:'#B45309', cursor:'help' }}>
+                        style={{ fontSize:11.5, fontWeight:700, color:'var(--tone-amber-tx)', cursor:'help' }}>
                         ★ {data.reviews[t.id].avg} ({data.reviews[t.id].n})
                       </span>
                     ) : (
@@ -284,9 +284,9 @@ function BattingOrder() {
                     ? 'These techs are within noise of each other — rank order here is not a meaningful difference'
                     : 'There is real separation between top and bottom on this bench'}
                     style={{ fontSize:10, fontWeight:600, padding:'2px 8px', borderRadius:99,
-                      color: tight ? 'var(--text-muted)' : '#B45309',
-                      background: tight ? 'var(--surface-2)' : '#FBF3E0',
-                      border: `1px solid ${tight ? 'var(--border)' : '#F0DCA8'}` }}>
+                      color: tight ? 'var(--text-muted)' : 'var(--tone-amber-tx)',
+                      background: tight ? 'var(--surface-2)' : 'var(--tone-amber-bg)',
+                      border: `1px solid ${tight ? 'var(--border)' : 'var(--tone-amber-bd)'}` }}>
                     {tight
                       ? `${Math.round(spread*100)}% spread — effectively interchangeable`
                       : `${Math.round(spread*100)}% spread`}
@@ -322,7 +322,7 @@ function BattingOrder() {
                       <td style={{ padding:'7px 12px', textAlign:'right' }}>{pct(r.membership_pct)}</td>
                       <td style={{ padding:'7px 12px', textAlign:'right' }}>
                         {techReviews[r.tech_id]
-                          ? <span style={{ color:'#B45309', fontWeight:700 }}
+                          ? <span style={{ color:'var(--tone-amber-tx)', fontWeight:700 }}
                               onMouseEnter={e => showTip(e, '⭐ Reviews (ServiceTitan)', `${techReviews[r.tech_id].n} review${techReviews[r.tech_id].n === 1 ? '' : 's'} in the window · ${techReviews[r.tech_id].n5} five-star · avg ${techReviews[r.tech_id].avg}★`)}
                               onMouseLeave={() => setTip(null)}>
                               {techReviews[r.tech_id].perJobs}%
@@ -530,9 +530,9 @@ function LiveBoard() {
               {brief.brief.actions.map((a, i) => (
                 <div key={i} style={{ display:'flex', gap:9, alignItems:'flex-start', fontSize:12 }}>
                   <span style={{ fontSize:9, fontWeight:700, textTransform:'uppercase', flexShrink:0, padding:'2px 0', borderRadius:99, width:52, textAlign:'center', marginTop:1,
-                    color: a.priority === 'now' ? '#B91C1C' : a.priority === 'today' ? '#B45309' : 'var(--text-muted)',
-                    background: a.priority === 'now' ? '#FBEEEA' : a.priority === 'today' ? '#FBF3E0' : 'var(--surface-2)',
-                    border: `1px solid ${a.priority === 'now' ? '#F0C8BE' : a.priority === 'today' ? '#F0DCA8' : 'var(--border)'}` }}>
+                    color: a.priority === 'now' ? 'var(--tone-red-tx)' : a.priority === 'today' ? 'var(--tone-amber-tx)' : 'var(--text-muted)',
+                    background: a.priority === 'now' ? 'var(--tone-red-bg)' : a.priority === 'today' ? 'var(--tone-amber-bg)' : 'var(--surface-2)',
+                    border: `1px solid ${a.priority === 'now' ? 'var(--tone-red-bd)' : a.priority === 'today' ? 'var(--tone-amber-bd)' : 'var(--border)'}` }}>
                     {a.priority}
                   </span>
                   <span style={{ color:'var(--text-primary)', lineHeight:1.5, flex:1 }}>{a.text}</span>
@@ -548,7 +548,7 @@ function LiveBoard() {
                 </div>
               ))}
               {(brief.brief.wins || []).map((w, i) => (
-                <div key={`g${i}`} style={{ display:'flex', gap:6, alignItems:'flex-start', color:'#15803D' }}>
+                <div key={`g${i}`} style={{ display:'flex', gap:6, alignItems:'flex-start', color:'var(--tone-green-tx)' }}>
                   <span style={{ flexShrink:0 }}>🏆</span><span>{w}</span>
                 </div>
               ))}
@@ -603,7 +603,7 @@ function LiveBoard() {
             style={{ cursor: (rev.bookedDetail || []).length ? 'pointer' : 'default', borderRadius:8, padding:'2px 6px', margin:'-2px -6px' }}
             onMouseEnter={e => { if ((rev.bookedDetail || []).length) e.currentTarget.style.background = 'var(--surface-2)' }}
             onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-            <div style={{ fontSize:20, fontWeight:800, color:'#15803D', lineHeight:1.1 }}>{money(rev.booked)}</div>
+            <div style={{ fontSize:20, fontWeight:800, color:'var(--tone-green-tx)', lineHeight:1.1 }}>{money(rev.booked)}</div>
             <div style={{ fontSize:10, fontWeight:700, color:'var(--text-primary)', textTransform:'uppercase', letterSpacing:.5, marginTop:2 }}>
               Expected revenue {(rev.bookedDetail || []).length > 0 && <span style={{ color:'var(--accent)', fontWeight:600, textTransform:'none' }}>· view jobs</span>}
             </div>
@@ -635,12 +635,12 @@ function LiveBoard() {
                       <span style={{ flex:1, minWidth:0, fontSize:12, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
                         {j.jobType || 'Install'}{j.tech ? <span style={{ color:'var(--text-muted)' }}> · {j.tech}</span> : null}
                       </span>
-                      <span style={{ fontWeight:800, fontSize:13, color:'#15803D', flexShrink:0, fontVariantNumeric:'tabular-nums' }}>{money(j.amount)}</span>
+                      <span style={{ fontWeight:800, fontSize:13, color:'var(--tone-green-tx)', flexShrink:0, fontVariantNumeric:'tabular-nums' }}>{money(j.amount)}</span>
                     </a>
                   ))}
                 </div>
                 <div style={{ padding:'11px 18px', borderTop:'1px solid var(--border)', display:'flex', justifyContent:'space-between', fontSize:13, fontWeight:800 }}>
-                  <span>Total</span><span style={{ color:'#15803D' }}>{money(rev.booked)}</span>
+                  <span>Total</span><span style={{ color:'var(--tone-green-tx)' }}>{money(rev.booked)}</span>
                 </div>
               </div>
             </div>
@@ -677,7 +677,7 @@ function LiveBoard() {
       )}
 
       {view === 'flagged' && flagged.length === 0 && (
-        <div className="card" style={{ padding:'22px 16px', textAlign:'center', color:'#15803D', fontSize:13 }}>
+        <div className="card" style={{ padding:'22px 16px', textAlign:'center', color:'var(--tone-green-tx)', fontSize:13 }}>
           ✓ Nothing flagged right now — every high-opportunity call is on a capable tech.
         </div>
       )}
@@ -701,7 +701,7 @@ function LiveBoard() {
               <div style={{ display:'flex', alignItems:'baseline', justifyContent:'space-between', gap:10, flexWrap:'wrap' }}>
                 <div style={{ fontSize:12.5, fontWeight:700, color:'var(--text-primary)' }}>🔁 {sw.text}</div>
                 {sw.upside > 0 && (
-                  <span style={{ fontSize:11, fontWeight:700, color:'#15803D', background:'#EAF5EE',
+                  <span style={{ fontSize:11, fontWeight:700, color:'var(--tone-green-tx)', background:'var(--tone-green-bg)',
                     border:'1px solid #BBE3C9', padding:'2px 8px', borderRadius:99, whiteSpace:'nowrap' }}>
                     +{money(sw.upside)} expected
                   </span>
@@ -721,7 +721,7 @@ function LiveBoard() {
       )}
 
       {flagged.length === 0 && calls.length > 0 && (
-        <div className="card" style={{ padding:'14px 16px', marginBottom:16, fontSize:13, color:'#15803D' }}>
+        <div className="card" style={{ padding:'14px 16px', marginBottom:16, fontSize:13, color:'var(--tone-green-tx)' }}>
           ✓ No mismatches — every high-opportunity call today is on a capable tech.
         </div>
       )}
@@ -773,16 +773,16 @@ function LiveBoard() {
                       : c.status === 'Working' ? 'Tech is on site' : c.status}
                       style={{ display:'inline-block', marginTop:3, marginRight:4, fontSize:9, fontWeight:700,
                         padding:'1px 5px', borderRadius:99,
-                        color: c.status === 'Done' ? '#15803D' : 'var(--text-muted)',
-                        background: c.status === 'Done' ? '#EAF5EE' : 'var(--surface-2)',
-                        border: `1px solid ${c.status === 'Done' ? '#BBE3C9' : 'var(--border)'}` }}>
+                        color: c.status === 'Done' ? 'var(--tone-green-tx)' : 'var(--text-muted)',
+                        background: c.status === 'Done' ? 'var(--tone-green-bg)' : 'var(--surface-2)',
+                        border: `1px solid ${c.status === 'Done' ? 'var(--tone-green-bd)' : 'var(--border)'}` }}>
                       {c.status.toLowerCase()}
                     </span>
                   )}
                   {c.windowPassed && c.actionable && (
                     <span title="Arrival window has closed and this hasn't been dispatched"
                       style={{ display:'inline-block', marginTop:3, marginRight:4, fontSize:9, fontWeight:700,
-                        color:'#B45309', background:'#FBF3E0', border:'1px solid #F0DCA8',
+                        color:'var(--tone-amber-tx)', background:'var(--tone-amber-bg)', border:'1px solid #F0DCA8',
                         padding:'1px 5px', borderRadius:99 }}>
                       window passed
                     </span>
@@ -798,7 +798,7 @@ function LiveBoard() {
                   {c.systemAge != null && (
                     <span title="Age of the system, read from the job notes"
                       style={{ display:'inline-block', marginTop:3, fontSize:9, fontWeight:700,
-                        color:'#B45309', background:'#FBF3E0', border:'1px solid #F0DCA8',
+                        color:'var(--tone-amber-tx)', background:'var(--tone-amber-bg)', border:'1px solid #F0DCA8',
                         padding:'1px 5px', borderRadius:99 }}>
                       ~{c.systemAge} yr system
                     </span>
@@ -810,10 +810,10 @@ function LiveBoard() {
                     ? `Sold work — ${money(c.bookedRevenue)} invoiced`
                     : ((c.opportunityReasons || []).join(' · ') || 'no opportunity signals')}
                   style={{ padding:'7px 12px', textAlign:'right', fontWeight:700, cursor:'help',
-                  color: c.opportunity >= 3 ? '#B91C1C' : 'var(--text-muted)' }}>
+                  color: c.opportunity >= 3 ? 'var(--tone-red-tx)' : 'var(--text-muted)' }}>
                   {c.opportunity}
                   {(c.bookedRevenue > 0 || c.expectedRevenue > 0) && (
-                    <div style={{ fontSize:9, fontWeight:600, color: c.bookedRevenue ? '#15803D' : 'var(--text-muted)' }}>
+                    <div style={{ fontSize:9, fontWeight:600, color: c.bookedRevenue ? 'var(--tone-green-tx)' : 'var(--text-muted)' }}>
                       {money(c.bookedRevenue || c.expectedRevenue)}
                     </div>
                   )}
@@ -821,9 +821,9 @@ function LiveBoard() {
                 <td style={{ padding:'7px 12px' }}>
                   {c.outcome && view === 'completed' && (
                     <div style={{ fontSize:11, fontWeight:600, lineHeight:1.5,
-                      color: c.outcome.kind === 'sold' ? '#15803D'
+                      color: c.outcome.kind === 'sold' ? 'var(--tone-green-tx)'
                         : c.outcome.kind === 'invoiced' ? 'var(--text-primary)'
-                        : c.outcome.kind === 'quoted' ? '#B45309' : 'var(--text-muted)' }}>
+                        : c.outcome.kind === 'quoted' ? 'var(--tone-amber-tx)' : 'var(--text-muted)' }}>
                       {c.outcome.kind === 'sold' ? '✓ ' : c.outcome.kind === 'quoted' ? '○ ' : ''}
                       {c.outcome.text}
                     </div>
@@ -832,12 +832,12 @@ function LiveBoard() {
                     <div style={{ fontSize:11, color:'var(--text-secondary)', lineHeight:1.5 }}>
                       {c.moveReason.join(' · ')}
                       {c.moveCaution && (
-                        <div style={{ color:'#B45309', fontWeight:600, marginTop:2 }}>⚠️ {c.moveCaution}</div>
+                        <div style={{ color:'var(--tone-amber-tx)', fontWeight:600, marginTop:2 }}>⚠️ {c.moveCaution}</div>
                       )}
                     </div>
                   )}
                   {(c.flags || []).map((f, k) => (
-                    <div key={k} style={{ fontSize:11, color: f.level === 'warn' ? '#B91C1C' : 'var(--text-muted)' }}>
+                    <div key={k} style={{ fontSize:11, color: f.level === 'warn' ? 'var(--tone-red-tx)' : 'var(--text-muted)' }}>
                       {f.level === 'warn' ? '⚠️ ' : 'ℹ️ '}{f.text}
                       {f.why?.length > 0 && (
                         <div style={{ fontSize:10, color:'var(--text-muted)' }}>{f.why.join(' · ')}</div>
@@ -931,7 +931,7 @@ function ByJobType() {
                   <td style={{ padding:'7px 12px', color:'var(--text-muted)' }}>{i + 1}</td>
                   <td style={{ padding:'7px 12px', fontWeight:600 }}>
                     {r.tech_name}
-                    {i === 0 && <span style={{ marginLeft:6, fontSize:9, fontWeight:700, color:'#15803D', background:'#EAF5EE', border:'1px solid #BBE3C9', padding:'1px 6px', borderRadius:99 }}>TOP</span>}
+                    {i === 0 && <span style={{ marginLeft:6, fontSize:9, fontWeight:700, color:'var(--tone-green-tx)', background:'var(--tone-green-bg)', border:'1px solid #BBE3C9', padding:'1px 6px', borderRadius:99 }}>TOP</span>}
                   </td>
                   <td style={{ padding:'7px 12px', fontSize:11, color:'var(--text-muted)' }}>{r.team}</td>
                   <td style={{ padding:'7px 12px', textAlign:'right', fontWeight:700 }}>{money(r.expected_value)}</td>
@@ -960,11 +960,11 @@ function ByJobType() {
 
 
 const ACTION_STYLE = {
-  book_assign: { color:'#15803D', bg:'#EAF5EE', border:'#BBE3C9', icon:'✅' },
-  book_bump:   { color:'#B45309', bg:'#FBF3E0', border:'#F0DCA8', icon:'🔁' },
+  book_assign: { color:'var(--tone-green-tx)', bg:'var(--tone-green-bg)', border:'var(--tone-green-bd)', icon:'✅' },
+  book_bump:   { color:'var(--tone-amber-tx)', bg:'var(--tone-amber-bg)', border:'var(--tone-amber-bd)', icon:'🔁' },
   hold:        { color:'var(--text-muted)', bg:'var(--surface-2)', border:'var(--border)', icon:'📅' },
-  no_tech:     { color:'#B91C1C', bg:'#FBEEEA', border:'#F0C8BE', icon:'⚠️' },
-  no_slot:     { color:'#B91C1C', bg:'#FBEEEA', border:'#F0C8BE', icon:'🚫' },
+  no_tech:     { color:'var(--tone-red-tx)', bg:'var(--tone-red-bg)', border:'var(--tone-red-bd)', icon:'⚠️' },
+  no_slot:     { color:'var(--tone-red-tx)', bg:'var(--tone-red-bg)', border:'var(--tone-red-bd)', icon:'🚫' },
 }
 
 function DecisionMaker() {
@@ -1134,7 +1134,7 @@ function DecisionMaker() {
               </div>
             )}
             {rec.bump && (
-              <div style={{ fontSize:12, color:'#B45309', marginTop:5 }}>
+              <div style={{ fontSize:12, color:'var(--tone-amber-tx)', marginTop:5 }}>
                 Bump #{rec.bump.jobNumber} ({rec.bump.name})
                 {rec.bump.why && (
                   <div style={{ fontSize:11, color:'var(--text-muted)', fontWeight:400, marginTop:2 }}>
@@ -1154,7 +1154,7 @@ function DecisionMaker() {
               {res.located ? '' : ' · address not located — drive times unavailable'}
             </div>
             {res.restriction && (
-              <div style={{ fontSize:11, color:'#B45309', fontWeight:600, marginTop:3 }}>
+              <div style={{ fontSize:11, color:'var(--tone-amber-tx)', fontWeight:600, marginTop:3 }}>
                 🔒 Only {res.restriction.techs.join(' / ')} run{res.restriction.techs.length === 1 ? 's' : ''} this job type — bench limited accordingly
               </div>
             )}
@@ -1164,7 +1164,7 @@ function DecisionMaker() {
               </div>
             )}
             {res.shiftDataMissing && (
-              <div style={{ fontSize:11, color:'#B45309', marginTop:3 }}>
+              <div style={{ fontSize:11, color:'var(--tone-amber-tx)', marginTop:3 }}>
                 ⚠️ Couldn't confirm today's schedule — this ranking may include techs who are off
               </div>
             )}
@@ -1188,7 +1188,7 @@ function DecisionMaker() {
                   return (
                   <tr key={o.techId} style={{ background: chosen ? 'rgba(21,128,61,.06)' : 'transparent' }}>
                     <td style={{ padding:'7px 12px', fontWeight:600 }}>
-                      {o.techName}{chosen && <span style={{ marginLeft:6, fontSize:9, fontWeight:700, color:'#15803D' }}>PICK</span>}
+                      {o.techName}{chosen && <span style={{ marginLeft:6, fontSize:9, fontWeight:700, color:'var(--tone-green-tx)' }}>PICK</span>}
                       {/* Each row explains its own cost, so the ranking and the
                           recommendation can never look contradictory: the top
                           earner may be un-bumpable while #2 has a routine call
@@ -1208,7 +1208,7 @@ function DecisionMaker() {
                     </td>
                     <td style={{ padding:'7px 12px', textAlign:'right', fontWeight:700 }}>{money(o.expectedValue)}</td>
                     <td style={{ padding:'7px 12px', textAlign:'right' }}>{o.closeRate}%</td>
-                    <td style={{ padding:'7px 12px', textAlign:'right', color: o.hasRoom ? 'var(--text-muted)' : '#B45309', fontWeight: o.hasRoom ? 400 : 700 }}>
+                    <td style={{ padding:'7px 12px', textAlign:'right', color: o.hasRoom ? 'var(--text-muted)' : 'var(--tone-amber-tx)', fontWeight: o.hasRoom ? 400 : 700 }}>
                       {o.allDayInstall ? 'install' : `${o.load}/${o.cap}${o.hasRoom ? '' : ' full'}`}
                     </td>
                     <td style={{ padding:'7px 12px', textAlign:'right', color:'var(--text-muted)' }}>

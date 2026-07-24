@@ -1,5 +1,18 @@
 import { useEffect, useState } from 'react'
 
+// Reacts to the theme toggle — the strip renders on every page, and hardcoded
+// light-mode chip colors were unreadable once a rep switched to dark.
+function useIsDark() {
+  const [isDark, setIsDark] = useState(() => document.documentElement.getAttribute('data-theme') === 'dark')
+  useEffect(() => {
+    const mo = new MutationObserver(() =>
+      setIsDark(document.documentElement.getAttribute('data-theme') === 'dark'))
+    mo.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
+    return () => mo.disconnect()
+  }, [])
+  return isDark
+}
+
 // Weather across the top of every page (and the Call Center TV in dark mode).
 // Three cities, the active NWS alert if any, and the demand-signal chip —
 // hot days are no-cool calls, cold snaps are no-heats. Data comes from
@@ -18,8 +31,11 @@ export default function WeatherStrip({ dark }) {
     const t = setInterval(load, 15 * 60_000)
     return () => { dead = true; clearInterval(t) }
   }, [])
+  const themeDark = useIsDark()
   if (!wx) return null
 
+  // `dark` prop = forced-dark surfaces (War Room TV); otherwise follow the theme.
+  const isDark = dark || themeDark
   const mut = dark ? 'rgba(255,255,255,.55)' : 'var(--text-muted)'
   const fg = dark ? '#fff' : 'var(--text-primary)'
   const div = dark ? 'rgba(255,255,255,.15)' : 'var(--border)'
@@ -38,12 +54,12 @@ export default function WeatherStrip({ dark }) {
         </div>
       ))}
       {wx.alert && (
-        <span style={{ display:'flex', alignItems:'center', gap:4, background:'rgba(239,159,39,.12)', border:'1px solid #EF9F27', borderRadius:99, padding:'2px 9px', fontSize:10.5, fontWeight:700, color: dark ? '#FAC775' : '#854F0B', flexShrink:0 }}>
+        <span style={{ display:'flex', alignItems:'center', gap:4, background: isDark ? 'rgba(239,159,39,.16)' : 'var(--tone-amber-bg)', border:`1px solid ${isDark ? '#8A6A1E' : 'var(--tone-amber-bd)'}`, borderRadius:99, padding:'2px 9px', fontSize:10.5, fontWeight:700, color: isDark ? '#F2C75C' : 'var(--tone-amber-tx)', flexShrink:0 }}>
           ⚠️ {wx.alert.event}{wx.alert.until ? ` til ${wx.alert.until}` : ''}
         </span>
       )}
       {wx.signal && (
-        <span style={{ display:'flex', alignItems:'center', gap:4, background:'rgba(127,119,221,.12)', border:'1px solid #7F77DD', borderRadius:99, padding:'2px 9px', fontSize:10.5, fontWeight:700, color: dark ? '#CECBF6' : '#3C3489', flexShrink:0 }}>
+        <span style={{ display:'flex', alignItems:'center', gap:4, background: isDark ? 'rgba(127,119,221,.16)' : 'var(--tone-purple-bg)', border:`1px solid ${isDark ? '#55498F' : 'var(--tone-purple-bd)'}`, borderRadius:99, padding:'2px 9px', fontSize:10.5, fontWeight:700, color: isDark ? '#C6BFF7' : 'var(--tone-purple-tx)', flexShrink:0 }}>
           📈 {wx.signal.text}
         </span>
       )}

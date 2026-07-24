@@ -7,9 +7,9 @@ import PtoRequestModal from './PtoRequestModal'
 
 const KIND_LABEL = { pto: 'PTO', sick: 'Sick' }
 const STATUS_CHIP = {
-  pending:  { bg: '#FBF3E0', color: '#8A5A00', label: 'Pending' },
-  approved: { bg: '#DCFCE7', color: '#15803D', label: 'Approved' },
-  denied:   { bg: '#FEE2E2', color: '#B91C1C', label: 'Denied' },
+  pending:  { bg: 'var(--tone-amber-bg)', color: '#8A5A00', label: 'Pending' },
+  approved: { bg: 'var(--tone-green-bg)', color: 'var(--tone-green-tx)', label: 'Approved' },
+  denied:   { bg: '#FEE2E2', color: 'var(--tone-red-tx)', label: 'Denied' },
 }
 const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 const niceDay = (s) => s ? new Date(`${s}T12:00:00`).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }) : ''

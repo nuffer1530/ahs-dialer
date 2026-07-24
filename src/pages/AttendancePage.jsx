@@ -886,7 +886,7 @@ export default function AttendancePage() {
                     </div>
                   </div>
                   <button className="btn sm" onClick={() => setEditTemplate({ ...t })}>Edit</button>
-                  <button className="btn sm" onClick={() => deleteTemplate(t.id)} style={{ color:'#B91C1C' }}>Delete</button>
+                  <button className="btn sm" onClick={() => deleteTemplate(t.id)} style={{ color:'var(--tone-red-tx)' }}>Delete</button>
                 </div>
               ))}
               <button className="btn primary" onClick={() => setEditTemplate({ shift_start:'08:00', shift_end:'17:00', break1_start:'10:00', break1_duration:15, lunch_start:'12:00', lunch_duration:30, break2_start:'14:30', break2_duration:15 })}>
@@ -924,7 +924,7 @@ export default function AttendancePage() {
                 <div className="form-field">
                   <label className="form-label">Color</label>
                   <div style={{ display:'flex', gap:6, alignItems:'center', paddingTop:4 }}>
-                    {['#DBEAFE','#DCFCE7','#FEF3C7','#FCE7F3','#EDE9FE','#FFEDD5'].map(c => (
+                    {['#DBEAFE','var(--tone-green-bg)','#FEF3C7','#FCE7F3','#EDE9FE','#FFEDD5'].map(c => (
                       <button key={c} type="button" onClick={() => setEditTemplate(t => ({ ...t, color: c }))}
                         style={{ width:22, height:22, borderRadius:6, background:c, cursor:'pointer', border: editTemplate.color === c ? '2px solid var(--accent)' : '1px solid var(--border)' }} />
                     ))}
@@ -974,7 +974,7 @@ export default function AttendancePage() {
               <input type="checkbox" checked={copyCfg.overwrite} onChange={e => setCopyCfg(c => ({ ...c, overwrite: e.target.checked }))} />
               Overwrite days that already have a schedule
             </label>
-            {copyResult?.error && <div style={{ fontSize:12.5, fontWeight:700, color:'#B91C1C' }}>{copyResult.error}</div>}
+            {copyResult?.error && <div style={{ fontSize:12.5, fontWeight:700, color:'var(--tone-red-tx)' }}>{copyResult.error}</div>}
             {copyResult?.ok && <div style={{ fontSize:12.5, fontWeight:600, color:'var(--success)' }}>✓ {copyResult.ok}</div>}
             <div style={{ display:'flex', justifyContent:'flex-end', gap:8 }}>
               <button className="btn" onClick={() => { setCopyModal(false); setCopyResult(null) }}>{copyResult?.ok ? 'Done' : 'Cancel'}</button>
@@ -996,7 +996,7 @@ export default function AttendancePage() {
                 <option value="">Pick a template…</option>
                 {templates.map(t => <option key={t.id} value={t.id}>{t.name} ({fmt(t.shift_start)} – {fmt(t.shift_end)})</option>)}
               </select>
-              {templates.length === 0 && <div style={{ fontSize:11.5, color:'#B45309', marginTop:4 }}>No templates yet — create one under Templates first.</div>}
+              {templates.length === 0 && <div style={{ fontSize:11.5, color:'var(--tone-amber-tx)', marginTop:4 }}>No templates yet — create one under Templates first.</div>}
             </div>
             <div className="form-field">
               <label className="form-label">Days</label>
@@ -1037,7 +1037,7 @@ export default function AttendancePage() {
               <input type="checkbox" checked={bulkCfg.overwrite} onChange={e => setBulkCfg(c => ({ ...c, overwrite: e.target.checked }))} />
               Overwrite days that already have a schedule
             </label>
-            {bulkResult?.error && <div style={{ fontSize:12.5, fontWeight:700, color:'#B91C1C' }}>{bulkResult.error}</div>}
+            {bulkResult?.error && <div style={{ fontSize:12.5, fontWeight:700, color:'var(--tone-red-tx)' }}>{bulkResult.error}</div>}
             {bulkResult?.ok && <div style={{ fontSize:12.5, fontWeight:600, color:'var(--success)' }}>✓ {bulkResult.ok}</div>}
             <div style={{ display:'flex', justifyContent:'flex-end', gap:8 }}>
               <button className="btn" onClick={() => { setBulkModal(false); setBulkResult(null) }}>{bulkResult?.ok ? 'Done' : 'Cancel'}</button>
@@ -1076,12 +1076,12 @@ export default function AttendancePage() {
                 </div>
               )}
             </div>
-            {publishResult?.error && <div style={{ fontSize:12.5, fontWeight:700, color:'#B91C1C' }}>{publishResult.error}</div>}
+            {publishResult?.error && <div style={{ fontSize:12.5, fontWeight:700, color:'var(--tone-red-tx)' }}>{publishResult.error}</div>}
             {publishResult && !publishResult.error && (
               <div style={{ fontSize:12.5, fontWeight:600, color:'var(--success)' }}>
                 ✓ Emailed {publishResult.sent} schedule{publishResult.sent === 1 ? '' : 's'}
                 {publishResult.skipped?.length > 0 && (
-                  <span style={{ color:'#B45309' }}> — skipped (no email or bounce): {publishResult.skipped.join(', ')}</span>
+                  <span style={{ color:'var(--tone-amber-tx)' }}> — skipped (no email or bounce): {publishResult.skipped.join(', ')}</span>
                 )}
               </div>
             )}

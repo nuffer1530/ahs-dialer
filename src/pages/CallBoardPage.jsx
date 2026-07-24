@@ -6,10 +6,10 @@ import { useAuth } from '../lib/AuthContext'
 // days, live from ServiceTitan. Every number is clickable to show what's behind it.
 
 const STATUS = {
-  good:  { color:'#16A34A', bg:'#EAF5EE', label:'At / over target' },
-  warn:  { color:'#C87800', bg:'#FBF3E0', label:'Filling up' },
-  under: { color:'#DC2626', bg:'#FBEEEA', label:'Below capacity' },
-  none:  { color:'#6B7280', bg:'var(--surface-2)', label:'No techs' },
+  good:  { color:'var(--success)', bg:'var(--tone-green-bg)', label:'At / over target' },
+  warn:  { color:'var(--tone-amber-tx)', bg:'var(--tone-amber-bg)', label:'Filling up' },
+  under: { color:'#DC2626', bg:'var(--tone-red-bg)', label:'Below capacity' },
+  none:  { color:'var(--tone-gray-tx)', bg:'var(--surface-2)', label:'No techs' },
 }
 const DAY_LABELS = ['Today', 'Tomorrow', 'Day 3']
 const ST_JOB_URL = (jobId) => `https://go.servicetitan.com/#/Job/Index/${jobId}`
@@ -56,7 +56,7 @@ function Cell({ trade, dayLabel, d, onDrill, tv }) {
         </div>
       ) : (
         <div style={{ padding: tv ? '22px 20px 16px' : '16px 16px 12px', display:'flex', alignItems: tv ? 'center' : 'baseline', gap:10, flex: tv ? 1 : undefined }}>
-          <span style={{ fontSize:fz(46), fontWeight:800, lineHeight:.9, color: d.needed > 0 ? s.color : '#16A34A', fontVariantNumeric:'tabular-nums' }}>
+          <span style={{ fontSize:fz(46), fontWeight:800, lineHeight:.9, color: d.needed > 0 ? s.color : 'var(--success)', fontVariantNumeric:'tabular-nums' }}>
             {d.needed > 0 ? d.needed : '✓'}
           </span>
           <span style={{ fontSize:fz(12), color:'var(--text-muted)', fontWeight:600 }}>{d.needed > 0 ? 'calls needed' : 'at target'}</span>
@@ -69,7 +69,7 @@ function Cell({ trade, dayLabel, d, onDrill, tv }) {
         <Metric tv={tv} label="Booked" value={`${d.calls}/${d.capacity}`} onClick={() => onDrill(trade, dayLabel, 'Booked calls', d.detail.calls, 'job')} />
         <div style={{ width:1, background:'var(--border)' }} />
         <Metric tv={tv} label={oppRate != null ? `Opps ${oppRate}%` : 'Opps'} value={d.opps}
-          accent={oppRate == null ? undefined : oppRate >= 30 ? '#16A34A' : '#DC2626'}
+          accent={oppRate == null ? undefined : oppRate >= 30 ? 'var(--success)' : '#DC2626'}
           onClick={() => onDrill(trade, dayLabel, 'Opportunities', d.detail.opps, 'job')} />
         <div style={{ width:1, background:'var(--border)' }} />
         <Metric tv={tv} label="Installs" value={d.installs} onClick={() => onDrill(trade, dayLabel, 'Installs', d.detail.installs, 'job')} />
@@ -231,7 +231,7 @@ export default function CallBoardPage() {
                 drillItems.map((t, i) => (
                   <div key={i} style={{ display:'flex', justifyContent:'space-between', padding:'11px 18px', borderBottom:'1px solid var(--border)', fontSize:13 }}>
                     <span style={{ opacity: t.off === 'off' ? .5 : 1 }}>{t.name}</span>
-                    <span style={{ fontSize:11, color: t.off === 'off' ? 'var(--danger)' : t.off ? '#C87800' : 'var(--success)', fontWeight:600 }}>
+                    <span style={{ fontSize:11, color: t.off === 'off' ? 'var(--danger)' : t.off ? 'var(--tone-amber-tx)' : 'var(--success)', fontWeight:600 }}>
                       {t.off === 'off' ? 'Off today' : t.off ? `Partial (${t.off})` : 'Working'}
                     </span>
                   </div>
@@ -245,7 +245,7 @@ export default function CallBoardPage() {
                       </span>
                       <span style={{ fontWeight:500 }}>{j.type}</span>
                       {j.note && (
-                        <span style={{ fontSize:10, fontWeight:700, color:'#B45309', background:'rgba(180,83,9,.08)',
+                        <span style={{ fontSize:10, fontWeight:700, color:'var(--tone-amber-tx)', background:'rgba(180,83,9,.08)',
                           border:'1px solid rgba(180,83,9,.25)', borderRadius:4, padding:'1px 6px', alignSelf:'center', whiteSpace:'nowrap' }}>
                           {j.note} — not an opportunity
                         </span>

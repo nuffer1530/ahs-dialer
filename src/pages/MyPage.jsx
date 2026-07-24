@@ -36,8 +36,8 @@ function fmtDate(ymd) {
 }
 
 const DAY_TYPE_STYLES = {
-  pto:     { label: 'PTO',     bg: '#EAF5EE', color: '#2E7D52', border: '#2E7D52' },
-  sick:    { label: 'Sick',    bg: '#FBEEEA', color: '#B5341A', border: '#B5341A' },
+  pto:     { label: 'PTO',     bg: 'var(--tone-green-bg)', color: '#2E7D52', border: '#2E7D52' },
+  sick:    { label: 'Sick',    bg: 'var(--tone-red-bg)', color: '#B5341A', border: '#B5341A' },
   holiday: { label: 'Holiday', bg: '#F0ECFB', color: '#5B3FA0', border: '#5B3FA0' },
   work:    { label: null,      bg: null,       color: null,      border: null      },
 }
@@ -107,8 +107,8 @@ const RATING_LABELS = { 4: 'Exceeds', 3: 'Meets', 2: 'Needs Improvement', 1: 'Po
 const RATING_COLORS = {
   4: { bg: '#d4edda', text: '#2E7D52', border: '#2E7D52' },
   3: { bg: '#d4edda', text: '#2E7D52', border: '#2E7D52' },
-  2: { bg: '#FBF3E0', text: '#8A5A00', border: '#8A5A00' },
-  1: { bg: '#FBEEEA', text: '#B5341A', border: '#B5341A' },
+  2: { bg: 'var(--tone-amber-bg)', text: '#8A5A00', border: '#8A5A00' },
+  1: { bg: 'var(--tone-red-bg)', text: '#B5341A', border: '#B5341A' },
 }
 
 export default function MyPage() {
@@ -413,7 +413,7 @@ export default function MyPage() {
                       ))}
                     </div>
                   </div>
-                  {announceMsg && <div style={{ fontSize:12.5, fontWeight:700, color:'#B91C1C' }}>{announceMsg}</div>}
+                  {announceMsg && <div style={{ fontSize:12.5, fontWeight:700, color:'var(--tone-red-tx)' }}>{announceMsg}</div>}
                   <div style={{ display:'flex', justifyContent:'flex-end', gap:8 }}>
                     <button className="btn" onClick={() => setAnnounceOpen(false)}>Cancel</button>
                     <button className="btn primary" onClick={sendAnnouncement}
