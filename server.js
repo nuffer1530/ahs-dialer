@@ -2561,7 +2561,7 @@ async function draftNotesFromTranscript(transcript) {
             fee_amount: { type: ['string', 'null'], description: "The fee as said, e.g. '$99' or '$49 member'. null if not stated." },
             tech_notes: { type: ['string', 'null'], description: 'Details that set the technician up for success: gate codes, pets, prior repairs, access notes, who will be home, equipment location. null if none.' },
             age_info: { type: ['string', 'null'], description: "Age of the home or equipment if mentioned, e.g. '~20 yr old system', 'home built 2005'. null if not mentioned." },
-            synopsis: { type: 'string', description: 'Two to three sentence plain-English summary of the call' },
+            synopsis: { type: 'string', description: "One to two sentence plain-English summary of anything NOT already captured by the other fields — how the call went, customer mood, follow-ups promised. Do NOT restate the window, fee, issue, or equipment age; those print right above the synopsis." },
           },
           required: ['can_go_early', 'reason', 'fee_quoted', 'synopsis'],
         },
@@ -2674,14 +2674,25 @@ async function runLiveDraft(callSid, entry) {
 // we fetch the recording by REST and run the same final pass from here.
 async function finalPassFromRest(callSid, e) {
   const auth = Buffer.from(`${process.env.TWILIO_ACCOUNT_SID}:${process.env.TWILIO_AUTH_TOKEN}`).toString('base64')
+  const recsFor = async (sid) => {
+    const r = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${process.env.TWILIO_ACCOUNT_SID}/Recordings.json?CallSid=${sid}`, {
+      headers: { Authorization: `Basic ${auth}` } })
+    return ((await r.json()).recordings || []).find(x => x.status === 'completed') || null
+  }
   let rec = null
   for (const delay of [10_000, 20_000]) {   // recording finishes processing a few seconds after hangup
     await new Promise(r => setTimeout(r, delay))
     try {
-      const r = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${process.env.TWILIO_ACCOUNT_SID}/Recordings.json?CallSid=${callSid}`, {
-        headers: { Authorization: `Basic ${auth}` } })
-      const d = await r.json()
-      rec = (d.recordings || []).find(x => x.status === 'completed') || null
+      rec = await recsFor(callSid)
+      if (!rec) {
+        // TaskRouter's dequeue records the REP's leg — a child call of the
+        // customer's. Walk the children and take the first recording found.
+        const cr = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${process.env.TWILIO_ACCOUNT_SID}/Calls.json?ParentCallSid=${callSid}`, {
+          headers: { Authorization: `Basic ${auth}` } })
+        const kids = (await cr.json()).calls || []
+        _wu(callSid, `no rec on parent; ${kids.length} child leg(s)`)
+        for (const k of kids) { rec = await recsFor(k.sid); if (rec) break }
+      }
       if (rec) break
     } catch (err) { _wu(callSid, `rest recordings: ${err.message}`) }
   }
