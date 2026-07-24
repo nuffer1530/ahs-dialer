@@ -878,11 +878,12 @@ export default function DialerPage() {
     const justEnded = (was === 'connected' || was === 'calling') && (callStatus === 'ended' || callStatus === null)
     if ((!live && !justEnded) || !selectedId) return
     const cid = selectedId
+    const cphone = (contacts.find(x => x.id === cid)?.phone) || ''
     let tries = 0
     const t = setInterval(async () => {
       if (justEnded && ++tries > 15) { clearInterval(t); return }   // post-call: give up after ~60s
       try {
-        const r = await fetch(`/api/call-notes/latest?contactId=${cid}`)
+        const r = await fetch(`/api/call-notes/latest?contactId=${cid}&phone=${encodeURIComponent(cphone)}`)
         const d = await r.json()
         if (d?.text) setAutoNote(prev => (prev?.text === d.text ? prev : { contactId: cid, text: d.text, at: d.at }))
       } catch {}

@@ -2528,7 +2528,8 @@ app.post('/api/twilio/twiml/outbound', (req, res) => {
 // memory keyed by call: transcripts land in ~10-30s and wrap-up is a minute,
 // so persistence buys nothing a deploy mid-call would not lose anyway.
 const OPENAI_KEY = process.env.OPENAI_API_KEY
-const _callNotes = new Map()   // callSid -> { contactId, text, at }
+const _callNotes = new Map()   // callSid -> { contactId, phone, text, at }
+const last10 = (p) => String(p || '').replace(/\D/g, '').slice(-10)
 const pruneCallNotes = () => {
   const cutoff = Date.now() - 30 * 60_000
   for (const [k, v] of _callNotes) if (v.at < cutoff) _callNotes.delete(k)
@@ -2588,7 +2589,7 @@ async function draftNotesFromTranscript(transcript) {
 
 // Post-call pass: Whisper on the finished recording — the final, highest-
 // quality draft (overwrites any live draft for the same call).
-async function transcribeAndDraftNotes({ callSid, contactId, mp3Url, duration }) {
+async function transcribeAndDraftNotes({ callSid, contactId, phone, mp3Url, duration }) {
   if (!OPENAI_KEY || !ANTHROPIC_KEY) return
   if (duration != null && duration < 15) return   // too short to be a conversation
   const auth = Buffer.from(`${process.env.TWILIO_ACCOUNT_SID}:${process.env.TWILIO_AUTH_TOKEN}`).toString('base64')
@@ -2607,7 +2608,7 @@ async function transcribeAndDraftNotes({ callSid, contactId, mp3Url, duration })
   const text = await draftNotesFromTranscript(transcript)
   if (!text) return
   pruneCallNotes()
-  _callNotes.set(callSid, { contactId, text, at: Date.now() })
+  _callNotes.set(callSid, { contactId, phone: last10(phone), text, at: Date.now() })
   console.log(`Call notes drafted (final) for contact ${contactId} (${callSid})`)
 }
 
@@ -2616,9 +2617,9 @@ async function transcribeAndDraftNotes({ callSid, contactId, mp3Url, duration })
 // notes so the CSR's box (and the booking guidance that reads it) fills
 // while the customer is still talking.
 const _liveTx = new Map()   // callSid -> { contactId, parts: [], lastRun, running }
-async function startLiveTranscription(callSid, contactId, label) {
+async function startLiveTranscription(callSid, contactId, label, phone) {
   if (!ANTHROPIC_KEY || !callSid || _liveTx.has(callSid)) return
-  _liveTx.set(callSid, { contactId, parts: [], lastRun: 0, running: false })
+  _liveTx.set(callSid, { contactId, phone: last10(phone), parts: [], lastRun: 0, running: false })
   try {
     const auth = Buffer.from(`${process.env.TWILIO_ACCOUNT_SID}:${process.env.TWILIO_AUTH_TOKEN}`).toString('base64')
     const form = new URLSearchParams({
@@ -2648,7 +2649,7 @@ async function runLiveDraft(callSid) {
     const draft = await draftNotesFromTranscript(text)
     if (draft) {
       pruneCallNotes()
-      _callNotes.set(callSid, { contactId: e.contactId, text: draft, at: Date.now() })
+      _callNotes.set(callSid, { contactId: e.contactId, phone: e.phone, text: draft, at: Date.now() })
     }
   } catch (err) { console.warn('live draft:', err.message) }
   e.running = false
@@ -2675,16 +2676,25 @@ app.get('/api/call-notes/health', (req, res) => {
   res.json({
     openaiKey: Boolean(OPENAI_KEY), anthropicKey: Boolean(ANTHROPIC_KEY),
     liveCalls: _liveTx.size, drafts: _callNotes.size,
+    entries: [..._callNotes.entries()].map(([sid, v]) => ({
+      sid: sid.slice(-8), contactId: v.contactId, phone: v.phone || null,
+      chars: v.text.length, ageSec: Math.round((Date.now() - v.at) / 1000),
+    })),
   })
 })
 
 // The dialer polls this during wrap-up to pre-fill the notes box.
 app.get('/api/call-notes/latest', (req, res) => {
   const contactId = String(req.query.contactId || '')
-  if (!contactId) return res.json({})
+  const phone = last10(req.query.phone)
+  if (!contactId && !phone) return res.json({})
   let best = null
   for (const v of _callNotes.values()) {
-    if (String(v.contactId) === contactId && Date.now() - v.at < 15 * 60_000 && (!best || v.at > best.at)) best = v
+    if (Date.now() - v.at >= 15 * 60_000) continue
+    // Duplicate contacts share a phone — match either key so the draft can't
+    // hide behind whichever duplicate the server happened to link.
+    const hit = (contactId && String(v.contactId) === contactId) || (phone && v.phone && v.phone === phone)
+    if (hit && (!best || v.at > best.at)) best = v
   }
   res.json(best ? { text: best.text, at: best.at } : {})
 })
@@ -2701,8 +2711,14 @@ app.post('/api/twilio/recording', async (req, res) => {
       recording_duration: RecordingDuration ? parseInt(RecordingDuration) : null,
     }).eq('call_sid', CallSid)
 
-    // Attach to the matching call log if one exists
-    const { data: ac } = await supabase.from('active_calls').select('*').eq('call_sid', CallSid).maybeSingle()
+    // Attach to the matching call log if one exists.
+    // Inbound calls stopped writing active_calls when TaskRouter landed — the
+    // contact for those lives on call_tasks. Check both.
+    let { data: ac } = await supabase.from('active_calls').select('*').eq('call_sid', CallSid).maybeSingle()
+    if (!ac?.contact_id) {
+      const { data: ct } = await supabase.from('call_tasks').select('contact_id, from_number').eq('call_sid', CallSid).maybeSingle()
+      if (ct?.contact_id) ac = { contact_id: ct.contact_id, from_number: ct.from_number }
+    }
     if (ac?.contact_id) {
       const { data: recentLog } = await supabase
         .from('call_logs')
@@ -2723,12 +2739,12 @@ app.post('/api/twilio/recording', async (req, res) => {
       // forget — a transcription failure must never break the webhook.
       // Backfill contact on any live draft that started before we knew it.
       for (const [sid, v] of _callNotes) {
-        if (!v.contactId && (sid === CallSid)) v.contactId = ac.contact_id
+        if (sid === CallSid) { if (!v.contactId) v.contactId = ac.contact_id; if (!v.phone) v.phone = last10(ac.from_number) }
       }
       const lt = _liveTx.get(CallSid)
-      if (lt && !lt.contactId) lt.contactId = ac.contact_id
+      if (lt) { if (!lt.contactId) lt.contactId = ac.contact_id; if (!lt.phone) lt.phone = last10(ac.from_number) }
       transcribeAndDraftNotes({
-        callSid: CallSid, contactId: ac.contact_id, mp3Url: mp3,
+        callSid: CallSid, contactId: ac.contact_id, phone: ac.from_number, mp3Url: mp3,
         duration: RecordingDuration ? parseInt(RecordingDuration) : null,
       }).catch(e => console.warn('wrap-up autopilot:', e.message))
     }
@@ -3303,7 +3319,7 @@ app.post('/api/twilio/taskrouter/events', async (req, res) => {
       let wattrs = {}
       try { wattrs = JSON.parse(req.body.WorkerAttributes || '{}') } catch {}
       const { data: task } = await supabase.from('call_tasks')
-        .select('queued_at').eq('task_sid', taskSid).maybeSingle()
+        .select('queued_at, contact_id, from_number').eq('task_sid', taskSid).maybeSingle()
       const wait = task?.queued_at
         ? Math.max(0, Math.round((Date.now() - new Date(task.queued_at).getTime()) / 1000))
         : null
@@ -3314,13 +3330,13 @@ app.post('/api/twilio/taskrouter/events', async (req, res) => {
         agent_profile_id: wattrs.profile_id || null,
         agent_name: wattrs.name || req.body.WorkerName || null,
       }).eq('task_sid', taskSid)
-      // Inbound answered -> live note-taking on the caller's leg.
+      // Inbound answered -> live note-taking on the caller's leg. The contact
+      // is on the call_tasks row we just read — active_calls has been empty
+      // for inbound since the TaskRouter migration.
       try {
         const tattrs = JSON.parse(req.body.TaskAttributes || '{}')
         if (tattrs.call_sid) {
-          const { data: ac } = await supabase.from('active_calls').select('contact_id')
-            .eq('call_sid', tattrs.call_sid).maybeSingle()
-          startLiveTranscription(tattrs.call_sid, ac?.contact_id || null, 'inbound').catch(() => {})
+          startLiveTranscription(tattrs.call_sid, task?.contact_id || null, 'inbound', task?.from_number || tattrs.from_number).catch(() => {})
         }
       } catch (e) { console.warn('inbound live-tx:', e.message) }
       return
@@ -3394,9 +3410,9 @@ app.post('/api/twilio/status', async (req, res) => {
   // row is keyed by the PARENT (browser) leg; the transcription rides the
   // child (customer) leg, which carries both tracks.
   if (CallStatus === 'in-progress') {
-    const { data: ac } = await supabase.from('active_calls').select('contact_id')
+    const { data: ac } = await supabase.from('active_calls').select('contact_id, to_number, from_number')
       .in('call_sid', [ParentCallSid || '', CallSid].filter(Boolean)).not('contact_id', 'is', null).limit(1).maybeSingle()
-    startLiveTranscription(CallSid, ac?.contact_id || null, 'outbound').catch(() => {})
+    startLiveTranscription(CallSid, ac?.contact_id || null, 'outbound', ac?.to_number || req.body.To).catch(() => {})
   }
   await supabase.from('active_calls').update({
     status: CallStatus,
