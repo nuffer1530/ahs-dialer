@@ -3557,7 +3557,7 @@ async function getDispatchWeights() {
   const { data } = await supabase.from('app_settings').select('value').eq('key', DISPATCH_WEIGHTS_KEY).maybeSingle()
   try {
     const w = JSON.parse(data?.value || '{}')
-    if (w && Number(w.expectedValue) >= 0) return { expectedValue: +w.expectedValue, closeRate: +w.closeRate, membership: +w.membership }
+    if (w && Number(w.expectedValue) >= 0) return { expectedValue: +w.expectedValue, closeRate: +w.closeRate, membership: +w.membership, reviews: +(w.reviews || 0) }
   } catch {}
   return DEFAULT_WEIGHTS
 }
@@ -3597,6 +3597,10 @@ async function refreshDispatchScores() {
   try {
     const weights = await getDispatchWeights()
     const data = await fetchDispatchWindow()
+    try {
+      const { data: rrow } = await supabase.from('app_settings').select('value').eq('key', 'tech_reviews').maybeSingle()
+      data.reviews = JSON.parse(rrow?.value || '{}')
+    } catch { data.reviews = {} }
     const ranked = computeBattingOrder(data, weights, { now: Date.now() })
     const stamp = new Date().toISOString()
 
@@ -3686,6 +3690,7 @@ app.post('/api/dispatch/weights', async (req, res) => {
       expectedValue: Math.max(0, Number(w.expectedValue) || 0),
       closeRate: Math.max(0, Number(w.closeRate) || 0),
       membership: Math.max(0, Number(w.membership) || 0),
+      reviews: Math.max(0, Number(w.reviews) || 0),
     }
     if (clean.expectedValue + clean.closeRate + clean.membership === 0) {
       return res.status(400).json({ error: 'Weights cannot all be zero.' })
@@ -5063,15 +5068,19 @@ Rules: a tech whose 'today' says off / no time left / all-day install cannot tak
 app.get('/api/dispatch/tech-notes', async (req, res) => {
   if (!(await requireDispatch(req, res))) return
   try {
-    const [{ data: row }, techs] = await Promise.all([
+    const [{ data: row }, { data: rrow }, techs] = await Promise.all([
       supabase.from('app_settings').select('value').eq('key', 'tech_notes').maybeSingle(),
+      supabase.from('app_settings').select('value').eq('key', 'tech_reviews').maybeSingle(),
       getBoardTechs().catch(() => []),
     ])
-    let notes = {}
+    let notes = {}, reviews = {}
     try { notes = JSON.parse(row?.value || '{}') } catch {}
+    try { reviews = JSON.parse(rrow?.value || '{}') } catch {}
     res.json({
-      notes,
-      techs: techs.filter(t => t.team !== 'Leadership')
+      notes, reviews,
+      // Dispatch picks service techs — install crews and leadership aren't
+      // dispatchable and just add scroll.
+      techs: techs.filter(t => t.team !== 'Leadership' && !/install/i.test(t.team || ''))
         .map(t => ({ id: t.id, name: t.name, team: t.team || 'Other' }))
         .sort((a, b) => (a.team || '').localeCompare(b.team || '') || (a.name || '').localeCompare(b.name || '')),
     })
@@ -5082,14 +5091,28 @@ app.post('/api/dispatch/tech-notes', async (req, res) => {
   try {
     const techId = String(req.body?.techId || '')
     if (!techId) return res.status(400).json({ error: 'techId required' })
-    const note = String(req.body?.note || '').trim().slice(0, 500)
-    const { data: row } = await supabase.from('app_settings').select('value').eq('key', 'tech_notes').maybeSingle()
-    let notes = {}
-    try { notes = JSON.parse(row?.value || '{}') } catch {}
-    if (note) notes[techId] = note
-    else delete notes[techId]
-    await supabase.from('app_settings').upsert({ key: 'tech_notes', value: JSON.stringify(notes) }, { onConflict: 'key' })
-    res.json({ ok: true, notes })
+    const out = { ok: true }
+    if ('note' in (req.body || {})) {
+      const note = String(req.body.note || '').trim().slice(0, 500)
+      const { data: row } = await supabase.from('app_settings').select('value').eq('key', 'tech_notes').maybeSingle()
+      let notes = {}
+      try { notes = JSON.parse(row?.value || '{}') } catch {}
+      if (note) notes[techId] = note
+      else delete notes[techId]
+      await supabase.from('app_settings').upsert({ key: 'tech_notes', value: JSON.stringify(notes) }, { onConflict: 'key' })
+      out.notes = notes
+    }
+    if ('rating' in (req.body || {})) {
+      const rating = req.body.rating == null ? null : Math.min(5, Math.max(1, Math.round(Number(req.body.rating))))
+      const { data: rrow } = await supabase.from('app_settings').select('value').eq('key', 'tech_reviews').maybeSingle()
+      let reviews = {}
+      try { reviews = JSON.parse(rrow?.value || '{}') } catch {}
+      if (rating) reviews[techId] = rating
+      else delete reviews[techId]
+      await supabase.from('app_settings').upsert({ key: 'tech_reviews', value: JSON.stringify(reviews) }, { onConflict: 'key' })
+      out.reviews = reviews
+    }
+    res.json(out)
   } catch (err) { res.status(500).json({ error: err.message }) }
 })
 

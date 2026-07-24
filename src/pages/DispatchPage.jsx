@@ -25,17 +25,19 @@ const ST_JOB_URL = (jobId) => `https://go.servicetitan.com/#/Job/Index/${jobId}`
 // treatment as the Live Board or the groups won't line up down the page.
 const BO_COLS = [
   { key:'rank',  label:'#',              width:'4%'  },
-  { key:'tech',  label:'Technician',     width:'19%' },
-  { key:'tier',  label:'Tier',           width:'14%' },
-  { key:'ev',    label:'$ / opportunity', width:'12%', align:'right',
+  { key:'tech',  label:'Technician',     width:'17%' },
+  { key:'tier',  label:'Tier',           width:'13%' },
+  { key:'ev',    label:'$ / opportunity', width:'11%', align:'right',
     title:'Expected revenue per opportunity = close rate × average sale' },
   { key:'close', label:'Close rate',     width:'10%', align:'right' },
   { key:'sale',  label:'Avg sale',       width:'10%', align:'right' },
-  { key:'sold',  label:'Total sold',     width:'11%', align:'right' },
-  { key:'opps',  label:'Opps',           width:'7%',  align:'right',
+  { key:'sold',  label:'Total sold',     width:'10%', align:'right' },
+  { key:'opps',  label:'Opps',           width:'6%',  align:'right',
     title:'Opportunities run in the window' },
   { key:'memb',  label:'Membership',     width:'7%',  align:'right' },
-  { key:'jobs',  label:'Jobs',           width:'6%',  align:'right',
+  { key:'rev',   label:'Reviews',        width:'7%',  align:'right',
+    title:'Dispatcher-entered rating from the Tech Info tab — weighted into the ranking' },
+  { key:'jobs',  label:'Jobs',           width:'5%',  align:'right',
     title:'Total jobs run — the sample size behind the ranking' },
 ]
 
@@ -103,14 +105,26 @@ function TechInfo() {
       .then(d => { setData(d); setDrafts(d.notes || {}) })
       .catch(e => setErr(e.message))
   }, [])
+  const flashSaved = (techId) => {
+    setSavedAt(prev => ({ ...prev, [techId]: Date.now() }))
+    setTimeout(() => setSavedAt(prev => ({ ...prev, [techId]: null })), 2500)
+  }
   const save = async (techId) => {
     const note = (drafts[techId] || '').trim()
     if ((data?.notes?.[techId] || '') === note) return
     try {
       const d = await authed('/api/dispatch/tech-notes', { method:'POST', body: JSON.stringify({ techId, note }) })
       setData(prev => ({ ...prev, notes: d.notes }))
-      setSavedAt(prev => ({ ...prev, [techId]: Date.now() }))
-      setTimeout(() => setSavedAt(prev => ({ ...prev, [techId]: null })), 2500)
+      flashSaved(techId)
+    } catch (e) { setErr(e.message) }
+  }
+  const rate = async (techId, rating) => {
+    // Clicking the current rating clears it.
+    const next = (data?.reviews?.[techId] === rating) ? null : rating
+    try {
+      const d = await authed('/api/dispatch/tech-notes', { method:'POST', body: JSON.stringify({ techId, rating: next }) })
+      setData(prev => ({ ...prev, reviews: d.reviews }))
+      flashSaved(techId)
     } catch (e) { setErr(e.message) }
   }
   if (err) return <div style={{ padding:20, color:'var(--danger)', fontSize:13 }}>{err}</div>
@@ -119,8 +133,8 @@ function TechInfo() {
   return (
     <div>
       <div style={{ fontSize:12, color:'var(--text-muted)', marginBottom:14 }}>
-        Notes about specific techs \u2014 strengths, quirks, customer feedback, anything dispatch should remember.
-        They pop up on hover (\ud83d\udcdd) on the Batting Order. Saves when you click away.
+        Notes and review ratings for the techs dispatch actually sends (install crews excluded).
+        Notes pop up when you hover a 📝 name on the Batting Order; the ★ rating is weighted into the ranking via the Reviews weight.
       </div>
       {teams.map(team => (
         <div key={team} style={{ marginBottom:20 }}>
@@ -128,12 +142,22 @@ function TechInfo() {
           <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(320px, 1fr))', gap:10 }}>
             {(data.techs || []).filter(t => t.team === team).map(t => (
               <div key={t.id} className="card" style={{ padding:'10px 12px' }}>
-                <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:6 }}>
-                  <span style={{ fontSize:12.5, fontWeight:700 }}>{t.name}</span>
-                  {savedAt[t.id] && <span style={{ fontSize:10.5, fontWeight:700, color:'var(--success)' }}>\u2713 Saved</span>}
+                <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:6, gap:8 }}>
+                  <span style={{ fontSize:12.5, fontWeight:700, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{t.name}</span>
+                  <span style={{ display:'flex', alignItems:'center', gap:6, flexShrink:0 }}>
+                    {savedAt[t.id] && <span style={{ fontSize:10.5, fontWeight:700, color:'var(--success)' }}>✓ Saved</span>}
+                    <span title="Review rating — weighted into the Batting Order ranking. Click the current star again to clear.">
+                      {[1,2,3,4,5].map(n => (
+                        <span key={n} onClick={() => rate(t.id, n)}
+                          style={{ cursor:'pointer', fontSize:14, color: n <= (data.reviews?.[t.id] || 0) ? '#B45309' : 'var(--border)' }}>
+                          ★
+                        </span>
+                      ))}
+                    </span>
+                  </span>
                 </div>
                 <textarea className="form-input" rows={2} value={drafts[t.id] || ''}
-                  placeholder="No notes yet\u2026"
+                  placeholder="No notes yet…"
                   onChange={e => setDrafts(prev => ({ ...prev, [t.id]: e.target.value }))}
                   onBlur={() => save(t.id)}
                   style={{ fontSize:12, resize:'vertical' }} />
@@ -149,8 +173,11 @@ function TechInfo() {
 function BattingOrder() {
   const [data, setData] = useState(null)
   const [techNotes, setTechNotes] = useState({})
+  const [techReviews, setTechReviews] = useState({})
   useEffect(() => {
-    authed('/api/dispatch/tech-notes').then(d => setTechNotes(d.notes || {})).catch(() => {})
+    authed('/api/dispatch/tech-notes')
+      .then(d => { setTechNotes(d.notes || {}); setTechReviews(d.reviews || {}) })
+      .catch(() => {})
   }, [])
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
@@ -180,7 +207,7 @@ function BattingOrder() {
   if (!data) return <div className="spinner lg" style={{ margin:'60px auto' }} />
 
   const units = [...new Set((data.groups || []).map(g => g.business_unit))].sort()
-  const wTotal = weights ? (weights.expectedValue + weights.closeRate + weights.membership) : 0
+  const wTotal = weights ? (weights.expectedValue + weights.closeRate + weights.membership + (weights.reviews || 0)) : 0
 
   return (
     <div>
@@ -198,10 +225,10 @@ function BattingOrder() {
       {weights && (
         <div className="card" style={{ padding:'12px 14px', marginBottom:16, display:'flex', alignItems:'center', gap:14, flexWrap:'wrap' }}>
           <span style={{ fontSize:11, fontWeight:700, textTransform:'uppercase', letterSpacing:.5, color:'var(--text-muted)' }}>Weighting</span>
-          {[['expectedValue','Expected value'],['closeRate','Close rate'],['membership','Membership']].map(([k,label]) => (
+          {[['expectedValue','Expected value'],['closeRate','Close rate'],['membership','Membership'],['reviews','Reviews']].map(([k,label]) => (
             <label key={k} style={{ display:'flex', alignItems:'center', gap:6, fontSize:12 }}>
               {label}
-              <input type="number" min="0" max="100" value={weights[k]}
+              <input type="number" min="0" max="100" value={weights[k] ?? 0}
                 onChange={e => setWeights(w => ({ ...w, [k]: Number(e.target.value) }))}
                 style={{ width:58, padding:'4px 6px', border:'1px solid var(--border)', borderRadius:6,
                   background:'var(--surface-2)', color:'var(--text-primary)', fontSize:12 }} />
@@ -266,8 +293,8 @@ function BattingOrder() {
                     <tr key={r.tech_id} style={{ background: r.tier === 'green' ? 'rgba(21,128,61,.04)' : 'transparent' }}>
                       <td style={{ padding:'7px 12px', color:'var(--text-muted)' }}>{r.rank}</td>
                       <td style={{ padding:'7px 12px', fontWeight:600, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}
-                        title={techNotes[r.tech_id] ? `${r.tech_name}\n\n\ud83d\udcdd ${techNotes[r.tech_id]}` : r.tech_name}>
-                        {r.tech_name}{techNotes[r.tech_id] && <span style={{ marginLeft:5, cursor:'help' }}>\ud83d\udcdd</span>}
+                        title={techNotes[r.tech_id] ? `${r.tech_name}\n\n📝 ${techNotes[r.tech_id]}` : r.tech_name}>
+                        {r.tech_name}{techNotes[r.tech_id] && <span style={{ marginLeft:5, cursor:'help' }}>📝</span>}
                       </td>
                       <td style={{ padding:'7px 12px' }}><TierPill tier={r.tier} /></td>
                       <td style={{ padding:'7px 12px', textAlign:'right', fontWeight:700 }}>{money(r.expected_value)}</td>
@@ -276,6 +303,11 @@ function BattingOrder() {
                       <td style={{ padding:'7px 12px', textAlign:'right', color:'var(--text-muted)' }}>{money(r.total_sold)}</td>
                       <td style={{ padding:'7px 12px', textAlign:'right', color:'var(--text-muted)' }}>{r.opportunities ?? '—'}</td>
                       <td style={{ padding:'7px 12px', textAlign:'right' }}>{pct(r.membership_pct)}</td>
+                      <td style={{ padding:'7px 12px', textAlign:'right' }}>
+                        {techReviews[r.tech_id]
+                          ? <span style={{ color:'#B45309', fontWeight:700 }}>★ {techReviews[r.tech_id]}</span>
+                          : <span style={{ color:'var(--text-muted)' }}>—</span>}
+                      </td>
                       <td style={{ padding:'7px 12px', textAlign:'right', color:'var(--text-muted)' }}>{r.jobs}</td>
                     </tr>
                   ))}
@@ -284,7 +316,7 @@ function BattingOrder() {
                       <td style={{ padding:'7px 12px' }}>—</td>
                       <td style={{ padding:'7px 12px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }} title={r.tech_name}>{r.tech_name}</td>
                       <td style={{ padding:'7px 12px' }}><TierPill tier="unranked" /></td>
-                      <td colSpan={6} style={{ padding:'7px 12px', color:'var(--text-muted)', fontSize:11 }}>
+                      <td colSpan={7} style={{ padding:'7px 12px', color:'var(--text-muted)', fontSize:11 }}>
                         Needs 10+ jobs to rank — not a rating
                       </td>
                       <td style={{ padding:'7px 12px', textAlign:'right', color:'var(--text-muted)' }}>{r.jobs}</td>
@@ -496,17 +528,17 @@ function LiveBoard() {
       {/* 🎭 Scenario AI — "Arber called in sick, what do I do with his calls?" */}
       <div className="card" style={{ padding:'11px 15px', marginBottom:12 }}>
         <div style={{ display:'flex', gap:8, alignItems:'center' }}>
-          <span style={{ fontSize:15, flexShrink:0 }}>\ud83c\udfad</span>
+          <span style={{ fontSize:15, flexShrink:0 }}>🎭</span>
           <input className="form-input" value={scenario} style={{ flex:1 }}
-            placeholder='Run a scenario\u2026 e.g. "Arber called in sick \u2014 what do I do with his calls?"'
+            placeholder='Run a scenario… e.g. "Arber called in sick — what do I do with his calls?"'
             onChange={e => setScenario(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') askScenario() }} />
           <button className="btn primary sm" onClick={askScenario} disabled={scBusy || scenario.trim().length < 5} style={{ flexShrink:0 }}>
-            {scBusy ? 'Working the board\u2026' : 'Walk me through it'}
+            {scBusy ? 'Working the board…' : 'Walk me through it'}
           </button>
         </div>
         {scErr && <div style={{ fontSize:12, color:'var(--danger)', marginTop:8 }}>{scErr}</div>}
-        {scBusy && <div style={{ fontSize:12, color:'var(--text-muted)', marginTop:8 }}>\ud83e\udde0 Thinking through every assignment on the board \u2014 15\u201330 seconds\u2026</div>}
+        {scBusy && <div style={{ fontSize:12, color:'var(--text-muted)', marginTop:8 }}>🧠 Thinking through every assignment on the board — 15–30 seconds…</div>}
         {scPlan?.plan && (
           <div style={{ marginTop:10, paddingTop:10, borderTop:'1px solid var(--border)' }}>
             <div style={{ fontSize:13, fontWeight:800 }}>{scPlan.plan.headline}</div>
@@ -523,7 +555,7 @@ function LiveBoard() {
               <div style={{ marginTop:8, paddingTop:8, borderTop:'1px solid var(--border)', display:'flex', flexDirection:'column', gap:4 }}>
                 {scPlan.plan.watchouts.map((w, i) => (
                   <div key={i} style={{ display:'flex', gap:6, fontSize:11, color:'var(--text-muted)', lineHeight:1.5 }}>
-                    <span style={{ flexShrink:0 }}>\ud83d\udc40</span><span>{w}</span>
+                    <span style={{ flexShrink:0 }}>👀</span><span>{w}</span>
                   </div>
                 ))}
               </div>
@@ -536,7 +568,7 @@ function LiveBoard() {
       {b3?.board?.length > 0 && (
         <div className="card" style={{ padding:'11px 15px', marginBottom:12 }}>
           <div style={{ fontSize:10.5, fontWeight:700, textTransform:'uppercase', letterSpacing:.5, color:'var(--text-muted)', marginBottom:8 }}>
-            Next 3 days \u2014 booked / capacity
+            Next 3 days — booked / capacity
           </div>
           <div style={{ display:'grid', gridTemplateColumns:`minmax(90px, auto) repeat(${(b3.dates || []).length}, 1fr)`, gap:'6px 14px', fontSize:12, alignItems:'center' }}>
             <span />
@@ -553,7 +585,7 @@ function LiveBoard() {
                     <span key={`${row.trade}${i}`} style={{ display:'flex', alignItems:'center', gap:6 }}>
                       <span style={{ fontWeight:800, color:col }}>{d.calls}/{Math.round(d.capacity)}</span>
                       {d.oppWatch
-                        ? <span title="Board full \u2014 Opportunity Watch: keep booking strong calls, dispatch makes room" style={{ fontSize:11 }}>\ud83d\udc40</span>
+                        ? <span title="Board full — Opportunity Watch: keep booking strong calls, dispatch makes room" style={{ fontSize:11 }}>👀</span>
                         : d.needed > 0 && <span style={{ fontSize:10.5, color:'var(--text-muted)' }}>need {d.needed}</span>}
                     </span>
                   )

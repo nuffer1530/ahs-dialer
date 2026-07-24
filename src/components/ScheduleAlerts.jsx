@@ -183,7 +183,7 @@ export default function ScheduleAlerts() {
         const id = `ann:${Date.now()}`
         // The sender gets the same popup as a delivery receipt.
         const from = isSender && !forMe
-          ? `Sent \u2713${payload.toNames ? ' \u2192 ' + payload.toNames : ''}`
+          ? `Sent ✓${payload.toNames ? ' → ' + payload.toNames : ''}`
           : (payload.from || 'Admin')
         setAlerts(prev => [...prev, { id, kind: 'announce', from, message: String(payload.message).slice(0, 300) }])
         playChime()

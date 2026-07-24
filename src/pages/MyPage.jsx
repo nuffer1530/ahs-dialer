@@ -418,7 +418,7 @@ export default function MyPage() {
                     <button className="btn" onClick={() => setAnnounceOpen(false)}>Cancel</button>
                     <button className="btn primary" onClick={sendAnnouncement}
                       disabled={announceBusy || !announce.message.trim() || (!announce.all && !announce.ids.length)}>
-                      {announceBusy ? 'Sending\u2026' : announce.all ? 'Send to everyone' : `Send (${announce.ids.length})`}
+                      {announceBusy ? 'Sending…' : announce.all ? 'Send to everyone' : `Send (${announce.ids.length})`}
                     </button>
                   </div>
                 </div>

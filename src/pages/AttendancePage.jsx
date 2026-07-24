@@ -267,7 +267,7 @@ export default function AttendancePage() {
     }
     await reloadSchedules()
     setCopyBusy(false)
-    setCopyResult({ ok: `Copied ${copied} day${copied === 1 ? '' : 's'}${skipped ? ` \u00b7 ${skipped} skipped (already scheduled)` : ''}` })
+    setCopyResult({ ok: `Copied ${copied} day${copied === 1 ? '' : 's'}${skipped ? ` · ${skipped} skipped (already scheduled)` : ''}` })
   }
 
   const bulkApply = async () => {
@@ -300,7 +300,7 @@ export default function AttendancePage() {
     }
     await reloadSchedules()
     setBulkBusy(false)
-    setBulkResult({ ok: `Scheduled ${applied} day${applied === 1 ? '' : 's'}${skipped ? ` \u00b7 ${skipped} skipped (already scheduled)` : ''}` })
+    setBulkResult({ ok: `Scheduled ${applied} day${applied === 1 ? '' : 's'}${skipped ? ` · ${skipped} skipped (already scheduled)` : ''}` })
   }
 
   const publishSchedules = async () => {
@@ -882,7 +882,7 @@ export default function AttendancePage() {
                     <div style={{ fontSize:13, fontWeight:600 }}>{t.name}</div>
                     <div style={{ fontSize:11.5, color:'var(--text-muted)' }}>
                       {fmt(t.shift_start)} – {fmt(t.shift_end)}
-                      {t.lunch_start ? ` \u00b7 Lunch ${fmt(t.lunch_start)}` : ''}
+                      {t.lunch_start ? ` · Lunch ${fmt(t.lunch_start)}` : ''}
                     </div>
                   </div>
                   <button className="btn sm" onClick={() => setEditTemplate({ ...t })}>Edit</button>
@@ -934,7 +934,7 @@ export default function AttendancePage() {
               <div style={{ display:'flex', justifyContent:'flex-end', gap:8 }}>
                 <button className="btn" onClick={() => setEditTemplate(null)}>Back</button>
                 <button className="btn primary" onClick={saveTemplate} disabled={tplBusy || !editTemplate.name?.trim()}>
-                  {tplBusy ? 'Saving\u2026' : 'Save template'}
+                  {tplBusy ? 'Saving…' : 'Save template'}
                 </button>
               </div>
             </div>
@@ -944,7 +944,7 @@ export default function AttendancePage() {
 
       {/* ── COPY WEEK MODAL ── */}
       {copyModal && (
-        <Modal title={`Copy Week \u2192 week of ${fmtDate(weekDates[0])}`} onClose={() => { setCopyModal(false); setCopyResult(null) }} width={440}>
+        <Modal title={`Copy Week → week of ${fmtDate(weekDates[0])}`} onClose={() => { setCopyModal(false); setCopyResult(null) }} width={440}>
           <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
             <div className="form-field">
               <label className="form-label">Copy from</label>
@@ -975,11 +975,11 @@ export default function AttendancePage() {
               Overwrite days that already have a schedule
             </label>
             {copyResult?.error && <div style={{ fontSize:12.5, fontWeight:700, color:'#B91C1C' }}>{copyResult.error}</div>}
-            {copyResult?.ok && <div style={{ fontSize:12.5, fontWeight:600, color:'var(--success)' }}>\u2713 {copyResult.ok}</div>}
+            {copyResult?.ok && <div style={{ fontSize:12.5, fontWeight:600, color:'var(--success)' }}>✓ {copyResult.ok}</div>}
             <div style={{ display:'flex', justifyContent:'flex-end', gap:8 }}>
               <button className="btn" onClick={() => { setCopyModal(false); setCopyResult(null) }}>{copyResult?.ok ? 'Done' : 'Cancel'}</button>
               <button className="btn primary" onClick={copyWeek} disabled={copyBusy || (!copyCfg.all && !copyCfg.ids.length)}>
-                {copyBusy ? 'Copying\u2026' : 'Copy week'}
+                {copyBusy ? 'Copying…' : 'Copy week'}
               </button>
             </div>
           </div>
@@ -988,13 +988,13 @@ export default function AttendancePage() {
 
       {/* ── BULK SCHEDULE MODAL ── */}
       {bulkModal && (
-        <Modal title={`Bulk Schedule \u2014 week of ${fmtDate(weekDates[0])}`} onClose={() => { setBulkModal(false); setBulkResult(null) }} width={460}>
+        <Modal title={`Bulk Schedule — week of ${fmtDate(weekDates[0])}`} onClose={() => { setBulkModal(false); setBulkResult(null) }} width={460}>
           <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
             <div className="form-field">
               <label className="form-label">Template</label>
               <select className="form-input" value={bulkCfg.templateId} onChange={e => setBulkCfg(c => ({ ...c, templateId: e.target.value }))}>
-                <option value="">Pick a template\u2026</option>
-                {templates.map(t => <option key={t.id} value={t.id}>{t.name} ({fmt(t.shift_start)} \u2013 {fmt(t.shift_end)})</option>)}
+                <option value="">Pick a template…</option>
+                {templates.map(t => <option key={t.id} value={t.id}>{t.name} ({fmt(t.shift_start)} – {fmt(t.shift_end)})</option>)}
               </select>
               {templates.length === 0 && <div style={{ fontSize:11.5, color:'#B45309', marginTop:4 }}>No templates yet — create one under Templates first.</div>}
             </div>
@@ -1038,12 +1038,12 @@ export default function AttendancePage() {
               Overwrite days that already have a schedule
             </label>
             {bulkResult?.error && <div style={{ fontSize:12.5, fontWeight:700, color:'#B91C1C' }}>{bulkResult.error}</div>}
-            {bulkResult?.ok && <div style={{ fontSize:12.5, fontWeight:600, color:'var(--success)' }}>\u2713 {bulkResult.ok}</div>}
+            {bulkResult?.ok && <div style={{ fontSize:12.5, fontWeight:600, color:'var(--success)' }}>✓ {bulkResult.ok}</div>}
             <div style={{ display:'flex', justifyContent:'flex-end', gap:8 }}>
               <button className="btn" onClick={() => { setBulkModal(false); setBulkResult(null) }}>{bulkResult?.ok ? 'Done' : 'Cancel'}</button>
               <button className="btn primary" onClick={bulkApply}
                 disabled={bulkBusy || !bulkCfg.templateId || (!bulkCfg.all && !bulkCfg.ids.length) || !bulkCfg.days.length}>
-                {bulkBusy ? 'Applying\u2026' : 'Apply schedule'}
+                {bulkBusy ? 'Applying…' : 'Apply schedule'}
               </button>
             </div>
           </div>
@@ -1091,7 +1091,7 @@ export default function AttendancePage() {
               </button>
               <button className="btn primary" onClick={publishSchedules}
                 disabled={publishing || (!pubSel.all && !pubSel.ids.length)}>
-                {publishing ? 'Sending\u2026' : pubSel.all ? 'Email everyone' : `Email (${pubSel.ids.length})`}
+                {publishing ? 'Sending…' : pubSel.all ? 'Email everyone' : `Email (${pubSel.ids.length})`}
               </button>
             </div>
           </div>
