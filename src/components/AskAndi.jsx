@@ -42,9 +42,15 @@ export default function AskAndi() {
   const [busy, setBusy] = useState(false)
   const bodyRef = useRef(null)
 
+  // Scroll the START of the newest message into view — snapping to the very
+  // bottom made every long answer/coach play open at its end, forcing the rep
+  // to scroll up before reading.
   useEffect(() => {
-    if (bodyRef.current) bodyRef.current.scrollTop = bodyRef.current.scrollHeight
-  }, [msgs, open])
+    const el = bodyRef.current
+    const last = el?.lastElementChild
+    if (!el || !last) return
+    el.scrollTop = Math.max(0, last.offsetTop - 10)
+  }, [msgs, open, busy])
 
   // 🎧 Live coach: the dialer heard an objection on the call — open with the
   // play, silently (the rep is mid-conversation; no chime, no focus steal).
@@ -125,7 +131,7 @@ export default function AskAndi() {
               style={{ border: 'none', background: 'rgba(255,255,255,.18)', color: '#fff', width: 26, height: 26, borderRadius: 8, cursor: 'pointer', fontSize: 14 }}>×</button>
           </div>
 
-          <div ref={bodyRef} style={{ flex: 1, overflowY: 'auto', padding: 14, display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <div ref={bodyRef} style={{ flex: 1, overflowY: 'auto', padding: 14, display: 'flex', flexDirection: 'column', gap: 10, position: 'relative' }}>
             {msgs.length === 0 && (
               <div style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.6, padding: '6px 2px' }}>
                 Try:
