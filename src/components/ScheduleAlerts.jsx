@@ -185,7 +185,7 @@ export default function ScheduleAlerts() {
         const from = isSender && !forMe
           ? `Sent ✓${payload.toNames ? ' → ' + payload.toNames : ''}`
           : (payload.from || 'Admin')
-        setAlerts(prev => [...prev, { id, kind: 'announce', from, message: String(payload.message).slice(0, 300) }])
+        setAlerts(prev => [...prev, { id, kind: payload.kind === 'oppwatch' ? 'oppwatch' : 'announce', from, message: String(payload.message).slice(0, 300) }])
         playChime()
         setTimeout(() => setAlerts(prev => prev.filter(a => a.id !== id)), 25000)
       })
@@ -235,6 +235,25 @@ export default function ScheduleAlerts() {
                 <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--text-primary)' }}>
                   ${a.amount.toFixed(2)}{a.jobNumber ? <span style={{ fontWeight: 500, color: 'var(--text-muted)', fontSize: 13 }}> · Job #{a.jobNumber}</span> : null}
                 </div>
+              </div>
+              <button onClick={() => dismiss(a.id)}
+                style={{ width: 24, height: 24, borderRadius: 6, border: 'none', background: 'var(--surface-2)', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 14, flexShrink: 0 }}
+                title="Dismiss">×</button>
+            </div>
+          )
+        }
+        if (a.kind === 'oppwatch') {
+          const g = '#D4A017'
+          return (
+            <div key={a.id} style={{
+              background: 'var(--surface)', border: `2px solid ${g}`, borderRadius: 'var(--radius-lg)',
+              boxShadow: `0 10px 32px rgba(0,0,0,.22), 0 0 18px ${g}55`, padding: '12px 14px',
+              display: 'flex', alignItems: 'center', gap: 12, animation: 'sched-in .18s ease-out',
+            }}>
+              <div style={{ width: 38, height: 38, borderRadius: '50%', background: g + '22', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, fontSize: 20 }}>🎯</div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 9, fontWeight: 800, letterSpacing: .6, textTransform: 'uppercase', color: g }}>Bonus unlocked</div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', wordBreak: 'break-word' }}>{a.message}</div>
               </div>
               <button onClick={() => dismiss(a.id)}
                 style={{ width: 24, height: 24, borderRadius: 6, border: 'none', background: 'var(--surface-2)', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 14, flexShrink: 0 }}

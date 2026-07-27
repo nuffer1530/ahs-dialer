@@ -689,6 +689,20 @@ export default function AdminPage() {
   const [opsSaving, setOpsSaving] = useState(false)
   const [opsDirty, setOpsDirty] = useState(false)
   const [bizHours, setBizHours] = useState(null)     // { mon: {open,close,closed}, ... }
+  // 🎯 Opportunity Watch Bonus config — read by the server's 10-min sweep.
+  const [oppInc, setOppInc] = useState(null)
+  const [oppIncSaved, setOppIncSaved] = useState(false)
+  useEffect(() => {
+    sb.from('app_settings').select('value').eq('key', 'opp_watch_incentive').maybeSingle().then(({ data }) => {
+      let v = { enabled: false, pool: 100, cutoff: '15:00' }
+      try { v = { ...v, ...JSON.parse(data?.value || '{}') } } catch {}
+      setOppInc(v)
+    })
+  }, [])
+  const saveOppInc = async () => {
+    await sb.from('app_settings').upsert({ key: 'opp_watch_incentive', value: JSON.stringify(oppInc) }, { onConflict: 'key' })
+    setOppIncSaved(true); setTimeout(() => setOppIncSaved(false), 2500)
+  }
   const [holidays, setHolidays] = useState(null)     // [{ date, name }]
   // Invite by email
   const [invEmail, setInvEmail] = useState('')
@@ -1426,6 +1440,41 @@ export default function AdminPage() {
                     A rep is paid when ServiceTitan marks the booked job <strong>completed</strong>, not when they book it,
                     so earnings appear after the job runs. Membership payouts come from the per-membership-type amounts.
                     See the <strong>Payouts</strong> tab for the full ledger.
+                  </div>
+                </div>
+              )}
+
+              {isAdmin && oppInc && (
+                <div className="card" style={{ borderLeft:'3px solid #D4A017' }}>
+                  <div className="card-header">
+                    <div className="card-title">🎯 Opportunity Watch Bonus</div>
+                    {oppIncSaved && <span style={{ fontSize:11, fontWeight:700, color:'var(--success)' }}>✓ Saved</span>}
+                  </div>
+                  <div className="card-body" style={{ display:'flex', flexDirection:'column', gap:12 }}>
+                    <div style={{ fontSize:12, color:'var(--text-secondary)', lineHeight:1.6 }}>
+                      Mon–Fri: if <strong>every trade with capacity</strong> hits Opportunity Watch (board full) before the
+                      cutoff, the pool splits equally among all reps and dispatchers scheduled to work that day — paid
+                      straight into commissions with the You-Got-Paid pop, plus a floor-wide unlock announcement.
+                      Pays at most once per day; skips company holidays.
+                    </div>
+                    <div style={{ display:'flex', gap:16, alignItems:'flex-end', flexWrap:'wrap' }}>
+                      <label style={{ display:'flex', alignItems:'center', gap:8, fontSize:13, fontWeight:700, cursor:'pointer', paddingBottom:8 }}>
+                        <input type="checkbox" checked={oppInc.enabled}
+                          onChange={e => setOppInc(v => ({ ...v, enabled: e.target.checked }))} />
+                        Enabled
+                      </label>
+                      <div className="form-field" style={{ width:140 }}>
+                        <label className="form-label">Daily pool ($)</label>
+                        <input className="form-input" type="number" min="1" step="1" value={oppInc.pool}
+                          onChange={e => setOppInc(v => ({ ...v, pool: Number(e.target.value) }))} />
+                      </div>
+                      <div className="form-field" style={{ width:140 }}>
+                        <label className="form-label">Cutoff (Denver)</label>
+                        <input className="form-input" type="time" value={oppInc.cutoff}
+                          onChange={e => setOppInc(v => ({ ...v, cutoff: e.target.value }))} />
+                      </div>
+                      <button className="btn primary" onClick={saveOppInc} style={{ marginBottom:2 }}>Save</button>
+                    </div>
                   </div>
                 </div>
               )}

@@ -3902,6 +3902,84 @@ async function fetchDispatchWindow(days = DISPATCH_WINDOW_DAYS) {
            technicians: buRes?.data || [], jobTypes: jtRes?.data || [] }
 }
 
+const OPP_BONUS_KEY = 'opp_watch_incentive'   // { enabled, pool, cutoff: 'HH:MM' }
+const OPP_BONUS_LOG = 'opp_watch_bonus_log'   // { 'YYYY-MM-DD': { at, n, pool } } — the can't-pay-twice ledger
+async function checkOppWatchBonus() {
+  const { data: cfgRow } = await supabase.from('app_settings').select('value').eq('key', OPP_BONUS_KEY).maybeSingle()
+  let cfg = { enabled: false, pool: 100, cutoff: '15:00' }
+  try { cfg = { ...cfg, ...JSON.parse(cfgRow?.value || '{}') } } catch {}
+  if (!cfg.enabled || !(Number(cfg.pool) > 0)) return
+
+  // Everything on the Denver clock — the server runs UTC.
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Denver', year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', hour12: false, weekday: 'short',
+  }).formatToParts(new Date()).map(p => [p.type, p.value]))
+  const today = `${parts.year}-${parts.month}-${parts.day}`
+  if (parts.weekday === 'Sat' || parts.weekday === 'Sun') return
+  const hm = `${parts.hour}:${parts.minute}`
+  if (hm < '07:00' || hm >= String(cfg.cutoff || '15:00')) return
+
+  try {
+    const { data: hRow } = await supabase.from('app_settings').select('value').eq('key', 'company_holidays').maybeSingle()
+    if ((JSON.parse(hRow?.value || '[]') || []).some(h => h?.date === today)) return
+  } catch {}
+
+  const { data: logRow } = await supabase.from('app_settings').select('value').eq('key', OPP_BONUS_LOG).maybeSingle()
+  let log = {}
+  try { log = JSON.parse(logRow?.value || '{}') } catch {}
+  if (log[today]) return   // already unlocked today
+
+  const b3 = await build3DayBoard()
+  const withCapacity = (b3?.board || []).filter(t => (t.days?.[0]?.capacity || 0) > 0)
+  if (!withCapacity.length) return
+  if (!withCapacity.every(t => t.days[0].oppWatch)) return
+
+  // Who shares: active reps + dispatchers with a WORK shift scheduled today.
+  const [{ data: scheds }, { data: profs }] = await Promise.all([
+    supabase.from('schedules').select('profile_id, day_type, shift_start').eq('date', today),
+    supabase.from('profiles').select('id, name, email, role').eq('active', true),
+  ])
+  const eligible = new Map((profs || []).filter(p => ['rep', 'dispatcher'].includes(p.role)).map(p => [p.id, p]))
+  const recipients = [...new Set((scheds || [])
+    .filter(sc => (!sc.day_type || sc.day_type === 'work') && sc.shift_start && eligible.has(sc.profile_id))
+    .map(sc => sc.profile_id))]
+  if (!recipients.length) { console.warn('opp bonus: board unlocked but nobody scheduled — not paid'); return }
+
+  // Claim the day in the ledger BEFORE inserting, so a crash can't double-pay.
+  log[today] = { at: new Date().toISOString(), n: recipients.length, pool: Number(cfg.pool) }
+  for (const k of Object.keys(log)) if (Date.now() - Date.parse(k) > 90 * 864e5) delete log[k]
+  await supabase.from('app_settings').upsert({ key: OPP_BONUS_LOG, value: JSON.stringify(log) }, { onConflict: 'key' })
+
+  // Split to exact cents — the pool must land exactly, remainder pennies to the first few.
+  const cents = Math.round(Number(cfg.pool) * 100)
+  const base = Math.floor(cents / recipients.length)
+  let leftover = cents - base * recipients.length
+  const rows = recipients.map(pid => {
+    const p = eligible.get(pid)
+    const c = base + (leftover-- > 0 ? 1 : 0)
+    return {
+      profile_id: pid,
+      rep_name: p.name || p.email || null,
+      // 'adjustment' keeps us inside the existing event_type vocabulary (the
+      // report shows the notes for adjustments, which carry the story).
+      event_type: 'adjustment',
+      amount: c / 100,
+      st_job_id: null, job_number: null,
+      notes: `🎯 Opportunity Watch Bonus — board full across every trade before ${cfg.cutoff}, $${(cents / 100).toFixed(0)} pool split ${recipients.length} ways`,
+      earned_at: new Date().toISOString(),
+      also_membership: false,
+    }
+  })
+  const { error } = await supabase.from('commissions').insert(rows)
+  if (error) { console.error('opp bonus insert:', error.message); return }
+  console.log(`OPP WATCH BONUS: $${cfg.pool} split ${recipients.length} ways`)
+  await sendFloorAnnounce({
+    to: 'all', from: 'Andi', fromId: null, kind: 'oppwatch',
+    message: `OPPORTUNITY WATCH BONUS UNLOCKED! Every trade is FULL before ${cfg.cutoff}. $${(cents / 100).toFixed(0)} pool → $${(base / 100).toFixed(2)} each to the ${recipients.length} of you scheduled today. That's teamwork — keep booking strong calls!`,
+  }).catch(e => console.warn('opp bonus announce:', e.message))
+}
+
 async function refreshDispatchScores() {
   const started = Date.now()
   try {
@@ -6534,6 +6612,11 @@ if (BOARD_EMAIL_TO && RESEND_KEY) {
 if (DISPATCH_REFRESH_HOURS > 0) {
   setTimeout(() => {
     refreshDispatchScores().catch(() => {})
+    // 🎯 Opportunity Watch Bonus: Mon–Fri, if EVERY trade with capacity goes
+    // to Opportunity Watch before the cutoff, the daily pool splits equally
+    // among scheduled reps/dispatchers — straight into commissions (which
+    // fires the You Got Paid popup) plus a gold floor-wide unlock pop.
+    setInterval(() => checkOppWatchBonus().catch(e => console.warn('opp bonus:', e.message)), 10 * 60_000)
     // Scheduled floor notifications: sweep every 60s, send what's due.
     setInterval(async () => {
       try {
