@@ -3,6 +3,8 @@ import { useSearchParams } from 'react-router-dom'
 import { sb } from '../lib/supabase'
 import TimeOffTab from '../components/TimeOffTab'
 import PtoRequestModal from '../components/PtoRequestModal'
+import ShiftSwapModal from '../components/ShiftSwapModal'
+import SwapRequests from '../components/SwapRequests'
 import { useAuth } from '../lib/AuthContext'
 import { inboundStats, outboundStats, acwStats, ahtOf, fmtSecs, fmtPct, SERVICE_LEVEL_SECONDS, SERVICE_LEVEL_TARGET } from '../lib/analytics'
 import Avatar from '../components/Avatar'
@@ -119,6 +121,7 @@ export default function MyPage() {
   const [tab, setTab] = useState(initialTab)
   // Click a day on My Schedule -> request time off for it.
   const [ptoDay, setPtoDay] = useState(null)
+  const [swapDay, setSwapDay] = useState(null)   // opens ShiftSwapModal ('' = no prefill)
   const [ptoToast, setPtoToast] = useState('')
   // 📣 Admin floor alert — broadcast to everyone or one person; pops like a
   // schedule alert on their screen.
@@ -488,6 +491,11 @@ export default function MyPage() {
               </div>
             </div>
           )}
+          {swapDay !== null && (
+            <ShiftSwapModal profile={profile} profiles={profiles} schedules={schedules}
+              initialDate={swapDay || undefined} onClose={() => setSwapDay(null)}
+              onSubmitted={() => { setPtoToast('Swap request sent — your co-worker has been emailed.'); setTimeout(() => setPtoToast(''), 6000) }} />
+          )}
           {ptoDay && (
             <PtoRequestModal initialDate={ptoDay} onClose={() => setPtoDay(null)}
               onSubmitted={() => { setPtoToast('Request sent — your manager has been notified. Track it in the Time Off tab.'); setTimeout(() => setPtoToast(''), 6000) }} />
@@ -722,51 +730,75 @@ export default function MyPage() {
               </div>
             )}
 
-            {/* TEAM SCHEDULE */}
+            {/* TEAM SCHEDULE — When-I-Work-style shift blocks, click your own to swap */}
             {tab === 'team-schedule' && (
               <div>
-                <div style={{ overflowX:'auto' }}>
-                  <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
+                <SwapRequests profile={profile} profiles={profiles} />
+                <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:10 }}>
+                  <div style={{ fontSize:11.5, color:'var(--text-muted)' }}>
+                    Click one of <b>your</b> shifts to request a swap — your co-worker accepts, then management signs off.
+                  </div>
+                  <button className="btn sm" style={{ marginLeft:'auto' }} onClick={() => setSwapDay('')}>🔁 Request a swap</button>
+                </div>
+                <div style={{ overflowX:'auto', borderRadius:'var(--radius-lg)', border:'1px solid var(--border)' }}>
+                  <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12, minWidth:860 }}>
                     <thead>
                       <tr style={{ background:'var(--surface-2)' }}>
-                        <th style={{ padding:'10px 14px', textAlign:'left', fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color:'var(--text-muted)', borderBottom:'1px solid var(--border)', width:140 }}>Agent</th>
+                        <th style={{ padding:'10px 14px', textAlign:'left', fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color:'var(--text-muted)', borderBottom:'1px solid var(--border)', width:150 }}>Agent</th>
                         {weekDates.map((date, i) => (
-                          <th key={date} style={{ padding:'10px 8px', textAlign:'center', fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color: date === today ? 'var(--accent)' : 'var(--text-muted)', borderBottom:'1px solid var(--border)', background: date === today ? 'var(--accent-bg)' : undefined }}>
-                            {DAYS[i]}<br />
-                            <span style={{ fontWeight:400, fontSize:10 }}>{fmtDate(date)}</span>
+                          <th key={date} style={{ padding:'8px 6px', textAlign:'center', fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color: date === today ? 'var(--accent)' : 'var(--text-muted)', borderBottom:'1px solid var(--border)', background: date === today ? 'var(--accent-bg)' : undefined }}>
+                            {DAYS[i]} <span style={{ fontWeight:400 }}>{fmtDate(date).split(' ').slice(1).join(' ')}</span>
                           </th>
                         ))}
+                        <th style={{ padding:'8px 10px', textAlign:'right', fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color:'var(--text-muted)', borderBottom:'1px solid var(--border)', width:60 }}>Hours</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {profiles.map((p, idx) => (
+                      {profiles.map((p, idx) => {
+                        const isMe = p.id === profile?.id
+                        const weekTotal = weekDates.reduce((a, dd) => a + schedHours(getSched(p.id, dd)), 0)
+                        return (
                         <tr key={p.id} style={{ background: idx % 2 === 0 ? 'var(--surface)' : 'var(--surface-2)', borderBottom:'1px solid var(--border)' }}>
-                          <td style={{ padding:'10px 14px', fontWeight: p.id === profile?.id ? 700 : 400, color: p.id === profile?.id ? 'var(--accent)' : 'var(--text-primary)' }}>
+                          <td style={{ padding:'10px 14px', fontWeight: isMe ? 700 : 500, color: isMe ? 'var(--accent)' : 'var(--text-primary)', whiteSpace:'nowrap' }}>
                             {p.name || p.email}
-                            {p.id === profile?.id && <span style={{ fontSize:9, marginLeft:4, color:'var(--accent)' }}>(you)</span>}
+                            {isMe && <span style={{ fontSize:9, marginLeft:4, color:'var(--accent)' }}>(you)</span>}
                           </td>
                           {weekDates.map(date => {
                             const sched = getSched(p.id, date)
                             const dt = sched?.day_type
                             const style = DAY_TYPE_STYLES[dt] || DAY_TYPE_STYLES.work
                             const isToday = date === today
+                            const isWork = sched && (!dt || dt === 'work') && sched.shift_start
+                            const swappable = isMe && isWork && date > today
                             return (
-                              <td key={date} style={{ padding:'8px', textAlign:'center', background: isToday ? 'var(--accent-bg)' : undefined, verticalAlign:'middle' }}>
-                                {!sched && <span style={{ fontSize:10, color:'var(--border-strong)' }}>--</span>}
-                                {sched && dt !== 'work' && (
-                                  <span style={{ fontSize:10, fontWeight:600, color: style.color, background: style.bg, padding:'2px 6px', borderRadius:4 }}>{style.label}</span>
+                              <td key={date} onClick={() => swappable && setSwapDay(date)}
+                                title={swappable ? 'Request a swap for this shift' : undefined}
+                                style={{ padding:'6px 5px', textAlign:'center', background: isToday ? 'var(--accent-bg)' : undefined, verticalAlign:'middle', cursor: swappable ? 'pointer' : 'default' }}>
+                                {!sched && <span style={{ fontSize:10, color:'var(--border-strong)' }}>—</span>}
+                                {sched && dt && dt !== 'work' && (
+                                  <div style={{ fontSize:10.5, fontWeight:700, color: style.color, background: style.bg, padding:'8px 4px', borderRadius:8 }}>{style.label}</div>
                                 )}
-                                {sched && dt === 'work' && (
-                                  <div style={{ fontSize:10, color:'var(--text-primary)', lineHeight:1.5 }}>
-                                    <div style={{ fontWeight:600 }}>{fmt12(sched.shift_start)}</div>
-                                    <div style={{ color:'var(--text-muted)' }}>{fmt12(sched.shift_end)}</div>
+                                {isWork && (
+                                  <div style={{
+                                    background: sched.template_color || 'var(--accent-bg)',
+                                    border: swappable ? '1px dashed var(--accent)' : '1px solid transparent',
+                                    borderRadius:8, padding:'7px 4px', lineHeight:1.35,
+                                  }}>
+                                    <div style={{ fontSize:11, fontWeight:700, color:'#1C1B19' }}>
+                                      {fmt12(sched.shift_start).replace(':00','').replace(' ','')}–{fmt12(sched.shift_end).replace(':00','').replace(' ','')}
+                                    </div>
+                                    <div style={{ fontSize:9, fontWeight:600, color:'#1C1B19', opacity:.65 }}>{fmtH(schedHours(sched))}h{swappable ? ' · 🔁' : ''}</div>
                                   </div>
                                 )}
                               </td>
                             )
                           })}
+                          <td style={{ padding:'8px 10px', textAlign:'right', fontWeight:700, color: weekTotal > 0 ? 'var(--text-primary)' : 'var(--text-muted)', fontVariantNumeric:'tabular-nums' }}>
+                            {weekTotal > 0 ? `${fmtH(weekTotal)}` : '—'}
+                          </td>
                         </tr>
-                      ))}
+                        )
+                      })}
                     </tbody>
                   </table>
                 </div>

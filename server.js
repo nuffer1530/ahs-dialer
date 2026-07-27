@@ -3956,6 +3956,249 @@ async function fetchDispatchWindow(days = DISPATCH_WINDOW_DAYS) {
            technicians: buRes?.data || [], jobTypes: jtRes?.data || [] }
 }
 
+// ═══ SHIFT SWAPS ════════════════════════════════════════════════════════════
+// Trade ("my Tue for your Thu") or give-away (someone takes my shift). The
+// co-worker agrees FIRST, then the requester's manager (any admin as backup)
+// — so management only ever sees deals both parties already want. Approval
+// physically swaps the schedule rows. 24-hour cutoff before the earliest
+// involved shift, on the Denver clock.
+
+const denverNowParts = (offsetMs = 0) => Object.fromEntries(new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'America/Denver', year: 'numeric', month: '2-digit', day: '2-digit',
+  hour: '2-digit', minute: '2-digit', hour12: false,
+}).formatToParts(new Date(Date.now() + offsetMs)).map(p => [p.type, p.value]))
+
+const afterSwapCutoff = (date, shiftStart) => {
+  const c = denverNowParts(24 * 3600e3)
+  const cd = `${c.year}-${c.month}-${c.day}`
+  return date > cd || (date === cd && String(shiftStart || '23:59') >= `${c.hour}:${c.minute}`)
+}
+
+const getScheduleRow = async (profileId, date) =>
+  (await supabase.from('schedules').select('*').eq('profile_id', profileId).eq('date', date).maybeSingle()).data
+
+const shiftFieldsOf = (r) => ({
+  day_type: 'work',
+  shift_start: r.shift_start, shift_end: r.shift_end,
+  break1_start: r.break1_start, break1_end: r.break1_end, break1_duration: r.break1_duration,
+  break2_start: r.break2_start, break2_end: r.break2_end, break2_duration: r.break2_duration,
+  lunch_start: r.lunch_start, lunch_end: r.lunch_end, lunch_duration: r.lunch_duration,
+  template_color: r.template_color,
+})
+
+const swapEmail = async (to, subject, bodyHtml) => {
+  if (!to) return
+  await sendResend({
+    to, subject,
+    html: `<div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:520px;margin:0 auto;padding:24px 20px;color:#111827;">
+  <div style="font-size:20px;font-weight:800;color:#ff751f;margin-bottom:10px;">andi</div>
+  ${bodyHtml}
+  <p style="margin:20px 0;"><a href="${appUrl}/mypage?tab=team-schedule" style="background:#ff751f;color:#fff;text-decoration:none;font-size:13px;font-weight:700;padding:10px 20px;border-radius:8px;">Open in Andi</a></p>
+</div>`,
+  }).catch(e => console.warn('swap email:', e.message))
+}
+
+app.post('/api/swaps/request', async (req, res) => {
+  const me = await requireUser(req, res)
+  if (!me) return
+  try {
+    const { requesterDate, targetId, targetDate, note } = req.body || {}
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(requesterDate || ''))) return res.status(400).json({ error: 'Pick which of your shifts to swap' })
+    if (!targetId || targetId === me.id) return res.status(400).json({ error: 'Pick a co-worker' })
+    if (targetDate && !/^\d{4}-\d{2}-\d{2}$/.test(String(targetDate))) return res.status(400).json({ error: 'Bad trade date' })
+
+    const { data: target } = await supabase.from('profiles').select('id, name, email, active').eq('id', targetId).maybeSingle()
+    if (!target || target.active === false) return res.status(400).json({ error: 'That co-worker is not active' })
+
+    const mine = await getScheduleRow(me.id, requesterDate)
+    if (!mine || (mine.day_type && mine.day_type !== 'work') || !mine.shift_start) {
+      return res.status(400).json({ error: `You don't have a work shift on ${requesterDate}` })
+    }
+    if (!afterSwapCutoff(requesterDate, mine.shift_start)) {
+      return res.status(400).json({ error: 'Swaps need to be requested more than 24 hours before the shift — for anything sooner, call your manager.' })
+    }
+    const theirsOnMyDay = await getScheduleRow(targetId, requesterDate)
+    if (theirsOnMyDay?.shift_start && (!theirsOnMyDay.day_type || theirsOnMyDay.day_type === 'work')) {
+      return res.status(400).json({ error: `${target.name || 'They'} already work${targetDate ? '' : 's'} on ${requesterDate} — they can't take your shift too.` })
+    }
+    if (targetDate) {
+      const theirs = await getScheduleRow(targetId, targetDate)
+      if (!theirs || (theirs.day_type && theirs.day_type !== 'work') || !theirs.shift_start) {
+        return res.status(400).json({ error: `${target.name || 'They'} don't have a work shift on ${targetDate}` })
+      }
+      if (!afterSwapCutoff(targetDate, theirs.shift_start)) {
+        return res.status(400).json({ error: 'The shift you want in trade starts within 24 hours — too late to swap it.' })
+      }
+      const mineOnTheirDay = await getScheduleRow(me.id, targetDate)
+      if (mineOnTheirDay?.shift_start && (!mineOnTheirDay.day_type || mineOnTheirDay.day_type === 'work')) {
+        return res.status(400).json({ error: `You already work on ${targetDate} — you can't take their shift too.` })
+      }
+    }
+
+    const { data: dupes } = await supabase.from('shift_swaps').select('id')
+      .eq('requester_id', me.id).eq('requester_date', requesterDate)
+      .in('status', ['pending_peer', 'pending_manager'])
+    if (dupes?.length) return res.status(400).json({ error: 'You already have a pending swap for that shift — cancel it first.' })
+
+    const { data: row, error } = await supabase.from('shift_swaps').insert({
+      requester_id: me.id, requester_date: requesterDate,
+      target_id: targetId, target_date: targetDate || null,
+      manager_id: me.manager_id || null,
+      note: String(note || '').slice(0, 400) || null,
+    }).select().single()
+    if (error) throw new Error(error.message)
+
+    const who = me.name || me.email
+    await swapEmail(target.email, `${who} wants to swap a shift with you`,
+      `<p style="font-size:14px;"><b>${esc2(who)}</b> is asking to ${targetDate
+        ? `trade shifts: they take your <b>${esc2(targetDate)}</b> shift, you take their <b>${esc2(requesterDate)}</b> shift`
+        : `give you their <b>${esc2(requesterDate)}</b> shift`}.</p>
+      ${row.note ? `<p style="font-size:13px;color:#374151;background:#F9FAFB;border:1px solid #E5E7EB;border-radius:8px;padding:10px 14px;">"${esc2(row.note)}"</p>` : ''}
+      <p style="font-size:13px;color:#374151;">If you accept, it goes to management for the final sign-off.</p>`)
+    res.json({ ok: true, swap: row })
+  } catch (err) {
+    console.error('swap request:', err.message)
+    res.status(500).json({ error: err.message })
+  }
+})
+
+app.post('/api/swaps/peer', async (req, res) => {
+  const me = await requireUser(req, res)
+  if (!me) return
+  try {
+    const { id, accept } = req.body || {}
+    const { data: row } = await supabase.from('shift_swaps').select('*').eq('id', id).maybeSingle()
+    if (!row) return res.status(404).json({ error: 'Swap not found' })
+    if (row.target_id !== me.id) return res.status(403).json({ error: 'This swap is not addressed to you' })
+    if (row.status !== 'pending_peer') return res.status(400).json({ error: `Already ${row.status.replace('_', ' ')}` })
+
+    const { data: reqr } = await supabase.from('profiles').select('id, name, email, manager_id').eq('id', row.requester_id).maybeSingle()
+    if (!accept) {
+      await supabase.from('shift_swaps').update({ status: 'declined', peer_decided_at: new Date().toISOString(), decided_by: me.name || me.email }).eq('id', id)
+      await swapEmail(reqr?.email, `${me.name || me.email} declined your shift swap`,
+        `<p style="font-size:14px;"><b>${esc2(me.name || me.email)}</b> declined the swap for <b>${esc2(row.requester_date)}</b>. Your shift is unchanged.</p>`)
+      return res.json({ ok: true })
+    }
+    await supabase.from('shift_swaps').update({ status: 'pending_manager', peer_decided_at: new Date().toISOString() }).eq('id', id)
+    // Route to the requester's manager; if none is set, every admin hears about it.
+    let approvers = []
+    if (row.manager_id) {
+      const { data: mgr } = await supabase.from('profiles').select('email').eq('id', row.manager_id).maybeSingle()
+      if (mgr?.email) approvers = [mgr.email]
+    }
+    if (!approvers.length) {
+      const { data: admins } = await supabase.from('profiles').select('email').eq('role', 'admin').eq('active', true)
+      approvers = (admins || []).map(a => a.email).filter(Boolean)
+    }
+    for (const to of approvers) {
+      await swapEmail(to, `Shift swap needs your approval: ${reqr?.name || 'a rep'} ↔ ${me.name || me.email}`,
+        `<p style="font-size:14px;"><b>${esc2(reqr?.name || reqr?.email || 'A rep')}</b> and <b>${esc2(me.name || me.email)}</b> agreed to ${row.target_date
+          ? `trade: <b>${esc2(row.requester_date)}</b> ↔ <b>${esc2(row.target_date)}</b>`
+          : `hand off the <b>${esc2(row.requester_date)}</b> shift`}. Both have signed off — it needs your approval.</p>`)
+    }
+    res.json({ ok: true })
+  } catch (err) {
+    console.error('swap peer:', err.message)
+    res.status(500).json({ error: err.message })
+  }
+})
+
+app.post('/api/swaps/decide', async (req, res) => {
+  const me = await requireUser(req, res)
+  if (!me) return
+  try {
+    const { id, decision, note } = req.body || {}
+    if (!['approved', 'denied'].includes(decision)) return res.status(400).json({ error: 'Decision must be approved or denied' })
+    const { data: row } = await supabase.from('shift_swaps').select('*').eq('id', id).maybeSingle()
+    if (!row) return res.status(404).json({ error: 'Swap not found' })
+    if (row.status !== 'pending_manager') return res.status(400).json({ error: `Not awaiting management (${row.status.replace('_', ' ')})` })
+    if (row.manager_id !== me.id && me.role !== 'admin') return res.status(403).json({ error: "Only this person's manager (or an admin) can decide" })
+
+    const [reqrRow, tgtRow] = await Promise.all([
+      supabase.from('profiles').select('id, name, email').eq('id', row.requester_id).maybeSingle().then(r => r.data),
+      supabase.from('profiles').select('id, name, email').eq('id', row.target_id).maybeSingle().then(r => r.data),
+    ])
+
+    if (decision === 'approved') {
+      const mine = await getScheduleRow(row.requester_id, row.requester_date)
+      if (!mine?.shift_start) return res.status(400).json({ error: 'The original shift no longer exists on the schedule — deny this one.' })
+      if (!afterSwapCutoff(row.requester_date, mine.shift_start)) return res.status(400).json({ error: 'That shift is now inside the 24-hour window — too late to approve.' })
+      const theirs = row.target_date ? await getScheduleRow(row.target_id, row.target_date) : null
+      if (row.target_date && !theirs?.shift_start) return res.status(400).json({ error: "The trade-back shift no longer exists — deny this one." })
+
+      // Physically swap: delete every row of both people on the involved
+      // dates, then re-insert with traded owners. Sidesteps any unique
+      // (profile,date) constraint no matter which off/pto rows exist.
+      const dates = [row.requester_date, row.target_date].filter(Boolean)
+      await supabase.from('schedules').delete()
+        .in('profile_id', [row.requester_id, row.target_id]).in('date', dates)
+      const inserts = [{ profile_id: row.target_id, date: row.requester_date, ...shiftFieldsOf(mine), created_by: me.id }]
+      if (theirs) inserts.push({ profile_id: row.requester_id, date: row.target_date, ...shiftFieldsOf(theirs), created_by: me.id })
+      const { error: insErr } = await supabase.from('schedules').insert(inserts)
+      if (insErr) throw new Error('schedule swap: ' + insErr.message)
+    }
+
+    await supabase.from('shift_swaps').update({
+      status: decision, decided_by: me.name || me.email, decided_at: new Date().toISOString(),
+      decision_note: String(note || '').slice(0, 300) || null,
+    }).eq('id', id)
+
+    const what = row.target_date ? `${row.requester_date} ↔ ${row.target_date}` : `the ${row.requester_date} shift`
+    for (const p of [reqrRow, tgtRow]) {
+      await swapEmail(p?.email, `Shift swap ${decision}: ${what}`,
+        `<p style="font-size:14px;">Your swap (${esc2(what)}) was <b>${decision}</b> by ${esc2(me.name || me.email)}.${decision === 'approved' ? ' The schedule has been updated.' : ' The schedule is unchanged.'}</p>
+        ${note ? `<p style="font-size:13px;color:#374151;">"${esc2(note)}"</p>` : ''}`)
+    }
+    res.json({ ok: true })
+  } catch (err) {
+    console.error('swap decide:', err.message)
+    res.status(500).json({ error: err.message })
+  }
+})
+
+app.post('/api/swaps/cancel', async (req, res) => {
+  const me = await requireUser(req, res)
+  if (!me) return
+  try {
+    const { id } = req.body || {}
+    const { data: row } = await supabase.from('shift_swaps').select('*').eq('id', id).maybeSingle()
+    if (!row) return res.status(404).json({ error: 'Swap not found' })
+    if (row.requester_id !== me.id && me.role !== 'admin') return res.status(403).json({ error: 'Not yours to cancel' })
+    if (!['pending_peer', 'pending_manager'].includes(row.status)) return res.status(400).json({ error: `Already ${row.status}` })
+    await supabase.from('shift_swaps').update({ status: 'canceled', decided_by: me.name || me.email, decided_at: new Date().toISOString() }).eq('id', id)
+    res.json({ ok: true })
+  } catch (err) { res.status(500).json({ error: err.message }) }
+})
+
+app.get('/api/swaps/mine', async (req, res) => {
+  const me = await requireUser(req, res)
+  if (!me) return
+  try {
+    const since = new Date(Date.now() - 60 * 864e5).toISOString()
+    const [{ data: mine }, { data: queue }] = await Promise.all([
+      supabase.from('shift_swaps').select('*')
+        .or(`requester_id.eq.${me.id},target_id.eq.${me.id}`)
+        .gte('created_at', since).order('created_at', { ascending: false }).limit(30),
+      me.role === 'admin'
+        ? supabase.from('shift_swaps').select('*').eq('status', 'pending_manager').order('created_at', { ascending: false })
+        : supabase.from('shift_swaps').select('*').eq('status', 'pending_manager').eq('manager_id', me.id).order('created_at', { ascending: false }),
+    ])
+    res.json({ mine: mine || [], queue: queue || [] })
+  } catch (err) { res.status(500).json({ error: err.message }) }
+})
+
+app.get('/api/swaps/week', async (req, res) => {
+  const me = await requireUser(req, res)
+  if (!me) return
+  try {
+    const { start, end } = req.query
+    const { data } = await supabase.from('shift_swaps').select('requester_id, target_id, requester_date, target_date, decided_at')
+      .eq('status', 'approved')
+      .or(`and(requester_date.gte.${start},requester_date.lte.${end}),and(target_date.gte.${start},target_date.lte.${end})`)
+    res.json({ swaps: data || [] })
+  } catch (err) { res.status(500).json({ error: err.message }) }
+})
+
 const OPP_BONUS_KEY = 'opp_watch_incentive'   // { enabled, pool, cutoff: 'HH:MM' }
 const OPP_BONUS_LOG = 'opp_watch_bonus_log'   // { 'YYYY-MM-DD': { at, n, pool } } — the can't-pay-twice ledger
 async function checkOppWatchBonus() {

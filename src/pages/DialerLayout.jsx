@@ -308,7 +308,7 @@ function DialerLayoutInner() {
   // claim-on-open, first rep there wins) and it clears the moment the inbox
   // empties — including when a booking is dismissed inside ServiceTitan.
   const openLeads = useOpenLeads()
-  const ptoApprovals = usePtoApprovals(profile?.id)
+  const ptoApprovals = usePtoApprovals(profile?.id, isAdmin)
   const [statusOptions, setStatusOptions] = useState(DEFAULT_STATUS_OPTIONS)
 
   // Load custom statuses from app_settings

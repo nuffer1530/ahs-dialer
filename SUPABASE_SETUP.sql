@@ -513,3 +513,25 @@ We serve Colorado Springs, Pueblo, and Castle Rock and surrounding areas. List e
 ('Dispatch fee policy', 'policy',
 '[DRAFT — FILL IN before relying on this]
 Standard dispatch/diagnostic fee: $___. Waived when: ___. Member rate: $___. After-hours/emergency rate: $___.', 'seed');
+
+
+-- ═══ Shift swaps (Jul 2026) ════════════════════════════════════════════════
+create table if not exists shift_swaps (
+  id uuid primary key default gen_random_uuid(),
+  requester_id uuid not null,
+  requester_date date not null,
+  target_id uuid not null,
+  target_date date,                       -- null = give-away
+  status text not null default 'pending_peer',  -- pending_peer | pending_manager | approved | denied | declined | canceled
+  note text,
+  manager_id uuid,
+  peer_decided_at timestamptz,
+  decided_by text,
+  decided_at timestamptz,
+  decision_note text,
+  created_at timestamptz default now()
+);
+alter table shift_swaps enable row level security;
+drop policy if exists "shift_swaps_read" on shift_swaps;
+create policy "shift_swaps_read" on shift_swaps for select to authenticated using (true);
+alter publication supabase_realtime add table shift_swaps;
