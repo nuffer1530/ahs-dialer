@@ -4185,6 +4185,14 @@ async function computeLiveBoardPayload(dayOffset = 0) {
 
     const jobById = new Map(jobs.map(j => [j.id, j]))
     const apptById = new Map(appts.map(a => [a.id, a]))
+    // Loaded here because BOTH the calls loop and the unassigned tray stamp
+    // canGoEarly — declaring it later threw a TDZ error that blanked the tab.
+    let canGoEarlyJobs = {}
+    try {
+      const { data: geRow } = await supabase.from('app_settings').select('value').eq('key', 'can_go_early_jobs').maybeSingle()
+      canGoEarlyJobs = JSON.parse(geRow?.value || '{}')
+    } catch {}
+
     const calls = []
     for (const a of assignments) {
       const j = jobById.get(a.jobId)
@@ -4384,11 +4392,7 @@ async function computeLiveBoardPayload(dayOffset = 0) {
       const { data: cRow } = await supabase.from('app_settings').select('value').eq('key', 'board_revenue_counted').maybeSingle()
       counted = JSON.parse(cRow?.value || '{}')
     } catch {}
-    let canGoEarlyJobs = {}
-    try {
-      const { data: geRow } = await supabase.from('app_settings').select('value').eq('key', 'can_go_early_jobs').maybeSingle()
-      canGoEarlyJobs = JSON.parse(geRow?.value || '{}')
-    } catch {}
+
     // keep the ledger from growing forever — entries older than 14 days drop
     for (const [jid, d] of Object.entries(counted)) {
       if (Date.parse(d) < Date.now() - 14 * 864e5) delete counted[jid]
