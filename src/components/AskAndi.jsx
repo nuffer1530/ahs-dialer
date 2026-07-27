@@ -46,6 +46,21 @@ export default function AskAndi() {
     if (bodyRef.current) bodyRef.current.scrollTop = bodyRef.current.scrollHeight
   }, [msgs, open])
 
+  // 🎧 Live coach: the dialer heard an objection on the call — open with the
+  // play, silently (the rep is mid-conversation; no chime, no focus steal).
+  useEffect(() => {
+    const onCoach = (ev) => {
+      const tip = ev.detail || {}
+      setMsgs(prev => [...prev, {
+        role: 'assistant', coach: true, coachLabel: tip.label, heard: tip.heard,
+        content: tip.text, sources: tip.articleTitle ? [tip.articleTitle] : [],
+      }])
+      setOpen(true)
+    }
+    window.addEventListener('andi-coach', onCoach)
+    return () => window.removeEventListener('andi-coach', onCoach)
+  }, [])
+
   const ask = async () => {
     const q = input.trim()
     if (!q || busy) return
@@ -125,12 +140,26 @@ export default function AskAndi() {
               </div>
             )}
             {msgs.map((m, i) => (
-              <div key={i} style={{ alignSelf: m.role === 'user' ? 'flex-end' : 'flex-start', maxWidth: '88%' }}>
+              <div key={i} style={{ alignSelf: m.role === 'user' ? 'flex-end' : 'flex-start', maxWidth: '88%', width: m.coach ? '100%' : undefined }}>
+                {m.coach && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
+                    <span style={{ fontSize: 10, fontWeight: 800, textTransform: 'uppercase', letterSpacing: .5,
+                      padding: '2px 9px', borderRadius: 99, background: 'var(--tone-amber-bg)', color: 'var(--tone-amber-tx)', border: '1px solid var(--tone-amber-bd)' }}>
+                      🎧 Live coach — {m.coachLabel}
+                    </span>
+                  </div>
+                )}
+                {m.coach && m.heard && (
+                  <div style={{ fontSize: 10.5, color: 'var(--text-muted)', fontStyle: 'italic', marginBottom: 3 }}>
+                    Customer: "{m.heard}"
+                  </div>
+                )}
                 <div style={{ padding: '9px 12px', borderRadius: 12, fontSize: 12.5, lineHeight: 1.55,
                   whiteSpace: m.role === 'user' ? 'pre-wrap' : 'normal',
                   background: m.role === 'user' ? 'var(--accent)' : 'var(--surface-2)',
                   color: m.role === 'user' ? '#fff' : 'var(--text-primary)',
-                  border: m.role === 'user' ? 'none' : '1px solid var(--border)' }}>
+                  border: m.role === 'user' ? 'none' : m.coach ? '1px solid var(--tone-amber-bd)' : '1px solid var(--border)',
+                  boxShadow: m.coach ? '0 0 0 2px var(--tone-amber-bg)' : 'none' }}>
                   {m.role === 'user' ? m.content : <AnswerText text={m.content} />}
                 </div>
                 {m.role === 'assistant' && (m.sources?.length > 0 || m.logId != null) && (

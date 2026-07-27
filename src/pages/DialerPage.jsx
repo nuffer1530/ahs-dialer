@@ -883,6 +883,13 @@ export default function DialerPage() {
         const r = await fetch(`/api/call-notes/latest?contactId=${cid}&phone=${encodeURIComponent(cphone)}`)
         const d = await r.json()
         if (d?.text) setAutoNote(prev => (prev?.text === d.text ? prev : { contactId: cid, text: d.text, at: d.at }))
+        // 🎧 Live coach: the customer said a trigger phrase — pop Ask Andi
+        // with the play. Once per tip, and only during the live call.
+        if (live) for (const tip of (d?.coach || [])) {
+          if (seenCoachRef.current.has(tip.id)) continue
+          seenCoachRef.current.add(tip.id)
+          window.dispatchEvent(new CustomEvent('andi-coach', { detail: tip }))
+        }
       } catch {}
     }
     poll()   // immediate — a tab opened mid-call shows notes right away
@@ -894,6 +901,7 @@ export default function DialerPage() {
   // Fill when the box is empty OR still holds the previous auto-draft — the
   // moment the rep types their own words, we stop touching the box and the
   // banner offers the newest draft instead.
+  const seenCoachRef = useRef(new Set())
   const lastAutoRef = useRef('')
   useEffect(() => {
     if (!autoNote || autoNote.contactId !== selectedId) return

@@ -3047,6 +3047,52 @@ async function startLiveTranscription(callSid, contactId, label, phone) {
   } catch (e) { _liveTx.delete(callSid); console.warn('live transcription start:', e.message) }
 }
 
+// ── 🎧 LIVE OBJECTION COACH ─────────────────────────────────────────────────
+// The customer's own words trigger the matching playbook article, delivered
+// through the same poll the live notes ride — Ask Andi pops open with the
+// play while the customer is still talking. Regex-first: instant and free.
+// Each category fires at most once per call so the rep isn't spammed.
+const COACH_TRIGGERS = [
+  { cat: 'price_phone', label: 'Asking for a price over the phone',
+    article: 'Objections: price over the phone, time windows, talking to a tech',
+    re: /how much (is|does|would|will)|what does (it|that|this) cost|what('s| is) (it|that|this) (gonna|going to) (cost|run)|ballpark|price over the phone|give me a price|quote (me )?over the phone|what (do|would) you (guys )?charge/i },
+  { cat: 'fee', label: 'Pushing back on the dispatch fee',
+    article: '$89 fee: objection-by-objection answers',
+    re: /(that|the|a) fee|eighty.?nine dollar|\$ ?89|charge (just )?to (come|send (someone|somebody)) out|pay (just )?for (an estimate|someone to (come|look))|free estimate|never (had to )?pa(y|id) for|waive (the|that)/i },
+  { cat: 'think', label: '"Let me think about it"',
+    article: 'Objection: I want to think about it',
+    re: /think about it|talk it over|sleep on it|have to get back to you/i },
+  { cat: 'other_co', label: 'They already have a company',
+    article: 'Objection: I already have a company I use',
+    re: /(another|other|different) company (we|i) (use|call)|(my|our) (guy|regular (guy|company)|plumber|electrician|hvac (guy|company))|already (have|use) (someone|somebody|a company|a guy)/i },
+]
+let _coachKb = { at: 0, map: new Map() }
+async function coachArticleBody(title) {
+  if (Date.now() - _coachKb.at > 5 * 60_000) {
+    const { data } = await supabase.from('kb_articles').select('title, body').eq('active', true)
+    _coachKb = { at: Date.now(), map: new Map((data || []).map(a => [a.title, a.body])) }
+  }
+  return _coachKb.map.get(title) || null
+}
+const _coachTips = new Map()   // callSid -> { contactId, phone, tips: [], fired: Set }
+async function detectCoach(callSid, txEntry, text) {
+  let ct = _coachTips.get(callSid)
+  if (!ct) { ct = { contactId: txEntry.contactId, phone: txEntry.phone, tips: [], fired: new Set() }; _coachTips.set(callSid, ct) }
+  ct.contactId = ct.contactId || txEntry.contactId
+  ct.phone = ct.phone || txEntry.phone
+  for (const t of COACH_TRIGGERS) {
+    if (ct.fired.has(t.cat) || !t.re.test(text)) continue
+    ct.fired.add(t.cat)
+    const body = await coachArticleBody(t.article)
+    if (!body) { console.warn(`coach: article "${t.article}" missing/inactive — trigger skipped`); continue }
+    ct.tips.push({
+      id: `${callSid}-${t.cat}`, cat: t.cat, label: t.label,
+      articleTitle: t.article, text: String(body).slice(0, 1600),
+      heard: String(text).slice(0, 140), at: Date.now(),
+    })
+  }
+}
+
 async function runLiveDraft(callSid, entry) {
   const e = entry || _liveTx.get(callSid)
   if (!e || e.running) return
@@ -3111,6 +3157,7 @@ app.post('/api/twilio/live-transcript', async (req, res) => {
     const { TranscriptionEvent, CallSid, Track } = req.body
     if (!CallSid) return
     if (TranscriptionEvent === 'transcription-stopped') {
+      setTimeout(() => _coachTips.delete(CallSid), 5 * 60_000)   // linger briefly for the last poll
       const e = _liveTx.get(CallSid)
       _liveTx.delete(CallSid)
       if (e) {
@@ -3127,6 +3174,7 @@ app.post('/api/twilio/live-transcript', async (req, res) => {
     const e = _liveTx.get(CallSid)
     if (!e) return
     e.parts.push({ who: Track === 'inbound_track' ? 'Customer' : 'Rep', text })
+    if (Track === 'inbound_track') detectCoach(CallSid, e, text).catch(() => {})
     if (Date.now() - e.lastRun > 20_000) runLiveDraft(CallSid)
   } catch (err) { console.warn('live-transcript webhook:', err.message) }
 })
@@ -3148,15 +3196,20 @@ app.get('/api/call-notes/latest', (req, res) => {
   const contactId = String(req.query.contactId || '')
   const phone = last10(req.query.phone)
   if (!contactId && !phone) return res.json({})
+  const match = (v) => (contactId && String(v.contactId) === contactId) || (phone && v.phone && v.phone === phone)
   let best = null
   for (const v of _callNotes.values()) {
     if (Date.now() - v.at >= 15 * 60_000) continue
     // Duplicate contacts share a phone — match either key so the draft can't
     // hide behind whichever duplicate the server happened to link.
-    const hit = (contactId && String(v.contactId) === contactId) || (phone && v.phone && v.phone === phone)
-    if (hit && (!best || v.at > best.at)) best = v
+    if (match(v) && (!best || v.at > best.at)) best = v
   }
-  res.json(best ? { text: best.text, at: best.at } : {})
+  // Live objection-coach tips ride the same poll — no extra request loop.
+  const coach = []
+  for (const ct of _coachTips.values()) {
+    if (match(ct)) coach.push(...ct.tips)
+  }
+  res.json({ ...(best ? { text: best.text, at: best.at } : {}), coach })
 })
 
 app.post('/api/twilio/recording', async (req, res) => {
