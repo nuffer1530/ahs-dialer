@@ -255,7 +255,7 @@ export default function CampaignsPage() {
         </div>
       )}
 
-      <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(320px,1fr))', gap:14 }}>
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(min(320px, 100%), 1fr))', gap:14 }}>
         {campaigns.map(camp => {
           const cc = contacts.filter(c => c.campaign_id === camp.id)
           const total = cc.length, done = cc.filter(isDone).length, booked = cc.filter(c => c.status === 'Booked').length

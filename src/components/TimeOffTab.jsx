@@ -153,7 +153,7 @@ export default function TimeOffTab({ profile }) {
       )}
 
       {/* Calendar and history side by side on wide screens */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))', gap: 20, alignItems: 'start' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(420px, 100%), 1fr))', gap: 20, alignItems: 'start' }}>
 
       {/* Month calendar — navigate up to a year out */}
       <div className="card">

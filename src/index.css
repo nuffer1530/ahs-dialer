@@ -175,3 +175,11 @@ textarea.form-input { resize: vertical; min-height: 72px; }
 @media (max-width: 768px) {
   :root { --sidebar-width: 100%; }
 }
+
+/* ── MOBILE (≤768px): tables scroll inside their cards instead of blowing out
+   the page, and wide grids are allowed to shrink. The shell swap (sidebar →
+   drawer) is handled in DialerLayout. ── */
+@media (max-width: 768px) {
+  .data-table { min-width: 640px; }
+  .card { overflow-x: auto; }
+}

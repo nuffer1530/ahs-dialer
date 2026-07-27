@@ -1,0 +1,11 @@
+{
+  "name": "Andi — Awesome Home Services",
+  "short_name": "Andi",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#F7F6F3",
+  "theme_color": "#ff751f",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

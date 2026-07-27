@@ -6,6 +6,7 @@ import PtoRequestModal from '../components/PtoRequestModal'
 import ShiftSwapModal from '../components/ShiftSwapModal'
 import SwapRequests from '../components/SwapRequests'
 import { useAuth } from '../lib/AuthContext'
+import { useIsMobile } from '../lib/useIsMobile'
 import { inboundStats, outboundStats, acwStats, ahtOf, fmtSecs, fmtPct, SERVICE_LEVEL_SECONDS, SERVICE_LEVEL_TARGET } from '../lib/analytics'
 import Avatar from '../components/Avatar'
 
@@ -115,6 +116,7 @@ const RATING_COLORS = {
 
 export default function MyPage() {
   const { profile, isAdmin } = useAuth()
+  const isMobile = useIsMobile()
   const [searchParams, setSearchParams] = useSearchParams()
   const VALID_TABS = ['my-schedule', 'team-schedule', 'stats', 'commissions', 'scorecard', 'time-off']
   const initialTab = VALID_TABS.includes(searchParams.get('tab')) ? searchParams.get('tab') : 'my-schedule'
@@ -528,7 +530,7 @@ export default function MyPage() {
 
         {/* Tab bar */}
         <div style={{ display:'flex', alignItems:'center', padding:'0 24px', marginTop:10 }}>
-          <div style={{ display:'flex', gap:0, flex:1 }}>
+          <div style={{ display:'flex', gap:0, flex:1, overflowX:'auto' }}>
             {TABS.map(t => {
               const isActive = tab === t.id
               const isHov = hoveredTab === t.id && !isActive
@@ -657,7 +659,7 @@ export default function MyPage() {
                   )
                 })()}
                 {schedView === 'week' && (
-                <div style={{ display:'grid', gridTemplateColumns:'repeat(7, 1fr)', gap:8 }}>
+                <div style={{ display:'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(7, 1fr)', gap:8 }}>
                   {weekDates.map(date => {
                     const sched = getSched(profile?.id, date)
                     const isToday = date === today

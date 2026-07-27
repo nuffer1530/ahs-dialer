@@ -150,7 +150,7 @@ function TechInfo() {
       {teams.map(team => (
         <div key={team} style={{ marginBottom:20 }}>
           <div style={{ fontSize:13, fontWeight:700, marginBottom:8 }}>{team}</div>
-          <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(320px, 1fr))', gap:10 }}>
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(min(320px, 100%), 1fr))', gap:10 }}>
             {(data.techs || []).filter(t => t.team === team).map(t => (
               <div key={t.id} className="card" style={{ padding:'10px 12px' }}>
                 <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:6, gap:8 }}>

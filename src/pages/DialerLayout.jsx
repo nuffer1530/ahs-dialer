@@ -3,6 +3,7 @@ import { Routes, Route, NavLink, useNavigate, useLocation } from 'react-router-d
 import { useAuth } from '../lib/AuthContext'
 import WeatherStrip from '../components/WeatherStrip'
 import AskAndi from '../components/AskAndi'
+import { useIsMobile } from '../lib/useIsMobile'
 import { loadOpsConfig } from '../lib/opsConfig'
 import { useData } from '../lib/DataContext'
 import { sb } from '../lib/supabase'
@@ -279,6 +280,8 @@ function DialerLayoutInner() {
   const [agentStatus, setAgentStatus] = useState('Offline')
   const [showStatusMenu, setShowStatusMenu] = useState(false)
   const [showSidebarStatus, setShowSidebarStatus] = useState(false)
+  const isMobile = useIsMobile()
+  const [mobileNav, setMobileNav] = useState(false)
   const [statusDuration, setStatusDuration] = useState(0)
   const statusTimerRef = useRef(null)
   const statusStartRef = useRef(null)
@@ -535,12 +538,28 @@ function DialerLayoutInner() {
     }
   }
 
+  // Mobile: the sidebar becomes a slide-over drawer; navigating closes it.
+  useEffect(() => { setMobileNav(false) }, [location.pathname])
+
   return (
     <div style={{ display:'flex', height:'100vh', overflow:'hidden' }}>
       <WinCelebration />
 
-      {/* ── LEFT SIDEBAR ── */}
-      <aside style={{
+      {isMobile && mobileNav && (
+        <div onClick={() => setMobileNav(false)}
+          style={{ position:'fixed', inset:0, background:'rgba(0,0,0,.45)', zIndex:1290 }} />
+      )}
+
+      {/* ── LEFT SIDEBAR (fixed drawer on mobile) ── */}
+      <aside style={isMobile ? {
+        position: 'fixed', top: 0, bottom: 0, left: mobileNav ? 0 : -300,
+        width: 280, minWidth: 280,
+        background: 'var(--surface)',
+        borderRight: '1px solid var(--border)',
+        display: 'flex', flexDirection: 'column',
+        transition: 'left .2s', overflow: 'hidden', zIndex: 1300,
+        boxShadow: mobileNav ? '0 0 40px rgba(0,0,0,.35)' : 'none',
+      } : {
         width: NAV_WIDTH,
         minWidth: NAV_WIDTH,
         flexShrink: 0,
@@ -719,6 +738,13 @@ function DialerLayoutInner() {
         {location.pathname !== '/warroom' && <AskAndi />}
         {location.pathname !== '/warroom' && (
         <div style={{ height:53, minHeight:53, boxSizing:'border-box', flexShrink:0, borderBottom:'1px solid var(--border)', background:'var(--surface)', display:'flex', alignItems:'center', justifyContent:'space-between', padding:'0 16px', position:'relative', zIndex:100 }}>
+          {isMobile && (
+            <button onClick={() => setMobileNav(v => !v)} title="Menu"
+              style={{ border:'1px solid var(--border)', background:'var(--surface-2)', color:'var(--text-primary)',
+                borderRadius:8, width:36, height:36, fontSize:17, cursor:'pointer', marginRight:10, flexShrink:0 }}>
+              ☰
+            </button>
+          )}
           {/* Contextual page header */}
           <div style={{ display:'flex', flexDirection:'column', lineHeight:1.2, minWidth:0 }}>
             <span style={{ fontSize:15, fontWeight:700, color:'var(--text-primary)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
@@ -732,7 +758,7 @@ function DialerLayoutInner() {
           </div>
           {/* Weather — centered in the top bar's dead space on every page */}
           <div style={{ flex:1, display:'flex', justifyContent:'center', minWidth:0, overflow:'hidden', padding:'0 14px' }}>
-            <WeatherStrip />
+            {!isMobile && <WeatherStrip />}
           </div>
           <div ref={menuRef} style={{ position:'relative' }}>
         <button onClick={() => setShowStatusMenu(v => !v)}
