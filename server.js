@@ -2667,6 +2667,60 @@ app.get('/api/tv/sales-today', async (req, res) => {
   }
 })
 
+// TV extras: today's 5★ reviews, membership sales, and the Opportunity Watch
+// Bonus unlock — one cached call so the wallboard stays cheap.
+let _tvWinsCache = null
+app.get('/api/tv/wins-today', async (req, res) => {
+  try {
+    if (_tvWinsCache && _tvWinsCache.expires > Date.now()) return res.json(_tvWinsCache.data)
+    const today = boardDay(0)
+    const denverToday = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Denver', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
+
+    const [reviewsRaw, membsRaw, techs, csrRows, profRows, bonusRow] = await Promise.all([
+      stGet(`/marketingreputation/v2/tenant/${ST_TENANT_ID}/reviews?fromDate=${denverToday}&pageSize=100`).then(d => d?.data || []).catch(() => []),
+      stGet(`/memberships/v2/tenant/${ST_TENANT_ID}/memberships?createdOnOrAfter=${today.startUtc.toISOString()}&pageSize=100`).then(d => d?.data || []).catch(() => []),
+      getBoardTechs().catch(() => []),
+      supabase.from('csr_st_users').select('st_user_id, profile_id').then(r => r.data || []),
+      supabase.from('profiles').select('id, name, email').then(r => r.data || []),
+      supabase.from('app_settings').select('value').eq('key', OPP_BONUS_LOG).maybeSingle().then(r => r.data),
+    ])
+    const techName = new Map(techs.map(t => [t.id, t.name]))
+    const profName = new Map(profRows.map(p => [p.id, p.name || p.email]))
+    const csrName = new Map(csrRows.map(c => [c.st_user_id, profName.get(c.profile_id)]))
+
+    const reviews = reviewsRaw
+      .filter(r => (r.rating || 0) === 5)
+      .map(r => ({
+        id: `rev-${r.internalId || r.externalId}`,
+        at: r.publishDate || null,
+        tech: r.technicianFullName || null,
+        author: r.authorName || 'A customer',
+        platform: r.platform || 'Google',
+      }))
+
+    const memberships = membsRaw.map(m => ({
+      id: `memb-${m.id}`,
+      at: m.createdOn || null,
+      seller: techName.get(m.soldById) || csrName.get(m.soldById) || 'The team',
+      type: m.membershipTypeName || m.type?.name || 'Awesome Club',
+    }))
+
+    let bonus = null
+    try {
+      const log = JSON.parse(bonusRow?.value || '{}')
+      if (log[denverToday]) bonus = { id: `bonus-${denverToday}`, at: log[denverToday].at, pool: log[denverToday].pool, n: log[denverToday].n }
+    } catch {}
+
+    const data = { generatedAt: new Date().toISOString(), reviews: reviews.slice(0, 20), memberships: memberships.slice(0, 20), bonus }
+    _tvWinsCache = { data, expires: Date.now() + 5 * 60_000 }
+    res.json(data)
+  } catch (err) {
+    console.error('tv wins:', err.message)
+    if (_tvWinsCache) return res.json(_tvWinsCache.data)
+    res.status(500).json({ error: err.message })
+  }
+})
+
 app.get('/api/board/3day', async (req, res) => {
   try {
     res.json(await build3DayBoard())

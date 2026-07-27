@@ -71,6 +71,7 @@ export default function WarRoomPage() {
   const [ticker, setTicker] = useState({ enabled: false, messages: [] })
   const [board, setBoard] = useState(null)   // 3-day call board (today column shown)
   const [sales, setSales] = useState([])     // estimates SOLD today (tech wins)
+  const [wins, setWins] = useState({ reviews: [], memberships: [], bonus: null })   // 5★ / club sales / 🎯 unlock
   const [isFull, setIsFull] = useState(false)
   const rootRef = useRef(null)
 
@@ -78,11 +79,13 @@ export default function WarRoomPage() {
   useEffect(() => {
     const load = () => fetch('/api/board/3day').then(r => r.json()).then(setBoard).catch(() => {})
     const loadSales = () => fetch('/api/tv/sales-today').then(r => r.json()).then(d => setSales(d.sales || [])).catch(() => {})
-    loadSales()
+    const loadWins = () => fetch('/api/tv/wins-today').then(r => r.json()).then(d => setWins({ reviews: d.reviews || [], memberships: d.memberships || [], bonus: d.bonus || null })).catch(() => {})
+    loadSales(); loadWins()
     const ts = setInterval(loadSales, 2 * 60_000)
+    const tw = setInterval(loadWins, 5 * 60_000)
     load()
     const t = setInterval(load, 90_000)
-    return () => { clearInterval(t); clearInterval(ts) }
+    return () => { clearInterval(t); clearInterval(ts); clearInterval(tw) }
   }, [])
 
   // Fullscreen the wallboard itself (not the whole app) so the nav drops away.
@@ -182,6 +185,9 @@ export default function WarRoomPage() {
   const feed = [
     ...logs.map(l => ({ kind: 'call', at: l.created_at, ...l })),
     ...sales.map(x => ({ kind: 'sale', at: x.soldOn, ...x })),
+    ...wins.reviews.map(x => ({ kind: 'review', ...x })),
+    ...wins.memberships.map(x => ({ kind: 'membership', ...x })),
+    ...(wins.bonus ? [{ kind: 'bonus', ...wins.bonus }] : []),
   ].sort((a, b) => Date.parse(b.at || 0) - Date.parse(a.at || 0)).slice(0, 14)
 
   const slColor = inbound.serviceLevel == null ? C.dim : inbound.serviceLevel >= SERVICE_LEVEL_TARGET ? C.green : inbound.serviceLevel >= 60 ? C.amber : C.red
@@ -397,6 +403,57 @@ export default function WarRoomPage() {
             {feed.length === 0 ? (
               <div style={{ padding:'30px 20px', color:C.muted, fontSize:14, textAlign:'center' }}>Waiting for activity…</div>
             ) : feed.map((l, i) => {
+              const t = (v) => v ? new Date(v).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' }) : ''
+              if (l.kind === 'bonus') {
+                const g = '#F0B429'
+                return (
+                  <div key={l.id} style={{ padding:'12px 16px', borderBottom:`1px solid ${C.panel2}`, display:'flex', alignItems:'center', gap:11,
+                    opacity: i > 9 ? 0.45 : 1, background:`${g}1c`, boxShadow:`inset 3px 0 0 ${g}` }}>
+                    <div style={{ width:9, height:9, borderRadius:'50%', background:g, flexShrink:0, boxShadow:`0 0 12px ${g}` }} />
+                    <div style={{ flex:1, minWidth:0 }}>
+                      <div style={{ fontSize:14, fontWeight:800, color:g, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
+                        🎯 OPPORTUNITY WATCH BONUS UNLOCKED
+                      </div>
+                      <div style={{ fontSize:11, color:C.muted }}>${Number(l.pool).toFixed(0)} pool split {l.n} ways · {t(l.at)}</div>
+                    </div>
+                    <span style={{ fontSize:12, fontWeight:800, color:g, flexShrink:0 }}>💰🎉</span>
+                  </div>
+                )
+              }
+              if (l.kind === 'review') {
+                return (
+                  <div key={l.id} style={{ padding:'11px 16px', borderBottom:`1px solid ${C.panel2}`, display:'flex', alignItems:'center', gap:11,
+                    opacity: i > 9 ? 0.45 : 1, background:`${C.amber}10` }}>
+                    <div style={{ width:9, height:9, borderRadius:'50%', background:C.amber, flexShrink:0 }} />
+                    <div style={{ flex:1, minWidth:0 }}>
+                      <div style={{ fontSize:14, fontWeight:700, color:C.amber, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
+                        ⭐ {l.tech || 'The team'} got a 5-star review
+                      </div>
+                      <div style={{ fontSize:11, color:C.muted, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
+                        {l.author} on {l.platform} · {t(l.at)}
+                      </div>
+                    </div>
+                    <span style={{ fontSize:12, fontWeight:700, color:C.amber, flexShrink:0 }}>★★★★★</span>
+                  </div>
+                )
+              }
+              if (l.kind === 'membership') {
+                return (
+                  <div key={l.id} style={{ padding:'11px 16px', borderBottom:`1px solid ${C.panel2}`, display:'flex', alignItems:'center', gap:11,
+                    opacity: i > 9 ? 0.45 : 1, background:`${C.purple}12` }}>
+                    <div style={{ width:9, height:9, borderRadius:'50%', background:C.purple, flexShrink:0 }} />
+                    <div style={{ flex:1, minWidth:0 }}>
+                      <div style={{ fontSize:14, fontWeight:700, color:C.purple, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
+                        🏅 {l.seller} sold a membership
+                      </div>
+                      <div style={{ fontSize:11, color:C.muted, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
+                        {l.type} · {t(l.at)}
+                      </div>
+                    </div>
+                    <span style={{ fontSize:12, fontWeight:700, color:C.purple, flexShrink:0 }}>CLUB</span>
+                  </div>
+                )
+              }
               if (l.kind === 'sale') {
                 const big = l.amount >= 1000
                 return (
