@@ -470,6 +470,7 @@ function LiveBoard() {
         </div>
         <div style={{ fontSize:12, color:'var(--text-muted)' }}>
           {data?.counts?.total ?? 0} calls on {day === 0 ? "today's" : day === 1 ? "tomorrow's" : "that day's"} board
+          {data?.counts?.unassigned > 0 && <span style={{ fontWeight:700, color:'var(--tone-amber-tx)' }}> · {data.counts.unassigned} unassigned</span>}
           {rev ? ` · ${rev.remaining} still to run · ${rev.done} done` : ''}
           {rev?.working ? ` · ${rev.working} on site` : ''}
           {' · '}auto-refreshes every 15 min
@@ -595,6 +596,30 @@ function LiveBoard() {
           </div>
         )}
       </div>}
+
+      {/* 🧺 Unassigned tray — jobs with no tech; the staging area during a shuffle */}
+      {(data?.unassigned || []).length > 0 && (
+        <div className="card" style={{ padding:'11px 15px', marginBottom:12, borderLeft:'3px solid var(--tone-amber-bd)' }}>
+          <div style={{ fontSize:10.5, fontWeight:700, textTransform:'uppercase', letterSpacing:.5, color:'var(--tone-amber-tx)', marginBottom:8 }}>
+            🧺 Unassigned tray — {data.unassigned.length} job{data.unassigned.length === 1 ? '' : 's'} with no tech
+          </div>
+          <div style={{ display:'flex', flexDirection:'column', gap:5 }}>
+            {data.unassigned.map(u => (
+              <div key={u.appointmentId} style={{ display:'flex', alignItems:'center', gap:10, fontSize:12, flexWrap:'wrap' }}>
+                <a href={ST_JOB_URL(u.jobId)} target="_blank" rel="noreferrer" style={{ fontWeight:700, color:'var(--accent)', textDecoration:'none' }}>#{u.jobNumber}</a>
+                <span style={{ flex:1, minWidth:140 }}>{u.jobType}</span>
+                <span style={{ color:'var(--text-muted)' }}>{windowLabel(u)}</span>
+                {u.opportunity >= 3
+                  ? <span style={{ fontSize:10, fontWeight:700, padding:'1px 8px', borderRadius:99, background:'var(--tone-red-bg)', color:'var(--tone-red-tx)', border:'1px solid var(--tone-red-bd)' }}>🔥 opp {u.opportunity}</span>
+                  : u.opportunity > 0
+                    ? <span style={{ fontSize:10, fontWeight:700, padding:'1px 8px', borderRadius:99, background:'var(--tone-amber-bg)', color:'var(--tone-amber-tx)', border:'1px solid var(--tone-amber-bd)' }}>opp {u.opportunity}</span>
+                    : <span style={{ fontSize:10, color:'var(--text-muted)' }}>routine</span>}
+                {u.canGoEarly && <span style={{ fontSize:10, fontWeight:700, color:'var(--tone-green-tx)' }}>can go early</span>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {rev && (
         <div className="card" style={{ padding:'13px 16px', marginBottom:14, display:'flex', gap:24, flexWrap:'wrap', alignItems:'center' }}>

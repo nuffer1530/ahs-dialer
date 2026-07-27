@@ -4131,7 +4131,12 @@ async function computeLiveBoardPayload(dayOffset = 0) {
       })
     const assignments = await assignmentsForAppointments(appts.map(a => a.id))
 
-    const jobIds = [...new Set(assignments.map(a => a.jobId).filter(Boolean))]
+    // Include jobs from EVERY appointment, not just assigned ones — the
+    // unassigned tray at the bottom of the ST board is real work too.
+    const jobIds = [...new Set([
+      ...assignments.map(a => a.jobId),
+      ...appts.map(a => a.jobId),
+    ].filter(Boolean))]
     const jobs = []
     for (let i = 0; i < jobIds.length; i += 50) {
       try {
@@ -4224,6 +4229,35 @@ async function computeLiveBoardPayload(dayOffset = 0) {
         flags: [],
       })
     }
+
+    // ── The unassigned tray ─────────────────────────────────────────────────
+    // Appointments with NO technician sit at the bottom of the ST dispatch
+    // board. Dispatchers stage work there mid-shuffle ("Justin called out — I
+    // unassigned his jobs, help me re-place them"), and because this board was
+    // built purely from assignments, those jobs were invisible to the AI.
+    const assignedApptIds = new Set(assignments.map(a => a.appointmentId))
+    const unassigned = []
+    for (const ap of appts) {
+      if (assignedApptIds.has(ap.id)) continue
+      if ((ap.status || 'Scheduled') === 'Canceled') continue
+      const j = jobById.get(ap.jobId)
+      if (!j || j.jobStatus === 'Canceled') continue
+      const jt = jtName.get(j.jobTypeId) || ''
+      const zip = zipOfLoc.get(j.locationId) || ''
+      const isMember = j.customerId ? memberCust.has(j.customerId) : null
+      const opp = scoreOpportunity(jt, zipTier.get(zip), isMember,
+        systemAgeFromNotes(j, new Date().getFullYear()), /hvac/i.test(jt), noCollectFromNotes(j))
+      unassigned.push({
+        appointmentId: ap.id, jobId: j.id, jobNumber: j.jobNumber,
+        jobType: jt, zip, isMember,
+        windowStart: ap.arrivalWindowStart || ap.start || null,
+        windowEnd: ap.arrivalWindowEnd || ap.end || null,
+        opportunity: opp.score, opportunityReasons: opp.reasons,
+        canGoEarly: Boolean(canGoEarlyJobs[String(j.id)]),
+        countsToCapacity: !EXCLUDE_CALL.test(jt),
+      })
+    }
+    unassigned.sort((a, b) => b.opportunity - a.opportunity)
 
     // ── Reassignment suggestions ────────────────────────────────────────────
     // Route logic is about the tech's DAY, not two jobs in isolation: if a
@@ -4758,9 +4792,10 @@ async function computeLiveBoardPayload(dayOffset = 0) {
       driveTime: driveTimeEnabled(),
       dayRevenue,
       techsToday,
-      calls, swaps,
+      calls, swaps, unassigned,
       counts: {
         total: calls.length,
+        unassigned: unassigned.length,
         flagged: calls.filter(c => c.flags.length).length,
         unrankedTechs: calls.filter(c => c.techTier === 'unranked').length,
       },
@@ -4824,6 +4859,13 @@ async function gatherDispatchFacts({ allCalls = false } = {}) {
       window: dnvWin(c.windowStart, c.windowEnd), flag: c.flags[0]?.text, why: c.flags[0]?.why,
     })),
     swaps: (board.swaps || []).map(x => ({ text: x.text, why: x.why, upside: x.upside })),
+    unassignedTray: (board.unassigned || []).map(u => ({
+      job: u.jobNumber, type: u.jobType,
+      window: dnvWin(u.windowStart, u.windowEnd),
+      opportunity: u.opportunity,
+      why: (u.opportunityReasons || []).slice(0, 2).join(' · ') || undefined,
+      canGoEarly: u.canGoEarly || undefined,
+    })),
     rescheduleCandidates: calls.filter(c => c.rescheduleCandidate)
       .map(c => ({ job: c.jobNumber, type: c.jobType, tech: c.techName, canGoEarly: c.canGoEarly || undefined })),
     completedOutcomes: calls.filter(c => c.outcome).map(c => ({
@@ -4884,6 +4926,8 @@ async function generateDispatchBrief() {
   const sys = `You are the dispatch analyst for Awesome Home Services (HVAC, plumbing, electrical, garage doors — Colorado Springs). You are given a JSON snapshot of today's live dispatch board, tech performance benches, and 3-day capacity. All times in the data are Denver local clock times — always write times that way (e.g. '4–8 PM'), never military or UTC. Write the read a sharp dispatch manager would give at the huddle: concrete, numbers-first, in plain dispatcher language. Only use what is in the data; never invent jobs, names, or numbers.
 
 Every bench tech carries a 'today' field with their REAL availability right now. Treat it as law: never build an action around routing work to (or comparing against) a tech whose 'today' says they are off, have no working time left, or are on an all-day install — those techs cannot take calls no matter how good their numbers are. Recommendations may only name techs whose 'today' shows calls on board or room.
+
+'unassignedTray' lists jobs sitting UNASSIGNED at the bottom of the dispatch board — booked customers with no tech attached yet. When a dispatcher says they "unassigned" jobs or asks what to keep, cut, or redistribute, they mean THESE — work the tray job by job, by opportunity score, and remember every tray job still holds its promised customer window.
 
 Arrival windows are PROMISES to customers — treat them as law too. Trading TECHS between two jobs is always window-safe (appointments stay put). Any move that changes a customer's window or day is only allowed when that job carries canGoEarly=true (the customer said the tech may come earlier) — and even then, say to call the customer first. Never propose shifting a customer's time otherwise; find the move that works within the promised windows instead.
 
@@ -5382,6 +5426,8 @@ app.post('/api/dispatch/scenario', async (req, res) => {
     const sys = `You are the dispatch coach for Awesome Home Services (HVAC, plumbing, electrical, garage doors \u2014 Colorado Springs). The dispatcher describes a scenario; you walk them step by step through the correct decision-making to maximize profitable dispatch.
 
 You are given a JSON snapshot: every assignment on today's board (job number, type, tech, window, opportunity score, expected revenue), flagged calls, reschedule candidates, tech performance benches with REAL availability in 'today', 3-day capacity, and weather. All times in the data are Denver local clock times — always write times that way (e.g. '4–8 PM'), never military or UTC. Ground every step in this data \u2014 name real techs and job numbers; never invent any.
+
+'unassignedTray' lists jobs sitting UNASSIGNED at the bottom of the dispatch board — booked customers with no tech attached yet. When the dispatcher says they "unassigned" jobs or asks what to keep, cut, or push, they mean THESE — place or defer each tray job explicitly, highest opportunity first, and never leave one unmentioned.
 
 Scenarios come in two shapes. DISRUPTIONS (a tech out sick, a truck down, a call running long): deal with the affected tech's specific assignments one by one — cover, swap, or push, cheapest move last. GOAL-SEEKING (sales are down, how do we squeeze more out of the board): hunt the profit levers in the data — high-opportunity calls sitting on red-tier techs that belong on green closers, strong closers burning slots on $0 maintenance/callbacks, unrouted swaps, reschedule candidates whose slots could take better calls, and tomorrow's capacity worth protecting. Name the specific moves and the dollar upside where computable.
 
