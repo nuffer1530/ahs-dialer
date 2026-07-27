@@ -1457,23 +1457,29 @@ export default function AdminPage() {
                       straight into commissions with the You-Got-Paid pop, plus a floor-wide unlock announcement.
                       Pays at most once per day; skips company holidays.
                     </div>
-                    <div style={{ display:'flex', gap:16, alignItems:'flex-end', flexWrap:'wrap' }}>
-                      <label style={{ display:'flex', alignItems:'center', gap:8, fontSize:13, fontWeight:700, cursor:'pointer', paddingBottom:8 }}>
-                        <input type="checkbox" checked={oppInc.enabled}
-                          onChange={e => setOppInc(v => ({ ...v, enabled: e.target.checked }))} />
-                        Enabled
-                      </label>
-                      <div className="form-field" style={{ width:140 }}>
+                    <div style={{ display:'grid', gridTemplateColumns:'auto 140px 150px auto', gap:16, alignItems:'stretch' }}>
+                      <div className="form-field" style={{ display:'flex', flexDirection:'column' }}>
+                        <label className="form-label">&nbsp;</label>
+                        <label style={{ display:'flex', alignItems:'center', gap:8, fontSize:13, fontWeight:700, cursor:'pointer', flex:1 }}>
+                          <input type="checkbox" checked={oppInc.enabled}
+                            onChange={e => setOppInc(v => ({ ...v, enabled: e.target.checked }))} />
+                          Enabled
+                        </label>
+                      </div>
+                      <div className="form-field">
                         <label className="form-label">Daily pool ($)</label>
                         <input className="form-input" type="number" min="1" step="1" value={oppInc.pool}
-                          onChange={e => setOppInc(v => ({ ...v, pool: Number(e.target.value) }))} />
+                          onChange={e => setOppInc(v => ({ ...v, pool: Number(e.target.value) }))} style={{ width:'100%' }} />
                       </div>
-                      <div className="form-field" style={{ width:140 }}>
+                      <div className="form-field">
                         <label className="form-label">Cutoff (Denver)</label>
                         <input className="form-input" type="time" value={oppInc.cutoff}
-                          onChange={e => setOppInc(v => ({ ...v, cutoff: e.target.value }))} />
+                          onChange={e => setOppInc(v => ({ ...v, cutoff: e.target.value }))} style={{ width:'100%' }} />
                       </div>
-                      <button className="btn primary" onClick={saveOppInc} style={{ marginBottom:2 }}>Save</button>
+                      <div className="form-field" style={{ display:'flex', flexDirection:'column' }}>
+                        <label className="form-label">&nbsp;</label>
+                        <button className="btn primary" onClick={saveOppInc} style={{ flex:1 }}>Save</button>
+                      </div>
                     </div>
                   </div>
                 </div>
