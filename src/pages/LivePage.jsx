@@ -19,7 +19,9 @@ const DEFAULT_STATUS_OPTIONS = [
 
 function timeSince(isoString) {
   if (!isoString) return '—'
-  const secs = Math.floor((Date.now() - new Date(isoString)) / 1000)
+  // Clamp: server timestamps can sit a second ahead of the browser clock,
+  // which rendered as '-1s' right after a status change.
+  const secs = Math.max(0, Math.floor((Date.now() - new Date(isoString)) / 1000))
   if (secs < 60) return `${secs}s`
   if (secs < 3600) return `${Math.floor(secs/60)}m ${Math.floor(secs%60/60)}s`
   return `${Math.floor(secs/3600)}h ${Math.floor((secs%3600)/60)}m`

@@ -32,7 +32,7 @@ const startOfToday = () => { const d = new Date(); d.setHours(0,0,0,0); return d
 const fmtWait = (s) => s == null ? '—' : s < 60 ? `${s}s` : `${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}`
 const timeSince = (iso) => {
   if (!iso) return '—'
-  const s = Math.floor((Date.now() - new Date(iso)) / 1000)
+  const s = Math.max(0, Math.floor((Date.now() - new Date(iso)) / 1000))
   if (s < 60) return `${s}s`
   if (s < 3600) return `${Math.floor(s/60)}m`
   return `${Math.floor(s/3600)}h ${Math.floor((s%3600)/60)}m`
