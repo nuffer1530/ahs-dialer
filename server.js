@@ -3029,9 +3029,10 @@ async function transcribeAndDraftNotes({ callSid, contactId, phone, mp3Url, dura
 // notes so the CSR's box (and the booking guidance that reads it) fills
 // while the customer is still talking.
 const _liveTx = new Map()   // callSid -> { contactId, parts: [], lastRun, running }
-async function startLiveTranscription(callSid, contactId, label, phone) {
+async function startLiveTranscription(callSid, contactId, label, phone, repName, contactName) {
   if (!ANTHROPIC_KEY || !callSid || _liveTx.has(callSid)) return
-  _liveTx.set(callSid, { contactId, phone: last10(phone), parts: [], lastRun: 0, running: false })
+  _liveTx.set(callSid, { contactId, phone: last10(phone), repName: repName || null, contactName: contactName || null,
+    direction: label, startedAt: Date.now(), parts: [], lastRun: 0, running: false })
   try {
     const auth = Buffer.from(`${process.env.TWILIO_ACCOUNT_SID}:${process.env.TWILIO_AUTH_TOKEN}`).toString('base64')
     const form = new URLSearchParams({
@@ -3177,13 +3178,37 @@ app.post('/api/twilio/live-transcript', async (req, res) => {
     if (!text) return
     const e = _liveTx.get(CallSid)
     if (!e) return
-    e.parts.push({ who: Track === 'inbound_track' ? 'Customer' : 'Rep', text })
+    e.parts.push({ who: Track === 'inbound_track' ? 'Customer' : 'Rep', text, at: Date.now() })
     if (Track === 'inbound_track') detectCoach(CallSid, e, text).catch(() => {})
     if (Date.now() - e.lastRun > 20_000) runLiveDraft(CallSid)
   } catch (err) { console.warn('live-transcript webhook:', err.message) }
 })
 
 // Diagnostics: is the pipeline armed, and is anything flowing?
+// 👁 LIVE CALL X-RAY — admins can read any in-progress call's transcript as
+// it happens, straight from the same in-memory stream that feeds the notes
+// and the coach. Nothing new is recorded; the tail dies with the call.
+app.get('/api/live-calls', async (req, res) => {
+  if (!(await requireAdmin(req, res))) return
+  const calls = [..._liveTx.entries()].map(([sid, e]) => ({
+    id: sid, contactId: e.contactId || null, phone: e.phone || null,
+    rep: e.repName || null, contactName: e.contactName || null,
+    direction: e.direction || null, startedAt: e.startedAt || null, lines: e.parts.length,
+  }))
+  res.json({ calls })
+})
+
+app.get('/api/live-calls/:sid/transcript', async (req, res) => {
+  if (!(await requireAdmin(req, res))) return
+  const e = _liveTx.get(String(req.params.sid || ''))
+  if (!e) return res.json({ active: false, lines: [] })
+  res.json({
+    active: true, rep: e.repName || null, contactName: e.contactName || null,
+    contactId: e.contactId || null, phone: e.phone || null, startedAt: e.startedAt || null,
+    lines: e.parts,
+  })
+})
+
 app.get('/api/call-notes/health', (req, res) => {
   res.json({
     openaiKey: Boolean(OPENAI_KEY), anthropicKey: Boolean(ANTHROPIC_KEY),
@@ -3854,7 +3879,8 @@ app.post('/api/twilio/taskrouter/events', async (req, res) => {
       try {
         const tattrs = JSON.parse(req.body.TaskAttributes || '{}')
         if (tattrs.call_sid) {
-          startLiveTranscription(tattrs.call_sid, task?.contact_id || null, 'inbound', task?.from_number || tattrs.from_number).catch(() => {})
+          startLiveTranscription(tattrs.call_sid, task?.contact_id || null, 'inbound',
+            task?.from_number || tattrs.from_number, wattrs.name || req.body.WorkerName || null).catch(() => {})
         }
       } catch (e) { console.warn('inbound live-tx:', e.message) }
       return
@@ -3928,9 +3954,10 @@ app.post('/api/twilio/status', async (req, res) => {
   // row is keyed by the PARENT (browser) leg; the transcription rides the
   // child (customer) leg, which carries both tracks.
   if (CallStatus === 'in-progress') {
-    const { data: ac } = await supabase.from('active_calls').select('contact_id, to_number, from_number')
+    const { data: ac } = await supabase.from('active_calls').select('contact_id, to_number, from_number, rep_identity, contact_name')
       .in('call_sid', [ParentCallSid || '', CallSid].filter(Boolean)).not('contact_id', 'is', null).limit(1).maybeSingle()
-    startLiveTranscription(CallSid, ac?.contact_id || null, 'outbound', ac?.to_number || req.body.To).catch(() => {})
+    startLiveTranscription(CallSid, ac?.contact_id || null, 'outbound', ac?.to_number || req.body.To,
+      ac?.rep_identity ? String(ac.rep_identity).replace(/_/g, ' ') : null, ac?.contact_name || null).catch(() => {})
   }
   await supabase.from('active_calls').update({
     status: CallStatus,

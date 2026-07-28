@@ -56,6 +56,43 @@ function Kpi({ label, value, sub, tone = 'default', big = false }) {
 export default function LivePage() {
   const { contacts } = useData()
   const { isAdmin } = useAuth()
+
+  // 👁 Live Call X-Ray (admins): read any in-progress call's transcript live.
+  const [liveCalls, setLiveCalls] = useState([])
+  const [watchSid, setWatchSid] = useState(null)
+  const [watchTx, setWatchTx] = useState(null)
+  const authedGet = async (path) => {
+    const { data: { session } } = await sb.auth.getSession()
+    const r = await fetch(path, { headers: { Authorization: `Bearer ${session?.access_token}` } })
+    if (!r.ok) throw new Error('request failed')
+    return r.json()
+  }
+  useEffect(() => {
+    if (!isAdmin) return
+    let dead = false
+    const load = () => authedGet('/api/live-calls').then(d => { if (!dead) setLiveCalls(d.calls || []) }).catch(() => {})
+    load()
+    const t = setInterval(load, 5000)
+    return () => { dead = true; clearInterval(t) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAdmin])
+  useEffect(() => {
+    if (!watchSid) { setWatchTx(null); return }
+    let dead = false
+    const load = () => authedGet(`/api/live-calls/${watchSid}/transcript`).then(d => { if (!dead) setWatchTx(d) }).catch(() => {})
+    load()
+    const t = setInterval(load, 2500)
+    return () => { dead = true; clearInterval(t) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [watchSid])
+  const xrayName = (c) => c.contactName
+    || contacts.find(x => x.id === c.contactId)?.name
+    || (c.phone ? `(${c.phone.slice(0, 3)}) ${c.phone.slice(3, 6)}-${c.phone.slice(6)}` : 'Unknown caller')
+  const xrayDur = (t) => {
+    if (!t) return ''
+    const m = Math.floor((Date.now() - t) / 60000), s2 = Math.floor(((Date.now() - t) % 60000) / 1000)
+    return `${m}:${String(s2).padStart(2, '0')}`
+  }
   const [logs, setLogs] = useState([])
   const [profiles, setProfiles] = useState([])
   const [tasks, setTasks] = useState([])        // today's inbound queue tasks
@@ -276,6 +313,76 @@ export default function LivePage() {
               })}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* 👁 Live Call X-Ray — admin-only list of in-progress transcriptions */}
+      {isAdmin && liveCalls.length > 0 && (
+        <div className="card" style={{ borderLeft:'3px solid var(--accent)' }}>
+          <div className="card-header">
+            <div className="card-title">👁 Live Calls — click to read along</div>
+            <span style={{ fontSize:11, color:'var(--text-muted)' }}>{liveCalls.length} in progress · transcript only, nothing extra is recorded</span>
+          </div>
+          <div>
+            {liveCalls.map(c => (
+              <div key={c.id} onClick={() => setWatchSid(c.id)}
+                style={{ display:'flex', alignItems:'center', gap:12, padding:'10px 18px', borderBottom:'1px solid var(--border)', cursor:'pointer' }}
+                onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
+                onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                <span style={{ width:8, height:8, borderRadius:'50%', background:'var(--danger)', animation:'pulse 1.2s infinite', flexShrink:0 }} />
+                <span style={{ fontSize:13, fontWeight:700 }}>{xrayName(c)}</span>
+                <span style={{ fontSize:11.5, color:'var(--text-muted)' }}>
+                  {c.direction === 'inbound' ? '📥 inbound' : '📤 outbound'}{c.rep ? ` · ${c.rep}` : ''} · {xrayDur(c.startedAt)} · {c.lines} lines
+                </span>
+                <span style={{ marginLeft:'auto', fontSize:11.5, fontWeight:700, color:'var(--accent)' }}>👁 Watch</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {watchSid && (
+        <div onClick={() => setWatchSid(null)}
+          style={{ position:'fixed', inset:0, background:'rgba(0,0,0,.5)', zIndex:800, display:'flex', alignItems:'center', justifyContent:'center', padding:20 }}>
+          <div onClick={e => e.stopPropagation()}
+            style={{ background:'var(--surface)', borderRadius:14, width:'100%', maxWidth:640, height:'78vh', boxShadow:'0 16px 48px rgba(0,0,0,.35)', display:'flex', flexDirection:'column', overflow:'hidden' }}>
+            <div style={{ padding:'12px 18px', borderBottom:'1px solid var(--border)', display:'flex', alignItems:'center', gap:10, flexShrink:0 }}>
+              {watchTx?.active !== false
+                ? <span style={{ width:9, height:9, borderRadius:'50%', background:'var(--danger)', animation:'pulse 1.2s infinite' }} />
+                : <span style={{ width:9, height:9, borderRadius:'50%', background:'var(--text-muted)' }} />}
+              <div style={{ flex:1, minWidth:0 }}>
+                <div style={{ fontSize:14, fontWeight:800 }}>
+                  {watchTx ? (watchTx.contactName || contacts.find(x => x.id === watchTx.contactId)?.name || 'Live call') : 'Live call'}
+                  {watchTx?.active === false && <span style={{ fontWeight:600, color:'var(--text-muted)' }}> — call ended</span>}
+                </div>
+                <div style={{ fontSize:11, color:'var(--text-muted)' }}>
+                  {watchTx?.rep ? `with ${watchTx.rep} · ` : ''}updates every few seconds · the rep can't see that you're reading
+                </div>
+              </div>
+              <button className="btn sm" onClick={() => setWatchSid(null)}>Close</button>
+            </div>
+            <div style={{ flex:1, overflowY:'auto', padding:16, display:'flex', flexDirection:'column', gap:8 }}
+              ref={el => { if (el) el.scrollTop = el.scrollHeight }}>
+              {(!watchTx || watchTx.lines.length === 0) && (
+                <div style={{ color:'var(--text-muted)', fontSize:13, textAlign:'center', padding:'40px 0' }}>
+                  {watchTx?.active === false ? 'This call has ended.' : 'Waiting for the first words…'}
+                </div>
+              )}
+              {(watchTx?.lines || []).map((l, i) => (
+                <div key={i} style={{ alignSelf: l.who === 'Rep' ? 'flex-end' : 'flex-start', maxWidth:'85%' }}>
+                  <div style={{ fontSize:9.5, fontWeight:700, textTransform:'uppercase', letterSpacing:.5, marginBottom:2,
+                    color: l.who === 'Rep' ? 'var(--accent)' : 'var(--tone-amber-tx)', textAlign: l.who === 'Rep' ? 'right' : 'left' }}>
+                    {l.who}{l.at ? ` · ${new Date(l.at).toLocaleTimeString([], { hour:'numeric', minute:'2-digit', second:'2-digit' })}` : ''}
+                  </div>
+                  <div style={{ padding:'8px 12px', borderRadius:12, fontSize:13, lineHeight:1.5,
+                    background: l.who === 'Rep' ? 'var(--accent-bg)' : 'var(--surface-2)',
+                    border: `1px solid ${l.who === 'Rep' ? 'var(--accent)' : 'var(--border)'}` }}>
+                    {l.text}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
       )}
 
