@@ -5,6 +5,7 @@ import { useData } from '../lib/DataContext'
 import { inboundStats, outboundStats, fmtSecs, SERVICE_LEVEL_SECONDS, SERVICE_LEVEL_TARGET } from '../lib/analytics'
 import { INTERACTION_COLORS } from '../lib/constants'
 import Avatar from '../components/Avatar'
+import { useDailyReload } from '../lib/useDailyReload'
 
 // Call-centre wallboard — a modern "Simon board" for the floor TV. Everything
 // real-time: inbound queue health, live calls, the leaderboard (rows slide when
@@ -62,6 +63,8 @@ function Panel({ title, icon, live, children, style }) {
 }
 
 export default function WarRoomPage() {
+  // 24/7 wallboard: self-reload nightly for the new day + the latest deploy.
+  useDailyReload()
   const { contacts } = useData()
   const [logs, setLogs] = useState([])
   const [tasks, setTasks] = useState([])

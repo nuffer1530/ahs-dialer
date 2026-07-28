@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { sb } from '../lib/supabase'
 import { useAuth } from '../lib/AuthContext'
+import { useDailyReload } from '../lib/useDailyReload'
 
 // 3-Day Call Board — repair/replacement capacity per trade for today + next two
 // days, live from ServiceTitan. Every number is clickable to show what's behind it.
@@ -79,6 +80,8 @@ function Cell({ trade, dayLabel, d, onDrill, tv }) {
 }
 
 export default function CallBoardPage() {
+  // 24/7 wallboard: self-reload nightly for the new day + the latest deploy.
+  useDailyReload()
   const { isAdmin, profile } = useAuth()
   const [data, setData] = useState(null)
   const [error, setError] = useState('')
