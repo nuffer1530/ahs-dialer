@@ -544,3 +544,8 @@ create table if not exists live_call_state (
   data jsonb not null,
   updated_at timestamptz default now()
 );
+
+
+-- Realtime status updates on the wallboards (Jul 2026): profiles must be in
+-- the publication for UPDATE events to reach the TV/dashboard at all.
+alter publication supabase_realtime add table profiles;

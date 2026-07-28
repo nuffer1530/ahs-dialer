@@ -139,6 +139,14 @@ export default function WarRoomPage() {
       const next = [...prev]; next[i] = { ...next[i], ...payload.new }; return next
     })
 
+    // Realtime is the fast path, but on a 24/7 wallboard the websocket can
+    // silently die (and profiles may not be in the realtime publication at
+    // all) — statuses then freeze until someone refreshes. Poll profiles
+    // every 30s as the guaranteed floor.
+    const pollProfiles = () => sb.from('profiles').select('*').eq('active', true)
+      .then(({ data }) => { if (data) setProfiles(data) })
+    const tp = setInterval(pollProfiles, 30_000)
+
     const ch = sb.channel('warroom')
       .on('postgres_changes', { event:'INSERT', schema:'public', table:'call_logs' }, p => setLogs(prev => [p.new, ...prev]))
       .on('postgres_changes', { event:'*', schema:'public', table:'call_tasks' }, upsert(setTasks, 'task_sid'))
@@ -148,7 +156,8 @@ export default function WarRoomPage() {
       .subscribe()
 
     const clock = setInterval(() => setTime(new Date()), 1000)
-    return () => { sb.removeChannel(ch); clearInterval(clock) }
+    return () => {
+      clearInterval(tp); sb.removeChannel(ch); clearInterval(clock) }
   }, [])
 
   const inbound = useMemo(() => inboundStats(tasks), [tasks])
