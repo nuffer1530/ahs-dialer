@@ -58,7 +58,7 @@ export default function LivePage() {
   const { isAdmin } = useAuth()
 
   // 👁 Live Call X-Ray (admins): read any in-progress call's transcript live.
-  const [liveCalls, setLiveCalls] = useState([])
+  const [xrayCalls, setXrayCalls] = useState([])
   const [watchSid, setWatchSid] = useState(null)
   const [watchTx, setWatchTx] = useState(null)
   const authedGet = async (path) => {
@@ -70,7 +70,7 @@ export default function LivePage() {
   useEffect(() => {
     if (!isAdmin) return
     let dead = false
-    const load = () => authedGet('/api/live-calls').then(d => { if (!dead) setLiveCalls(d.calls || []) }).catch(() => {})
+    const load = () => authedGet('/api/live-calls').then(d => { if (!dead) setXrayCalls(d.calls || []) }).catch(() => {})
     load()
     const t = setInterval(load, 5000)
     return () => { dead = true; clearInterval(t) }
@@ -317,14 +317,14 @@ export default function LivePage() {
       )}
 
       {/* 👁 Live Call X-Ray — admin-only list of in-progress transcriptions */}
-      {isAdmin && liveCalls.length > 0 && (
+      {isAdmin && xrayCalls.length > 0 && (
         <div className="card" style={{ borderLeft:'3px solid var(--accent)' }}>
           <div className="card-header">
             <div className="card-title">👁 Live Calls — click to read along</div>
-            <span style={{ fontSize:11, color:'var(--text-muted)' }}>{liveCalls.length} in progress · transcript only, nothing extra is recorded</span>
+            <span style={{ fontSize:11, color:'var(--text-muted)' }}>{xrayCalls.length} in progress · transcript only, nothing extra is recorded</span>
           </div>
           <div>
-            {liveCalls.map(c => (
+            {xrayCalls.map(c => (
               <div key={c.id} onClick={() => setWatchSid(c.id)}
                 style={{ display:'flex', alignItems:'center', gap:12, padding:'10px 18px', borderBottom:'1px solid var(--border)', cursor:'pointer' }}
                 onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
