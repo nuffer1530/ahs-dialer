@@ -370,16 +370,16 @@ function LiveBoard() {
   const askScenario = async () => {
     if (scBusy || scenario.trim().length < 5) return
     setScBusy(true); setScErr(''); setScPlan(null)
-    try { setScPlan(await authed('/api/dispatch/scenario', { method: 'POST', body: JSON.stringify({ scenario: scenario.trim() }) })) }
+    try { setScPlan(await authed('/api/dispatch/scenario', { method: 'POST', body: JSON.stringify({ scenario: scenario.trim(), day }) })) }
     catch (e) { setScErr(e.message) } finally { setScBusy(false) }
   }
   const loadBrief = useCallback(async (refresh = false) => {
     setBriefBusy(true); setBriefErr('')
-    try { setBrief(await authed(`/api/dispatch/brief${refresh ? '?refresh=1' : ''}`)) }
+    try { setBrief(await authed(`/api/dispatch/brief?day=${day}${refresh ? '&refresh=1' : ''}`)) }
     catch (e) { setBriefErr(e.message) }   // visible, not silent — 'where is it?' was the bug
     finally { setBriefBusy(false) }
-  }, [])
-  useEffect(() => { loadBrief() }, [loadBrief])
+  }, [day])
+  useEffect(() => { setBrief(null); loadBrief() }, [loadBrief])
 
   const load = useCallback(async (force = false) => {
     try { setData(await authed(`/api/dispatch/live-board?day=${day}${force ? '&force=1' : ''}`)); setErr('') }
@@ -502,7 +502,7 @@ function LiveBoard() {
         </div>
       </div>
 
-      {day === 0 && !brief?.brief && (briefBusy || briefErr) && (
+      {!brief?.brief && (briefBusy || briefErr) && (
         <div className="card" style={{ padding:'13px 18px', marginBottom:14, borderLeft:'4px solid var(--accent)', fontSize:12.5,
           color: briefErr ? 'var(--danger)' : 'var(--text-muted)' }}>
           {briefBusy
@@ -512,11 +512,13 @@ function LiveBoard() {
         </div>
       )}
 
-      {day === 0 && brief?.brief && (
+      {brief?.brief && (
         <div className="card" style={{ padding:'11px 15px', marginBottom:12, borderLeft:'3px solid var(--accent)' }}>
           <div style={{ display:'flex', alignItems:'baseline', justifyContent:'space-between', gap:10, flexWrap:'wrap' }}>
             <div style={{ fontSize:13, fontWeight:800, color:'var(--text-primary)' }}>
-              🧠 {brief.brief.headline}
+              🧠 {day > 0 && <span style={{ fontSize:10, fontWeight:800, textTransform:'uppercase', letterSpacing:.5, padding:'2px 8px', borderRadius:99, marginRight:7, background:'var(--tone-blue-bg)', color:'var(--tone-blue-tx)', border:'1px solid var(--tone-blue-bd)', verticalAlign:'middle' }}>
+                Game plan — {day === 1 ? 'tomorrow' : '2 days out'}
+              </span>}{brief.brief.headline}
             </div>
             <div style={{ display:'flex', alignItems:'center', gap:8 }}>
               <span style={{ fontSize:10, color:'var(--text-muted)' }}>analyzed {ago(brief.generatedAt)}</span>
@@ -559,11 +561,13 @@ function LiveBoard() {
       )}
 
       {/* 🎭 Scenario AI — disruptions AND goal-seeking ("sales are down…") */}
-      {day === 0 && <div className="card" style={{ padding:'11px 15px', marginBottom:12 }}>
+      {<div className="card" style={{ padding:'11px 15px', marginBottom:12 }}>
         <div style={{ display:'flex', gap:8, alignItems:'center' }}>
           <span style={{ fontSize:15, flexShrink:0 }}>🎭</span>
           <input className="form-input" value={scenario} style={{ flex:1 }}
-            placeholder='Run a scenario… e.g. "Arber called in sick — what do I do with his calls?"'
+            placeholder={day === 0
+              ? 'Run a scenario… e.g. "Arber called in sick — what do I do with his calls?"'
+              : `Game-plan ${day === 1 ? 'tomorrow' : 'that day'}… e.g. "How should we set up this board for maximum profit?"`}
             onChange={e => setScenario(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') askScenario() }} />
           <button className="btn primary sm" onClick={askScenario} disabled={scBusy || scenario.trim().length < 5} style={{ flexShrink:0 }}>

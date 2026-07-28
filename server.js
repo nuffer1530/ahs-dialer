@@ -5289,9 +5289,9 @@ app.get('/api/dispatch/live-board', async (req, res) => {
 let _briefBusy = false
 // Shared by the daily brief and Scenario AI: one signal-dense snapshot of
 // today's board, benches, capacity, and weather.
-async function gatherDispatchFacts({ allCalls = false } = {}) {
-  const hit = _liveBoardCache.get(0)
-  const board = (hit && hit.expires > Date.now()) ? hit.data : await computeLiveBoardPayload(0)
+async function gatherDispatchFacts({ allCalls = false, day = 0 } = {}) {
+  const hit = _liveBoardCache.get(day)
+  const board = (hit && hit.expires > Date.now()) ? hit.data : await computeLiveBoardPayload(day)
   const { data: scores } = await supabase.from('dispatch_tech_scores').select('*')
   let capacity = []
   try {
@@ -5315,6 +5315,7 @@ async function gatherDispatchFacts({ allCalls = false } = {}) {
   const calls = board.calls || []
   const facts = {
     now: new Date().toLocaleString('en-US', { timeZone: 'America/Denver' }),
+    analyzing: day === 0 ? 'TODAY' : `${board.date} (${day === 1 ? 'TOMORROW' : `${day} days out`}) — a FUTURE day being game-planned in advance`,
     counts: board.counts,
     revenue: board.dayRevenue,
     flagged: calls.filter(c => c.flags?.length).map(c => ({
@@ -5382,11 +5383,15 @@ function cleanBriefText(t, max) {
   return out
 }
 
-async function generateDispatchBrief() {
+async function generateDispatchBrief(day = 0) {
   if (!ANTHROPIC_KEY) throw new Error('No ANTHROPIC_API_KEY configured')
-  const facts = await gatherDispatchFacts()
+  const facts = await gatherDispatchFacts({ day })
 
-  const sys = `You are the dispatch analyst for Awesome Home Services (HVAC, plumbing, electrical, garage doors — Colorado Springs). You are given a JSON snapshot of today's live dispatch board, tech performance benches, and 3-day capacity. All times in the data are Denver local clock times — always write times that way (e.g. '4–8 PM'), never military or UTC. Write the read a sharp dispatch manager would give at the huddle: concrete, numbers-first, in plain dispatcher language. Only use what is in the data; never invent jobs, names, or numbers.
+  const futureNote = day === 0 ? '' : `
+
+You are analyzing a FUTURE day (see 'analyzing') — this is advance GAME-PLANNING, not live triage. Nothing has run yet; there are no outcomes. Focus on: booking gaps to fill before the day arrives, flagged assignments to fix ahead of time (there is time to move things properly now), high-opportunity calls to protect with the right closers, and what the unassigned tray needs. Actions should be phrased as prep ("move X before Thursday", "fill 3 plumbing slots"), with priority 'today' meaning do-the-prep-today and 'plan' for nice-to-haves.`
+
+  const sys = futureNote + `You are the dispatch analyst for Awesome Home Services (HVAC, plumbing, electrical, garage doors — Colorado Springs). You are given a JSON snapshot of today's live dispatch board, tech performance benches, and 3-day capacity. All times in the data are Denver local clock times — always write times that way (e.g. '4–8 PM'), never military or UTC. Write the read a sharp dispatch manager would give at the huddle: concrete, numbers-first, in plain dispatcher language. Only use what is in the data; never invent jobs, names, or numbers.
 
 Every bench tech carries a 'today' field with their REAL availability right now. Treat it as law: never build an action around routing work to (or comparing against) a tech whose 'today' says they are off, have no working time left, or are on an all-day install — those techs cannot take calls no matter how good their numbers are. Recommendations may only name techs whose 'today' shows calls on board or room.
 
@@ -5449,23 +5454,28 @@ Submit the analysis via the submit_brief tool. 3-6 actions, ordered by priority;
   brief.actions = (brief.actions || []).slice(0, 6).map(a => ({ priority: a.priority, text: clean(a.text, 220) }))
   brief.watchouts = (brief.watchouts || []).slice(0, 4).map(w => clean(w, 200))
   brief.wins = (brief.wins || []).slice(0, 3).map(w => clean(w, 180))
-  const record = { brief, generatedAt: new Date().toISOString() }
+  const record = { brief, day, boardDate: facts.analyzing, generatedAt: new Date().toISOString() }
   await supabase.from('app_settings').upsert(
-    { key: 'dispatch_brief', value: JSON.stringify(record) }, { onConflict: 'key' })
+    { key: day === 0 ? 'dispatch_brief' : `dispatch_brief_d${day}`, value: JSON.stringify(record) }, { onConflict: 'key' })
   return record
 }
 
 app.get('/api/dispatch/brief', async (req, res) => {
   if (!(await requireDispatch(req, res))) return
   try {
-    const { data: row } = await supabase.from('app_settings').select('value').eq('key', 'dispatch_brief').maybeSingle()
+    const day = Math.min(2, Math.max(0, parseInt(req.query.day) || 0))
+    const key = day === 0 ? 'dispatch_brief' : `dispatch_brief_d${day}`
+    const { data: row } = await supabase.from('app_settings').select('value').eq('key', key).maybeSingle()
     let record = null
     try { record = JSON.parse(row?.value || 'null') } catch {}
+    if (record && (record.day || 0) !== day) record = null   // pre-day-aware cache rows
     const ageMs = record?.generatedAt ? Date.now() - Date.parse(record.generatedAt) : Infinity
-    const wantFresh = req.query.refresh === '1' || ageMs > 6 * 3600_000
+    // Future-day briefs stale faster: bookings keep landing on those boards.
+    const maxAge = day === 0 ? 6 * 3600_000 : 2 * 3600_000
+    const wantFresh = req.query.refresh === '1' || ageMs > maxAge
     if (wantFresh && !_briefBusy) {
       _briefBusy = true
-      try { record = await generateDispatchBrief() }
+      try { record = await generateDispatchBrief(day) }
       finally { _briefBusy = false }
     }
     if (!record) return res.status(503).json({ error: 'No analysis yet — try refresh.' })
@@ -5884,7 +5894,8 @@ app.post('/api/dispatch/scenario', async (req, res) => {
     if (!ANTHROPIC_KEY) return res.status(500).json({ error: 'No ANTHROPIC_API_KEY configured' })
     const scenario = String(req.body?.scenario || '').trim().slice(0, 600)
     if (scenario.length < 5) return res.status(400).json({ error: 'Describe the scenario first.' })
-    const facts = await gatherDispatchFacts({ allCalls: true })
+    const day = Math.min(2, Math.max(0, parseInt(req.body?.day) || 0))
+    const facts = await gatherDispatchFacts({ allCalls: true, day })
 
     const sys = `You are the dispatch coach for Awesome Home Services (HVAC, plumbing, electrical, garage doors \u2014 Colorado Springs). The dispatcher describes a scenario; you walk them step by step through the correct decision-making to maximize profitable dispatch.
 
