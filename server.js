@@ -2477,8 +2477,11 @@ async function build3DayBoard() {
       let needed = Math.max(0, Math.round(capacity - svcJobs.length))
       // FULL is not CLOSED. When the board is (or becomes) completely filled,
       // the flag flips to Opportunity Watch: keep booking high-value calls —
-      // dispatch makes room by moving low-value ones.
-      let oppWatch = capacity > 0 && svcJobs.length >= capacity
+      // dispatch makes room by moving low-value ones. Full means the ROUNDED
+      // calls-needed hits zero — fractional capacity (3.8 techs → 15.2 slots)
+      // left a dead zone where the board said '0 needed' and 'at target'
+      // without flipping the watch (Electrical at 15/15.2).
+      let oppWatch = capacity > 0 && needed <= 0
       if (di === 0) {
         // Today's "needed" respects the clock: only capacity still ahead of
         // now can be filled, and only calls still ahead of now occupy it. At
