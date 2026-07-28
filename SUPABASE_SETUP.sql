@@ -535,3 +535,12 @@ alter table shift_swaps enable row level security;
 drop policy if exists "shift_swaps_read" on shift_swaps;
 create policy "shift_swaps_read" on shift_swaps for select to authenticated using (true);
 alter publication supabase_realtime add table shift_swaps;
+
+
+-- ═══ Live call state persistence (Jul 2026) ════════════════════════════════
+-- Transcripts/notes survive server restarts; rows are deleted at call end.
+create table if not exists live_call_state (
+  call_sid text primary key,
+  data jsonb not null,
+  updated_at timestamptz default now()
+);

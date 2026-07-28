@@ -3109,6 +3109,70 @@ async function detectCoach(callSid, txEntry, text) {
   }
 }
 
+// ── Restart resilience ──────────────────────────────────────────────────────
+// _liveTx is in-memory, so a deploy mid-call wiped the transcript: the X-ray
+// showed 'call ended' while the call was still live, and notes stopped
+// (bit Deanna+Brittany on Jul 28). Two layers: every utterance writes through
+// to live_call_state (survives restarts once the table exists — tolerate its
+// absence quietly), and an unrecognized CallSid RECREATES the session and
+// re-links the contact so transcription self-heals within one sentence even
+// with no table.
+function persistTx(callSid, e) {
+  supabase.from('live_call_state').upsert({
+    call_sid: callSid,
+    data: { contactId: e.contactId, phone: e.phone, repName: e.repName, contactName: e.contactName,
+            direction: e.direction, startedAt: e.startedAt, parts: e.parts.slice(-400) },
+    updated_at: new Date().toISOString(),
+  }, { onConflict: 'call_sid' }).then(({ error }) => {
+    if (error && !/live_call_state/.test(error.message)) console.warn('liveTx persist:', error.message)
+  })
+}
+
+async function restoreOrRecreateTx(callSid) {
+  // Try the durable copy first (full transcript back), else start fresh.
+  try {
+    const { data: row } = await supabase.from('live_call_state').select('data').eq('call_sid', callSid).maybeSingle()
+    if (row?.data) {
+      const d = row.data
+      const e = { contactId: d.contactId || null, phone: d.phone || null, repName: d.repName || null,
+                  contactName: d.contactName || null, direction: d.direction || null,
+                  startedAt: d.startedAt || Date.now(), parts: d.parts || [], lastRun: 0, running: false }
+      _liveTx.set(callSid, e)
+      console.log(`liveTx restored from DB for ${callSid} (${e.parts.length} lines)`)
+      return e
+    }
+  } catch {}
+  const e = { contactId: null, phone: null, repName: null, contactName: null,
+              direction: null, startedAt: Date.now(), parts: [], lastRun: 0, running: false }
+  _liveTx.set(callSid, e)
+  console.log(`liveTx recreated after restart for ${callSid}`)
+  // Re-link the contact/rep in the background — same sources the recording
+  // webhook uses.
+  ;(async () => {
+    try {
+      const { data: ac } = await supabase.from('active_calls').select('contact_id, to_number, rep_identity, contact_name')
+        .eq('call_sid', callSid).maybeSingle()
+      if (ac) {
+        e.contactId = e.contactId || ac.contact_id
+        e.phone = e.phone || last10(ac.to_number)
+        e.repName = e.repName || (ac.rep_identity ? String(ac.rep_identity).replace(/_/g, ' ') : null)
+        e.contactName = e.contactName || ac.contact_name
+        e.direction = e.direction || 'outbound'
+        return
+      }
+      const { data: ct } = await supabase.from('call_tasks').select('contact_id, from_number, agent_name')
+        .eq('call_sid', callSid).maybeSingle()
+      if (ct) {
+        e.contactId = e.contactId || ct.contact_id
+        e.phone = e.phone || last10(ct.from_number)
+        e.repName = e.repName || ct.agent_name
+        e.direction = e.direction || 'inbound'
+      }
+    } catch (err) { console.warn('liveTx relink:', err.message) }
+  })()
+  return e
+}
+
 async function runLiveDraft(callSid, entry) {
   const e = entry || _liveTx.get(callSid)
   if (!e || e.running) return
@@ -3173,6 +3237,7 @@ app.post('/api/twilio/live-transcript', async (req, res) => {
     const { TranscriptionEvent, CallSid, Track } = req.body
     if (!CallSid) return
     if (TranscriptionEvent === 'transcription-stopped') {
+      supabase.from('live_call_state').delete().eq('call_sid', CallSid).then(() => {}, () => {})
       setTimeout(() => _coachTips.delete(CallSid), 5 * 60_000)   // linger briefly for the last poll
       const e = _liveTx.get(CallSid)
       _liveTx.delete(CallSid)
@@ -3187,9 +3252,10 @@ app.post('/api/twilio/live-transcript', async (req, res) => {
     try { data = JSON.parse(req.body.TranscriptionData || '{}') } catch {}
     const text = String(data.transcript || '').trim()
     if (!text) return
-    const e = _liveTx.get(CallSid)
-    if (!e) return
+    let e = _liveTx.get(CallSid)
+    if (!e) e = await restoreOrRecreateTx(CallSid)
     e.parts.push({ who: Track === 'inbound_track' ? 'Customer' : 'Rep', text, at: Date.now() })
+    persistTx(CallSid, e)
     if (Track === 'inbound_track') detectCoach(CallSid, e, text).catch(() => {})
     if (Date.now() - e.lastRun > 20_000) runLiveDraft(CallSid)
   } catch (err) { console.warn('live-transcript webhook:', err.message) }
