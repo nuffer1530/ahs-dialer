@@ -320,7 +320,7 @@ export default function LivePage() {
       {isAdmin && xrayCalls.length > 0 && (
         <div className="card" style={{ borderLeft:'3px solid var(--accent)' }}>
           <div className="card-header">
-            <div className="card-title">👁 Live Calls — click to read along</div>
+            <div className="card-title">Live Calls — click to read along</div>
             <span style={{ fontSize:11, color:'var(--text-muted)' }}>{xrayCalls.length} in progress · transcript only, nothing extra is recorded</span>
           </div>
           <div>
@@ -334,7 +334,7 @@ export default function LivePage() {
                 <span style={{ fontSize:11.5, color:'var(--text-muted)' }}>
                   {c.direction === 'inbound' ? '📥 inbound' : '📤 outbound'}{c.rep ? ` · ${c.rep}` : ''} · {xrayDur(c.startedAt)} · {c.lines} lines
                 </span>
-                <span style={{ marginLeft:'auto', fontSize:11.5, fontWeight:700, color:'var(--accent)' }}>👁 Watch</span>
+                <span style={{ marginLeft:'auto', fontSize:11.5, fontWeight:700, color:'var(--accent)' }}>View transcript</span>
               </div>
             ))}
           </div>
