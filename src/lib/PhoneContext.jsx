@@ -184,6 +184,27 @@ export function PhoneProvider({ children }) {
         device.on('unregistered', () => setTwilioReady(false))
         device.on('error', (err) => console.error('Twilio error:', err))
 
+        // Access tokens live ONE HOUR and nothing refreshed them: an hour
+        // after page load, outbound connect() died instantly in the browser
+        // (never reaching Twilio — dial → drop → wrap-up) and inbound
+        // registration silently lapsed. The SDK announces expiry in advance;
+        // hand it a fresh token every time.
+        const refreshToken = async () => {
+          try {
+            const r = await fetch('/api/twilio/token', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ identity }),
+            })
+            const d = await r.json()
+            if (d.token && device) device.updateToken(d.token)
+          } catch (e) { console.warn('Twilio token refresh failed (will retry):', e.message) }
+        }
+        device.on('tokenWillExpire', refreshToken)
+        // Belt and braces: refresh on a timer too, in case the event is missed
+        // while the machine sleeps. Every 45 min beats a 60-min TTL.
+        const tokenTimer = setInterval(refreshToken, 45 * 60_000)
+        device.on('destroyed', () => clearInterval(tokenTimer))
+
         device.on('incoming', async (call) => {
           const from = call.parameters?.From || call.parameters?.from || 'Unknown'
           const normalizedPhone = from.replace(/\D/g, '').slice(-10)
