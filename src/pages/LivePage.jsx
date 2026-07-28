@@ -355,7 +355,7 @@ export default function LivePage() {
                         a text, an email. Campaign rides underneath when set, so
                         this column didn't lose information when it was renamed. */}
                     <td style={{ padding:'10px 12px', fontSize:12 }}>
-                      {p.interaction_type ? (
+                      {p.interaction_type && ['On Call', 'Wrap Up'].includes(p.status) ? (
                         <div>
                           <span style={{ display:'inline-block', padding:'2px 8px', borderRadius:99, fontSize:11, fontWeight:600,
                             background: INTERACTION_COLORS[p.interaction_type] ? INTERACTION_COLORS[p.interaction_type] + '20' : 'var(--surface-2)',

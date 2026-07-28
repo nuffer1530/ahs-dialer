@@ -2081,6 +2081,7 @@ app.post('/api/admin/user/deactivate', async (req, res) => {
       deactivated_at: new Date().toISOString(),
       status: 'Offline',
       status_since: new Date().toISOString(),
+      interaction_type: null,
     }).eq('id', userId)
     if (profErr) throw new Error(`Could not update profile: ${profErr.message}`)
 

@@ -494,7 +494,7 @@ function DialerLayoutInner() {
 
   const signOut = async () => {
     const now = new Date().toISOString()
-    await sb.from('profiles').update({ status: 'Offline', status_since: now }).eq('id', profile.id)
+    await sb.from('profiles').update({ status: 'Offline', status_since: now, interaction_type: null }).eq('id', profile.id)
     syncWorkerActivity(profile.id, 'Offline')
     if (currentEventRef.current) {
       await sb.from('status_events').update({ ended_at: now }).eq('id', currentEventRef.current)

@@ -378,7 +378,7 @@ export default function WarRoomPage() {
                   </div>
                   {/* What kind of interaction — sits between the name and the
                       status so the floor reads "who / on what / how long". */}
-                  {p.interaction_type && (
+                  {p.interaction_type && ['On Call', 'Wrap Up'].includes(p.status) && (
                     <span style={{ fontSize:11, fontWeight:700, flexShrink:0, padding:'4px 10px', borderRadius:99,
                       color: INTERACTION_COLORS[p.interaction_type] || C.muted,
                       background: `${INTERACTION_COLORS[p.interaction_type] || C.muted}1f` }}>
