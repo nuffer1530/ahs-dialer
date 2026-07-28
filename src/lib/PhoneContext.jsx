@@ -207,21 +207,25 @@ export function PhoneProvider({ children }) {
 
         device.on('incoming', async (call) => {
           const from = call.parameters?.From || call.parameters?.from || 'Unknown'
+          // A co-worker's browser calling: From is client:Their_Identity.
+          const isTeammate = from.startsWith('client:')
+          const teammateName = isTeammate ? from.slice(7).replace(/_/g, ' ') : null
           const normalizedPhone = from.replace(/\D/g, '').slice(-10)
-          const matched = contactsRef.current.find(
+          const matched = isTeammate ? null : contactsRef.current.find(
             c => c.phone && c.phone.replace(/\D/g, '').slice(-10) === normalizedPhone)
 
           setIncomingCall({
-            call, from,
-            contactName: matched?.name || null,
+            call, from: isTeammate ? teammateName : from,
+            isTeammate,
+            contactName: isTeammate ? `${teammateName} (teammate)` : (matched?.name || null),
             contactId: matched?.id || null,
-            stLookup: matched ? null : 'loading',
+            stLookup: isTeammate || matched ? null : 'loading',
           })
           // The caller hung up while we were still ringing — clear the banner.
           call.on('cancel', () => setIncomingCall(prev => (prev?.call === call ? null : prev)))
           call.on('disconnect', () => setIncomingCall(prev => (prev?.call === call ? null : prev)))
 
-          if (!matched && normalizedPhone.length === 10) {
+          if (!isTeammate && !matched && normalizedPhone.length === 10) {
             try {
               const r = await fetch(`/api/st/lookup?phone=${normalizedPhone}`)
               const data = await r.json()
@@ -324,6 +328,13 @@ export function PhoneProvider({ children }) {
   }, [currentRep, updateAgentStatus, wireCallEvents])
 
   // Answer. Callable from any page — the banner in the shell uses this.
+  // Ring a co-worker's browser — no phone numbers involved, works anywhere
+  // they're logged in. Rides makeCall, so busy-guards and status flow apply.
+  const callTeammate = useCallback((teammate) => {
+    const ident = (teammate.name || teammate.email || '').replace(/[^a-zA-Z0-9_]/g, '_')
+    return makeCall(`client:${ident}`, { contactName: teammate.name || teammate.email, interactionType: 'Teammate' })
+  }, [makeCall])
+
   const acceptIncoming = useCallback(() => {
     if (!incomingCall?.call) return null
     const inc = incomingCall
@@ -331,11 +342,11 @@ export function PhoneProvider({ children }) {
     setCallStatus('connected')
     startCallTimer()
     setCallDirection('inbound')
-    updateAgentStatus('On Call', 'Inbound')
+    updateAgentStatus('On Call', inc.isTeammate ? 'Teammate' : 'Inbound')
     wireCallEvents(inc.call)
     inc.call.accept()
     setIncomingCall(null)
-    setPendingInbound(inc)   // DialerPage turns this into a contact tab
+    if (!inc.isTeammate) setPendingInbound(inc)   // DialerPage turns this into a contact tab
     return inc
   }, [incomingCall, startCallTimer, updateAgentStatus, wireCallEvents])
 
@@ -355,7 +366,7 @@ export function PhoneProvider({ children }) {
   return (
     <PhoneContext.Provider value={{
       twilioReady, incomingCall, callStatus, callDuration, callDirection,
-      makeCall, acceptIncoming, rejectIncoming, hangUp, cancelAutoWrap, startInteraction, endInteraction,
+      makeCall, callTeammate, acceptIncoming, rejectIncoming, hangUp, cancelAutoWrap, startInteraction, endInteraction,
       pendingInbound, setPendingInbound,
       hasActiveCall: () => !!callRef.current,
     }}>

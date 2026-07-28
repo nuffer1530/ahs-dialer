@@ -2886,7 +2886,7 @@ app.post('/api/twilio/twiml/outbound', (req, res) => {
   // TwiML app → here, NOT through /api/twilio/call — so without this, outbound
   // calls never reached active_calls at all and the Live board only ever saw
   // inbound. Fire-and-forget: never delay the TwiML response for a log write.
-  if (p.CallSid) {
+  if (p.CallSid && !String(to || '').startsWith('client:')) {
     supabase.from('active_calls').upsert({
       call_sid: p.CallSid,
       direction: 'outbound',
@@ -2902,6 +2902,17 @@ app.post('/api/twilio/twiml/outbound', (req, res) => {
   }
 
   const twiml = new VoiceResponse()
+
+  // Teammate call: dial the co-worker's browser directly. Internal calls are
+  // NOT recorded or transcribed and never touch active_calls — they're not
+  // customer calls and shouldn't show on boards or in recordings.
+  if (String(to || '').startsWith('client:')) {
+    const idial = twiml.dial({ callerId: `client:${p.identity || 'Andi'}`, timeout: 25 })
+    idial.client(String(to).slice(7))
+    res.type('text/xml')
+    return res.send(twiml.toString())
+  }
+
   const dial = twiml.dial({
     callerId: twilioPhone,
     timeout: 30,

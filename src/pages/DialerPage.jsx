@@ -224,6 +224,8 @@ export default function DialerPage() {
   const [correctOutcome, setCorrectOutcome] = useState('')
   const [correctNote, setCorrectNote] = useState('')
   const [dialpadNumber, setDialpadNumber] = useState('')
+  const [dialTeam, setDialTeam] = useState([])       // teammates for the dialpad picker
+  const [dialTeamSel, setDialTeamSel] = useState('')
 
   // ST Booking panel
   const [stJobTypes, setStJobTypes] = useState([])
@@ -275,7 +277,7 @@ export default function DialerPage() {
   // dialer destroyed the Device and inbound calls could not be answered.
   const {
     twilioReady, callStatus, callDuration, incomingCall,
-    makeCall: phoneMakeCall, hangUp, startInteraction, endInteraction,
+    makeCall: phoneMakeCall, callTeammate, hangUp, startInteraction, endInteraction,
     pendingInbound, setPendingInbound, callDirection,
   } = usePhone()
 
@@ -2218,7 +2220,7 @@ export default function DialerPage() {
 
       {/* DIALPAD MODAL */}
       {showDialpad && (
-        <Modal title="Manual Dial" onClose={() => { setShowDialpad(false); setDialpadNumber('') }} width={280}>
+        <Modal title="Manual Dial" onClose={() => { setShowDialpad(false); setDialpadNumber(''); setDialTeamSel('') }} width={300}>
           <div style={{ textAlign:'center', marginBottom:12 }}>
             <input autoFocus type="tel" value={dialpadNumber}
               onChange={e => setDialpadNumber(e.target.value.replace(/[^0-9*#]/g,'').slice(0,15))}
@@ -2244,6 +2246,34 @@ export default function DialerPage() {
               style={{ flex:2, padding:'10px 0', border:'none', borderRadius:'var(--radius)', background:dialpadNumber.length>=10?'var(--success)':'var(--border)', cursor:dialpadNumber.length>=10?'pointer':'not-allowed', fontSize:14, fontWeight:700, color:'#fff' }}>
               Call
             </button>
+          </div>
+
+          {/* Or ring a co-worker's browser — no number needed */}
+          <div style={{ marginTop:14, paddingTop:12, borderTop:'1px solid var(--border)' }}>
+            <div style={{ fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:.5, color:'var(--text-muted)', marginBottom:6 }}>
+              Or call a teammate
+            </div>
+            <div style={{ display:'flex', gap:6 }}>
+              <select className="form-input" value={dialTeamSel} style={{ flex:1 }}
+                onFocus={() => { if (!dialTeam.length) sb.from('profiles').select('id, name, email').eq('active', true).order('name').then(({ data }) => setDialTeam(data || [])) }}
+                onClick={() => { if (!dialTeam.length) sb.from('profiles').select('id, name, email').eq('active', true).order('name').then(({ data }) => setDialTeam(data || [])) }}
+                onChange={e => setDialTeamSel(e.target.value)}>
+                <option value="">Pick a teammate…</option>
+                {dialTeam.filter(t => t.id !== profile?.id).map(t => (
+                  <option key={t.id} value={t.id}>{t.name || t.email}</option>
+                ))}
+              </select>
+              <button className="btn primary" disabled={!dialTeamSel}
+                onClick={() => {
+                  const t = dialTeam.find(x => x.id === dialTeamSel)
+                  if (t) { callTeammate(t); setShowDialpad(false); setDialTeamSel('') }
+                }}>
+                Call
+              </button>
+            </div>
+            <div style={{ fontSize:10, color:'var(--text-muted)', marginTop:5 }}>
+              Rings their Andi tab wherever they're logged in — office or home.
+            </div>
           </div>
         </Modal>
       )}

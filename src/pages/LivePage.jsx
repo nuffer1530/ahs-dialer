@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useData } from '../lib/DataContext'
 import { useAuth } from '../lib/AuthContext'
+import { usePhone } from '../lib/PhoneContext'
 import { sb } from '../lib/supabase'
 import Badge from '../components/Badge'
 import { isDone, fmtShort, syncWorkerActivity } from '../lib/utils'
@@ -55,7 +56,8 @@ function Kpi({ label, value, sub, tone = 'default', big = false }) {
 
 export default function LivePage() {
   const { contacts } = useData()
-  const { isAdmin } = useAuth()
+  const { isAdmin, profile: myProfile } = useAuth()
+  const { callTeammate, twilioReady, callStatus } = usePhone()
 
   // 👁 Live Call X-Ray (admins): read any in-progress call's transcript live.
   const [xrayCalls, setXrayCalls] = useState([])
@@ -443,6 +445,16 @@ export default function LivePage() {
                           <Avatar avatar={p.avatar} name={p.name || p.email} />
                         </div>
                         <div style={{ fontSize:13 }}>{p.name || p.email}</div>
+                        {p.id !== myProfile?.id && (
+                          <button onClick={() => callTeammate(p)}
+                            disabled={!twilioReady || !!callStatus || status === 'Offline'}
+                            title={status === 'Offline' ? `${p.name || 'They'} aren't logged in` : `Call ${p.name || p.email} — rings their browser wherever they're logged in`}
+                            style={{ marginLeft:2, padding:'2px 10px', fontSize:10.5, fontWeight:700, borderRadius:99,
+                              border:'1px solid var(--accent)', cursor: (!twilioReady || callStatus || status === 'Offline') ? 'not-allowed' : 'pointer',
+                              background:'transparent', color:'var(--accent)', opacity: (!twilioReady || callStatus || status === 'Offline') ? .4 : 1 }}>
+                            Call
+                          </button>
+                        )}
                       </div>
                     </td>
                     <td style={{ padding:'10px 12px' }}>
