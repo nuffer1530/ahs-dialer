@@ -4036,11 +4036,15 @@ app.post('/api/twilio/status', async (req, res) => {
     startLiveTranscription(CallSid, ac?.contact_id || null, 'outbound', ac?.to_number || req.body.To,
       ac?.rep_identity ? String(ac.rep_identity).replace(/_/g, ' ') : null, ac?.contact_name || null).catch(() => {})
   }
+  // Outbound rows are keyed by the PARENT (browser) leg but the status
+  // callbacks fire from the CHILD leg — matching only CallSid left every
+  // outbound row stuck at 'initiated' forever (the TV counted 7 live calls
+  // on an empty floor). Match either leg.
   await supabase.from('active_calls').update({
     status: CallStatus,
     duration: Duration ? parseInt(Duration) : null,
     ended_at: ['completed','failed','busy','no-answer','canceled'].includes(CallStatus) ? new Date().toISOString() : null,
-  }).eq('call_sid', CallSid)
+  }).in('call_sid', [CallSid, ParentCallSid].filter(Boolean))
   res.sendStatus(200)
 })
 
@@ -7086,6 +7090,17 @@ if (DISPATCH_REFRESH_HOURS > 0) {
     // among scheduled reps/dispatchers — straight into commissions (which
     // fires the You Got Paid popup) plus a gold floor-wide unlock pop.
     setInterval(() => checkOppWatchBonus().catch(e => console.warn('opp bonus:', e.message)), 10 * 60_000)
+    // Janitor: no phone call runs 4 hours. Any active_calls row still
+    // non-terminal that old is a missed callback — close it so the live
+    // counters can never drift permanently.
+    setInterval(async () => {
+      try {
+        await supabase.from('active_calls')
+          .update({ status: 'completed', ended_at: new Date().toISOString() })
+          .not('status', 'in', '(completed,failed,busy,no-answer,canceled)')
+          .lt('started_at', new Date(Date.now() - 4 * 3600e3).toISOString())
+      } catch (e) { console.warn('active_calls janitor:', e.message) }
+    }, 30 * 60_000)
     // Scheduled floor notifications: sweep every 60s, send what's due.
     setInterval(async () => {
       try {
