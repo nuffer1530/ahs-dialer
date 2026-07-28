@@ -228,6 +228,33 @@ export default function WarRoomPage() {
           <div style={{ width:8, height:8, borderRadius:'50%', background:C.green, animation:'wr-pulse 1.5s infinite' }} />
           <span style={{ fontSize:12, color:C.muted, letterSpacing:1 }}>LIVE</span>
         </div>
+
+        {/* Today's money — sold revenue + sales + club count, front and center */}
+        {(() => {
+          const soldTotal = sales.reduce((a, x) => a + (Number(x.amount) || 0), 0)
+          const clubCount = wins.memberships.length
+          return (
+            <div style={{ display:'flex', alignItems:'center', gap:26 }}>
+              <div style={{ textAlign:'center' }}>
+                <div style={{ fontSize:30, fontWeight:800, letterSpacing:-1, color: soldTotal >= 10000 ? '#F0B429' : C.green, fontVariantNumeric:'tabular-nums', lineHeight:1 }}>
+                  ${soldTotal.toLocaleString()}
+                </div>
+                <div style={{ fontSize:10, fontWeight:700, letterSpacing:1.2, color:C.muted, textTransform:'uppercase', marginTop:3 }}>Sold today</div>
+              </div>
+              <div style={{ width:1, height:34, background:C.border }} />
+              <div style={{ textAlign:'center' }}>
+                <div style={{ fontSize:30, fontWeight:800, letterSpacing:-1, color:C.text, fontVariantNumeric:'tabular-nums', lineHeight:1 }}>{sales.length}</div>
+                <div style={{ fontSize:10, fontWeight:700, letterSpacing:1.2, color:C.muted, textTransform:'uppercase', marginTop:3 }}>Sales</div>
+              </div>
+              <div style={{ width:1, height:34, background:C.border }} />
+              <div style={{ textAlign:'center' }}>
+                <div style={{ fontSize:30, fontWeight:800, letterSpacing:-1, color:C.purple, fontVariantNumeric:'tabular-nums', lineHeight:1 }}>{clubCount}</div>
+                <div style={{ fontSize:10, fontWeight:700, letterSpacing:1.2, color:C.muted, textTransform:'uppercase', marginTop:3 }}>Clubs</div>
+              </div>
+            </div>
+          )
+        })()}
+
         <div style={{ display:'flex', alignItems:'center', gap:16 }}>
           <WeatherStrip dark />
           <button onClick={toggleFull} title={isFull ? 'Exit fullscreen' : 'Fullscreen'}
