@@ -233,6 +233,7 @@ export default function WarRoomPage() {
         {(() => {
           const soldTotal = sales.reduce((a, x) => a + (Number(x.amount) || 0), 0)
           const clubCount = wins.memberships.length
+          const starCount = wins.reviews.length
           return (
             <div style={{ display:'flex', alignItems:'center', gap:26 }}>
               <div style={{ textAlign:'center' }}>
@@ -250,6 +251,11 @@ export default function WarRoomPage() {
               <div style={{ textAlign:'center' }}>
                 <div style={{ fontSize:30, fontWeight:800, letterSpacing:-1, color:C.purple, fontVariantNumeric:'tabular-nums', lineHeight:1 }}>{clubCount}</div>
                 <div style={{ fontSize:10, fontWeight:700, letterSpacing:1.2, color:C.muted, textTransform:'uppercase', marginTop:3 }}>Clubs</div>
+              </div>
+              <div style={{ width:1, height:34, background:C.border }} />
+              <div style={{ textAlign:'center' }}>
+                <div style={{ fontSize:30, fontWeight:800, letterSpacing:-1, color:C.amber, fontVariantNumeric:'tabular-nums', lineHeight:1 }}>{starCount}</div>
+                <div style={{ fontSize:10, fontWeight:700, letterSpacing:1.2, color:C.muted, textTransform:'uppercase', marginTop:3 }}>5★ Reviews</div>
               </div>
             </div>
           )
