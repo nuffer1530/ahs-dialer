@@ -167,7 +167,12 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
         pushRecurring()
         return
       }
-      if (['pto','sick','holiday','off'].includes(sched.day_type)) {
+      if (sched.day_type === 'off') {
+        // Scheduled OFF = an empty row. The old full-width 'off' block had no
+        // styling of its own and rendered looking like a day-long shift.
+        return
+      }
+      if (['pto','sick','holiday'].includes(sched.day_type)) {
         newBlocks[p.id] = [{ id: sched.day_type+'-'+p.id, type: sched.day_type, start: 0, duration: TOTAL_INTERVALS }]
         return
       }
