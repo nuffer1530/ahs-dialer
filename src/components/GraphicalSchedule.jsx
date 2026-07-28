@@ -18,7 +18,7 @@ const BLOCK_TYPES = [
   { id:'lunch',    label:'Lunch',          color:'#1baf7a', bg:'#1baf7a18', text:'#0f6e56' },
   { id:'outbound', label:'Outbound',       color:'#4a3aa7', bg:'#4a3aa718', text:'#4a3aa7' },
   { id:'meeting',  label:'Meeting',        color:'#e34948', bg:'#e3494818', text:'#a32d2d' },
-  { id:'pto',      label:'PTO',            color:'#3b82f6', bg:'#3b82f615', text:'#185fa5' },
+  { id:'pto',      label:'PTO',            color:'#8B93A3', bg:'#8B93A322', text:'#5C6470' },
   { id:'sick',     label:'Sick',           color:'#f59e0b', bg:'#f59e0b15', text:'#854f0b' },
   { id:'holiday',  label:'Holiday',        color:'#8b5cf6', bg:'#8b5cf615', text:'#4a3aa7' },
 ]
