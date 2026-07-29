@@ -7,6 +7,7 @@ import CampaignsPage from './CampaignsPage'
 import Avatar from '../components/Avatar'
 import AvatarCropper from '../components/AvatarCropper'
 import KnowledgeTab from '../components/KnowledgeTab'
+import CallRoutingTab from '../components/CallRoutingTab'
 import { OPS_DEFAULTS, invalidateOpsConfig, loadOpsConfig } from '../lib/opsConfig'
 
 const EMOJIS = {
@@ -1319,7 +1320,7 @@ export default function AdminPage() {
   }
 
   const TABS = isAdmin
-    ? [{ id:'users', label:'Users' }, { id:'campaigns', label:'Campaigns' }, { id:'commission', label:'Commission' }, { id:'payouts', label:'Payouts' }, { id:'statuses', label:'Statuses' }, { id:'scorecards', label:'Scorecards' }, { id:'floortv', label:'Floor TV' }, { id:'ops', label:'Thresholds' }, { id:'knowledge', label:'Knowledge' }]
+    ? [{ id:'users', label:'Users' }, { id:'campaigns', label:'Campaigns' }, { id:'commission', label:'Commission' }, { id:'payouts', label:'Payouts' }, { id:'statuses', label:'Statuses' }, { id:'scorecards', label:'Scorecards' }, { id:'floortv', label:'Floor TV' }, { id:'ops', label:'Thresholds' }, { id:'knowledge', label:'Knowledge' }, { id:'routing', label:'Call Routing' }]
     : [{ id:'users', label:'My Profile' }, { id:'commission', label:'My Earnings' }]
 
   return (
@@ -1629,6 +1630,8 @@ export default function AdminPage() {
 
       {/* Users tab */}
       {settingsTab === 'knowledge' && isAdmin && <KnowledgeTab />}
+
+      {settingsTab === 'routing' && isAdmin && <CallRoutingTab />}
 
       {settingsTab === 'ops' && isAdmin && (
         <div style={{ flex:1, overflowY:'auto', padding:24, display:'flex', flexDirection:'column', gap:20 }}>

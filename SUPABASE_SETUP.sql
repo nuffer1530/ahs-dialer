@@ -587,3 +587,10 @@ alter table active_calls add column if not exists recording_duration int;
 -- Booking → recording linkage: the dialer now sends its contact id when booking.
 alter table andi_bookings add column if not exists contact_id uuid;
 alter table andi_bookings add column if not exists st_job_number text;
+
+-- ── Call routing / voicemails (Jul 2026) ────────────────────────────────────
+-- Routing config itself lives in app_settings ('call_routing') — no table.
+-- Voicemails land in call_recordings (direction 'voicemail'); these columns
+-- hold the Whisper transcript and the heard/unheard state for the inbox.
+alter table call_recordings add column if not exists transcript text;
+alter table call_recordings add column if not exists heard_at timestamptz;

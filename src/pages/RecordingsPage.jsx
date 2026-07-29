@@ -58,8 +58,14 @@ export default function RecordingsPage() {
   const [expandedId, setExpandedId] = useState(null)
   const audioRef = useRef(null)
 
+  const [newVmCount, setNewVmCount] = useState(0)
   useEffect(() => {
     sb.from('profiles').select('id, name, email').eq('active', true).order('name').then(({ data }) => setProfiles(data || []))
+    // Shared voicemail inbox: how many nobody has listened to yet?
+    fetch('/api/recordings?direction=voicemail&limit=100')
+      .then(r => r.json())
+      .then(d => setNewVmCount((d.data || []).filter(r => !r.heard_at).length))
+      .catch(() => {})
   }, [])
 
   useEffect(() => {
@@ -73,7 +79,8 @@ export default function RecordingsPage() {
 
       const params = new URLSearchParams()
       const rep = !isAdmin ? (profile?.name || profile?.email || '') : repFilter
-      if (rep) params.set('rep', rep)
+      // Voicemails belong to no rep — everyone sees the shared inbox.
+      if (rep && dirFilter !== 'voicemail') params.set('rep', rep)
       if (dirFilter) params.set('direction', dirFilter)
       if (bookedOnly) params.set('booked', '1')
       if (from) params.set('from', from.toISOString())
@@ -102,6 +109,12 @@ export default function RecordingsPage() {
     const sid = recSid(rec)
     const audio = new Audio(sid ? `/api/twilio/recording/${sid}` : rec.url)
     audioRef.current = audio
+    // Playing a fresh voicemail marks it heard for the whole team.
+    if (rec.direction === 'voicemail' && !rec.heard_at) {
+      fetch('/api/recordings/heard', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: rec.id }) }).catch(() => {})
+      setRecordings(prev => prev.map(r => r.id === rec.id ? { ...r, heard_at: new Date().toISOString() } : r))
+      setNewVmCount(n => Math.max(0, n - 1))
+    }
     audio.onended = () => { setPlayingId(null); setProgress(0) }
     audio.ontimeupdate = () => setProgress(audio.duration ? (audio.currentTime / audio.duration) * 100 : 0)
     audio.onerror = () => { setPlayingId(null); alert('Could not load this recording.') }
@@ -119,7 +132,7 @@ export default function RecordingsPage() {
     if (outcomeFilter && r.outcome !== outcomeFilter) return false
     if (search) {
       const q = search.toLowerCase()
-      const hay = `${r.contact_name || ''} ${r.phone || ''} ${r.notes || ''} ${r.st_job_number || ''}`.toLowerCase()
+      const hay = `${r.contact_name || ''} ${r.phone || ''} ${r.notes || ''} ${r.transcript || ''} ${r.st_job_number || ''}`.toLowerCase()
       if (!hay.includes(q)) return false
     }
     return true
@@ -172,6 +185,7 @@ export default function RecordingsPage() {
             <option value="">All calls</option>
             <option value="inbound">Inbound</option>
             <option value="outbound">Outbound</option>
+            <option value="voicemail">Voicemails</option>
           </select>
         </div>
         <div>
@@ -199,9 +213,16 @@ export default function RecordingsPage() {
       </div>
 
       {/* Summary */}
-      <div style={{ display:'flex', gap:16, marginBottom:14, fontSize:12, color:'var(--text-muted)' }}>
+      <div style={{ display:'flex', gap:16, marginBottom:14, fontSize:12, color:'var(--text-muted)', alignItems:'center' }}>
         <span>{filtered.length} recording{filtered.length !== 1 ? 's' : ''}</span>
         {bookedCount > 0 && <span style={{ color:'var(--tone-green-tx)', fontWeight:600 }}>{bookedCount} booked</span>}
+        {newVmCount > 0 && dirFilter !== 'voicemail' && (
+          <button onClick={() => setDirFilter('voicemail')}
+            style={{ fontSize:11, fontWeight:700, padding:'3px 10px', borderRadius:99, cursor:'pointer',
+              background:'var(--tone-amber-bg)', color:'var(--tone-amber-tx)', border:'1px solid var(--tone-amber-bd)' }}>
+            {newVmCount} new voicemail{newVmCount === 1 ? '' : 's'}
+          </button>
+        )}
         {filtered.length > 0 && (
           <span>Avg length: {fmtDuration(Math.round(filtered.reduce((s,r) => s + (r.duration || 0), 0) / filtered.length))}</span>
         )}
@@ -228,6 +249,9 @@ export default function RecordingsPage() {
             const isOpen = expandedId === rec.id
             const oc = OUTCOME_COLORS[rec.outcome] || { bg:'var(--surface-2)', color:'var(--text-muted)', border:'var(--border)' }
             const dirIn = rec.direction === 'inbound'
+            const isVm = rec.direction === 'voicemail'
+            const unheard = isVm && !rec.heard_at
+            const bodyText = rec.notes || (isVm ? rec.transcript : '')
             return (
               <div key={rec.id}
                 style={{ padding:'12px 16px', borderBottom: i < filtered.length-1 ? '1px solid var(--border)' : 'none', background: isPlaying ? 'var(--accent-bg)' : 'transparent' }}>
@@ -247,19 +271,20 @@ export default function RecordingsPage() {
                   </button>
 
                   {/* Customer + chips + notes preview */}
-                  <div style={{ flex:1, minWidth:0, cursor: rec.notes ? 'pointer' : 'default' }}
-                    onClick={() => rec.notes && setExpandedId(isOpen ? null : rec.id)}>
+                  <div style={{ flex:1, minWidth:0, cursor: bodyText ? 'pointer' : 'default' }}
+                    onClick={() => bodyText && setExpandedId(isOpen ? null : rec.id)}>
                     <div style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap' }}>
+                      {unheard && <span title="New — nobody has listened yet" style={{ width:8, height:8, borderRadius:'50%', background:'var(--tone-amber-bd)', flexShrink:0 }} />}
                       {rec.direction && (
-                        <span title={dirIn ? 'Inbound call' : 'Outbound call'}
+                        <span title={isVm ? 'Voicemail' : dirIn ? 'Inbound call' : 'Outbound call'}
                           style={{ fontSize:10, fontWeight:700, padding:'2px 7px', borderRadius:99, flexShrink:0,
-                            background: dirIn ? 'var(--tone-blue-bg)' : 'var(--tone-purple-bg)',
-                            color: dirIn ? 'var(--tone-blue-tx)' : 'var(--tone-purple-tx)',
-                            border: `1px solid ${dirIn ? 'var(--tone-blue-bd)' : 'var(--tone-purple-bd)'}` }}>
-                          {dirIn ? 'IN' : 'OUT'}
+                            background: isVm ? 'var(--tone-amber-bg)' : dirIn ? 'var(--tone-blue-bg)' : 'var(--tone-purple-bg)',
+                            color: isVm ? 'var(--tone-amber-tx)' : dirIn ? 'var(--tone-blue-tx)' : 'var(--tone-purple-tx)',
+                            border: `1px solid ${isVm ? 'var(--tone-amber-bd)' : dirIn ? 'var(--tone-blue-bd)' : 'var(--tone-purple-bd)'}` }}>
+                          {isVm ? 'VM' : dirIn ? 'IN' : 'OUT'}
                         </span>
                       )}
-                      <span style={{ fontSize:13, fontWeight:600, color:'var(--text-primary)' }}>
+                      <span style={{ fontSize:13, fontWeight: unheard ? 800 : 600, color:'var(--text-primary)' }}>
                         {rec.contact_name || 'Unknown caller'}
                       </span>
                       {rec.outcome && (
@@ -278,12 +303,12 @@ export default function RecordingsPage() {
                     </div>
                     <div style={{ fontSize:11, color:'var(--text-muted)', marginTop:2, overflow:'hidden', textOverflow:'ellipsis', whiteSpace: isOpen ? 'normal' : 'nowrap' }}>
                       {fmtPhone(rec.phone)}
-                      {rec.notes ? ` — ${isOpen ? '' : rec.notes.slice(0, 110)}${!isOpen && rec.notes.length > 110 ? '…' : ''}` : ''}
+                      {bodyText ? ` — ${isOpen ? '' : bodyText.slice(0, 110)}${!isOpen && bodyText.length > 110 ? '…' : ''}` : ''}
                     </div>
-                    {isOpen && rec.notes && (
+                    {isOpen && bodyText && (
                       <div style={{ marginTop:6, padding:'8px 11px', fontSize:12, lineHeight:1.55, whiteSpace:'pre-wrap',
                         background:'var(--surface-2)', border:'1px solid var(--border)', borderRadius:8, color:'var(--text-secondary)' }}>
-                        {rec.notes}
+                        {bodyText}
                       </div>
                     )}
                     {isPlaying && (

@@ -4080,6 +4080,123 @@ app.get('/api/st/intelligence/:id', async (req, res) => {
 //
 // Agents still answer through the Voice SDK exactly as before — the assignment
 // callback below dequeues the task to client:<identity>.
+// ── ☎️ CALL ROUTING ─────────────────────────────────────────────────────────
+// Everything about how inbound calls are handled lives in ONE app_settings
+// JSON (key 'call_routing'), edited from Settings → Call Routing. The inbound
+// webhook re-reads it (30s cache), so an admin edit is live on the next call.
+// Defaults are chosen to exactly match the pre-settings behavior: open 24/7,
+// same greeting, same hold music — nothing changes until an admin says so.
+const HOLD_MUSIC = {
+  classical:   'http://com.twilio.music.classical.s3.amazonaws.com/BusyStrings.mp3',
+  waltz:       'http://com.twilio.music.classical.s3.amazonaws.com/ClockworkWaltz.mp3',
+  ambient:     'http://com.twilio.music.ambient.s3.amazonaws.com/aerosolspray_-_Living_Taciturn.mp3',
+  electronica: 'http://com.twilio.music.electronica.s3.amazonaws.com/teru_-_110_Downtempo_Electronic_4.mp3',
+  guitars:     'http://com.twilio.music.guitars.s3.amazonaws.com/Pitx_-_Long_Winter.mp3',
+  rock:        'http://com.twilio.music.rock.s3.amazonaws.com/nickleus_-_original_guitar_song_200907251723.mp3',
+  softrock:    'http://com.twilio.music.soft-rock.s3.amazonaws.com/_ghost_-_promo_2_sample_pack.mp3',
+}
+// Twilio <Say> Amazon Polly neural voices — a bad voice string errors the
+// whole call, so the UI only offers this vetted list (+ legacy alice).
+const ROUTING_VOICES = ['Polly.Joanna-Neural', 'Polly.Matthew-Neural', 'Polly.Salli-Neural',
+  'Polly.Joey-Neural', 'Polly.Kendra-Neural', 'Polly.Kimberly-Neural', 'alice']
+
+const ROUTING_DEFAULTS = {
+  voice: 'Polly.Joanna-Neural',
+  hours: {
+    mon: { closed: false, open: '00:00', close: '23:59' },
+    tue: { closed: false, open: '00:00', close: '23:59' },
+    wed: { closed: false, open: '00:00', close: '23:59' },
+    thu: { closed: false, open: '00:00', close: '23:59' },
+    fri: { closed: false, open: '00:00', close: '23:59' },
+    sat: { closed: false, open: '00:00', close: '23:59' },
+    sun: { closed: false, open: '00:00', close: '23:59' },
+  },
+  holidays: [],   // [{ date:'2026-11-26', name:'Thanksgiving', message:'' }]
+  override: { active: false, message: '', until: null },
+  greetings: {
+    open: 'Thank you for calling Awesome Home Services. This call may be recorded for quality purposes. Please hold while we connect you.',
+    closed: 'Thank you for calling Awesome Home Services. We are currently closed. Please leave a message and we will call you back as soon as we open.',
+    holiday: '',   // empty = use the closed greeting
+    voicemail: 'Please leave your name, number, and what you need help with after the tone, and we will get right back to you.',
+  },
+  afterHours: { action: 'forward', forwardNumber: '', floorWaitSec: 45 },
+  queue: {
+    holdMusic: 'classical', customMusicUrl: '',
+    comfortMessage: 'Thanks for holding — the next available team member will be right with you.',
+    overflow: { action: 'hold', maxWaitSec: 180, forwardNumber: '' },
+  },
+  voicemail: { maxSec: 120, emails: [], transcribe: true },
+}
+
+let _routingCache = { at: 0, cfg: null }
+function mergeRouting(saved) {
+  const d = JSON.parse(JSON.stringify(ROUTING_DEFAULTS))
+  if (!saved || typeof saved !== 'object') return d
+  for (const k of Object.keys(d)) {
+    if (saved[k] == null) continue
+    if (k === 'hours') { for (const day of Object.keys(d.hours)) if (saved.hours?.[day]) d.hours[day] = { ...d.hours[day], ...saved.hours[day] } }
+    else if (Array.isArray(d[k])) d[k] = Array.isArray(saved[k]) ? saved[k] : d[k]
+    else if (typeof d[k] === 'object') d[k] = { ...d[k], ...saved[k], ...(k === 'queue' && saved.queue?.overflow ? { overflow: { ...d.queue.overflow, ...saved.queue.overflow } } : {}) }
+    else d[k] = saved[k]
+  }
+  if (!ROUTING_VOICES.includes(d.voice)) d.voice = ROUTING_DEFAULTS.voice
+  return d
+}
+async function getRouting() {
+  if (_routingCache.cfg && Date.now() - _routingCache.at < 30_000) return _routingCache.cfg
+  let saved = null
+  try {
+    const { data } = await supabase.from('app_settings').select('value').eq('key', 'call_routing').maybeSingle()
+    saved = data?.value ? JSON.parse(data.value) : null
+  } catch {}   // config unreachable → defaults; a call must never fail on this
+  const cfg = mergeRouting(saved)
+  _routingCache = { at: Date.now(), cfg }
+  return cfg
+}
+
+// Where are we right now, Denver wall clock? → { open, reason, holiday }
+function routingStateNow(cfg) {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Denver', weekday: 'short', year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', hour12: false,
+  }).formatToParts(new Date()).map(p => [p.type, p.value]))
+  const hhmm = `${parts.hour === '24' ? '00' : parts.hour}:${parts.minute}`
+  const dateStr = `${parts.year}-${parts.month}-${parts.day}`
+  if (cfg.override?.active) {
+    const expired = cfg.override.until && Date.parse(cfg.override.until) < Date.now()
+    if (!expired) return { open: false, reason: 'override', now: hhmm, date: dateStr }
+  }
+  const hol = (cfg.holidays || []).find(h => h.date === dateStr)
+  if (hol) return { open: false, reason: 'holiday', holiday: hol, now: hhmm, date: dateStr }
+  const dayKey = { Sun: 'sun', Mon: 'mon', Tue: 'tue', Wed: 'wed', Thu: 'thu', Fri: 'fri', Sat: 'sat' }[parts.weekday]
+  const day = cfg.hours[dayKey]
+  if (!day || day.closed || hhmm < day.open || hhmm > day.close) return { open: false, reason: 'hours', now: hhmm, date: dateStr }
+  return { open: true, reason: 'open', now: hhmm, date: dateStr }
+}
+
+const routingSay = (twiml, cfg, msg) => { if (msg) twiml.say({ voice: cfg.voice }, msg) }
+function sendToVoicemail(twiml, cfg) {
+  routingSay(twiml, cfg, cfg.greetings.voicemail)
+  twiml.record({ maxLength: cfg.voicemail.maxSec || 120, playBeep: true, action: `${appUrl}/api/twilio/routing/voicemail-done` })
+  routingSay(twiml, cfg, 'We did not receive a recording. Goodbye.')
+}
+function enqueueCall(twiml, cfg, { CallSid, From, contact, afterHours }) {
+  const enqueue = twiml.enqueue({
+    workflowSid: TWILIO_WORKFLOW_SID,
+    waitUrl: `${appUrl}/api/twilio/queue/wait${afterHours ? '?ah=1' : ''}`,
+    waitUrlMethod: 'POST',
+    action: `${appUrl}/api/twilio/routing/queue-done${afterHours ? '?ah=1' : ''}`,
+  })
+  // Attributes ride along to the assignment callback and the events webhook, so
+  // we know who's calling without a second lookup.
+  enqueue.task(JSON.stringify({
+    call_sid: CallSid,
+    from_number: From,
+    contact_id: contact?.id || null,
+    contact_name: contact?.name || null,
+  }))
+}
+
 app.post('/api/twilio/inbound', async (req, res) => {
   const { From, CallSid } = req.body
   console.log(`Inbound call from ${From}, SID: ${CallSid}`)
@@ -4092,43 +4209,200 @@ app.post('/api/twilio/inbound', async (req, res) => {
     contact = data
   }
 
+  const cfg = await getRouting()
+  const state = routingStateNow(cfg)
   const twiml = new VoiceResponse()
 
-  // No workflow configured — fall back to voicemail rather than dropping the
-  // caller into a queue that can never route them.
-  if (!TWILIO_WORKFLOW_SID) {
-    console.error('TWILIO_WORKFLOW_SID not set — inbound call cannot be queued')
-    twiml.say({ voice: 'alice' }, 'Thank you for calling Awesome Home Services. Please leave a message after the tone.')
-    twiml.record({ maxLength: 120, action: `${appUrl}/api/twilio/inbound/complete`, transcribe: false })
+  // Closed — emergency override, holiday, or outside hours.
+  if (!state.open) {
+    const msg = state.reason === 'override' ? (cfg.override.message || cfg.greetings.closed)
+      : state.reason === 'holiday' ? (state.holiday?.message || cfg.greetings.holiday || cfg.greetings.closed)
+      : cfg.greetings.closed
+    routingSay(twiml, cfg, msg)
+    const act = cfg.afterHours.action
+    if (act === 'forward' && cfg.afterHours.forwardNumber) {
+      const dial = twiml.dial({
+        timeout: 25, callerId: twilioPhone,
+        action: `${appUrl}/api/twilio/routing/forward-result`,
+        record: 'record-from-answer-dual',
+        recordingStatusCallback: `${appUrl}/api/twilio/recording`,
+        recordingStatusCallbackEvent: 'completed',
+      })
+      dial.number(cfg.afterHours.forwardNumber)
+    } else if (act === 'floor' && TWILIO_WORKFLOW_SID) {
+      enqueueCall(twiml, cfg, { CallSid, From, contact, afterHours: true })
+    } else {
+      sendToVoicemail(twiml, cfg)
+    }
     res.type('text/xml')
     return res.send(twiml.toString())
   }
 
-  twiml.say({ voice: 'alice' }, 'Thank you for calling Awesome Home Services. This call may be recorded for quality purposes. Please hold while we connect you.')
-  const enqueue = twiml.enqueue({
-    workflowSid: TWILIO_WORKFLOW_SID,
-    waitUrl: `${appUrl}/api/twilio/queue/wait`,
-    waitUrlMethod: 'POST',
-  })
-  // Attributes ride along to the assignment callback and the events webhook, so
-  // we know who's calling without a second lookup.
-  enqueue.task(JSON.stringify({
-    call_sid: CallSid,
-    from_number: From,
-    contact_id: contact?.id || null,
-    contact_name: contact?.name || null,
-  }))
+  // Open — greet and queue to the floor.
+  if (!TWILIO_WORKFLOW_SID) {
+    console.error('TWILIO_WORKFLOW_SID not set — inbound call cannot be queued')
+    routingSay(twiml, cfg, cfg.greetings.closed)
+    sendToVoicemail(twiml, cfg)
+    res.type('text/xml')
+    return res.send(twiml.toString())
+  }
+  routingSay(twiml, cfg, cfg.greetings.open)
+  enqueueCall(twiml, cfg, { CallSid, From, contact, afterHours: false })
 
   res.type('text/xml')
   res.send(twiml.toString())
 })
 
-// Hold music while queued. Twilio re-requests this as it loops.
-app.post('/api/twilio/queue/wait', (req, res) => {
+// Hold loop. Twilio re-requests this each time the track finishes, which is
+// what lets the overflow check run — QueueTime rides in on every request.
+app.post('/api/twilio/queue/wait', async (req, res) => {
+  const cfg = await getRouting()
   const twiml = new VoiceResponse()
-  twiml.play({ loop: 0 }, 'http://com.twilio.music.classical.s3.amazonaws.com/BusyStrings.mp3')
+  const waited = parseInt(req.body?.QueueTime || '0') || 0
+  const afterHours = req.query.ah === '1'
+  // After-hours "try the floor" caps the wait hard; during open hours the
+  // overflow setting decides (hold = never leave).
+  const maxWait = afterHours ? (cfg.afterHours.floorWaitSec || 45)
+    : cfg.queue.overflow.action !== 'hold' ? (cfg.queue.overflow.maxWaitSec || 180)
+    : null
+  if (maxWait != null && waited >= maxWait) {
+    twiml.leave()
+  } else {
+    if (waited > 0) routingSay(twiml, cfg, cfg.queue.comfortMessage)
+    const music = cfg.queue.holdMusic === 'custom' && cfg.queue.customMusicUrl
+      ? cfg.queue.customMusicUrl : (HOLD_MUSIC[cfg.queue.holdMusic] || HOLD_MUSIC.classical)
+    twiml.play(music)
+  }
   res.type('text/xml')
   res.send(twiml.toString())
+})
+
+// The call left the queue. 'bridged' fires after a normal answered call ends
+// (nothing to do); 'leave' means the overflow pulled them out — route it.
+app.post('/api/twilio/routing/queue-done', async (req, res) => {
+  const cfg = await getRouting()
+  const twiml = new VoiceResponse()
+  if (req.body?.QueueResult === 'leave') {
+    const afterHours = req.query.ah === '1'
+    const act = afterHours ? 'voicemail' : cfg.queue.overflow.action
+    routingSay(twiml, cfg, 'We are sorry for the wait.')
+    if (act === 'forward' && cfg.queue.overflow.forwardNumber) {
+      const dial = twiml.dial({
+        timeout: 25, callerId: twilioPhone,
+        action: `${appUrl}/api/twilio/routing/forward-result`,
+        record: 'record-from-answer-dual',
+        recordingStatusCallback: `${appUrl}/api/twilio/recording`,
+        recordingStatusCallbackEvent: 'completed',
+      })
+      dial.number(cfg.queue.overflow.forwardNumber)
+    } else {
+      sendToVoicemail(twiml, cfg)
+    }
+  }
+  res.type('text/xml')
+  res.send(twiml.toString())
+})
+
+// After a forward attempt: answered → done; anything else → voicemail.
+app.post('/api/twilio/routing/forward-result', async (req, res) => {
+  const cfg = await getRouting()
+  const twiml = new VoiceResponse()
+  if (req.body?.DialCallStatus !== 'completed') sendToVoicemail(twiml, cfg)
+  res.type('text/xml')
+  res.send(twiml.toString())
+})
+
+// Voicemail landed: thank the caller, then (async) register the recording,
+// transcribe it, and notify the team.
+app.post('/api/twilio/routing/voicemail-done', async (req, res) => {
+  const cfg = await getRouting()
+  const twiml = new VoiceResponse()
+  routingSay(twiml, cfg, 'Thank you. We will get back to you as soon as possible. Goodbye.')
+  twiml.hangup()
+  res.type('text/xml')
+  res.send(twiml.toString())
+
+  try {
+    const { RecordingUrl, RecordingSid, RecordingDuration, From, CallSid } = req.body
+    if (!RecordingUrl || !RecordingSid) return
+    const mp3 = `${RecordingUrl}.mp3`
+    const phone = last10(From)
+    let contact = null
+    if (phone) {
+      const { data: cands } = await supabase.from('contacts').select('id, name, phone').ilike('phone', `%${phone.slice(-4)}%`).limit(50)
+      contact = (cands || []).find(x => last10(x.phone) === phone) || null
+    }
+    await saveRecording({
+      recording_sid: RecordingSid, call_sid: CallSid, url: mp3,
+      duration: RecordingDuration ? parseInt(RecordingDuration) : null,
+      direction: 'voicemail', rep: null,
+      contact_id: contact?.id || null, contact_name: contact?.name || null,
+      phone: phone || null, call_started_at: new Date().toISOString(),
+    })
+
+    let transcript = null
+    if (cfg.voicemail.transcribe && OPENAI_KEY) {
+      try {
+        const auth = Buffer.from(`${accountSid}:${authToken}`).toString('base64')
+        const audioRes = await fetch(mp3, { headers: { Authorization: `Basic ${auth}` } })
+        if (audioRes.ok) {
+          const fd = new FormData()
+          fd.append('file', new Blob([Buffer.from(await audioRes.arrayBuffer())], { type: 'audio/mpeg' }), 'vm.mp3')
+          fd.append('model', 'whisper-1')
+          fd.append('language', 'en')
+          const wRes = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+            method: 'POST', headers: { Authorization: `Bearer ${OPENAI_KEY}` }, body: fd,
+          })
+          if (wRes.ok) transcript = (await wRes.json())?.text || null
+        }
+      } catch (e) { console.warn('voicemail transcribe:', e.message) }
+      if (transcript) {
+        await supabase.from('call_recordings').update({ transcript }).eq('recording_sid', RecordingSid)
+          .then(({ error }) => { if (error) console.warn('voicemail transcript save:', error.message) })
+      }
+    }
+
+    const emails = (cfg.voicemail.emails || []).filter(Boolean)
+    if (emails.length) {
+      const who = contact?.name ? `${contact.name} (${phone})` : (From || 'Unknown caller')
+      const dur = RecordingDuration ? `${RecordingDuration}s` : ''
+      await sendResend({
+        to: emails,
+        subject: `New voicemail from ${who}`,
+        html: `<p><b>${esc2(who)}</b> left a ${dur} voicemail.</p>` +
+          (transcript ? `<p style="padding:10px 14px;background:#f4f4f5;border-radius:8px">${esc2(transcript)}</p>` : '') +
+          `<p><a href="${appUrl}/recordings">Listen in Andi → Recordings</a></p>`,
+      }).catch(e => console.warn('voicemail email:', e.message))
+    }
+  } catch (err) { console.warn('voicemail-done:', err.message) }
+})
+
+// ── Admin: read/write the routing config ────────────────────────────────────
+app.get('/api/admin/call-routing', async (req, res) => {
+  if (!(await requireAdmin(req, res))) return
+  const cfg = await getRouting()
+  res.json({ cfg, state: routingStateNow(cfg), musicOptions: Object.keys(HOLD_MUSIC), voices: ROUTING_VOICES })
+})
+app.post('/api/admin/call-routing', async (req, res) => {
+  if (!(await requireAdmin(req, res))) return
+  try {
+    const cfg = mergeRouting(req.body?.cfg)
+    const { error } = await supabase.from('app_settings')
+      .upsert({ key: 'call_routing', value: JSON.stringify(cfg) }, { onConflict: 'key' })
+    if (error) throw error
+    _routingCache = { at: 0, cfg: null }   // next call reads the new config
+    res.json({ ok: true, cfg, state: routingStateNow(cfg) })
+  } catch (err) { res.status(500).json({ error: err.message }) }
+})
+
+// Mark a voicemail heard (clears the New badge for everyone).
+app.post('/api/recordings/heard', async (req, res) => {
+  try {
+    const { id } = req.body || {}
+    if (!id) return res.status(400).json({ error: 'id required' })
+    await supabase.from('call_recordings').update({ heard_at: new Date().toISOString() }).eq('id', id)
+    res.json({ ok: true })
+  } catch (err) { res.status(500).json({ error: err.message }) }
 })
 
 // ── TaskRouter assignment: send the queued caller to the reserved agent.
