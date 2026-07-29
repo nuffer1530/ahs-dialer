@@ -4144,12 +4144,19 @@ function mergeRouting(saved) {
 }
 async function getRouting() {
   if (_routingCache.cfg && Date.now() - _routingCache.at < 30_000) return _routingCache.cfg
-  let saved = null
+  let saved = null, legacyHolidays = null
   try {
-    const { data } = await supabase.from('app_settings').select('value').eq('key', 'call_routing').maybeSingle()
-    saved = data?.value ? JSON.parse(data.value) : null
+    const { data } = await supabase.from('app_settings').select('key, value').in('key', ['call_routing', 'company_holidays'])
+    const row = (k) => data?.find(r => r.key === k)?.value
+    saved = row('call_routing') ? JSON.parse(row('call_routing')) : null
+    legacyHolidays = row('company_holidays') ? JSON.parse(row('company_holidays')) : null
   } catch {}   // config unreachable → defaults; a call must never fail on this
   const cfg = mergeRouting(saved)
+  // Holidays entered in the old Thresholds tab carry over until the routing
+  // config saves its own list — Call Routing is the single source of truth.
+  if (!cfg.holidays.length && Array.isArray(legacyHolidays)) {
+    cfg.holidays = legacyHolidays.filter(h => h?.date).map(h => ({ date: h.date, name: h.name || '', message: '' }))
+  }
   _routingCache = { at: Date.now(), cfg }
   return cfg
 }
@@ -4917,8 +4924,9 @@ async function checkOppWatchBonus() {
   if (hm < '07:00' || hm >= String(cfg.cutoff || '15:00')) return
 
   try {
-    const { data: hRow } = await supabase.from('app_settings').select('value').eq('key', 'company_holidays').maybeSingle()
-    if ((JSON.parse(hRow?.value || '[]') || []).some(h => h?.date === today)) return
+    // Holidays live on the Call Routing config (legacy company_holidays rides
+    // along inside getRouting until the new config is saved once).
+    if (((await getRouting()).holidays || []).some(h => h?.date === today)) return
   } catch {}
 
   const { data: logRow } = await supabase.from('app_settings').select('value').eq('key', OPP_BONUS_LOG).maybeSingle()
