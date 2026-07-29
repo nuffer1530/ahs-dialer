@@ -549,3 +549,41 @@ create table if not exists live_call_state (
 -- Realtime status updates on the wallboards (Jul 2026): profiles must be in
 -- the publication for UPDATE events to reach the TV/dashboard at all.
 alter publication supabase_realtime add table profiles;
+
+-- ── Call recordings registry (Jul 2026) ─────────────────────────────────────
+-- One row per completed Twilio recording, written the moment the recording
+-- exists — NOT dependent on the rep filing an outcome. The Recordings tab
+-- reads this and joins outcome/notes/booking on at read time. Also adds the
+-- columns the recording webhook had been writing into the void (call_logs
+-- never had recording_url/call_sid, so every attach silently failed).
+create table if not exists call_recordings (
+  id uuid primary key default gen_random_uuid(),
+  recording_sid text unique not null,
+  call_sid text,
+  url text not null,
+  duration int,
+  direction text,                 -- 'inbound' | 'outbound'
+  rep text,                       -- display name, same convention as call_logs.rep
+  contact_id uuid,
+  contact_name text,
+  phone text,                     -- last-10 digits of the customer number
+  call_started_at timestamptz,
+  st_job_id bigint,               -- set when a job was booked on this call
+  st_job_number text,
+  created_at timestamptz default now()
+);
+create index if not exists call_recordings_contact_idx on call_recordings (contact_id, created_at desc);
+create index if not exists call_recordings_created_idx on call_recordings (created_at desc);
+alter table call_recordings enable row level security;
+drop policy if exists "authenticated read call_recordings" on call_recordings;
+create policy "authenticated read call_recordings" on call_recordings for select to authenticated using (true);
+
+alter table call_logs add column if not exists call_sid text;
+alter table call_logs add column if not exists recording_url text;
+alter table call_logs add column if not exists recording_duration int;
+alter table active_calls add column if not exists recording_url text;
+alter table active_calls add column if not exists recording_sid text;
+alter table active_calls add column if not exists recording_duration int;
+-- Booking → recording linkage: the dialer now sends its contact id when booking.
+alter table andi_bookings add column if not exists contact_id uuid;
+alter table andi_bookings add column if not exists st_job_number text;

@@ -1,16 +1,20 @@
 import { useState, useEffect, useRef } from 'react'
 import { sb } from '../lib/supabase'
 import { useAuth } from '../lib/AuthContext'
-import { useData } from '../lib/DataContext'
+
+// Recordings tab — reads the call_recordings registry via /api/recordings.
+// Every inbound and outbound customer call lands there at recording time;
+// the server joins on the outcome/notes the rep filed and the job booked
+// on the call (click the job chip to open it in ServiceTitan).
 
 const OUTCOME_COLORS = {
-  'Booked':         { bg:'#DCFCE7', color:'#15803D', border:'#16A34A' },
+  'Booked':         { bg:'var(--tone-green-bg)', color:'var(--tone-green-tx)', border:'var(--tone-green-bd)' },
   'No Answer':      { bg:'var(--surface-2)', color:'var(--text-muted)', border:'var(--border)' },
-  'Voicemail':      { bg:'#EFF6FF', color:'#1D4ED8', border:'#3B82F6' },
-  'Not Interested': { bg:'#FEE2E2', color:'#B91C1C', border:'#F87171' },
-  'DNC':            { bg:'#FEE2E2', color:'#7F1D1D', border:'#DC2626' },
+  'Voicemail':      { bg:'var(--tone-blue-bg)', color:'var(--tone-blue-tx)', border:'var(--tone-blue-bd)' },
+  'Not Interested': { bg:'var(--tone-red-bg)', color:'var(--tone-red-tx)', border:'var(--tone-red-bd)' },
+  'DNC':            { bg:'var(--tone-red-bg)', color:'var(--tone-red-tx)', border:'var(--tone-red-bd)' },
   'Bad Data':       { bg:'var(--surface-2)', color:'var(--text-muted)', border:'var(--border)' },
-  'Text Sent':      { bg:'#F3E8FF', color:'#6B21A8', border:'#A855F7' },
+  'Text Sent':      { bg:'var(--tone-purple-bg)', color:'var(--tone-purple-tx)', border:'var(--tone-purple-bd)' },
 }
 
 const fmtDuration = (s) => {
@@ -21,28 +25,37 @@ const fmtDuration = (s) => {
 
 const fmtWhen = (iso) => {
   if (!iso) return '--'
-  const d = new Date(iso)
-  return d.toLocaleString('en-US', { month:'short', day:'numeric', hour:'numeric', minute:'2-digit' })
+  return new Date(iso).toLocaleString('en-US', {
+    timeZone: 'America/Denver', month:'short', day:'numeric', hour:'numeric', minute:'2-digit',
+  })
+}
+
+const fmtPhone = (p) => {
+  const d = String(p || '').replace(/\D/g, '').slice(-10)
+  return d.length === 10 ? `(${d.slice(0,3)}) ${d.slice(3,6)}-${d.slice(6)}` : (p || '')
 }
 
 export default function RecordingsPage() {
   const { profile } = useAuth()
-  const { contacts } = useData()
   const isAdmin = profile?.role === 'admin'
 
   const [recordings, setRecordings] = useState([])
   const [loading, setLoading] = useState(true)
+  const [loadErr, setLoadErr] = useState('')
   const [profiles, setProfiles] = useState([])
 
   // Filters
-  const [repFilter, setRepFilter] = useState(isAdmin ? '' : (profile?.name || ''))
+  const [repFilter, setRepFilter] = useState(isAdmin ? '' : (profile?.name || profile?.email || ''))
+  const [dirFilter, setDirFilter] = useState('')
   const [outcomeFilter, setOutcomeFilter] = useState('')
+  const [bookedOnly, setBookedOnly] = useState(false)
   const [search, setSearch] = useState('')
   const [dateRange, setDateRange] = useState('7d')
 
-  // Player
+  // Player + expanded notes
   const [playingId, setPlayingId] = useState(null)
   const [progress, setProgress] = useState(0)
+  const [expandedId, setExpandedId] = useState(null)
   const audioRef = useRef(null)
 
   useEffect(() => {
@@ -51,31 +64,34 @@ export default function RecordingsPage() {
 
   useEffect(() => {
     const load = async () => {
-      setLoading(true)
+      setLoading(true); setLoadErr('')
       const now = new Date()
       let from = null
       if (dateRange === 'today') { from = new Date(now); from.setHours(0,0,0,0) }
       else if (dateRange === '7d') { from = new Date(now.getTime() - 7*24*60*60*1000) }
       else if (dateRange === '30d') { from = new Date(now.getTime() - 30*24*60*60*1000) }
 
-      let q = sb.from('call_logs')
-        .select('*, contacts(name, phone, external_id)')
-        .not('recording_url', 'is', null)
-        .order('created_at', { ascending: false })
-        .limit(200)
+      const params = new URLSearchParams()
+      const rep = !isAdmin ? (profile?.name || profile?.email || '') : repFilter
+      if (rep) params.set('rep', rep)
+      if (dirFilter) params.set('direction', dirFilter)
+      if (bookedOnly) params.set('booked', '1')
+      if (from) params.set('from', from.toISOString())
+      params.set('limit', '300')
 
-      if (!isAdmin) q = q.eq('rep', profile?.name || profile?.email)
-      else if (repFilter) q = q.eq('rep', repFilter)
-      if (from) q = q.gte('created_at', from.toISOString())
-
-      const { data } = await q
-      setRecordings(data || [])
+      try {
+        const r = await fetch(`/api/recordings?${params}`)
+        const d = await r.json()
+        if (!r.ok) throw new Error(d.error || 'Could not load recordings')
+        setRecordings(d.data || [])
+      } catch (e) { setLoadErr(e.message); setRecordings([]) }
       setLoading(false)
     }
     if (profile) load()
-  }, [profile, isAdmin, repFilter, dateRange])
+  }, [profile, isAdmin, repFilter, dirFilter, bookedOnly, dateRange])
 
-  // Audio player controls
+  // Audio player controls — everything plays through the authenticated proxy.
+  const recSid = (rec) => rec.recording_sid || rec.url?.split('/').pop()?.replace('.mp3', '')
   const togglePlay = (rec) => {
     if (playingId === rec.id) {
       audioRef.current?.pause()
@@ -83,9 +99,8 @@ export default function RecordingsPage() {
       return
     }
     if (audioRef.current) { audioRef.current.pause() }
-    const sid = rec.recording_url?.split('/').pop()?.replace('.mp3', '')
-    const src = sid ? `/api/twilio/recording/${sid}` : rec.recording_url
-    const audio = new Audio(src)
+    const sid = recSid(rec)
+    const audio = new Audio(sid ? `/api/twilio/recording/${sid}` : rec.url)
     audioRef.current = audio
     audio.onended = () => { setPlayingId(null); setProgress(0) }
     audio.ontimeupdate = () => setProgress(audio.duration ? (audio.currentTime / audio.duration) * 100 : 0)
@@ -96,24 +111,25 @@ export default function RecordingsPage() {
   useEffect(() => () => { audioRef.current?.pause() }, [])
 
   const downloadRec = (rec) => {
-    const sid = rec.recording_url?.split('/').pop()?.replace('.mp3', '')
-    const url = sid ? `/api/twilio/recording/${sid}?download=1` : rec.recording_url
-    window.open(url, '_blank')
+    const sid = recSid(rec)
+    window.open(sid ? `/api/twilio/recording/${sid}?download=1` : rec.url, '_blank')
   }
 
   const filtered = recordings.filter(r => {
     if (outcomeFilter && r.outcome !== outcomeFilter) return false
     if (search) {
       const q = search.toLowerCase()
-      const name = (r.contacts?.name || '').toLowerCase()
-      const phone = (r.contacts?.phone || '').toLowerCase()
-      const notes = (r.notes || '').toLowerCase()
-      if (!name.includes(q) && !phone.includes(q) && !notes.includes(q)) return false
+      const hay = `${r.contact_name || ''} ${r.phone || ''} ${r.notes || ''} ${r.st_job_number || ''}`.toLowerCase()
+      if (!hay.includes(q)) return false
     }
     return true
   })
 
   const outcomes = [...new Set(recordings.map(r => r.outcome).filter(Boolean))]
+  const bookedCount = filtered.filter(r => r.st_job_id).length
+
+  const selStyle = { border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'7px 10px', fontSize:12, background:'var(--surface)', color:'var(--text-primary)' }
+  const lblStyle = { fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color:'var(--text-muted)', marginBottom:4 }
 
   return (
     <div style={{ flex:1, overflowY:'auto', padding:24 }}>
@@ -121,7 +137,7 @@ export default function RecordingsPage() {
       <div style={{ marginBottom:18 }}>
         <div style={{ fontSize:18, fontWeight:600, color:'var(--text-primary)' }}>Call Recordings</div>
         <div style={{ fontSize:12, color:'var(--text-muted)', marginTop:2 }}>
-          {isAdmin ? 'Review and coach on any rep\u2019s calls' : 'Your recorded calls'}
+          {isAdmin ? 'Every inbound and outbound customer call, with the outcome and notes attached' : 'Your recorded calls'}
         </div>
       </div>
 
@@ -129,16 +145,15 @@ export default function RecordingsPage() {
       <div style={{ display:'flex', gap:10, marginBottom:16, flexWrap:'wrap', alignItems:'flex-end' }}>
         {isAdmin && (
           <div>
-            <div style={{ fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color:'var(--text-muted)', marginBottom:4 }}>Rep</div>
-            <select value={repFilter} onChange={e => setRepFilter(e.target.value)}
-              style={{ border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'7px 10px', fontSize:12, background:'var(--surface)', color:'var(--text-primary)', minWidth:170 }}>
+            <div style={lblStyle}>Rep</div>
+            <select value={repFilter} onChange={e => setRepFilter(e.target.value)} style={{ ...selStyle, minWidth:160 }}>
               <option value="">All reps</option>
               {profiles.map(p => <option key={p.id} value={p.name || p.email}>{p.name || p.email}</option>)}
             </select>
           </div>
         )}
         <div>
-          <div style={{ fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color:'var(--text-muted)', marginBottom:4 }}>Period</div>
+          <div style={lblStyle}>Period</div>
           <div style={{ display:'flex', gap:4 }}>
             {[['today','Today'],['7d','7 days'],['30d','30 days'],['all','All']].map(([id, label]) => (
               <button key={id} onClick={() => setDateRange(id)}
@@ -152,29 +167,51 @@ export default function RecordingsPage() {
           </div>
         </div>
         <div>
-          <div style={{ fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color:'var(--text-muted)', marginBottom:4 }}>Outcome</div>
-          <select value={outcomeFilter} onChange={e => setOutcomeFilter(e.target.value)}
-            style={{ border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'7px 10px', fontSize:12, background:'var(--surface)', color:'var(--text-primary)', minWidth:140 }}>
+          <div style={lblStyle}>Direction</div>
+          <select value={dirFilter} onChange={e => setDirFilter(e.target.value)} style={{ ...selStyle, minWidth:110 }}>
+            <option value="">All calls</option>
+            <option value="inbound">Inbound</option>
+            <option value="outbound">Outbound</option>
+          </select>
+        </div>
+        <div>
+          <div style={lblStyle}>Outcome</div>
+          <select value={outcomeFilter} onChange={e => setOutcomeFilter(e.target.value)} style={{ ...selStyle, minWidth:130 }}>
             <option value="">All outcomes</option>
             {outcomes.map(o => <option key={o} value={o}>{o}</option>)}
           </select>
         </div>
-        <div style={{ flex:1, minWidth:180 }}>
-          <div style={{ fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color:'var(--text-muted)', marginBottom:4 }}>Search</div>
-          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Customer, phone, or notes..."
-            style={{ width:'100%', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'7px 10px', fontSize:12, background:'var(--surface)', color:'var(--text-primary)' }} />
+        <div>
+          <div style={lblStyle}>Booked</div>
+          <button onClick={() => setBookedOnly(b => !b)}
+            style={{ padding:'7px 12px', fontSize:12, borderRadius:'var(--radius)', border:'1px solid', cursor:'pointer',
+              borderColor: bookedOnly ? 'var(--tone-green-bd)' : 'var(--border)',
+              background: bookedOnly ? 'var(--tone-green-bg)' : 'var(--surface)',
+              color: bookedOnly ? 'var(--tone-green-tx)' : 'var(--text-secondary)', fontWeight: bookedOnly ? 700 : 400 }}>
+            Booked calls only
+          </button>
+        </div>
+        <div style={{ flex:1, minWidth:170 }}>
+          <div style={lblStyle}>Search</div>
+          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Customer, phone, notes, or job #..."
+            style={{ ...selStyle, width:'100%' }} />
         </div>
       </div>
 
       {/* Summary */}
       <div style={{ display:'flex', gap:16, marginBottom:14, fontSize:12, color:'var(--text-muted)' }}>
         <span>{filtered.length} recording{filtered.length !== 1 ? 's' : ''}</span>
+        {bookedCount > 0 && <span style={{ color:'var(--tone-green-tx)', fontWeight:600 }}>{bookedCount} booked</span>}
         {filtered.length > 0 && (
-          <span>
-            Avg length: {fmtDuration(Math.round(filtered.reduce((s,r) => s + (r.recording_duration || 0), 0) / filtered.length))}
-          </span>
+          <span>Avg length: {fmtDuration(Math.round(filtered.reduce((s,r) => s + (r.duration || 0), 0) / filtered.length))}</span>
         )}
       </div>
+
+      {loadErr && (
+        <div style={{ padding:'10px 14px', marginBottom:12, fontSize:12, color:'var(--tone-red-tx)', background:'var(--tone-red-bg)', border:'1px solid var(--tone-red-bd)', borderRadius:8 }}>
+          {loadErr}
+        </div>
+      )}
 
       {/* List */}
       {loading ? (
@@ -182,75 +219,103 @@ export default function RecordingsPage() {
       ) : filtered.length === 0 ? (
         <div style={{ textAlign:'center', padding:60, color:'var(--text-muted)' }}>
           <div style={{ fontSize:14, fontWeight:500, marginBottom:4 }}>No recordings found</div>
-          <div style={{ fontSize:12 }}>Recordings appear here once calls are completed.</div>
+          <div style={{ fontSize:12 }}>Recordings appear here automatically once calls complete.</div>
         </div>
       ) : (
         <div style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:10, overflow:'hidden' }}>
           {filtered.map((rec, i) => {
             const isPlaying = playingId === rec.id
+            const isOpen = expandedId === rec.id
             const oc = OUTCOME_COLORS[rec.outcome] || { bg:'var(--surface-2)', color:'var(--text-muted)', border:'var(--border)' }
+            const dirIn = rec.direction === 'inbound'
             return (
               <div key={rec.id}
-                style={{ padding:'12px 16px', borderBottom: i < filtered.length-1 ? '1px solid var(--border)' : 'none', display:'flex', alignItems:'center', gap:12, background: isPlaying ? 'var(--accent-bg)' : 'transparent' }}>
+                style={{ padding:'12px 16px', borderBottom: i < filtered.length-1 ? '1px solid var(--border)' : 'none', background: isPlaying ? 'var(--accent-bg)' : 'transparent' }}>
+                <div style={{ display:'flex', alignItems:'center', gap:12 }}>
 
-                {/* Play button */}
-                <button onClick={() => togglePlay(rec)}
-                  style={{ width:36, height:36, borderRadius:'50%', border:'none', flexShrink:0, cursor:'pointer',
-                    background: isPlaying ? '#16A34A' : 'var(--surface-2)',
-                    border: `1px solid ${isPlaying ? '#16A34A' : 'var(--border)'}`,
-                    display:'flex', alignItems:'center', justifyContent:'center' }}>
-                  {isPlaying ? (
-                    <svg width="12" height="12" viewBox="0 0 12 12" fill="#fff"><rect x="2" y="1" width="3" height="10" rx="1"/><rect x="7" y="1" width="3" height="10" rx="1"/></svg>
-                  ) : (
-                    <svg width="12" height="12" viewBox="0 0 12 12" fill="var(--text-secondary)"><path d="M3 1.5v9l7-4.5-7-4.5z"/></svg>
-                  )}
-                </button>
+                  {/* Play button */}
+                  <button onClick={() => togglePlay(rec)}
+                    style={{ width:36, height:36, borderRadius:'50%', flexShrink:0, cursor:'pointer',
+                      background: isPlaying ? 'var(--tone-green-bd)' : 'var(--surface-2)',
+                      border: `1px solid ${isPlaying ? 'var(--tone-green-bd)' : 'var(--border)'}`,
+                      display:'flex', alignItems:'center', justifyContent:'center' }}>
+                    {isPlaying ? (
+                      <svg width="12" height="12" viewBox="0 0 12 12" fill="#fff"><rect x="2" y="1" width="3" height="10" rx="1"/><rect x="7" y="1" width="3" height="10" rx="1"/></svg>
+                    ) : (
+                      <svg width="12" height="12" viewBox="0 0 12 12" fill="var(--text-secondary)"><path d="M3 1.5v9l7-4.5-7-4.5z"/></svg>
+                    )}
+                  </button>
 
-                {/* Customer + notes */}
-                <div style={{ flex:1, minWidth:0 }}>
-                  <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-                    <span style={{ fontSize:13, fontWeight:600, color:'var(--text-primary)' }}>
-                      {rec.contacts?.name || 'Unknown caller'}
-                    </span>
-                    {rec.outcome && (
-                      <span style={{ fontSize:10, fontWeight:600, padding:'2px 7px', borderRadius:99, background:oc.bg, color:oc.color, border:`1px solid ${oc.border}` }}>
-                        {rec.outcome}
+                  {/* Customer + chips + notes preview */}
+                  <div style={{ flex:1, minWidth:0, cursor: rec.notes ? 'pointer' : 'default' }}
+                    onClick={() => rec.notes && setExpandedId(isOpen ? null : rec.id)}>
+                    <div style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap' }}>
+                      {rec.direction && (
+                        <span title={dirIn ? 'Inbound call' : 'Outbound call'}
+                          style={{ fontSize:10, fontWeight:700, padding:'2px 7px', borderRadius:99, flexShrink:0,
+                            background: dirIn ? 'var(--tone-blue-bg)' : 'var(--tone-purple-bg)',
+                            color: dirIn ? 'var(--tone-blue-tx)' : 'var(--tone-purple-tx)',
+                            border: `1px solid ${dirIn ? 'var(--tone-blue-bd)' : 'var(--tone-purple-bd)'}` }}>
+                          {dirIn ? 'IN' : 'OUT'}
+                        </span>
+                      )}
+                      <span style={{ fontSize:13, fontWeight:600, color:'var(--text-primary)' }}>
+                        {rec.contact_name || 'Unknown caller'}
                       </span>
+                      {rec.outcome && (
+                        <span style={{ fontSize:10, fontWeight:600, padding:'2px 7px', borderRadius:99, background:oc.bg, color:oc.color, border:`1px solid ${oc.border}` }}>
+                          {rec.outcome}
+                        </span>
+                      )}
+                      {rec.st_job_id && (
+                        <button onClick={(e) => { e.stopPropagation(); window.open(`https://go.servicetitan.com/#/Job/Index/${rec.st_job_id}`, '_blank') }}
+                          title="Open this job in ServiceTitan"
+                          style={{ fontSize:10, fontWeight:700, padding:'2px 8px', borderRadius:99, cursor:'pointer',
+                            background:'var(--tone-green-bg)', color:'var(--tone-green-tx)', border:'1px solid var(--tone-green-bd)' }}>
+                          Job {rec.st_job_number || `#${rec.st_job_id}`} ↗
+                        </button>
+                      )}
+                    </div>
+                    <div style={{ fontSize:11, color:'var(--text-muted)', marginTop:2, overflow:'hidden', textOverflow:'ellipsis', whiteSpace: isOpen ? 'normal' : 'nowrap' }}>
+                      {fmtPhone(rec.phone)}
+                      {rec.notes ? ` — ${isOpen ? '' : rec.notes.slice(0, 110)}${!isOpen && rec.notes.length > 110 ? '…' : ''}` : ''}
+                    </div>
+                    {isOpen && rec.notes && (
+                      <div style={{ marginTop:6, padding:'8px 11px', fontSize:12, lineHeight:1.55, whiteSpace:'pre-wrap',
+                        background:'var(--surface-2)', border:'1px solid var(--border)', borderRadius:8, color:'var(--text-secondary)' }}>
+                        {rec.notes}
+                      </div>
+                    )}
+                    {isPlaying && (
+                      <div style={{ marginTop:6, height:3, background:'var(--border)', borderRadius:99, overflow:'hidden' }}>
+                        <div style={{ height:'100%', width:`${progress}%`, background:'var(--tone-green-bd)', borderRadius:99, transition:'width .2s' }} />
+                      </div>
                     )}
                   </div>
-                  <div style={{ fontSize:11, color:'var(--text-muted)', marginTop:2 }}>
-                    {rec.contacts?.phone || ''}
-                    {rec.notes ? `${rec.contacts?.phone ? ' - ' : ''}${rec.notes.slice(0, 90)}${rec.notes.length > 90 ? '...' : ''}` : ''}
+
+                  {/* Meta */}
+                  <div style={{ textAlign:'right', flexShrink:0, minWidth:92 }}>
+                    <div style={{ fontSize:12, fontWeight:600, color:'var(--text-primary)' }}>{fmtDuration(rec.duration)}</div>
+                    <div style={{ fontSize:10, color:'var(--text-muted)' }}>{fmtWhen(rec.call_started_at || rec.created_at)}</div>
                   </div>
-                  {isPlaying && (
-                    <div style={{ marginTop:6, height:3, background:'var(--border)', borderRadius:99, overflow:'hidden' }}>
-                      <div style={{ height:'100%', width:`${progress}%`, background:'#16A34A', borderRadius:99, transition:'width .2s' }} />
-                    </div>
+
+                  {isAdmin && (
+                    <div style={{ fontSize:11, color:'var(--text-secondary)', flexShrink:0, minWidth:90, textAlign:'right' }}>{rec.rep || ''}</div>
                   )}
-                </div>
 
-                {/* Meta */}
-                <div style={{ textAlign:'right', flexShrink:0, minWidth:100 }}>
-                  <div style={{ fontSize:12, fontWeight:600, color:'var(--text-primary)' }}>{fmtDuration(rec.recording_duration)}</div>
-                  <div style={{ fontSize:10, color:'var(--text-muted)' }}>{fmtWhen(rec.created_at)}</div>
-                </div>
-
-                {isAdmin && (
-                  <div style={{ fontSize:11, color:'var(--text-secondary)', flexShrink:0, minWidth:110, textAlign:'right' }}>{rec.rep}</div>
-                )}
-
-                {/* Actions */}
-                <div style={{ display:'flex', gap:6, flexShrink:0 }}>
-                  {rec.contacts?.external_id && (
-                    <button onClick={() => window.open(`https://go.servicetitan.com/#/Customer/${rec.contacts.external_id}`, '_blank')}
+                  {/* Actions */}
+                  <div style={{ display:'flex', gap:6, flexShrink:0 }}>
+                    {rec.external_id && (
+                      <button onClick={() => window.open(`https://go.servicetitan.com/#/Customer/${rec.external_id}`, '_blank')}
+                        style={{ padding:'5px 10px', fontSize:11, border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface-2)', color:'var(--text-secondary)', cursor:'pointer' }}>
+                        ST
+                      </button>
+                    )}
+                    <button onClick={() => downloadRec(rec)}
                       style={{ padding:'5px 10px', fontSize:11, border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface-2)', color:'var(--text-secondary)', cursor:'pointer' }}>
-                      ST
+                      Download
                     </button>
-                  )}
-                  <button onClick={() => downloadRec(rec)}
-                    style={{ padding:'5px 10px', fontSize:11, border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface-2)', color:'var(--text-secondary)', cursor:'pointer' }}>
-                    Download
-                  </button>
+                  </div>
                 </div>
               </div>
             )

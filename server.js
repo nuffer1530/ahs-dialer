@@ -1189,7 +1189,7 @@ app.get('/api/admin/commission/sync-status', async (req, res) => {
 // ── ST: Create booking (direct to dispatch board, unscheduled)
 app.post('/api/st/book', async (req, res) => {
   try {
-    const { customerId, jobTypeId, businessUnitId, notes, repName, contactName, phone, zip, start, end, campaignId, andiRec } = req.body
+    const { customerId, contactId, jobTypeId, businessUnitId, notes, repName, contactName, phone, zip, start, end, campaignId, andiRec } = req.body
     if (!customerId || !jobTypeId || !businessUnitId) {
       return res.status(400).json({ error: 'customerId, jobTypeId, and businessUnitId required' })
     }
@@ -1287,14 +1287,23 @@ app.post('/api/st/book', async (req, res) => {
           const { data: prof } = await supabase.from('profiles').select('id').eq('name', repName).maybeSingle()
           profileId = prof?.id || null
         }
-        await supabase.from('andi_bookings').upsert({
+        const bookingRow = {
           st_job_id: jobId,
           profile_id: profileId,
           csr_name: repName || null,
           customer_name: contactName || null,
           st_job_type_id: jobTypeId || null,
           booked_at: new Date().toISOString(),
+        }
+        // contact_id/st_job_number are newer columns — if that migration
+        // hasn't run yet, retry without them: attribution (= the rep's pay)
+        // must never be lost to a linkage nicety.
+        const { error: bkErr } = await supabase.from('andi_bookings').upsert({
+          ...bookingRow,
+          st_job_number: jobNumber ? String(jobNumber) : null,
+          contact_id: contactId || null,
         }, { onConflict: 'st_job_id' })
+        if (bkErr) await supabase.from('andi_bookings').upsert(bookingRow, { onConflict: 'st_job_id' })
       }
     } catch (e) { console.warn('andi_bookings insert:', e.message) }
 
@@ -3221,6 +3230,18 @@ async function finalPassFromRest(callSid, e) {
   if (!rec) { _wu(callSid, 'no recording via REST'); return }
   const mp3 = `https://api.twilio.com${rec.uri.replace('.json', '.mp3')}`
   const dur = rec.duration ? parseInt(rec.duration) : null
+  await saveRecording({
+    recording_sid: rec.sid,
+    call_sid: callSid,
+    url: mp3,
+    duration: dur,
+    direction: e.direction || 'inbound',
+    rep: e.repName || null,
+    contact_id: e.contactId || null,
+    contact_name: e.contactName || null,
+    phone: e.phone || null,
+    call_started_at: e.startedAt ? new Date(e.startedAt).toISOString() : new Date().toISOString(),
+  }).catch(err => _wu(callSid, `registry: ${err.message}`))
   // Attach to the rep's call log so inbound recordings show in the app too.
   if (e.contactId) {
     const { data: recentLog } = await supabase.from('call_logs').select('id')
@@ -3318,6 +3339,106 @@ app.get('/api/call-notes/latest', (req, res) => {
   res.json({ ...(best ? { text: best.text, at: best.at } : {}), coach })
 })
 
+// ── Call recording registry ─────────────────────────────────────────────────
+// Every completed recording lands in call_recordings the moment it exists —
+// independent of whether the rep ever files an outcome (most calls never get
+// a call_logs row, so hanging recordings off outcome logs lost nearly all of
+// them). The Recordings tab reads this table and joins outcome/notes/booking
+// back on at read time.
+async function saveRecording(row) {
+  if (!row?.recording_sid || !row?.url) return
+  try {
+    // Booked on this call? The booking lands mid-call and the recording only
+    // arrives after hangup, so the andi_bookings row already exists by now.
+    if (row.contact_id && !row.st_job_id) {
+      const since = new Date((Date.parse(row.call_started_at) || Date.now()) - 10 * 60_000).toISOString()
+      const { data: bk } = await supabase.from('andi_bookings')
+        .select('st_job_id, st_job_number').eq('contact_id', row.contact_id)
+        .gte('booked_at', since).order('booked_at', { ascending: false }).limit(1).maybeSingle()
+      if (bk) { row.st_job_id = bk.st_job_id; row.st_job_number = bk.st_job_number || null }
+    }
+  } catch {}
+  const { error } = await supabase.from('call_recordings').upsert(row, { onConflict: 'recording_sid' })
+  if (error) console.warn('call_recordings save:', error.message)
+}
+
+// Safety net: webhooks get missed (deploy restart mid-call, TaskRouter paths
+// that never fire a recording callback). Every 30 minutes, pull recent
+// recordings straight from Twilio and upsert any the registry doesn't have —
+// the Recordings tab must be the complete record of inbound AND outbound,
+// not just the calls whose callbacks happened to land.
+async function sweepRecordings(hoursBack = 26) {
+  const auth = Buffer.from(`${accountSid}:${authToken}`).toString('base64')
+  const tw = async (path) => {
+    const r = await fetch(`https://api.twilio.com${path}`, { headers: { Authorization: `Basic ${auth}` } })
+    return r.json()
+  }
+  const since = new Date(Date.now() - hoursBack * 3600_000)
+  const { data: have, error: haveErr } = await supabase.from('call_recordings')
+    .select('recording_sid').gte('created_at', new Date(since.getTime() - 86400_000).toISOString()).limit(5000)
+  if (haveErr) return false   // table not migrated yet — nothing to sweep into
+  const haveSet = new Set((have || []).map(x => x.recording_sid))
+
+  let page = `/2010-04-01/Accounts/${accountSid}/Recordings.json?PageSize=500&${encodeURIComponent('DateCreated>')}=${since.toISOString().slice(0, 10)}`
+  let added = 0
+  for (let p = 0; p < 6 && page; p++) {
+    const d = await tw(page)
+    page = d.next_page_uri || null
+    for (const rec of d.recordings || []) {
+      if (rec.status !== 'completed' || haveSet.has(rec.sid)) continue
+      if (new Date(rec.date_created) < since) continue
+      try {
+        const call = await tw(`/2010-04-01/Accounts/${accountSid}/Calls/${rec.call_sid}.json`)
+        let root = call
+        if (call.parent_call_sid) {
+          try { root = await tw(`/2010-04-01/Accounts/${accountSid}/Calls/${call.parent_call_sid}.json`) } catch {}
+        }
+        const sids = [rec.call_sid, call.parent_call_sid].filter(Boolean)
+        const { data: ac } = await supabase.from('active_calls')
+          .select('direction, rep_identity, contact_id, contact_name, from_number, to_number, started_at')
+          .in('call_sid', sids).limit(1).maybeSingle()
+        const { data: ct } = ac ? { data: null } : await supabase.from('call_tasks')
+          .select('contact_id, contact_name, from_number, agent_name, answered_at')
+          .in('call_sid', sids).limit(1).maybeSingle()
+
+        // Direction: a browser-originated leg means WE placed the call.
+        const isClient = (s) => String(s || '').startsWith('client:')
+        const outbound = ac ? ac.direction === 'outbound'
+          : ct ? false
+          : isClient(root.from) || isClient(call.from)
+        // Customer number: whichever end isn't us and isn't a browser identity.
+        const ourNum = last10(twilioPhone)
+        const external = [call.to, call.from, root.to, root.from]
+          .find(n => n && !isClient(n) && last10(n) && last10(n) !== ourNum)
+        let phone = last10(ac ? (outbound ? ac.to_number : ac.from_number) : ct ? ct.from_number : external)
+        let contactId = ac?.contact_id || ct?.contact_id || null
+        let contactName = ac?.contact_name || ct?.contact_name || null
+        if (!contactId && phone) {
+          const { data: cands } = await supabase.from('contacts').select('id, name, phone')
+            .ilike('phone', `%${phone.slice(-4)}%`).limit(50)
+          const c = (cands || []).find(x => last10(x.phone) === phone)
+          if (c) { contactId = c.id; contactName = c.name }
+        }
+        await saveRecording({
+          recording_sid: rec.sid,
+          call_sid: root.sid || rec.call_sid,
+          url: `https://api.twilio.com${rec.uri.replace('.json', '.mp3')}`,
+          duration: rec.duration ? parseInt(rec.duration) : null,
+          direction: outbound ? 'outbound' : 'inbound',
+          rep: ac?.rep_identity || ct?.agent_name || null,
+          contact_id: contactId, contact_name: contactName, phone: phone || null,
+          call_started_at: root.start_time ? new Date(root.start_time).toISOString()
+            : ac?.started_at || ct?.answered_at || new Date(rec.date_created).toISOString(),
+        })
+        haveSet.add(rec.sid)
+        added++
+      } catch (e) { console.warn('recording sweep item:', e.message) }
+    }
+  }
+  if (added) console.log(`Recording sweep: ${added} recording(s) backfilled`)
+  return true
+}
+
 app.post('/api/twilio/recording', async (req, res) => {
   try {
     const { CallSid, RecordingSid, RecordingUrl, RecordingDuration } = req.body
@@ -3335,10 +3456,26 @@ app.post('/api/twilio/recording', async (req, res) => {
     // contact for those lives on call_tasks. Check both.
     let { data: ac } = await supabase.from('active_calls').select('*').eq('call_sid', CallSid).maybeSingle()
     if (!ac?.contact_id) {
-      const { data: ct } = await supabase.from('call_tasks').select('contact_id, from_number').eq('call_sid', CallSid).maybeSingle()
-      if (ct?.contact_id) ac = { contact_id: ct.contact_id, from_number: ct.from_number }
+      const { data: ct } = await supabase.from('call_tasks')
+        .select('contact_id, contact_name, from_number, agent_name, answered_at').eq('call_sid', CallSid).maybeSingle()
+      if (ct?.contact_id) ac = { direction: 'inbound', contact_id: ct.contact_id, contact_name: ct.contact_name,
+        from_number: ct.from_number, rep_identity: ct.agent_name, started_at: ct.answered_at }
     }
     if (!ac?.contact_id) _wu(CallSid, 'no contact match — whisper skipped')
+
+    // Registry first — this must not depend on a contact match or a call log.
+    await saveRecording({
+      recording_sid: RecordingSid,
+      call_sid: CallSid,
+      url: mp3,
+      duration: RecordingDuration ? parseInt(RecordingDuration) : null,
+      direction: ac?.direction || null,
+      rep: ac?.rep_identity || null,
+      contact_id: ac?.contact_id || null,
+      contact_name: ac?.contact_name || null,
+      phone: last10(ac?.direction === 'outbound' ? ac?.to_number : ac?.from_number) || null,
+      call_started_at: ac?.started_at || new Date().toISOString(),
+    })
     if (ac?.contact_id) {
       const { data: recentLog } = await supabase
         .from('call_logs')
@@ -3393,21 +3530,60 @@ app.get('/api/twilio/recording/:sid', async (req, res) => {
 })
 
 // ── List call recordings (for the Recordings page)
+// Reads the call_recordings registry, then joins each recording to the
+// outcome/notes the rep filed for that contact around the call — at read
+// time, because the wrap-up log lands minutes AFTER the recording does.
 app.get('/api/recordings', async (req, res) => {
   try {
-    const { rep, from, to, limit = 100 } = req.query
-    let q = supabase
-      .from('call_logs')
-      .select('*, contacts(name, phone, external_id)')
-      .not('recording_url', 'is', null)
+    const { rep, direction, from, to, booked, limit = 200 } = req.query
+    let q = supabase.from('call_recordings').select('*')
       .order('created_at', { ascending: false })
-      .limit(parseInt(limit))
+      .limit(Math.min(parseInt(limit) || 200, 500))
     if (rep) q = q.eq('rep', rep)
+    if (direction) q = q.eq('direction', direction)
     if (from) q = q.gte('created_at', from)
     if (to) q = q.lte('created_at', to)
-    const { data, error } = await q
+    if (booked === '1') q = q.not('st_job_id', 'is', null)
+    const { data: recs, error } = await q
     if (error) throw error
-    res.json({ data: data || [] })
+    const rows = recs || []
+
+    const cids = [...new Set(rows.map(r => r.contact_id).filter(Boolean))]
+    let logs = [], cMap = new Map()
+    if (cids.length) {
+      const minStart = rows.reduce((m, r) => Math.min(m, Date.parse(r.call_started_at || r.created_at) || Date.now()), Date.now())
+      const { data: lg } = await supabase.from('call_logs')
+        .select('id, contact_id, rep, outcome, notes, created_at')
+        .in('contact_id', cids)
+        .gte('created_at', new Date(minStart - 5 * 60_000).toISOString())
+      logs = lg || []
+      const { data: cs } = await supabase.from('contacts').select('id, name, phone, external_id').in('id', cids)
+      cMap = new Map((cs || []).map(c => [c.id, c]))
+    }
+
+    const out = rows.map(r => {
+      const started = Date.parse(r.call_started_at || r.created_at) || 0
+      // The matching log: same contact, filed between call start and +2h,
+      // nearest wins (two calls to the same contact in a day stay separate).
+      let log = null
+      for (const l of logs) {
+        if (l.contact_id !== r.contact_id) continue
+        const t = Date.parse(l.created_at)
+        if (t < started - 5 * 60_000 || t > started + 2 * 3600_000) continue
+        if (!log || Math.abs(t - started) < Math.abs(Date.parse(log.created_at) - started)) log = l
+      }
+      const c = cMap.get(r.contact_id)
+      return {
+        ...r,
+        contact_name: r.contact_name || c?.name || null,
+        phone: r.phone || last10(c?.phone) || null,
+        external_id: c?.external_id || null,
+        rep: r.rep || log?.rep || null,
+        outcome: log?.outcome || (r.st_job_id ? 'Booked' : null),
+        notes: log?.notes || null,
+      }
+    })
+    res.json({ data: out })
   } catch (err) {
     console.error('Recordings list error:', err.message)
     res.status(500).json({ error: err.message, data: [] })
@@ -7127,4 +7303,22 @@ if (LEAD_POLL_SECONDS > 0) {
   console.log(`Lead inbox poll every ${LEAD_POLL_SECONDS}s`)
 } else {
   console.log('Lead inbox poll disabled (LEAD_POLL_SECONDS=0)')
+}
+
+// Recording registry sweep: a week-deep backfill that keeps retrying until
+// the call_recordings table exists (the migration may land after this boots),
+// then a 26h look-back every 30 min for anything the webhooks missed.
+if (accountSid && authToken) {
+  let recSweepDeepDone = false
+  const recSweepTick = async () => {
+    try {
+      const ok = await sweepRecordings(recSweepDeepDone ? 26 : 7 * 24)
+      if (ok) recSweepDeepDone = true
+    } catch (e) { console.warn('recording sweep:', e.message) }
+  }
+  setTimeout(() => {
+    recSweepTick()
+    setInterval(recSweepTick, 30 * 60_000)
+  }, 90_000)
+  console.log('Recording sweep every 30m (7d backfill once table exists)')
 }

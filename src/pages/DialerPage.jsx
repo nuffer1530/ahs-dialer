@@ -1062,7 +1062,7 @@ export default function DialerPage() {
       const res = await fetch('/api/st/book', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          customerId: c.external_id, jobTypeId: selectedJobType, businessUnitId: selectedBU,
+          customerId: c.external_id, contactId: c.id, jobTypeId: selectedJobType, businessUnitId: selectedBU,
           campaignId: stCampaignId,
           notes: notes || `Outbound call booked by ${currentRep} via Andi`,
           repName: currentRep, contactName: c.name, phone: c.phone, zip: c.zip,
