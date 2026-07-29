@@ -3536,13 +3536,16 @@ app.get('/api/twilio/recording/:sid', async (req, res) => {
 app.get('/api/recordings', async (req, res) => {
   try {
     const { rep, direction, from, to, booked, limit = 200 } = req.query
+    // Filter and sort on when the CALL happened, not when the row landed —
+    // the sweep backfills old calls with a fresh created_at, which put
+    // yesterday's recordings on the Today tab.
     let q = supabase.from('call_recordings').select('*')
-      .order('created_at', { ascending: false })
+      .order('call_started_at', { ascending: false, nullsFirst: false })
       .limit(Math.min(parseInt(limit) || 200, 500))
     if (rep) q = q.eq('rep', rep)
     if (direction) q = q.eq('direction', direction)
-    if (from) q = q.gte('created_at', from)
-    if (to) q = q.lte('created_at', to)
+    if (from) q = q.gte('call_started_at', from)
+    if (to) q = q.lte('call_started_at', to)
     if (booked === '1') q = q.not('st_job_id', 'is', null)
     const { data: recs, error } = await q
     if (error) throw error
