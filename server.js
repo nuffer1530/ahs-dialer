@@ -3188,6 +3188,7 @@ async function runLiveDraft(callSid, entry) {
   const text = e.parts.map(p => `${p.who}: ${p.text}`).join('\n')
   if (text.length < 80) return
   e.running = true; e.lastRun = Date.now()
+  classifyBooking(callSid, e).catch(() => {})   // dropdowns fill alongside the notes
   try {
     const draft = await draftNotesFromTranscript(text)
     if (draft) {
@@ -3196,6 +3197,78 @@ async function runLiveDraft(callSid, entry) {
     }
   } catch (err) { console.warn('live draft:', err.message) }
   e.running = false
+}
+
+// ── LIVE BOOKING CLASSIFIER ─────────────────────────────────────────────────
+// While the notes draft themselves, the same transcript picks the ST business
+// unit + job type so the booking dropdowns are already right when the CSR
+// opens the panel. Suggestions ride /api/call-notes/latest like coach tips;
+// the client only auto-fills dropdowns the rep hasn't touched.
+const _bookMeta = { at: 0, jobTypes: [], bus: [] }
+async function getBookMeta() {
+  if (_bookMeta.jobTypes.length && Date.now() - _bookMeta.at < 6 * 3600_000) return _bookMeta
+  const [jt, bu] = await Promise.all([
+    stGet(`/jpm/v2/tenant/${ST_TENANT_ID}/job-types?active=true&pageSize=500`).catch(() => null),
+    stGet(`/settings/v2/tenant/${ST_TENANT_ID}/business-units?active=true&pageSize=200`).catch(() => null),
+  ])
+  if (jt?.data?.length) _bookMeta.jobTypes = jt.data.map(j => ({ id: j.id, name: j.name, buIds: j.businessUnitIds || [] }))
+  if (bu?.data?.length) _bookMeta.bus = bu.data.map(b => ({ id: b.id, name: b.name }))
+  if (_bookMeta.jobTypes.length && _bookMeta.bus.length) _bookMeta.at = Date.now()
+  return _bookMeta
+}
+
+const _bookSuggest = new Map()   // callSid -> { contactId, phone, at, businessUnitId, jobTypeId, buName, jtName }
+async function classifyBooking(callSid, e) {
+  if (!ANTHROPIC_KEY || !e || e.classifying) return
+  const text = e.parts.map(p => `${p.who}: ${p.text}`).join('\n')
+  if (text.length < 120 || text.length === e.lastClassifyLen) return   // wait for real conversation, skip if no new speech
+  e.classifying = true
+  try {
+    const meta = await getBookMeta()
+    if (!meta.bus.length || !meta.jobTypes.length) return
+    const buList = meta.bus.map(b => `${b.id}: ${b.name}`).join('\n')
+    const jtList = meta.jobTypes.map(j => `${j.id}: ${j.name}${j.buIds.length ? ` [BU ${j.buIds.join(',')}]` : ''}`).join('\n')
+    const r = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001', max_tokens: 300,
+        system: 'You classify live home-services calls (HVAC, plumbing, electrical, garage doors — Colorado Springs) into the ServiceTitan business unit and job type the CSR should book. Pick ONLY ids from the provided lists, and base the pick on the customer\'s own description of the problem. A wrong guess books a wrong job — if the trade or service is not clear yet, submit nulls.',
+        tools: [{
+          name: 'pick_booking',
+          description: 'Submit the booking classification for this call',
+          input_schema: {
+            type: 'object',
+            properties: {
+              businessUnitId: { type: ['integer', 'null'], description: 'Business unit id from the list, or null if unclear' },
+              jobTypeId: { type: ['integer', 'null'], description: 'Job type id from the list, or null if unclear. Must belong to the chosen business unit.' },
+              confident: { type: 'boolean', description: 'true only if the transcript clearly supports the choice' },
+            },
+            required: ['businessUnitId', 'jobTypeId', 'confident'],
+          },
+        }],
+        tool_choice: { type: 'tool', name: 'pick_booking' },
+        messages: [{ role: 'user', content: `BUSINESS UNITS:\n${buList}\n\nJOB TYPES (with their business unit ids):\n${jtList}\n\nLIVE TRANSCRIPT SO FAR:\n${text.slice(-6000)}` }],
+      }),
+    })
+    if (!r.ok) return
+    const out = (await r.json())?.content?.find(c => c.type === 'tool_use')?.input || {}
+    e.lastClassifyLen = text.length
+    if (!out.confident) return
+    const jt = meta.jobTypes.find(j => j.id === out.jobTypeId) || null
+    let buId = out.businessUnitId || null
+    // The pair must be real — a job type outside the picked BU books wrong.
+    if (jt && buId && jt.buIds.length && !jt.buIds.includes(buId)) buId = jt.buIds[0]
+    if (jt && !buId) buId = jt.buIds[0] || null
+    if (!jt && !buId) return
+    const bu = meta.bus.find(b => b.id === buId) || null
+    _bookSuggest.set(callSid, {
+      contactId: e.contactId || null, phone: e.phone || null, at: Date.now(),
+      businessUnitId: buId, jobTypeId: jt?.id || null,
+      buName: bu?.name || null, jtName: jt?.name || null,
+    })
+  } catch (err) { console.warn('booking classify:', err.message) }
+  finally { e.classifying = false }
 }
 
 // TaskRouter's dequeue instruction records the call but supports NO recording
@@ -3260,6 +3333,7 @@ app.post('/api/twilio/live-transcript', async (req, res) => {
     if (TranscriptionEvent === 'transcription-stopped') {
       supabase.from('live_call_state').delete().eq('call_sid', CallSid).then(() => {}, () => {})
       setTimeout(() => _coachTips.delete(CallSid), 5 * 60_000)   // linger briefly for the last poll
+      setTimeout(() => _bookSuggest.delete(CallSid), 15 * 60_000)   // survives wrap-up, then goes
       const e = _liveTx.get(CallSid)
       _liveTx.delete(CallSid)
       if (e) {
@@ -3336,7 +3410,14 @@ app.get('/api/call-notes/latest', (req, res) => {
   for (const ct of _coachTips.values()) {
     if (match(ct)) coach.push(...ct.tips)
   }
-  res.json({ ...(best ? { text: best.text, at: best.at } : {}), coach })
+  // The booking classifier's pick rides along too. Kept 15 min so it still
+  // fills the panel when the rep books during wrap-up, after hangup.
+  let suggest = null
+  for (const [sid, s] of _bookSuggest) {
+    if (Date.now() - s.at >= 15 * 60_000) { _bookSuggest.delete(sid); continue }
+    if (match(s) && (!suggest || s.at > suggest.at)) suggest = s
+  }
+  res.json({ ...(best ? { text: best.text, at: best.at } : {}), coach, ...(suggest ? { suggest } : {}) })
 })
 
 // ── Call recording registry ─────────────────────────────────────────────────

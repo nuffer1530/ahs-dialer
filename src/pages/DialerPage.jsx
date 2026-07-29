@@ -234,6 +234,8 @@ export default function DialerPage() {
   const [stCampaignId, setStCampaignId] = useState(null)
   const [selectedJobType, setSelectedJobType] = useState('')
   const [selectedBU, setSelectedBU] = useState('')
+  const [bookSuggest, setBookSuggest] = useState(null)   // live classifier's BU/job-type pick
+  const autoBookRef = useRef({ bu: '', jt: '' })         // what WE auto-filled — rep edits win
   const [buSearch, setBuSearch] = useState('')
   const [buOpen, setBuOpen] = useState(false)
   const [jtSearch, setJtSearch] = useState('')
@@ -404,6 +406,7 @@ export default function DialerPage() {
     setSelectedBU(''); setSelectedJobType(''); setStCampaignId(null)
     setAvailability([]); setSelectedSlot(null); setAvailError(null)
     setShowAvailModal(false); setAvailWeekOffset(0); setGuidance(null)
+    setBookSuggest(null); autoBookRef.current = { bu: '', jt: '' }
   }
   useEffect(() => {
     setNotesVal(''); setBookingResult(null); setSelectedOutcome(null)
@@ -885,6 +888,9 @@ export default function DialerPage() {
         const r = await fetch(`/api/call-notes/latest?contactId=${cid}&phone=${encodeURIComponent(cphone)}`)
         const d = await r.json()
         if (d?.text) setAutoNote(prev => (prev?.text === d.text ? prev : { contactId: cid, text: d.text, at: d.at }))
+        // Live booking classifier: BU + job type picked from the conversation.
+        if (d?.suggest) setBookSuggest(prev =>
+          (prev?.at === d.suggest.at && prev?.forContact === cid) ? prev : { ...d.suggest, forContact: cid })
         // 🎧 Live coach: the customer said a trigger phrase — pop Ask Andi
         // with the play. Once per tip, and only during the live call.
         if (live) for (const tip of (d?.coach || [])) {
@@ -913,6 +919,23 @@ export default function DialerPage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoNote])
+
+  // Auto-fill the booking dropdowns from the live classifier — but only while
+  // both are empty or still holding OUR last pick. The moment the rep chooses
+  // either one by hand, the suggestions stop touching them.
+  useEffect(() => {
+    if (!bookSuggest || bookSuggest.forContact !== selectedId) return
+    const buId = bookSuggest.businessUnitId ? String(bookSuggest.businessUnitId) : ''
+    const jtId = bookSuggest.jobTypeId ? String(bookSuggest.jobTypeId) : ''
+    const buUntouched = !selectedBU || selectedBU === autoBookRef.current.bu
+    const jtUntouched = !selectedJobType || selectedJobType === autoBookRef.current.jt
+    if (!buId || !buUntouched || !jtUntouched) return
+    if (selectedBU !== buId) { setSelectedBU(buId); setAvailability([]); setBookingResult(null) }
+    autoBookRef.current.bu = buId
+    if (jtId) { setSelectedJobType(jtId); autoBookRef.current.jt = jtId }
+    else if (selectedBU !== buId) { setSelectedJobType(''); autoBookRef.current.jt = '' }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bookSuggest])
 
   const logOutcome = async (stay) => {
     if (!selectedOutcome || !selectedContact) return
@@ -1807,6 +1830,11 @@ export default function DialerPage() {
                                 <SearchSelect label="Business unit" value={selectedBU} onChange={v => { setSelectedBU(v); setSelectedJobType(''); setAvailability([]); setBookingResult(null) }} options={buOptions} placeholder="Select..." />
                                 <SearchSelect label="Job type" value={selectedJobType} onChange={v => { setSelectedJobType(v); setAvailability([]); setBookingResult(null) }} options={jtOptions} placeholder="Select..." disabled={!selectedBU} />
                               </div>
+                              {selectedBU && selectedBU === autoBookRef.current.bu && (
+                                <div style={{ fontSize:10.5, color:'var(--text-muted)', marginTop:-4 }}>
+                                  Andi picked these from the conversation — double-check before booking.
+                                </div>
+                              )}
                               <SearchSelect label="Marketing campaign" value={String(stCampaignId||'')} onChange={v => setStCampaignId(v)} options={campOptions} placeholder="Select campaign..." />
 
                               {/* Sell a membership into ServiceTitan. Only types an admin has
