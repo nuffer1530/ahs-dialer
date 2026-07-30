@@ -243,8 +243,9 @@ export default function DialerPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showDialpad])
 
-  // One search box, three phonebooks: teammates ring their Andi tab, directory
-  // entries dial out under their own name, customers open their card and dial.
+  // One search box, internal only: teammates ring their Andi tab, directory
+  // entries dial out under their own name. Customers stay out of it — the
+  // dialer queue and tabs are how customer calls start.
   const dialSearchResults = (() => {
     const q = dialSearch.trim().toLowerCase()
     if (q.length < 2) return []
@@ -253,22 +254,16 @@ export default function DialerPage() {
       .slice(0, 4).map(t => ({ type: 'team', key: `t${t.id}`, name: t.name || t.email, sub: 'Teammate — rings their Andi tab', t }))
     const dir = (dialDir || [])
       .filter(d => `${d.name} ${d.label || ''}`.toLowerCase().includes(q))
-      .slice(0, 4).map((d, i) => ({ type: 'dir', key: `d${i}${d.number}`, name: d.name, sub: d.label || d.number, d }))
-    const cust = contacts
-      .filter(c => c.phone && (c.name || '').toLowerCase().includes(q))
-      .slice(0, 5).map(c => ({ type: 'cust', key: `c${c.id}`, name: c.name, sub: c.phone, c }))
-    return [...team, ...dir, ...cust].slice(0, 9)
+      .slice(0, 8).map((d, i) => ({ type: 'dir', key: `d${i}${d.number}`, name: d.name, sub: d.label || d.number, d }))
+    return [...team, ...dir].slice(0, 9)
   })()
   const dialSearchCall = (r) => {
     if (r.type === 'team') callTeammate(r.t)
-    else if (r.type === 'dir') {
+    else {
       const num = String(r.d.number || '').replace(/[^\d+]/g, '')
       if (num.replace(/\D/g, '').length < 10) { alert(`"${r.d.name}" has an invalid number saved (${r.d.number}).`); return }
       // Explicitly NOT the open customer tab's context — this is an internal call.
       phoneMakeCall(num, { contactId: '', contactName: r.d.name })
-    } else {
-      openTab(r.c.id)
-      phoneMakeCall(r.c.phone, { contactId: r.c.id, contactName: r.c.name || '' })
     }
     setShowDialpad(false); setDialSearch(''); setDialDirSel(''); setDialTeamSel('')
   }
@@ -2307,7 +2302,7 @@ export default function DialerPage() {
           {/* Or find them by name — teammates, directory, customers */}
           <div style={{ marginBottom: 12 }}>
             <input value={dialSearch} onChange={e => setDialSearch(e.target.value)}
-              placeholder="Or search a name — team, directory, customers…"
+              placeholder="Or search a name — teammates & directory…"
               style={{ width:'100%', background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'8px 12px', fontSize:12.5, color:'var(--text-primary)', outline:'none' }} />
             {dialSearch.trim().length >= 2 && (
               <div style={{ marginTop:6, border:'1px solid var(--border)', borderRadius:'var(--radius)', overflow:'hidden', maxHeight:220, overflowY:'auto' }}>
