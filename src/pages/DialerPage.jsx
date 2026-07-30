@@ -227,15 +227,51 @@ export default function DialerPage() {
   const [dialTeam, setDialTeam] = useState([])       // teammates for the dialpad picker
   const [dialDir, setDialDir] = useState(null)       // admin-managed company directory
   const [dialDirSel, setDialDirSel] = useState('')
+  const [dialSearch, setDialSearch] = useState('')   // name search across team + directory + customers
   useEffect(() => {
-    if (!showDialpad || dialDir !== null) return
-    sb.from('app_settings').select('value').eq('key', 'company_directory').maybeSingle().then(({ data }) => {
-      let d = []
-      try { d = JSON.parse(data?.value || '[]') } catch {}
-      setDialDir(Array.isArray(d) ? d.filter(x => x?.name && x?.number) : [])
-    })
+    if (!showDialpad) return
+    if (dialDir === null) {
+      sb.from('app_settings').select('value').eq('key', 'company_directory').maybeSingle().then(({ data }) => {
+        let d = []
+        try { d = JSON.parse(data?.value || '[]') } catch {}
+        setDialDir(Array.isArray(d) ? d.filter(x => x?.name && x?.number) : [])
+      })
+    }
+    if (!dialTeam.length) {
+      sb.from('profiles').select('id, name, email').eq('active', true).order('name').then(({ data }) => setDialTeam(data || []))
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showDialpad])
+
+  // One search box, three phonebooks: teammates ring their Andi tab, directory
+  // entries dial out under their own name, customers open their card and dial.
+  const dialSearchResults = (() => {
+    const q = dialSearch.trim().toLowerCase()
+    if (q.length < 2) return []
+    const team = dialTeam
+      .filter(t => t.id !== profile?.id && (t.name || t.email || '').toLowerCase().includes(q))
+      .slice(0, 4).map(t => ({ type: 'team', key: `t${t.id}`, name: t.name || t.email, sub: 'Teammate — rings their Andi tab', t }))
+    const dir = (dialDir || [])
+      .filter(d => `${d.name} ${d.label || ''}`.toLowerCase().includes(q))
+      .slice(0, 4).map((d, i) => ({ type: 'dir', key: `d${i}${d.number}`, name: d.name, sub: d.label || d.number, d }))
+    const cust = contacts
+      .filter(c => c.phone && (c.name || '').toLowerCase().includes(q))
+      .slice(0, 5).map(c => ({ type: 'cust', key: `c${c.id}`, name: c.name, sub: c.phone, c }))
+    return [...team, ...dir, ...cust].slice(0, 9)
+  })()
+  const dialSearchCall = (r) => {
+    if (r.type === 'team') callTeammate(r.t)
+    else if (r.type === 'dir') {
+      const num = String(r.d.number || '').replace(/[^\d+]/g, '')
+      if (num.replace(/\D/g, '').length < 10) { alert(`"${r.d.name}" has an invalid number saved (${r.d.number}).`); return }
+      // Explicitly NOT the open customer tab's context — this is an internal call.
+      phoneMakeCall(num, { contactId: '', contactName: r.d.name })
+    } else {
+      openTab(r.c.id)
+      phoneMakeCall(r.c.phone, { contactId: r.c.id, contactName: r.c.name || '' })
+    }
+    setShowDialpad(false); setDialSearch(''); setDialDirSel(''); setDialTeamSel('')
+  }
   const [dialTeamSel, setDialTeamSel] = useState('')
 
   // ST Booking panel
@@ -2259,13 +2295,45 @@ export default function DialerPage() {
 
       {/* DIALPAD MODAL */}
       {showDialpad && (
-        <Modal title="Manual Dial" onClose={() => { setShowDialpad(false); setDialpadNumber(''); setDialTeamSel(''); setDialDirSel('') }} width={300}>
+        <Modal title="Manual Dial" onClose={() => { setShowDialpad(false); setDialpadNumber(''); setDialTeamSel(''); setDialDirSel(''); setDialSearch('') }} width={300}>
           <div style={{ textAlign:'center', marginBottom:12 }}>
             <input autoFocus type="tel" value={dialpadNumber}
               onChange={e => setDialpadNumber(e.target.value.replace(/[^0-9*#]/g,'').slice(0,15))}
               onKeyDown={e => { if(e.key==='Enter'&&dialpadNumber.length>=10){makeCall(dialpadNumber);setShowDialpad(false)} }}
               placeholder="Enter number"
               style={{ width:'100%', background:'var(--surface-2)', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'10px 14px', fontSize:20, fontWeight:600, letterSpacing:2, textAlign:'center', color:'var(--text-primary)', outline:'none' }} />
+          </div>
+
+          {/* Or find them by name — teammates, directory, customers */}
+          <div style={{ marginBottom: 12 }}>
+            <input value={dialSearch} onChange={e => setDialSearch(e.target.value)}
+              placeholder="Or search a name — team, directory, customers…"
+              style={{ width:'100%', background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'8px 12px', fontSize:12.5, color:'var(--text-primary)', outline:'none' }} />
+            {dialSearch.trim().length >= 2 && (
+              <div style={{ marginTop:6, border:'1px solid var(--border)', borderRadius:'var(--radius)', overflow:'hidden', maxHeight:220, overflowY:'auto' }}>
+                {dialSearchResults.length === 0 && (
+                  <div style={{ padding:'10px 12px', fontSize:12, color:'var(--text-muted)' }}>No matches.</div>
+                )}
+                {dialSearchResults.map(r => (
+                  <div key={r.key} onClick={() => dialSearchCall(r)}
+                    style={{ display:'flex', alignItems:'center', gap:8, padding:'8px 10px', cursor:'pointer', borderBottom:'1px solid var(--border)', background:'var(--surface)' }}
+                    onMouseEnter={e => e.currentTarget.style.background='var(--accent-bg)'}
+                    onMouseLeave={e => e.currentTarget.style.background='var(--surface)'}>
+                    <span style={{ fontSize:9.5, fontWeight:800, padding:'2px 6px', borderRadius:99, flexShrink:0,
+                      background: r.type==='team' ? 'var(--tone-blue-bg)' : r.type==='dir' ? 'var(--tone-purple-bg)' : 'var(--tone-green-bg)',
+                      color: r.type==='team' ? 'var(--tone-blue-tx)' : r.type==='dir' ? 'var(--tone-purple-tx)' : 'var(--tone-green-tx)',
+                      border: `1px solid ${r.type==='team' ? 'var(--tone-blue-bd)' : r.type==='dir' ? 'var(--tone-purple-bd)' : 'var(--tone-green-bd)'}` }}>
+                      {r.type==='team' ? 'TEAM' : r.type==='dir' ? 'DIR' : 'CUST'}
+                    </span>
+                    <div style={{ flex:1, minWidth:0 }}>
+                      <div style={{ fontSize:12.5, fontWeight:600, color:'var(--text-primary)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{r.name}</div>
+                      <div style={{ fontSize:10.5, color:'var(--text-muted)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{r.sub}</div>
+                    </div>
+                    <span style={{ fontSize:11, fontWeight:700, color:'var(--success)', flexShrink:0 }}>Call</span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
           <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:8, marginBottom:12 }}>
             {['1','2','3','4','5','6','7','8','9','*','0','#'].map(k => (
@@ -2332,7 +2400,7 @@ export default function DialerPage() {
                   onClick={() => {
                     const d = dialDir[parseInt(dialDirSel)]
                     const num = String(d?.number || '').replace(/[^\d+]/g, '')
-                    if (num.replace(/\D/g, '').length >= 10) { makeCall(num); setShowDialpad(false); setDialDirSel('') }
+                    if (num.replace(/\D/g, '').length >= 10) { phoneMakeCall(num, { contactId: '', contactName: d.name }); setShowDialpad(false); setDialDirSel('') }
                     else alert(`"${d?.name}" has an invalid number saved (${d?.number}). Ask an admin to fix it in Settings → Users.`)
                   }}>
                   Call
