@@ -1419,7 +1419,7 @@ app.post('/api/st/membership/sell', async (req, res) => {
   } catch (err) {
     audit.ok = false
     audit.error = err.message
-    await supabase.from('andi_membership_sales').insert(audit).catch(() => {})
+    await supabase.from('andi_membership_sales').insert(audit).then(() => {}, () => {})
     console.error('Membership sale error:', err.message)
     res.status(500).json({ error: err.message })
   }
@@ -2863,13 +2863,15 @@ app.post('/api/twilio/sms', async (req, res) => {
     const { to, body, repName, contactId } = req.body
     if (!to || !body) return res.status(400).json({ error: 'to and body required' })
     const msg = await twilioClient.messages.create({ to, from: twilioPhone, body })
-    // Log it
-    await supabase.from('call_logs').insert({
+    // Log it. NOTE: supabase builders have .then but NO .catch — chaining
+    // .catch throws AFTER the text already sent and fails the whole request.
+    const { error: logErr } = await supabase.from('call_logs').insert({
       contact_id: contactId || null,
       rep: repName || 'CSR',
       outcome: 'Text Sent',
       notes: body,
-    }).catch(() => {})
+    })
+    if (logErr) console.warn('sms log:', logErr.message)
     res.json({ ok: true, sid: msg.sid })
   } catch (err) {
     console.error('SMS error:', err.message)
