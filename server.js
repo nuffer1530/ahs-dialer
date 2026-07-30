@@ -2256,6 +2256,13 @@ async function build3DayBoard() {
   // prorate as normal. Admin-tunable; 4h default.
   const { data: insThRow } = await supabase.from('app_settings').select('value').eq('key', 'board_install_threshold_hours').maybeSingle()
   const INSTALL_MIN_HOURS = Number(String(insThRow?.value ?? '').replace(/"/g, '')) || 4
+  // A SERVICE-typed appointment stretched past this many hours is an install
+  // in disguise (job 35317: "Plumbing - Repair", 6h pressure-tank replacement,
+  // install only mentioned in the notes). It still counts as one booked call —
+  // but the hours beyond one standard call's worth come off the tech's
+  // capacity. Admin-tunable via app_settings 'board_long_call_hours'.
+  const { data: longThRow } = await supabase.from('app_settings').select('value').eq('key', 'board_long_call_hours').maybeSingle()
+  const LONG_CALL_HOURS = Number(String(longThRow?.value ?? '').replace(/"/g, '')) || 5
 
   // Jobs per day (one ST call per day). Keep the fields the board + drill-down need.
   const jobsByDayRaw = await Promise.all(days.map(d =>
@@ -2318,6 +2325,7 @@ async function build3DayBoard() {
   // out of capacity was asymmetric: Jason Tse's callback block read as "room
   // for 2 more" while his morning was physically spoken for.
   let excludedHours = {}   // `${techId}|${dayIndex}` → hours
+  let longCallHours = {}   // `${techId}|${dayIndex}` → hours on marathon service jobs
   try {
     const apptRes = await stGet(`/jpm/v2/tenant/${ST_TENANT_ID}/appointments?startsOnOrAfter=${apptLookback.toISOString()}&pageSize=500`)
     const appts = (apptRes?.data || []).filter(a => a.start && a.end && a.active !== false && a.status !== 'Canceled')
@@ -2343,8 +2351,10 @@ async function build3DayBoard() {
     const installBUIds = new Set(Object.values(installBU))
     const byId = {}
     for (const a of relevant) {
+      const durH = (new Date(a.end) - new Date(a.start)) / 3600e3
       if (installBUIds.has(jobBU[a.jobId])) byId[a.id] = { a, bucket: installHours }
       else if (EXCLUDE_CALL.test(nameByType[String(jobTypeOf[a.jobId])] || '')) byId[a.id] = { a, bucket: excludedHours }
+      else if (durH >= LONG_CALL_HOURS) byId[a.id] = { a, bucket: longCallHours }
     }
     const ids = Object.keys(byId)
     for (let i = 0; i < ids.length; i += 50) {
@@ -2371,8 +2381,9 @@ async function build3DayBoard() {
     console.error('BOARD: install-consumption lookup FAILED, capacity will be overstated:', e.stack || e.message)
     installHours = {}
     excludedHours = {}
+    longCallHours = {}
   }
-  console.log(`BOARD: consumption computed — ${Object.keys(installHours).length} install tech-days, ${Object.keys(excludedHours).length} excluded-call tech-days`)
+  console.log(`BOARD: consumption computed — ${Object.keys(installHours).length} install tech-days, ${Object.keys(excludedHours).length} excluded-call tech-days, ${Object.keys(longCallHours).length} long-call tech-days`)
 
   // HVAC maintenance is an opportunity only when the system is 12+ years old.
   // Find which locations (across all 3 days' HVAC maint jobs) qualify, in as
@@ -2456,7 +2467,13 @@ async function build3DayBoard() {
         // excluded from the booked count, so they must ALSO come off capacity —
         // no threshold: every hour on a callback is an hour nobody can book.
         const excH = Math.min(excludedHours[`${techId}|${di}`] || 0, Math.max(0, workH - offH - insH))
-        const avail = Math.max(0, Math.min((workH - offH - insH - excH) / workH, 1))
+        // Marathon service job: it stays booked as ONE call, so only its hours
+        // BEYOND one standard call's worth (shift ÷ calls-per-tech) consume
+        // capacity — Clay on a 6h "repair" with a tank install in the notes is
+        // half a tech, not a full one.
+        const rawLongH = Math.min(longCallHours[`${techId}|${di}`] || 0, Math.max(0, workH - offH - insH - excH))
+        const longEx = Math.max(0, rawLongH - workH / cpt(trade))
+        const avail = Math.max(0, Math.min((workH - offH - insH - excH - longEx) / workH, 1))
         techsAvail += avail
         if (di === 0) {
           // Productive hours that are still ahead of the clock, against the
@@ -2464,14 +2481,14 @@ async function build3DayBoard() {
           // left means half the tech's calls left.
           const dayRem = { startUtc: new Date(Math.max(nowMs, day.startUtc.getTime())), endUtc: day.endUtc }
           const workRemH = my.filter(s => s.type !== 'TimeOff').reduce((a, s) => a + overlapHours(s, dayRem), 0)
-          const productiveH = Math.max(0, workH - offH - insH - excH)
+          const productiveH = Math.max(0, workH - offH - insH - excH - longEx)
           techsAvailRemaining += Math.min(productiveH, workRemH) / workH
         }
         techList.push({
           name: techName(techId),
           off: avail >= 1 ? null
-            : avail <= 0 ? (insH > 0 ? 'on install' : excH > 0 ? 'on callbacks/permits' : 'off')
-            : `${Math.round(avail * 100)}%${insH > 0 ? ' (install)' : excH > 0 ? ' (callbacks/permits)' : ''}`,
+            : avail <= 0 ? (insH > 0 ? 'on install' : excH > 0 ? 'on callbacks/permits' : longEx > 0 ? 'on a long job' : 'off')
+            : `${Math.round(avail * 100)}%${insH > 0 ? ' (install)' : excH > 0 ? ' (callbacks/permits)' : longEx > 0 ? ' (long job)' : ''}`,
         })
       }
       techsAvail = Math.round(techsAvail * 10) / 10
