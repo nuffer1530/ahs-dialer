@@ -228,8 +228,9 @@ export default function DialerPage() {
   const [dialDir, setDialDir] = useState(null)       // admin-managed company directory
   const [dialDirSel, setDialDirSel] = useState('')
   const [dialSearch, setDialSearch] = useState('')   // name search across team + directory + customers
+  const [xferOpen, setXferOpen] = useState(false)    // transfer picker (declared here: the load effect below watches it)
   useEffect(() => {
-    if (!showDialpad) return
+    if (!showDialpad && !xferOpen) return
     if (dialDir === null) {
       sb.from('app_settings').select('value').eq('key', 'company_directory').maybeSingle().then(({ data }) => {
         let d = []
@@ -241,7 +242,7 @@ export default function DialerPage() {
       sb.from('profiles').select('id, name, email').eq('active', true).order('name').then(({ data }) => setDialTeam(data || []))
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showDialpad])
+  }, [showDialpad, xferOpen])
 
   // One search box, internal only: teammates ring their Andi tab, directory
   // entries dial out under their own name. Customers stay out of it — the
@@ -321,9 +322,75 @@ export default function DialerPage() {
   // dialer destroyed the Device and inbound calls could not be answered.
   const {
     twilioReady, callStatus, callDuration, incomingCall,
-    makeCall: phoneMakeCall, callTeammate, hangUp, startInteraction, endInteraction,
+    makeCall: phoneMakeCall, callTeammate, hangUp, startInteraction, endInteraction, getCallSid, callIsTeammate,
     pendingInbound, setPendingInbound, callDirection,
   } = usePhone()
+
+  // ── Hold & transfer ──────────────────────────────────────────────────────
+  const [holdOn, setHoldOn] = useState(false)
+  const [ctlBusy, setCtlBusy] = useState(false)
+  const [xferMode, setXferMode] = useState('warm')
+  const [xferNum, setXferNum] = useState('')
+  const [xferState, setXferState] = useState(null)   // { status, label, mode }
+  const ctlApi = async (path, body = {}) => {
+    const sid = getCallSid()
+    if (!sid) throw new Error('No active call')
+    const r = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ callSid: sid, ...body }) })
+    const d = await r.json().catch(() => ({}))
+    if (!r.ok) throw new Error(d.error || 'Call control failed')
+    return d
+  }
+  const toggleHold = async () => {
+    if (ctlBusy) return
+    setCtlBusy(true)
+    try { const d = await ctlApi('/api/twilio/call/hold', { hold: !holdOn }); setHoldOn(!!d.held) }
+    catch (e) { alert(e.message) }
+    setCtlBusy(false)
+  }
+  const startXfer = async (to, label) => {
+    if (ctlBusy) return
+    setCtlBusy(true)
+    try {
+      await ctlApi('/api/twilio/call/transfer', { to, label, mode: xferMode, fromIdentity: currentRep })
+      setHoldOn(true)
+      if (xferMode === 'cold') {
+        // Fire-and-leave: the server unholds the customer when the target answers.
+        setXferOpen(false); setXferState(null); setHoldOn(false)
+        setTimeout(() => hangUp(), 600)
+      } else {
+        setXferState({ status: 'calling', label, mode: 'warm' })
+      }
+    } catch (e) { alert(e.message) }
+    setCtlBusy(false)
+  }
+  const completeXfer = async () => {
+    try { await ctlApi('/api/twilio/call/transfer/complete') } catch (e) { alert(e.message); return }
+    setXferOpen(false); setXferState(null); setHoldOn(false)
+    hangUp()
+  }
+  const cancelXfer = async () => {
+    try { await ctlApi('/api/twilio/call/transfer/cancel') } catch {}
+    setXferState(null); setHoldOn(false)
+  }
+  // Watch the consult leg while a warm transfer is up.
+  useEffect(() => {
+    if (!xferState || xferState.mode !== 'warm') return
+    const t = setInterval(async () => {
+      try {
+        const sid = getCallSid()
+        if (!sid) return
+        const r = await fetch(`/api/twilio/call/ctl-state?callSid=${sid}`)
+        const d = await r.json()
+        if (d?.target?.status) setXferState(s => (s ? { ...s, status: d.target.status } : s))
+      } catch {}
+    }, 2000)
+    return () => clearInterval(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [xferState?.mode])
+  // The call ended — whatever control state we had is gone with it.
+  useEffect(() => {
+    if (callStatus !== 'connected') { setHoldOn(false); setXferState(null); setXferOpen(false); setCtlBusy(false) }
+  }, [callStatus])
 
   // Skills-based outbound routing. When the rep has selected active campaigns
   // (via the Queues selector), Next / auto-advance serve leads from those
@@ -1358,6 +1425,21 @@ export default function DialerPage() {
             color: callStatus==='connected' ? 'var(--success)' : callStatus==='ended' ? 'var(--text-muted)' : 'var(--tone-amber-tx)' }}>
             <span style={{ width:6, height:6, borderRadius:'50%', background:'currentColor', display:'inline-block' }}></span>
             {callStatus==='calling' ? 'Dialing...' : callStatus==='ringing' ? 'Ringing...' : callStatus==='connected' ? fmtDuration(callDuration) : 'Ended'}
+            {holdOn && (
+              <span style={{ fontSize:9.5, fontWeight:800, padding:'1px 6px', borderRadius:99, background:'var(--tone-amber-bg)', color:'var(--tone-amber-tx)', border:'1px solid var(--tone-amber-bd)' }}>ON HOLD</span>
+            )}
+            {callStatus==='connected' && !callIsTeammate && (
+              <>
+                <button onClick={toggleHold} disabled={ctlBusy}
+                  style={{ background: holdOn ? 'var(--tone-amber-bd)' : 'var(--surface)', border:'1px solid var(--tone-amber-bd)', color: holdOn ? '#fff' : 'var(--tone-amber-tx)', padding:'2px 7px', borderRadius:3, cursor: ctlBusy ? 'wait' : 'pointer', fontSize:10, fontWeight:700 }}>
+                  {ctlBusy ? '…' : holdOn ? 'Resume' : 'Hold'}
+                </button>
+                <button onClick={() => setXferOpen(true)} disabled={ctlBusy}
+                  style={{ background:'var(--surface)', border:'1px solid var(--accent)', color:'var(--accent)', padding:'2px 7px', borderRadius:3, cursor: ctlBusy ? 'wait' : 'pointer', fontSize:10, fontWeight:700 }}>
+                  Transfer
+                </button>
+              </>
+            )}
             {['calling','ringing','connected'].includes(callStatus) && (
               <button onClick={hangUp} style={{ background:'#DC2626', border:'none', color:'#fff', padding:'2px 7px', borderRadius:3, cursor:'pointer', fontSize:10, marginLeft:2 }}>Hang up</button>
             )}
@@ -2400,6 +2482,96 @@ export default function DialerPage() {
                   }}>
                   Call
                 </button>
+              </div>
+            </div>
+          )}
+        </Modal>
+      )}
+
+      {/* ── TRANSFER MODAL ── */}
+      {xferOpen && (
+        <Modal title={xferState ? 'Transfer in progress' : 'Transfer call'} onClose={() => { if (!xferState) { setXferOpen(false); setXferNum('') } }} width={340}>
+          {xferState ? (
+            <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
+              <div style={{ textAlign:'center', padding:'14px 10px', background:'var(--surface-2)', borderRadius:'var(--radius)' }}>
+                <div style={{ fontSize:14, fontWeight:800 }}>{xferState.label}</div>
+                <div style={{ fontSize:12, marginTop:4, fontWeight:600,
+                  color: xferState.status==='connected' ? 'var(--success)' : xferState.status==='failed' ? 'var(--danger)' : 'var(--tone-amber-tx)' }}>
+                  {xferState.status==='calling' ? 'Calling…' : xferState.status==='ringing' ? 'Ringing…'
+                    : xferState.status==='connected' ? 'On the line with you — customer is on hold'
+                    : xferState.status==='left' ? 'They hung up' : 'No answer'}
+                </div>
+              </div>
+              <div style={{ fontSize:11.5, color:'var(--text-muted)', textAlign:'center' }}>
+                Talk to them first, then send the customer through — or cancel to take the customer back.
+              </div>
+              <div style={{ display:'flex', gap:8 }}>
+                <button className="btn" style={{ flex:1 }} onClick={cancelXfer}>Cancel — take call back</button>
+                <button className="btn primary" style={{ flex:1 }} disabled={xferState.status!=='connected'} onClick={completeXfer}>
+                  Send customer through
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
+              <div style={{ display:'flex', gap:6 }}>
+                {[['warm','Warm — talk to them first'],['cold','Cold — send now']].map(([m, label]) => (
+                  <button key={m} onClick={() => setXferMode(m)}
+                    style={{ flex:1, padding:'8px 6px', fontSize:11.5, fontWeight:600, borderRadius:'var(--radius)', cursor:'pointer',
+                      border:`1px solid ${xferMode===m ? 'var(--accent)' : 'var(--border)'}`,
+                      background: xferMode===m ? 'var(--accent-bg)' : 'var(--surface)',
+                      color: xferMode===m ? 'var(--accent)' : 'var(--text-secondary)' }}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <div style={{ fontSize:10.5, color:'var(--text-muted)', marginTop:-6 }}>
+                {xferMode==='warm'
+                  ? 'Customer waits on hold while you brief the person — then you send the customer through.'
+                  : 'Customer goes on hold and connects to them the moment they answer. You drop off immediately.'}
+              </div>
+
+              <div>
+                <div style={{ fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:.5, color:'var(--text-muted)', marginBottom:5 }}>Teammate</div>
+                <div style={{ display:'flex', flexDirection:'column', gap:4, maxHeight:120, overflowY:'auto' }}>
+                  {dialTeam.filter(t => t.id !== profile?.id).map(t => (
+                    <button key={t.id} className="btn sm" style={{ justifyContent:'flex-start', textAlign:'left' }} disabled={ctlBusy}
+                      onClick={() => startXfer(`client:${(t.name || t.email || '').replace(/[^a-zA-Z0-9_]/g, '_')}`, t.name || t.email)}>
+                      {t.name || t.email}
+                    </button>
+                  ))}
+                  {dialTeam.length === 0 && <div style={{ fontSize:11.5, color:'var(--text-muted)' }}>Loading…</div>}
+                </div>
+              </div>
+
+              {dialDir?.length > 0 && (
+                <div>
+                  <div style={{ fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:.5, color:'var(--text-muted)', marginBottom:5 }}>Company directory</div>
+                  <div style={{ display:'flex', flexDirection:'column', gap:4, maxHeight:120, overflowY:'auto' }}>
+                    {dialDir.map((d, i) => (
+                      <button key={i} className="btn sm" style={{ justifyContent:'flex-start', textAlign:'left' }} disabled={ctlBusy}
+                        onClick={() => {
+                          const num = String(d.number || '').replace(/[^\d+]/g, '')
+                          if (num.replace(/\D/g, '').length >= 10) startXfer(num, d.name)
+                          else alert(`"${d.name}" has an invalid number saved.`)
+                        }}>
+                        {d.name}{d.label ? ` — ${d.label}` : ''}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div>
+                <div style={{ fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:.5, color:'var(--text-muted)', marginBottom:5 }}>Or a number</div>
+                <div style={{ display:'flex', gap:6 }}>
+                  <input className="form-input" style={{ flex:1 }} placeholder="+1 719 555 1234" value={xferNum}
+                    onChange={e => setXferNum(e.target.value)} />
+                  <button className="btn primary" disabled={ctlBusy || xferNum.replace(/\D/g, '').length < 10}
+                    onClick={() => startXfer(xferNum.replace(/[^\d+]/g, ''), xferNum)}>
+                    {xferMode==='warm' ? 'Call' : 'Send'}
+                  </button>
+                </div>
               </div>
             </div>
           )}

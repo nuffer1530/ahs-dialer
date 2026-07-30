@@ -27,6 +27,7 @@ export function PhoneProvider({ children }) {
   const [twilioReady, setTwilioReady] = useState(false)
   const [incomingCall, setIncomingCall] = useState(null) // { call, from, contactName, contactId, stLookup }
   const [callStatus, setCallStatus] = useState(null)
+  const [callIsTeammate, setCallIsTeammate] = useState(false)   // internal call — no hold/transfer UI
   const [callDuration, setCallDuration] = useState(0)
 
   // Set when a call is accepted. DialerPage watches this and resolves it into a
@@ -315,6 +316,7 @@ export function PhoneProvider({ children }) {
       }
       const call = await deviceRef.current.connect({ params })
       callRef.current = call
+      setCallIsTeammate(meta.interactionType === 'Teammate')
       setCallStatus('calling')
       setCallDirection('outbound')
       updateAgentStatus('On Call', meta.interactionType || 'Outbound')
@@ -339,6 +341,7 @@ export function PhoneProvider({ children }) {
     if (!incomingCall?.call) return null
     const inc = incomingCall
     callRef.current = inc.call
+    setCallIsTeammate(!!inc.isTeammate)
     setCallStatus('connected')
     startCallTimer()
     setCallDirection('inbound')
@@ -365,10 +368,11 @@ export function PhoneProvider({ children }) {
 
   return (
     <PhoneContext.Provider value={{
-      twilioReady, incomingCall, callStatus, callDuration, callDirection,
+      twilioReady, incomingCall, callStatus, callDuration, callDirection, callIsTeammate,
       makeCall, callTeammate, acceptIncoming, rejectIncoming, hangUp, cancelAutoWrap, startInteraction, endInteraction,
       pendingInbound, setPendingInbound,
       hasActiveCall: () => !!callRef.current,
+      getCallSid: () => callRef.current?.parameters?.CallSid || null,
     }}>
       {children}
     </PhoneContext.Provider>

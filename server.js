@@ -2950,6 +2950,9 @@ app.post('/api/twilio/twiml/outbound', (req, res) => {
     record: 'record-from-answer-dual',
     recordingStatusCallback: `${appUrl}/api/twilio/recording`,
     recordingStatusCallbackEvent: 'completed',
+    // Hold/transfer parking: when the customer leg is redirected into a
+    // conference, this rep leg falls through here and joins it.
+    action: `${appUrl}/api/twilio/routing/after-dial`,
   })
   // statusCallback closes the row out — otherwise it sticks at 'initiated'
   // forever, exactly the stale-row bug inbound had.
@@ -4320,6 +4323,13 @@ app.post('/api/twilio/queue/wait', async (req, res) => {
 // (nothing to do); 'leave' means the overflow pulled them out — route it;
 // 'hangup' means the caller gave up — kill any rep leg still ringing at them.
 app.post('/api/twilio/routing/queue-done', async (req, res) => {
+  // Park in progress? The rep leg was just redirected into the conference —
+  // this (customer) leg follows it there instead of hanging up.
+  const ctl = ctlOf(req.body?.CallSid)
+  if (ctl?.pendingConf) {
+    res.type('text/xml')
+    return res.send(confTwiml(ctl.confName, true))
+  }
   const cfg = await getRouting()
   const twiml = new VoiceResponse()
   const result = req.body?.QueueResult
@@ -4464,6 +4474,197 @@ app.post('/api/admin/call-routing', async (req, res) => {
     _routingCache = { at: 0, cfg: null }   // next call reads the new config
     res.json({ ok: true, cfg, state: routingStateNow(cfg) })
   } catch (err) { res.status(500).json({ error: err.message }) }
+})
+
+// ── 📞 HOLD & TRANSFER ──────────────────────────────────────────────────────
+// A plain <Dial> bridge can't hold or add parties, so the first hold/transfer
+// op "parks" the call: the CHILD leg is REST-redirected into a conference and
+// the PARENT falls through its dial/enqueue action (after-dial / queue-done),
+// which answers with the same conference. Outbound: parent = rep's browser,
+// child = customer. Inbound (TaskRouter): parent = customer, child = rep.
+// From there hold is a participant flag and transfers are added participants.
+const _callCtl = new Map()   // any leg sid → shared ctl object
+const ctlOf = (sid) => _callCtl.get(String(sid || '')) || null
+
+async function twApi(method, path, form) {
+  const r = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${accountSid}${path}`, {
+    method,
+    headers: {
+      Authorization: 'Basic ' + Buffer.from(`${accountSid}:${authToken}`).toString('base64'),
+      ...(form ? { 'Content-Type': 'application/x-www-form-urlencoded' } : {}),
+    },
+    body: form ? new URLSearchParams(form) : undefined,
+  })
+  const text = await r.text()
+  let d = {}
+  try { d = JSON.parse(text) } catch {}
+  if (!r.ok) throw new Error(d.message || `Twilio ${r.status}`)
+  return d
+}
+
+const confTwiml = (confName, endOnExit) =>
+  `<?xml version="1.0" encoding="UTF-8"?><Response><Dial><Conference beep="false" startConferenceOnEnter="true" endConferenceOnExit="${endOnExit}" waitUrl="">${confName}</Conference></Dial></Response>`
+
+async function resolveCtl(browserSid) {
+  const existing = ctlOf(browserSid)
+  if (existing) return existing
+  if (_callCtl.size > 400) {   // stale-entry sweep
+    for (const [k, v] of _callCtl) if (Date.now() - v.at > 6 * 3600_000) _callCtl.delete(k)
+  }
+  const me = await twApi('GET', `/Calls/${browserSid}.json`)
+  let customerSid, direction
+  if (me.parent_call_sid) {           // inbound: the customer is the parent
+    customerSid = me.parent_call_sid
+    direction = 'inbound'
+  } else {                            // outbound: the customer is the child
+    const kids = await twApi('GET', `/Calls.json?ParentCallSid=${browserSid}&Status=in-progress`)
+    const kid = (kids.calls || [])[0]
+    if (!kid) throw new Error('No live customer leg on this call')
+    customerSid = kid.sid
+    direction = 'outbound'
+  }
+  const ctl = {
+    confName: `ctl_${customerSid}`, customerSid, repSid: browserSid, direction,
+    parked: false, pendingConf: false, held: false, confSid: null, target: null, at: Date.now(),
+  }
+  _callCtl.set(customerSid, ctl)
+  _callCtl.set(browserSid, ctl)
+  return ctl
+}
+
+async function parkCall(ctl) {
+  if (ctl.parked) return
+  ctl.pendingConf = true
+  // Redirect the CHILD leg; the parent's action callback joins right after.
+  const childSid = ctl.direction === 'outbound' ? ctl.customerSid : ctl.repSid
+  const endOnExit = ctl.direction === 'outbound'   // the customer leaving always ends it
+  await twApi('POST', `/Calls/${childSid}.json`, { Twiml: confTwiml(ctl.confName, endOnExit) })
+  for (let i = 0; i < 14; i++) {
+    await new Promise(r => setTimeout(r, 500))
+    try {
+      const d = await twApi('GET', `/Conferences.json?FriendlyName=${encodeURIComponent(ctl.confName)}&Status=in-progress`)
+      const conf = (d.conferences || [])[0]
+      if (conf) {
+        const parts = await twApi('GET', `/Conferences/${conf.sid}/Participants.json`)
+        if ((parts.participants || []).length >= 2) { ctl.confSid = conf.sid; ctl.parked = true; return }
+      }
+    } catch {}
+  }
+  throw new Error('Could not move the call into hold mode — try again')
+}
+
+async function setCtlHold(ctl, on) {
+  await twApi('POST', `/Conferences/${ctl.confSid}/Participants/${ctl.customerSid}.json`, {
+    Hold: on ? 'True' : 'False',
+    ...(on ? { HoldUrl: `${appUrl}/api/twilio/routing/hold-music`, HoldMethod: 'POST' } : {}),
+  })
+  ctl.held = on
+}
+
+app.post('/api/twilio/call/hold', async (req, res) => {
+  try {
+    const ctl = await resolveCtl(req.body?.callSid)
+    await parkCall(ctl)
+    await setCtlHold(ctl, req.body?.hold !== false)
+    res.json({ ok: true, held: ctl.held })
+  } catch (err) { res.status(500).json({ error: err.message }) }
+})
+
+app.post('/api/twilio/call/transfer', async (req, res) => {
+  try {
+    const { callSid, to, label, mode, fromIdentity } = req.body || {}
+    if (!to) return res.status(400).json({ error: 'Transfer target required' })
+    const ctl = await resolveCtl(callSid)
+    await parkCall(ctl)
+    await setCtlHold(ctl, true)
+    const isClient = String(to).startsWith('client:')
+    const p = await twApi('POST', `/Conferences/${ctl.confSid}/Participants.json`, {
+      From: isClient ? `client:${String(fromIdentity || 'Andi').replace(/[^a-zA-Z0-9_]/g, '_')}` : twilioPhone,
+      To: to,
+      Timeout: '30',
+      EndConferenceOnExit: 'false',
+      Beep: 'false',
+      StatusCallback: `${appUrl}/api/twilio/call/target-events`,
+      StatusCallbackEvent: 'ringing answered completed',
+    })
+    ctl.target = { sid: p.call_sid, to, label: label || to, mode: mode === 'cold' ? 'cold' : 'warm', status: 'calling' }
+    _callCtl.set(p.call_sid, ctl)
+    res.json({ ok: true, target: ctl.target })
+  } catch (err) { res.status(500).json({ error: err.message }) }
+})
+
+// Warm consult done — let the customer through; the client drops the rep leg.
+app.post('/api/twilio/call/transfer/complete', async (req, res) => {
+  try {
+    const ctl = ctlOf(req.body?.callSid)
+    if (!ctl?.parked) return res.status(400).json({ error: 'No transfer in progress' })
+    await setCtlHold(ctl, false)
+    res.json({ ok: true })
+  } catch (err) { res.status(500).json({ error: err.message }) }
+})
+
+app.post('/api/twilio/call/transfer/cancel', async (req, res) => {
+  try {
+    const ctl = ctlOf(req.body?.callSid)
+    if (!ctl) return res.status(400).json({ error: 'No call control state' })
+    if (ctl.target?.sid) { try { await twApi('DELETE', `/Conferences/${ctl.confSid}/Participants/${ctl.target.sid}.json`) } catch {} }
+    ctl.target = null
+    await setCtlHold(ctl, false)
+    res.json({ ok: true })
+  } catch (err) { res.status(500).json({ error: err.message }) }
+})
+
+app.get('/api/twilio/call/ctl-state', (req, res) => {
+  const ctl = ctlOf(req.query.callSid)
+  res.json(ctl ? { parked: ctl.parked, held: ctl.held, target: ctl.target } : {})
+})
+
+// Transfer-target call progress (participant statusCallback).
+app.post('/api/twilio/call/target-events', async (req, res) => {
+  res.sendStatus(200)
+  try {
+    const { CallSid, CallStatus } = req.body
+    const ctl = ctlOf(CallSid)
+    if (!ctl?.target || ctl.target.sid !== CallSid) return
+    if (CallStatus === 'ringing') ctl.target.status = 'ringing'
+    else if (CallStatus === 'in-progress') {
+      ctl.target.status = 'connected'
+      if (ctl.target.mode === 'cold') await setCtlHold(ctl, false).catch(() => {})
+    } else if (['completed', 'busy', 'no-answer', 'failed', 'canceled'].includes(CallStatus)) {
+      const wasConnected = ctl.target.status === 'connected'
+      const wasCold = ctl.target.mode === 'cold'
+      ctl.target = { ...ctl.target, status: wasConnected ? 'left' : 'failed' }
+      if (!wasConnected && wasCold) {
+        // Cold transfer failed with the rep already gone — never strand the
+        // customer on hold: apologize and take a voicemail.
+        try {
+          const cfg = await getRouting()
+          const rescue = `<?xml version="1.0" encoding="UTF-8"?><Response><Say voice="${cfg.voice}">We are sorry, we could not complete the transfer. ${esc2(cfg.greetings.voicemail)}</Say><Record maxLength="${cfg.voicemail.maxSec || 120}" playBeep="true" action="${appUrl}/api/twilio/routing/voicemail-done"/></Response>`
+          await twApi('POST', `/Calls/${ctl.customerSid}.json`, { Twiml: rescue })
+        } catch (e) { console.warn('cold-transfer rescue:', e.message) }
+      }
+    }
+  } catch (e) { console.warn('target-events:', e.message) }
+})
+
+// Hold music for parked customers — same music the queue uses.
+app.post('/api/twilio/routing/hold-music', async (req, res) => {
+  const cfg = await getRouting()
+  const twiml = new VoiceResponse()
+  const music = cfg.queue.holdMusic === 'custom' && cfg.queue.customMusicUrl
+    ? cfg.queue.customMusicUrl : (HOLD_MUSIC[cfg.queue.holdMusic] || HOLD_MUSIC.classical)
+  twiml.play({ loop: 0 }, music)
+  res.type('text/xml')
+  res.send(twiml.toString())
+})
+
+// Outbound parent lands here when its child leg leaves the bridge — either a
+// normal hangup (empty response, same as before) or a park in progress.
+app.post('/api/twilio/routing/after-dial', (req, res) => {
+  const ctl = ctlOf(req.body?.CallSid)
+  res.type('text/xml')
+  if (ctl?.pendingConf) return res.send(confTwiml(ctl.confName, false))
+  res.send('<?xml version="1.0" encoding="UTF-8"?><Response/>')
 })
 
 // Mark a voicemail heard (clears the New badge for everyone).
