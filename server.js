@@ -4285,11 +4285,13 @@ app.post('/api/twilio/queue/wait', async (req, res) => {
 })
 
 // The call left the queue. 'bridged' fires after a normal answered call ends
-// (nothing to do); 'leave' means the overflow pulled them out — route it.
+// (nothing to do); 'leave' means the overflow pulled them out — route it;
+// 'hangup' means the caller gave up — kill any rep leg still ringing at them.
 app.post('/api/twilio/routing/queue-done', async (req, res) => {
   const cfg = await getRouting()
   const twiml = new VoiceResponse()
-  if (req.body?.QueueResult === 'leave') {
+  const result = req.body?.QueueResult
+  if (result === 'leave') {
     const afterHours = req.query.ah === '1'
     const act = afterHours ? 'voicemail' : cfg.queue.overflow.action
     routingSay(twiml, cfg, 'We are sorry for the wait.')
@@ -4308,6 +4310,36 @@ app.post('/api/twilio/routing/queue-done', async (req, res) => {
   }
   res.type('text/xml')
   res.send(twiml.toString())
+
+  // Ghost-ring killer. The dequeue instruction ACCEPTS the reservation the
+  // moment TaskRouter offers it, so a caller who hangs up while the rep's
+  // browser is still ringing leaves TaskRouter nothing pending to cancel —
+  // the client: leg keeps ringing at a dead call for its full timeout. The
+  // dequeue leg carries the CALLER's number as From (set in the assignment
+  // response), so find any still-ringing client legs from them and end them.
+  if (result === 'hangup' || result === 'error') {
+    const from = req.body?.From
+    if (!from) return
+    const sweep = async () => {
+      const auth = Buffer.from(`${accountSid}:${authToken}`).toString('base64')
+      for (const status of ['ringing', 'queued']) {
+        const r = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Calls.json?From=${encodeURIComponent(from)}&Status=${status}&PageSize=20`,
+          { headers: { Authorization: `Basic ${auth}` } })
+        const legs = ((await r.json()).calls || []).filter(c => String(c.to || '').startsWith('client:'))
+        for (const c of legs) {
+          await fetch(`https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Calls/${c.sid}.json`, {
+            method: 'POST',
+            headers: { Authorization: `Basic ${auth}`, 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({ Status: 'completed' }),
+          })
+          console.log(`ghost ring canceled: ${c.sid} → ${c.to} (caller ${from} hung up in queue)`)
+        }
+      }
+    }
+    // Twice: now, and again in 4s for a leg that was mid-creation at hangup.
+    sweep().catch(e => console.warn('ghost ring sweep:', e.message))
+    setTimeout(() => sweep().catch(e => console.warn('ghost ring sweep:', e.message)), 4000)
+  }
 })
 
 // After a forward attempt: answered → done; anything else → voicemail.
