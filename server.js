@@ -3442,7 +3442,13 @@ app.get('/api/call-notes/latest', (req, res) => {
     if (Date.now() - s.at >= 15 * 60_000) { _bookSuggest.delete(sid); continue }
     if (match(s) && (!suggest || s.at > suggest.at)) suggest = s
   }
-  res.json({ ...(best ? { text: best.text, at: best.at } : {}), coach, ...(suggest ? { suggest } : {}) })
+  // Which marketing channel did they call in on? (ST telecom lookup.)
+  let channel = null
+  if (phone) {
+    const ch = _mktChannel.get(phone)
+    if (ch && Date.now() - ch.at < 3600_000) channel = ch.name
+  }
+  res.json({ ...(best ? { text: best.text, at: best.at } : {}), coach, ...(suggest ? { suggest } : {}), ...(channel ? { channel } : {}) })
 })
 
 // ── Call recording registry ─────────────────────────────────────────────────
@@ -4229,10 +4235,35 @@ function enqueueCall(twiml, cfg, { CallSid, From, contact, afterHours }) {
   }))
 }
 
-// Marketing attribution probe: when ST forwards a tracking number to us, the
-// originally-dialed number should arrive as ForwardedFrom (Diversion header).
-// Trace the last 20 inbound calls so a single test call proves whether ST's
-// forwarding passes it — visible in /api/call-notes/health.
+// Marketing channel attribution. Dialpad strips the Diversion header
+// (ForwardedFrom arrives empty — probed live), but the tracking number's ring
+// lands in ST's call log WITH its campaign ~2s before the forward reaches us
+// (verified: Yard Signs test, Jul 30). So: look the caller up in ST telecom
+// and pin the campaign to the live call, delivered via the notes poll.
+const _mktChannel = new Map()   // last10(caller) -> { name, at }
+async function lookupSTChannel(fromNumber) {
+  const p10 = last10(fromNumber)
+  if (!p10) return
+  for (const delay of [1500, 6000, 15000]) {   // ST usually has it by the first try
+    await new Promise(r => setTimeout(r, delay))
+    try {
+      const since = new Date(Date.now() - 10 * 60_000).toISOString()
+      const d = await stGet(`/telecom/v2/tenant/${ST_TENANT_ID}/calls?createdOnOrAfter=${encodeURIComponent(since)}&pageSize=50`)
+      const hit = (d?.data || [])
+        .map(c => c.leadCall || c)
+        .filter(c => c.direction === 'Inbound' && last10(c.from) === p10 && c.campaign?.name)
+        .sort((a, b) => Date.parse(b.receivedOn || 0) - Date.parse(a.receivedOn || 0))[0]
+      if (hit) {
+        _mktChannel.set(p10, { name: hit.campaign.name, at: Date.now() })
+        if (_mktChannel.size > 200) { for (const [k, v] of _mktChannel) if (Date.now() - v.at > 3600_000) _mktChannel.delete(k) }
+        return
+      }
+    } catch (e) { console.warn('ST channel lookup:', e.message) }
+  }
+}
+
+// Attribution probe: trace the last 20 inbound calls (ForwardedFrom stayed
+// null through Dialpad — kept for future carriers) — /api/call-notes/health.
 const _fwdTrace = []
 app.post('/api/twilio/inbound', async (req, res) => {
   const { From, CallSid } = req.body
@@ -4242,6 +4273,7 @@ app.post('/api/twilio/inbound', async (req, res) => {
     forwardedFrom: req.body.ForwardedFrom || null, calledVia: req.body.CalledVia || null,
   })
   if (_fwdTrace.length > 20) _fwdTrace.pop()
+  lookupSTChannel(From).catch(() => {})
   const normalizedPhone = (From || '').replace(/\D/g, '').slice(-10)
 
   let contact = null

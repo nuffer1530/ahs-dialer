@@ -329,6 +329,7 @@ export default function DialerPage() {
   // ── Hold & transfer ──────────────────────────────────────────────────────
   const [holdOn, setHoldOn] = useState(false)
   const [ctlBusy, setCtlBusy] = useState(false)
+  const [callChannel, setCallChannel] = useState(null)   // marketing channel from ST
   const [xferMode, setXferMode] = useState('warm')
   const [xferNum, setXferNum] = useState('')
   const [xferState, setXferState] = useState(null)   // { status, label, mode }
@@ -390,6 +391,7 @@ export default function DialerPage() {
   // The call ended — whatever control state we had is gone with it.
   useEffect(() => {
     if (callStatus !== 'connected') { setHoldOn(false); setXferState(null); setXferOpen(false); setCtlBusy(false) }
+    if (!callStatus) setCallChannel(null)
   }, [callStatus])
 
   // Skills-based outbound routing. When the rep has selected active campaigns
@@ -1000,6 +1002,8 @@ export default function DialerPage() {
         // Live booking classifier: BU + job type picked from the conversation.
         if (d?.suggest) setBookSuggest(prev =>
           (prev?.at === d.suggest.at && prev?.forContact === cid) ? prev : { ...d.suggest, forContact: cid })
+        // Marketing channel the caller came in on (ST tracking-number lookup).
+        if (d?.channel) setCallChannel(d.channel)
         // 🎧 Live coach: the customer said a trigger phrase — pop Ask Andi
         // with the play. Once per tip, and only during the live call.
         if (live) for (const tip of (d?.coach || [])) {
@@ -1427,6 +1431,12 @@ export default function DialerPage() {
             {callStatus==='calling' ? 'Dialing...' : callStatus==='ringing' ? 'Ringing...' : callStatus==='connected' ? fmtDuration(callDuration) : 'Ended'}
             {holdOn && (
               <span style={{ fontSize:9.5, fontWeight:800, padding:'1px 6px', borderRadius:99, background:'var(--tone-amber-bg)', color:'var(--tone-amber-tx)', border:'1px solid var(--tone-amber-bd)' }}>ON HOLD</span>
+            )}
+            {callChannel && (
+              <span title="Marketing channel this caller dialed (from ServiceTitan)"
+                style={{ fontSize:9.5, fontWeight:800, padding:'1px 7px', borderRadius:99, background:'var(--tone-purple-bg)', color:'var(--tone-purple-tx)', border:'1px solid var(--tone-purple-bd)' }}>
+                {callChannel}
+              </span>
             )}
             {callStatus==='connected' && !callIsTeammate && (
               <>
