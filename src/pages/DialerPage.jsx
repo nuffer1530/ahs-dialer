@@ -225,6 +225,17 @@ export default function DialerPage() {
   const [correctNote, setCorrectNote] = useState('')
   const [dialpadNumber, setDialpadNumber] = useState('')
   const [dialTeam, setDialTeam] = useState([])       // teammates for the dialpad picker
+  const [dialDir, setDialDir] = useState(null)       // admin-managed company directory
+  const [dialDirSel, setDialDirSel] = useState('')
+  useEffect(() => {
+    if (!showDialpad || dialDir !== null) return
+    sb.from('app_settings').select('value').eq('key', 'company_directory').maybeSingle().then(({ data }) => {
+      let d = []
+      try { d = JSON.parse(data?.value || '[]') } catch {}
+      setDialDir(Array.isArray(d) ? d.filter(x => x?.name && x?.number) : [])
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showDialpad])
   const [dialTeamSel, setDialTeamSel] = useState('')
 
   // ST Booking panel
@@ -2248,7 +2259,7 @@ export default function DialerPage() {
 
       {/* DIALPAD MODAL */}
       {showDialpad && (
-        <Modal title="Manual Dial" onClose={() => { setShowDialpad(false); setDialpadNumber(''); setDialTeamSel('') }} width={300}>
+        <Modal title="Manual Dial" onClose={() => { setShowDialpad(false); setDialpadNumber(''); setDialTeamSel(''); setDialDirSel('') }} width={300}>
           <div style={{ textAlign:'center', marginBottom:12 }}>
             <input autoFocus type="tel" value={dialpadNumber}
               onChange={e => setDialpadNumber(e.target.value.replace(/[^0-9*#]/g,'').slice(0,15))}
@@ -2303,6 +2314,32 @@ export default function DialerPage() {
               Rings their Andi tab wherever they're logged in — office or home.
             </div>
           </div>
+
+          {/* Company directory — admin-managed numbers, one pick to dial */}
+          {dialDir?.length > 0 && (
+            <div style={{ marginTop:12, paddingTop:12, borderTop:'1px solid var(--border)' }}>
+              <div style={{ fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:.5, color:'var(--text-muted)', marginBottom:6 }}>
+                Company directory
+              </div>
+              <div style={{ display:'flex', gap:6 }}>
+                <select className="form-input" value={dialDirSel} style={{ flex:1 }} onChange={e => setDialDirSel(e.target.value)}>
+                  <option value="">Pick a contact…</option>
+                  {dialDir.map((d, i) => (
+                    <option key={i} value={String(i)}>{d.name}{d.label ? ` — ${d.label}` : ''}</option>
+                  ))}
+                </select>
+                <button className="btn primary" disabled={dialDirSel === ''}
+                  onClick={() => {
+                    const d = dialDir[parseInt(dialDirSel)]
+                    const num = String(d?.number || '').replace(/[^\d+]/g, '')
+                    if (num.replace(/\D/g, '').length >= 10) { makeCall(num); setShowDialpad(false); setDialDirSel('') }
+                    else alert(`"${d?.name}" has an invalid number saved (${d?.number}). Ask an admin to fix it in Settings → Users.`)
+                  }}>
+                  Call
+                </button>
+              </div>
+            </div>
+          )}
         </Modal>
       )}
     </div>

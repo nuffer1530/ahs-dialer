@@ -703,6 +703,29 @@ export default function AdminPage() {
     await sb.from('app_settings').upsert({ key: 'opp_watch_incentive', value: JSON.stringify(oppInc) }, { onConflict: 'key' })
     setOppIncSaved(true); setTimeout(() => setOppIncSaved(false), 2500)
   }
+
+  // Company directory — numbers every CSR can dial from Manual Dial.
+  const [directory, setDirectory] = useState(null)
+  const [dirSaving, setDirSaving] = useState(false)
+  const [dirMsg, setDirMsg] = useState('')
+  useEffect(() => {
+    if (settingsTab !== 'users' || !isAdmin || directory !== null) return
+    sb.from('app_settings').select('value').eq('key', 'company_directory').maybeSingle().then(({ data }) => {
+      let d = []
+      try { d = JSON.parse(data?.value || '[]') } catch {}
+      setDirectory(Array.isArray(d) ? d : [])
+    })
+  }, [settingsTab, isAdmin, directory])
+  const saveDirectory = async () => {
+    setDirSaving(true)
+    const clean = (directory || [])
+      .map(d => ({ name: (d.name || '').trim(), number: (d.number || '').trim(), label: (d.label || '').trim() }))
+      .filter(d => d.name && d.number)
+    await sb.from('app_settings').upsert({ key: 'company_directory', value: JSON.stringify(clean) }, { onConflict: 'key' })
+    setDirectory(clean)
+    setDirSaving(false)
+    setDirMsg('Saved — live in every dialpad'); setTimeout(() => setDirMsg(''), 3000)
+  }
   // Invite by email
   const [invEmail, setInvEmail] = useState('')
   const [invRole, setInvRole] = useState('rep')
@@ -1975,6 +1998,41 @@ export default function AdminPage() {
                 <button className="btn primary" onClick={saveProfile} disabled={saving}>{saving ? 'Saving...' : 'Save changes'}</button>
               </div>
             </Modal>
+          )}
+
+          {/* ── COMPANY DIRECTORY ── */}
+          {isAdmin && (
+            <div className="card">
+              <div className="card-header">
+                <div className="card-title">Company Directory</div>
+                <span style={{ fontSize:11, color:'var(--text-muted)' }}>Numbers every CSR can dial from Manual Dial — techs, warehouse, vendors, the office next door</span>
+                {dirMsg && <span style={{ fontSize:12, color:'var(--success)', marginLeft:'auto' }}>{dirMsg}</span>}
+              </div>
+              <div className="card-body" style={{ display:'flex', flexDirection:'column', gap:8 }}>
+                {directory === null ? <div className="spinner" /> : (
+                  <>
+                    {directory.length === 0 && (
+                      <div style={{ fontSize:12, color:'var(--text-muted)' }}>Nobody here yet — add the warehouse, on-call techs, the answering service…</div>
+                    )}
+                    {directory.map((d, i) => (
+                      <div key={i} style={{ display:'flex', gap:8, alignItems:'center', flexWrap:'wrap' }}>
+                        <input className="form-input" placeholder="Name" value={d.name || ''} style={{ width:180 }}
+                          onChange={e => setDirectory(ds => ds.map((x, xi) => xi === i ? { ...x, name: e.target.value } : x))} />
+                        <input className="form-input" placeholder="Phone number" value={d.number || ''} style={{ width:150 }}
+                          onChange={e => setDirectory(ds => ds.map((x, xi) => xi === i ? { ...x, number: e.target.value } : x))} />
+                        <input className="form-input" placeholder="Label (optional — Warehouse, HVAC tech, Vendor…)" value={d.label || ''} style={{ flex:1, minWidth:170 }}
+                          onChange={e => setDirectory(ds => ds.map((x, xi) => xi === i ? { ...x, label: e.target.value } : x))} />
+                        <button className="btn sm" onClick={() => setDirectory(ds => ds.filter((_, xi) => xi !== i))}>Remove</button>
+                      </div>
+                    ))}
+                    <div style={{ display:'flex', gap:8, alignItems:'center' }}>
+                      <button className="btn sm" onClick={() => setDirectory(ds => [...(ds || []), { name:'', number:'', label:'' }])}>+ Add entry</button>
+                      <button className="btn sm primary" onClick={saveDirectory} disabled={dirSaving}>{dirSaving ? 'Saving…' : 'Save directory'}</button>
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
           )}
         </div>
       )}
