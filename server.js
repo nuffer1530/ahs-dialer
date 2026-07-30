@@ -4513,14 +4513,38 @@ async function resolveCtl(browserSid) {
   }
   const me = await twApi('GET', `/Calls/${browserSid}.json`)
   let customerSid, direction
-  if (me.parent_call_sid) {           // inbound: the customer is the parent
+  if (me.parent_call_sid) {           // inbound with real parentage
     customerSid = me.parent_call_sid
     direction = 'inbound'
+  } else if (String(me.to || '').startsWith('client:')) {
+    // TaskRouter dequeue leg: an independent call to the rep's browser with
+    // NO parent linkage (verified live) — but its From is the CALLER's own
+    // number, so the customer's in-progress leg is findable by number.
+    direction = 'inbound'
+    if (me.from) {
+      const cand = await twApi('GET', `/Calls.json?From=${encodeURIComponent(me.from)}&To=${encodeURIComponent(twilioPhone)}&Status=in-progress&PageSize=5`)
+      customerSid = ((cand.calls || []).find(c => c.sid !== browserSid) || {}).sid
+    }
+    if (!customerSid) {
+      // Fallback: the answered call_task recorded the customer leg sid.
+      const ident = String(me.to).slice(7)
+      const { data: ct } = await supabase.from('call_tasks')
+        .select('call_sid, from_number, agent_name, answered_at')
+        .eq('state', 'answered').order('answered_at', { ascending: false }).limit(5)
+      const hit = (ct || []).find(t =>
+        (me.from && last10(t.from_number) === last10(me.from)) ||
+        String(t.agent_name || '').replace(/[^a-zA-Z0-9_]/g, '_') === ident)
+      customerSid = hit?.call_sid
+    }
+    if (!customerSid) throw new Error('Could not find the customer side of this call')
   } else {                            // outbound: the customer is the child
-    const kids = await twApi('GET', `/Calls.json?ParentCallSid=${browserSid}&Status=in-progress`)
-    const kid = (kids.calls || [])[0]
-    if (!kid) throw new Error('No live customer leg on this call')
-    customerSid = kid.sid
+    const kids = await twApi('GET', `/Calls.json?ParentCallSid=${browserSid}&PageSize=5`)
+    const live = (kids.calls || []).find(c => c.status === 'in-progress')
+    if (!live) {
+      const stillRinging = (kids.calls || []).some(c => ['ringing', 'queued', 'initiated'].includes(c.status))
+      throw new Error(stillRinging ? 'The customer has not answered yet' : 'No live customer leg on this call')
+    }
+    customerSid = live.sid
     direction = 'outbound'
   }
   const ctl = {
