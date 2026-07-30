@@ -2327,8 +2327,13 @@ async function build3DayBoard() {
   let excludedHours = {}   // `${techId}|${dayIndex}` → hours
   let longCallHours = {}   // `${techId}|${dayIndex}` → hours on marathon service jobs
   try {
-    const apptRes = await stGet(`/jpm/v2/tenant/${ST_TENANT_ID}/appointments?startsOnOrAfter=${apptLookback.toISOString()}&pageSize=500`)
-    const appts = (apptRes?.data || []).filter(a => a.start && a.end && a.active !== false && a.status !== 'Canceled')
+    // ST returns appointments in DESCENDING start order, so one 500 page is
+    // the far-future book, not the board window — today's appointments fell
+    // off the end and consumption silently under-sampled (job 35317's 6h
+    // repair never made the page). Page it all; the forward book is only a
+    // few hundred rows (verified 601 on Jul 30).
+    const apptRaw = await stPageAll(p => `/jpm/v2/tenant/${ST_TENANT_ID}/appointments?startsOnOrAfter=${apptLookback.toISOString()}&pageSize=500&page=${p}`, 6000)
+    const appts = apptRaw.filter(a => a.start && a.end && a.active !== false && a.status !== 'Canceled')
 
     // Only appointments that actually overlap a board day are worth resolving.
     const relevant = appts.filter(a => {
