@@ -3384,7 +3384,7 @@ app.get('/api/live-calls/:sid/transcript', async (req, res) => {
 app.get('/api/call-notes/health', (req, res) => {
   res.json({
     openaiKey: Boolean(OPENAI_KEY), anthropicKey: Boolean(ANTHROPIC_KEY),
-    liveCalls: _liveTx.size, drafts: _callNotes.size, whisper: _wuTrace,
+    liveCalls: _liveTx.size, drafts: _callNotes.size, whisper: _wuTrace, inboundTrace: _fwdTrace,
     entries: [..._callNotes.entries()].map(([sid, v]) => ({
       sid: sid.slice(-8), contactId: v.contactId, phone: v.phone || null,
       chars: v.text.length, ageSec: Math.round((Date.now() - v.at) / 1000),
@@ -4204,9 +4204,19 @@ function enqueueCall(twiml, cfg, { CallSid, From, contact, afterHours }) {
   }))
 }
 
+// Marketing attribution probe: when ST forwards a tracking number to us, the
+// originally-dialed number should arrive as ForwardedFrom (Diversion header).
+// Trace the last 20 inbound calls so a single test call proves whether ST's
+// forwarding passes it — visible in /api/call-notes/health.
+const _fwdTrace = []
 app.post('/api/twilio/inbound', async (req, res) => {
   const { From, CallSid } = req.body
   console.log(`Inbound call from ${From}, SID: ${CallSid}`)
+  _fwdTrace.unshift({
+    at: new Date().toISOString(), from: From || null, to: req.body.To || null,
+    forwardedFrom: req.body.ForwardedFrom || null, calledVia: req.body.CalledVia || null,
+  })
+  if (_fwdTrace.length > 20) _fwdTrace.pop()
   const normalizedPhone = (From || '').replace(/\D/g, '').slice(-10)
 
   let contact = null
