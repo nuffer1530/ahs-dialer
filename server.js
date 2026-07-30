@@ -4487,13 +4487,23 @@ const _callCtl = new Map()   // any leg sid → shared ctl object
 const ctlOf = (sid) => _callCtl.get(String(sid || '')) || null
 
 async function twApi(method, path, form) {
+  let body
+  if (form) {
+    // Twilio wants repeated params for multi-value fields (StatusCallbackEvent)
+    // — a space-joined string is silently ignored.
+    body = new URLSearchParams()
+    for (const [k, v] of Object.entries(form)) {
+      if (Array.isArray(v)) v.forEach(x => body.append(k, x))
+      else body.append(k, v)
+    }
+  }
   const r = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${accountSid}${path}`, {
     method,
     headers: {
       Authorization: 'Basic ' + Buffer.from(`${accountSid}:${authToken}`).toString('base64'),
       ...(form ? { 'Content-Type': 'application/x-www-form-urlencoded' } : {}),
     },
-    body: form ? new URLSearchParams(form) : undefined,
+    body,
   })
   const text = await r.text()
   let d = {}
@@ -4609,7 +4619,7 @@ app.post('/api/twilio/call/transfer', async (req, res) => {
       EndConferenceOnExit: 'false',
       Beep: 'false',
       StatusCallback: `${appUrl}/api/twilio/call/target-events`,
-      StatusCallbackEvent: 'ringing answered completed',
+      StatusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
     })
     ctl.target = { sid: p.call_sid, to, label: label || to, mode: mode === 'cold' ? 'cold' : 'warm', status: 'calling' }
     _callCtl.set(p.call_sid, ctl)
@@ -4638,9 +4648,26 @@ app.post('/api/twilio/call/transfer/cancel', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }) }
 })
 
-app.get('/api/twilio/call/ctl-state', (req, res) => {
+app.get('/api/twilio/call/ctl-state', async (req, res) => {
   const ctl = ctlOf(req.query.callSid)
-  res.json(ctl ? { parked: ctl.parked, held: ctl.held, target: ctl.target } : {})
+  if (!ctl) return res.json({})
+  // Belt and suspenders: callbacks can drop, so while a consult leg is up,
+  // refresh its status straight from Twilio and run the same transitions.
+  if (ctl.target?.sid && !['left', 'failed'].includes(ctl.target.status)) {
+    try {
+      const c = await twApi('GET', `/Calls/${ctl.target.sid}.json`)
+      if (c.status === 'ringing') ctl.target.status = 'ringing'
+      else if (c.status === 'in-progress') {
+        if (ctl.target.status !== 'connected') {
+          ctl.target.status = 'connected'
+          if (ctl.target.mode === 'cold') await setCtlHold(ctl, false).catch(() => {})
+        }
+      } else if (['completed', 'busy', 'no-answer', 'failed', 'canceled'].includes(c.status)) {
+        ctl.target.status = ctl.target.status === 'connected' ? 'left' : 'failed'
+      }
+    } catch {}
+  }
+  res.json({ parked: ctl.parked, held: ctl.held, target: ctl.target })
 })
 
 // Transfer-target call progress (participant statusCallback).
