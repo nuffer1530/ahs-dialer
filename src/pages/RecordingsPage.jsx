@@ -52,7 +52,7 @@ export default function RecordingsPage() {
   const [outcomeFilter, setOutcomeFilter] = useState('')
   const [bookedOnly, setBookedOnly] = useState(false)
   const [search, setSearch] = useState('')
-  const [dateRange, setDateRange] = useState('7d')
+  const [dateRange, setDateRange] = useState('today')
 
   // Player + expanded notes
   const [playingId, setPlayingId] = useState(null)

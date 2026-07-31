@@ -3441,7 +3441,7 @@ app.get('/api/live-calls/:sid/transcript', async (req, res) => {
 
 app.get('/api/call-notes/health', (req, res) => {
   res.json({
-    openaiKey: Boolean(OPENAI_KEY), anthropicKey: Boolean(ANTHROPIC_KEY),
+    openaiKey: Boolean(OPENAI_KEY), anthropicKey: Boolean(ANTHROPIC_KEY), uptimeSec: Math.round(process.uptime()),
     liveCalls: _liveTx.size, drafts: _callNotes.size, whisper: _wuTrace, inboundTrace: _fwdTrace,
     entries: [..._callNotes.entries()].map(([sid, v]) => ({
       sid: sid.slice(-8), contactId: v.contactId, phone: v.phone || null,
@@ -3826,11 +3826,14 @@ app.post('/api/twilio/recording', async (req, res) => {
     // Inbound calls stopped writing active_calls when TaskRouter landed — the
     // contact for those lives on call_tasks. Check both.
     let { data: ac } = await supabase.from('active_calls').select('*').eq('call_sid', CallSid).maybeSingle()
+    let inboundTask = null
     if (!ac?.contact_id) {
-      const { data: ct } = await supabase.from('call_tasks')
-        .select('contact_id, contact_name, from_number, agent_name, answered_at').eq('call_sid', CallSid).maybeSingle()
-      if (ct?.contact_id) ac = { direction: 'inbound', contact_id: ct.contact_id, contact_name: ct.contact_name,
-        from_number: ct.from_number, rep_identity: ct.agent_name, started_at: ct.answered_at }
+      const { data: ct } = await supabase.from('call_tasks').select('*').eq('call_sid', CallSid).maybeSingle()
+      if (ct) {
+        inboundTask = ct
+        ac = { direction: 'inbound', contact_id: ct.contact_id, contact_name: ct.contact_name,
+          from_number: ct.from_number, rep_identity: ct.agent_name, started_at: ct.answered_at }
+      }
     }
     if (!ac?.contact_id) _wu(CallSid, 'no contact match — whisper skipped')
 
@@ -3847,6 +3850,28 @@ app.post('/api/twilio/recording', async (req, res) => {
       phone: last10(ac?.direction === 'outbound' ? ac?.to_number : ac?.from_number) || null,
       call_started_at: ac?.started_at || new Date().toISOString(),
     })
+
+    // Inbound QA eval rides the recording callback too — belt and suspenders
+    // with finalPassFromRest (call_sid is unique in call_evaluations, so a
+    // double fire is a harmless duplicate-insert error).
+    if (inboundTask) {
+      try {
+        let e = _liveTx.get(CallSid)
+        if (!e?.parts?.length) {
+          const { data: st } = await supabase.from('live_call_state').select('data').eq('call_sid', CallSid).maybeSingle()
+          if (st?.data?.parts?.length) e = { ...st.data, parts: st.data.parts }
+        }
+        if (e?.parts?.length) {
+          evaluateCall({
+            callSid: CallSid, recordingSid: RecordingSid,
+            duration: RecordingDuration ? parseInt(RecordingDuration) : null,
+            e: { parts: e.parts, line: e.line || inboundTask.line || null,
+                 contactId: inboundTask.contact_id, contactName: inboundTask.contact_name,
+                 phone: last10(inboundTask.from_number), repName: inboundTask.agent_name },
+          }).catch(err => console.warn('call eval (webhook):', err.message))
+        }
+      } catch (err) { console.warn('call eval (webhook):', err.message) }
+    }
     if (ac?.contact_id) {
       const { data: recentLog } = await supabase
         .from('call_logs')
@@ -4810,6 +4835,7 @@ app.post('/api/admin/call-routing', async (req, res) => {
 // From there hold is a participant flag and transfers are added participants.
 const _callCtl = new Map()   // any leg sid → shared ctl object
 const ctlOf = (sid) => _callCtl.get(String(sid || '')) || null
+const _recStarted = new Set()   // customer legs we've started a REST recording on
 
 async function twApi(method, path, form) {
   let body
@@ -5076,9 +5102,12 @@ app.post('/api/twilio/taskrouter/assignment', async (req, res) => {
       // against a blank contact.
       from: taskAttrs.from_number || twilioPhone,
       post_work_activity_sid: TWILIO_ACTIVITY_AVAILABLE || undefined,
-      record: 'record-from-answer-dual',
-      recording_status_callback: `${appUrl}/api/twilio/recording`,
-      recording_status_callback_event: 'completed',
+      // Recording does NOT ride the dequeue: its record param proved
+      // unreliable (zero recordings on answered calls, Jul 31) and its
+      // status callback was always ignored. reservation.accepted starts a
+      // REST recording on the CUSTOMER leg instead — deterministic, with a
+      // real completion callback.
+      record: 'do-not-record',
     })
   } catch (err) {
     console.error('TaskRouter assignment error:', err.message)
@@ -5141,6 +5170,18 @@ app.post('/api/twilio/taskrouter/events', async (req, res) => {
       try {
         const tattrs = JSON.parse(req.body.TaskAttributes || '{}')
         if (tattrs.call_sid) {
+          // Record the customer leg the moment a rep accepts. Twilio calls
+          // /api/twilio/recording on completion, which registers it, drafts
+          // notes, and triggers the QA eval.
+          if (!_recStarted.has(tattrs.call_sid)) {
+            _recStarted.add(tattrs.call_sid)
+            if (_recStarted.size > 500) _recStarted.delete(_recStarted.values().next().value)
+            twApi('POST', `/Calls/${tattrs.call_sid}/Recordings.json`, {
+              RecordingChannels: 'dual',
+              RecordingStatusCallback: `${appUrl}/api/twilio/recording`,
+              RecordingStatusCallbackEvent: ['completed'],
+            }).catch(e => console.warn('inbound recording start:', e.message))
+          }
           startLiveTranscription(tattrs.call_sid, task?.contact_id || null, 'inbound',
             task?.from_number || tattrs.from_number, wattrs.name || req.body.WorkerName || null).catch(() => {})
           // Dispatch-line calls skip the customer-call machinery (coach,
