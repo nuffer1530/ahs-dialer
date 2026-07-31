@@ -59,29 +59,57 @@ export default function EvalModal({ evalRow, onClose }) {
             </div>
           )}
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {items.map((it, i) => {
-              const full = it.applicable && it.earned >= it.max
-              const zero = it.applicable && it.earned === 0
-              return (
-                <div key={i} style={{ display: 'flex', gap: 10, padding: '8px 11px', borderRadius: 9,
-                  background: 'var(--surface)', border: '1px solid var(--border)', opacity: it.applicable ? 1 : .55 }}>
-                  <div style={{ width: 44, flexShrink: 0, textAlign: 'center' }}>
-                    <div style={{ fontSize: 13, fontWeight: 800,
-                      color: !it.applicable ? 'var(--text-muted)' : full ? 'var(--tone-green-tx)' : zero ? 'var(--tone-red-tx)' : 'var(--tone-amber-tx)' }}>
-                      {it.applicable ? `${it.earned}/${it.max}` : 'N/A'}
-                    </div>
-                  </div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 12.5, fontWeight: 700 }}>{it.criterion}</div>
-                    {it.evidence && (
-                      <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 2, lineHeight: 1.45 }}>{it.evidence}</div>
+          {(() => {
+            // Group items under their sections (new rows); old rows without
+            // section data fall through to one flat group.
+            const secDefs = evalRow.scores?.sections?.length ? evalRow.scores.sections : [{ name: null, weight: null, pct: null }]
+            const grouped = secDefs.map(sd => ({
+              ...sd,
+              rows: items.filter(it => sd.name == null || String(it.section || '').toLowerCase() === sd.name.toLowerCase()),
+            }))
+            const claimed = new Set(grouped.flatMap(g => g.rows))
+            const orphans = items.filter(it => !claimed.has(it))
+            if (orphans.length) grouped.push({ name: 'Other', weight: null, pct: null, rows: orphans })
+            return grouped.filter(g => g.rows.length).map((g, gi) => (
+              <div key={gi} style={{ marginBottom: 12 }}>
+                {g.name != null && (
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 6 }}>
+                    <span style={{ fontSize: 11, fontWeight: 800, textTransform: 'uppercase', letterSpacing: .6, color: 'var(--text-secondary)' }}>{g.name}</span>
+                    {g.weight != null && <span style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>{g.weight}% of score</span>}
+                    {g.pct != null && (
+                      <span style={{ marginLeft: 'auto', fontSize: 11.5, fontWeight: 800,
+                        color: g.pct >= 90 ? 'var(--tone-green-tx)' : g.pct >= 75 ? 'var(--tone-amber-tx)' : 'var(--tone-red-tx)' }}>
+                        {Math.round(g.pct)}%
+                      </span>
                     )}
                   </div>
+                )}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {g.rows.map((it, i) => {
+                    const full = it.applicable && it.earned >= it.max
+                    const zero = it.applicable && it.earned === 0
+                    return (
+                      <div key={i} style={{ display: 'flex', gap: 10, padding: '8px 11px', borderRadius: 9,
+                        background: 'var(--surface)', border: '1px solid var(--border)', opacity: it.applicable ? 1 : .55 }}>
+                        <div style={{ width: 44, flexShrink: 0, textAlign: 'center' }}>
+                          <div style={{ fontSize: 13, fontWeight: 800,
+                            color: !it.applicable ? 'var(--text-muted)' : full ? 'var(--tone-green-tx)' : zero ? 'var(--tone-red-tx)' : 'var(--tone-amber-tx)' }}>
+                            {it.applicable ? `${it.earned}/${it.max}` : 'N/A'}
+                          </div>
+                        </div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 12.5, fontWeight: 700 }}>{it.criterion}</div>
+                          {it.evidence && (
+                            <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 2, lineHeight: 1.45 }}>{it.evidence}</div>
+                          )}
+                        </div>
+                      </div>
+                    )
+                  })}
                 </div>
-              )
-            })}
-          </div>
+              </div>
+            ))
+          })()}
           <div style={{ fontSize: 10.5, color: 'var(--text-muted)', marginTop: 10 }}>
             N/A items are excluded from the score — this call was graded out of {evalRow.possible} points.
           </div>

@@ -3565,27 +3565,58 @@ async function sweepRecordings(hoursBack = 26) {
 // N/A criteria are EXCLUDED from the denominator (a no-hold call scores out
 // of fewer points, per Brandyn). Monthly averages auto-fill the scorecard's
 // call_quality KPI.
-const EVAL_RUBRIC_DEFAULT = `ACCURACY & PROCEDURE (50%)
-1. Greeting used (5 pts) — Opened with the company greeting: "Thank you for calling Awesome Home Services, this is {name} speaking. How can we make your day Awesome?" Close variations acceptable; missing the Awesome greeting entirely is 0.
-2. Verified homeowner status (10 pts) — Asked whether we're speaking with the property owner ("Are you the homeowner?" / "Do you rent or own the property?").
-3. Verified address (5 pts) — Asked for or confirmed the service/property address.
-4. Verified email (5 pts) — Asked for or confirmed an email address ("Let me make sure I have the right email — is it …?").
-5. Asked age of home/unit (5 pts) — Asked how old the home or the equipment is.
-6. Confirmed best phone number (5 pts) — Asked for or confirmed the best number to reach the customer.
-7. Used/confirmed client name (5 pts) — Got the caller's full name or confirmed it, and used it during the call.
-8. Offered in-house plan (5 pts) — If the caller is not a member, offered the club membership plan. If they ARE a member, thanked them for being a member (that earns the points).
-9. Attempted/overcame objections (5 pts) — Acknowledged concerns and worked through them ("I understand your concern, here's how this works…"). N/A if the caller raised no objections.
+const DEFAULT_EVAL_SECTIONS = [
+  {
+    name: 'Accuracy & Procedure', weight: 50,
+    items: [
+      { question: 'Greeting used', points: 5, guidance: 'Opened with the company greeting: "Thank you for calling Awesome Home Services, this is {name} speaking. How can we make your day Awesome?" Close variations acceptable; missing the Awesome greeting entirely is 0.' },
+      { question: 'Verified homeowner status', points: 10, guidance: 'Asked whether we\'re speaking with the property owner ("Are you the homeowner?" / "Do you rent or own the property?").' },
+      { question: 'Verified address', points: 5, guidance: 'Asked for or confirmed the service/property address.' },
+      { question: 'Verified email', points: 5, guidance: 'Asked for or confirmed an email address ("Let me make sure I have the right email — is it …?").' },
+      { question: 'Asked age of home/unit', points: 5, guidance: 'Asked how old the home or the equipment is.' },
+      { question: 'Confirmed best phone number', points: 5, guidance: 'Asked for or confirmed the best number to reach the customer.' },
+      { question: 'Used/confirmed client name', points: 5, guidance: 'Got the caller\'s full name or confirmed it, and used it during the call.' },
+      { question: 'Offered in-house plan', points: 5, guidance: 'If the caller is not a member, offered the club membership plan. If they ARE a member, thanked them for being a member (that earns the points).' },
+      { question: 'Attempted/overcame objections', points: 5, guidance: 'Acknowledged concerns and worked through them ("I understand your concern, here\'s how this works…"). N/A if the caller raised no objections.' },
+    ],
+  },
+  {
+    name: 'Soft Skills & Customer Experience', weight: 50,
+    items: [
+      { question: 'Expressed empathy', points: 10, guidance: 'Acknowledged the customer\'s situation ("I understand how frustrating that must be for you.").' },
+      { question: 'Minimal dead air/silence', points: 5, guidance: 'Responded promptly; narrated pauses ("Let me check that for you") instead of going silent.' },
+      { question: 'Did not interrupt client', points: 5, guidance: 'Let the caller explain fully before responding.' },
+      { question: 'Actively listened', points: 5, guidance: 'Repeated or confirmed details back; referenced things the caller said earlier.' },
+      { question: 'Avoided slang/jargon', points: 5, guidance: 'Professional language; no in-house acronyms or day-to-day slang.' },
+      { question: 'Friendly, polite, professional', points: 5, guidance: 'Positive tone throughout, used the client\'s name, said please and thank you.' },
+      { question: 'Compliant & confident with company policies', points: 5, guidance: 'Explained pricing, warranties, or fees per company rules; stayed calm and factual if questioned.' },
+      { question: 'Correct hold procedure', points: 5, guidance: 'Asked permission before placing the caller on hold. N/A if no hold occurred.' },
+      { question: 'Checked in if hold over 3 minutes', points: 5, guidance: 'After a long hold, thanked the caller and gave an update. N/A if no hold that long.' },
+    ],
+  },
+]
 
-SOFT SKILLS & CUSTOMER EXPERIENCE (50%)
-10. Expressed empathy (10 pts) — Acknowledged the customer's situation ("I understand how frustrating that must be for you.").
-11. Minimal dead air/silence (5 pts) — Responded promptly; narrated pauses ("Let me check that for you") instead of going silent.
-12. Did not interrupt client (5 pts) — Let the caller explain fully before responding.
-13. Actively listened (5 pts) — Repeated or confirmed details back; referenced things the caller said earlier.
-14. Avoided slang/jargon (5 pts) — Professional language; no in-house acronyms or day-to-day slang.
-15. Friendly, polite, professional (5 pts) — Positive tone throughout, used the client's name, said please and thank you.
-16. Compliant & confident with company policies (5 pts) — Explained pricing, warranties, or fees per company rules; stayed calm and factual if questioned.
-17. Correct hold procedure (5 pts) — Asked permission before placing the caller on hold. N/A if no hold occurred.
-18. Checked in if hold over 3 minutes (5 pts) — After a long hold, thanked the caller and gave an update. N/A if no hold that long.`
+function cleanEvalSections(raw) {
+  if (!Array.isArray(raw)) return null
+  const secs = raw.map(s => ({
+    name: String(s?.name || '').trim().slice(0, 80),
+    weight: Math.max(0, Number(s?.weight) || 0),
+    items: (Array.isArray(s?.items) ? s.items : []).map(i => ({
+      question: String(i?.question || '').trim().slice(0, 160),
+      points: Math.max(1, parseInt(i?.points) || 5),
+      guidance: String(i?.guidance || '').trim().slice(0, 600),
+    })).filter(i => i.question),
+  })).filter(s => s.name && s.items.length)
+  return secs.length ? secs : null
+}
+
+// The exact text the AI scores against, built from the structure.
+function evalRubricText(sections) {
+  return sections.map(s =>
+    `SECTION: ${s.name} — worth ${s.weight}% of the final score\n` +
+    s.items.map((i, n) => `${n + 1}. ${i.question} (${i.points} pts)${i.guidance ? ` — ${i.guidance}` : ''}`).join('\n')
+  ).join('\n\n')
+}
 
 let _evalCfgCache = { at: 0, cfg: null }
 async function getEvalCfg() {
@@ -3598,7 +3629,7 @@ async function getEvalCfg() {
   const cfg = {
     enabled: saved?.enabled !== false,
     minSeconds: Number(saved?.minSeconds) || 60,
-    rubric: (saved?.rubric || '').trim() || EVAL_RUBRIC_DEFAULT,
+    sections: cleanEvalSections(saved?.sections) || JSON.parse(JSON.stringify(DEFAULT_EVAL_SECTIONS)),
   }
   _evalCfgCache = { at: Date.now(), cfg }
   return cfg
@@ -3606,20 +3637,22 @@ async function getEvalCfg() {
 
 app.get('/api/admin/call-eval-config', async (req, res) => {
   if (!(await requireAdmin(req, res))) return
-  res.json({ cfg: await getEvalCfg(), defaultRubric: EVAL_RUBRIC_DEFAULT })
+  res.json({ cfg: await getEvalCfg(), defaultSections: DEFAULT_EVAL_SECTIONS })
 })
 app.post('/api/admin/call-eval-config', async (req, res) => {
   if (!(await requireAdmin(req, res))) return
   try {
-    const { rubric, minSeconds, enabled } = req.body || {}
+    const { sections, minSeconds, enabled } = req.body || {}
+    const cleaned = cleanEvalSections(sections)
+    if (!cleaned) return res.status(400).json({ error: 'At least one section with one question is required' })
     const val = {
-      rubric: String(rubric || '').slice(0, 20000),
+      sections: cleaned,
       minSeconds: Math.max(0, parseInt(minSeconds) || 60),
       enabled: enabled !== false,
     }
     const { error } = await supabase.from('app_settings').upsert({ key: 'call_eval_rubric', value: JSON.stringify(val) }, { onConflict: 'key' })
     if (error) throw error
-    _evalCfgCache = { at: 0, cfg: null }   // next call scores against the new text
+    _evalCfgCache = { at: 0, cfg: null }   // next call scores against the new rubric
     res.json({ ok: true, cfg: await getEvalCfg() })
   } catch (err) { res.status(500).json({ error: err.message }) }
 })
@@ -3645,7 +3678,7 @@ async function evaluateCall({ callSid, recordingSid, duration, e }) {
     headers: { 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
     body: JSON.stringify({
       model: 'claude-sonnet-5', max_tokens: 2500,
-      system: `You are a strict but fair call-quality evaluator for Awesome Home Services' inbound CSRs. Score ONLY from the transcript. The rubric below is the single source of truth — parse its criteria and point values exactly as written (it changes over time; never assume a criterion that isn't in it). Transcription is imperfect: judge intent rather than exact wording, EXCEPT where the rubric demands specific phrasing (then accept close variations). Mark a criterion applicable=false when the situation never arose on this call (no hold → hold criteria N/A; no objections raised → objection criterion N/A). Partial credit is allowed where earned. Evidence must be a short quote from the transcript or a one-line reason.`,
+      system: `You are a strict but fair call-quality evaluator for Awesome Home Services' inbound CSRs. Score ONLY from the transcript. The rubric below is the single source of truth — score exactly the questions it lists, with their point values, under their exact section names (it changes over time; never assume a question that isn't in it). Transcription is imperfect: judge intent rather than exact wording, EXCEPT where the rubric demands specific phrasing (then accept close variations). Mark a question applicable=false when the situation never arose on this call (no hold → hold questions N/A; no objections raised → objection question N/A). Partial credit is allowed where earned. Evidence must be a short quote from the transcript or a one-line reason.`,
       tools: [{
         name: 'submit_evaluation',
         description: 'Submit the scored call evaluation',
@@ -3657,13 +3690,14 @@ async function evaluateCall({ callSid, recordingSid, duration, e }) {
               items: {
                 type: 'object',
                 properties: {
-                  criterion: { type: 'string', description: 'Criterion name as written in the rubric' },
+                  section: { type: 'string', description: 'Section name EXACTLY as written in the rubric' },
+                  criterion: { type: 'string', description: 'Question text as written in the rubric' },
                   max_points: { type: 'integer' },
                   earned_points: { type: 'integer' },
                   applicable: { type: 'boolean', description: 'false only when the situation never arose on this call' },
                   evidence: { type: 'string', description: 'Short quote or one-line reason' },
                 },
-                required: ['criterion', 'max_points', 'earned_points', 'applicable', 'evidence'],
+                required: ['section', 'criterion', 'max_points', 'earned_points', 'applicable', 'evidence'],
               },
             },
             summary: { type: 'string', description: '2-3 sentence coaching summary addressed to the rep' },
@@ -3673,7 +3707,7 @@ async function evaluateCall({ callSid, recordingSid, duration, e }) {
         },
       }],
       tool_choice: { type: 'tool', name: 'submit_evaluation' },
-      messages: [{ role: 'user', content: `RUBRIC:\n${cfg.rubric}\n\nCALL TRANSCRIPT (Rep = our CSR, Customer = the caller):\n${transcript.slice(0, 24000)}` }],
+      messages: [{ role: 'user', content: `RUBRIC:\n${evalRubricText(cfg.sections)}\n\nCALL TRANSCRIPT (Rep = our CSR, Customer = the caller):\n${transcript.slice(0, 24000)}` }],
     }),
   })
   if (!r.ok) { console.warn('call eval api:', r.status, (await r.text()).slice(0, 160)); return }
@@ -3681,23 +3715,41 @@ async function evaluateCall({ callSid, recordingSid, duration, e }) {
   if (!out?.items?.length) return
 
   const items = out.items.map(i => ({
-    criterion: String(i.criterion || '').slice(0, 120),
+    section: String(i.section || '').slice(0, 80),
+    criterion: String(i.criterion || '').slice(0, 160),
     max: Math.max(0, parseInt(i.max_points) || 0),
     earned: Math.max(0, Math.min(parseInt(i.earned_points) || 0, parseInt(i.max_points) || 0)),
     applicable: i.applicable !== false,
     evidence: String(i.evidence || '').slice(0, 300),
   }))
-  const appl = items.filter(i => i.applicable)
-  const possible = appl.reduce((s, i) => s + i.max, 0)
-  const earned = appl.reduce((s, i) => s + i.earned, 0)
+
+  // Section-weighted score: each section scores on its own applicable items,
+  // then combines by its % weight (renormalized if a whole section was N/A).
+  const secAgg = cfg.sections.map(s => ({ name: s.name, weight: s.weight, earned: 0, possible: 0 }))
+  const secOf = (name) => secAgg.find(s => s.name.toLowerCase() === String(name).toLowerCase()) || secAgg[0]
+  for (const it of items) {
+    if (!it.applicable) continue
+    const s = secOf(it.section)
+    s.possible += it.max
+    s.earned += it.earned
+  }
+  const active = secAgg.filter(s => s.possible > 0)
+  const possible = active.reduce((a, s) => a + s.possible, 0)
+  const earned = active.reduce((a, s) => a + s.earned, 0)
   if (possible <= 0) return
-  const pct = Math.round((earned / possible) * 1000) / 10
+  const wSum = active.reduce((a, s) => a + (Number(s.weight) || 0), 0)
+  const pct = wSum > 0
+    ? Math.round(active.reduce((a, s) => a + (s.earned / s.possible) * (Number(s.weight) || 0), 0) / wSum * 1000) / 10
+    : Math.round((earned / possible) * 1000) / 10
+  const sections = secAgg.map(s => ({
+    ...s, pct: s.possible > 0 ? Math.round((s.earned / s.possible) * 1000) / 10 : null,
+  }))
 
   const { error } = await supabase.from('call_evaluations').insert({
     call_sid: callSid, recording_sid: recordingSid || null,
     contact_id: e.contactId || null, contact_name: e.contactName || null,
     phone: e.phone || null, rep, profile_id: profileId,
-    scores: { items, coaching_tip: out.coaching_tip || null },
+    scores: { items, sections, coaching_tip: out.coaching_tip || null },
     earned, possible, pct, summary: out.summary || null,
   })
   if (error) { console.warn('call eval save:', error.message); return }
