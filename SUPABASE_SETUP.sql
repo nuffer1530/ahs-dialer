@@ -620,3 +620,10 @@ create index if not exists call_evaluations_rep_idx on call_evaluations (rep, cr
 alter table call_evaluations enable row level security;
 drop policy if exists "authenticated read call_evaluations" on call_evaluations;
 create policy "authenticated read call_evaluations" on call_evaluations for select to authenticated using (true);
+
+-- ── Dispatch line (Jul 2026) ────────────────────────────────────────────────
+-- Dedicated tech line (719) 259-2681 → TaskRouter Dispatch queue. The skill
+-- lives on profiles and syncs onto the worker's attributes; call_tasks.line
+-- tags dispatch calls so dashboards can tell them apart.
+alter table profiles add column if not exists dispatch_skill boolean default false;
+alter table call_tasks add column if not exists line text;

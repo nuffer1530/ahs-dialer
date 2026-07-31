@@ -296,6 +296,28 @@ export default function CallRoutingTab() {
           </div>
         </div>
 
+        {/* Dispatch line */}
+        {cfg.dispatchLine && (
+          <div className="card" style={{ padding: 16 }}>
+            {cardTitle('Dispatch line — (719) 259-2681', 'The technicians’ line. Always open, rings only workers with the Dispatch skill, voicemail after the max wait. Point the ST dispatch tracking number’s forwarding here.')}
+            <div style={{ marginBottom: 10 }}>
+              <div style={lbl}>Greeting</div>
+              <textarea rows={2} style={{ ...input, width: '100%', resize: 'vertical', fontFamily: 'inherit' }}
+                value={cfg.dispatchLine.greeting} onChange={e => setIn('dispatchLine', { greeting: e.target.value })} />
+            </div>
+            <div style={{ marginBottom: 10 }}>
+              <div style={lbl}>Voicemail prompt (no dispatcher answered)</div>
+              <textarea rows={2} style={{ ...input, width: '100%', resize: 'vertical', fontFamily: 'inherit' }}
+                value={cfg.dispatchLine.voicemail} onChange={e => setIn('dispatchLine', { voicemail: e.target.value })} />
+            </div>
+            <div>
+              <div style={lbl}>Max wait before voicemail (sec)</div>
+              <input type="number" min="15" max="600" style={{ ...input, width: 90 }} value={cfg.dispatchLine.maxWaitSec}
+                onChange={e => setIn('dispatchLine', { maxWaitSec: parseInt(e.target.value) || 60 })} />
+            </div>
+          </div>
+        )}
+
         {/* Voicemail */}
         <div className="card" style={{ padding: 16 }}>
           {cardTitle('Voicemail', 'Voicemails land in Recordings with a transcript, and email whoever is checked below.')}

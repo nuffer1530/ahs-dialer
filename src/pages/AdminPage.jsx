@@ -1095,7 +1095,11 @@ export default function AdminPage() {
     if (!editProfile) return
     setSaving(true)
     try {
-      const { error } = await sb.from('profiles').update({ name: editProfile.name, role: editProfile.role, inbound_skill: !!editProfile.inbound_skill, manager_id: editProfile.manager_id || null }).eq('id', editProfile.id)
+      let { error } = await sb.from('profiles').update({ name: editProfile.name, role: editProfile.role, inbound_skill: !!editProfile.inbound_skill, dispatch_skill: !!editProfile.dispatch_skill, manager_id: editProfile.manager_id || null }).eq('id', editProfile.id)
+      // dispatch_skill is a newer column — retry without it pre-migration.
+      if (error) ({ error } = await sb.from('profiles').update({ name: editProfile.name, role: editProfile.role, inbound_skill: !!editProfile.inbound_skill, manager_id: editProfile.manager_id || null }).eq('id', editProfile.id))
+      // Push the skill change onto their TaskRouter worker right away.
+      fetch('/api/twilio/worker-activity', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ profileId: editProfile.id, skillsOnly: true }) }).catch(() => {})
       if (error) throw error
       const { data } = await sb.from('profiles').select('*').eq('id', editProfile.id).maybeSingle()
       if (data) setProfiles(prev => prev.map(p => p.id === data.id ? data : p))
@@ -1957,6 +1961,18 @@ export default function AdminPage() {
                     <div style={{ flex:1 }}>
                       <div style={{ fontSize:13, fontWeight:600, color: editProfile.inbound_skill ? 'var(--accent)' : 'var(--text-primary)' }}>Inbound queue</div>
                       <div style={{ fontSize:11, color:'var(--text-muted)' }}>Takes live inbound calls from the queue — always served before outbound.</div>
+                    </div>
+                  </label>
+
+                  {/* Dispatch line — techs calling (719) 259-2681; only these workers ring */}
+                  <label style={{ display:'flex', alignItems:'center', gap:10, padding:'10px 12px', marginBottom:10, borderRadius:'var(--radius)', cursor:'pointer',
+                    background: editProfile.dispatch_skill ? 'var(--tone-purple-bg)' : 'var(--surface-2)',
+                    border:`1px solid ${editProfile.dispatch_skill ? 'var(--tone-purple-bd)' : 'var(--border)'}` }}>
+                    <input type="checkbox" checked={!!editProfile.dispatch_skill}
+                      onChange={e => setEditProfile(p => ({ ...p, dispatch_skill: e.target.checked }))} />
+                    <div style={{ flex:1 }}>
+                      <div style={{ fontSize:13, fontWeight:600, color: editProfile.dispatch_skill ? 'var(--tone-purple-tx)' : 'var(--text-primary)' }}>Dispatch line</div>
+                      <div style={{ fontSize:11, color:'var(--text-muted)' }}>Takes technician calls to the dedicated dispatch number — techs never ring CSRs.</div>
                     </div>
                   </label>
 

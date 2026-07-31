@@ -20,6 +20,9 @@ app.use(express.urlencoded({ extended: false }))
 const accountSid = process.env.TWILIO_ACCOUNT_SID
 const authToken = process.env.TWILIO_AUTH_TOKEN
 const twilioPhone = process.env.TWILIO_PHONE_NUMBER
+// Dedicated tech/dispatch DID — bought Jul 31 2026, routes to the Dispatch
+// TaskRouter queue (workers with dispatch == 1) instead of the CSR floor.
+const DISPATCH_NUMBER = process.env.TWILIO_DISPATCH_NUMBER || '+17192592681'
 const appUrl = process.env.APP_URL || 'https://andi.awesomeservice.com'
 
 const supabase = createClient(
@@ -2800,30 +2803,50 @@ app.get('/api/health', (req, res) => {
 app.post('/api/twilio/worker-activity', async (req, res) => {
   try {
     if (!TWILIO_WORKSPACE_SID) return res.json({ ok: false, skipped: 'no workspace configured' })
-    const { profileId, status } = req.body
+    const { profileId, status, skillsOnly } = req.body
     if (!profileId) return res.status(400).json({ error: 'profileId required' })
 
+    // select('*') deliberately: dispatch_skill may predate its migration and
+    // an explicit column list would 42703 the whole read.
+    const { data: prof } = await supabase.from('profiles').select('*').eq('id', profileId).maybeSingle()
+    if (!prof) return res.status(404).json({ error: 'profile not found' })
+
     const workers = await twilioClient.taskrouter.v1.workspaces(TWILIO_WORKSPACE_SID).workers.list({ limit: 100 })
-    const worker = workers.find(w => {
+    let worker = workers.find(w => {
       try { return JSON.parse(w.attributes || '{}').profile_id === profileId } catch { return false }
     })
-    if (!worker) return res.json({ ok: false, skipped: 'no worker for this profile' })
 
-    // Read the skill state from the DB rather than trusting only the passed
-    // status, so this is correct whether it's poked by a status change or a
-    // queue-availability toggle.
-    const { data: prof } = await supabase
-      .from('profiles').select('status, inbound_skill, inbound_available').eq('id', profileId).maybeSingle()
-    const effStatus = status || prof?.status
+    // Skills live on the worker ATTRIBUTES; the queues target them
+    // (Inbound: inbound == 1, Dispatch: dispatch == 1). Activity only says
+    // "at the desk right now" — so a dispatcher with inbound toggled off is
+    // Available for dispatch without ever matching the CSR queue.
+    const repName = prof.name || prof.email || 'Rep'
+    const identity = repName.replace(/[^a-zA-Z0-9_]/g, '_')
+    let attrs = {}
+    try { attrs = JSON.parse(worker?.attributes || '{}') } catch {}
+    const wanted = {
+      ...attrs,
+      contact_uri: attrs.contact_uri || `client:${identity}`,
+      profile_id: profileId,
+      name: repName,
+      inbound: (prof.inbound_skill ? (prof.inbound_available ? 1 : 0) : 1),
+      dispatch: prof.dispatch_skill ? 1 : 0,
+    }
 
-    // A rep takes inbound only while their status is Available AND — if they've
-    // been granted the inbound skill — they've toggled that queue on. Reps with
-    // no inbound skill granted keep the pre-skills behavior (Available → inbound)
-    // so nothing changes until the admin starts assigning skills.
-    const takesInbound = effStatus === 'Available' && (prof?.inbound_skill ? prof.inbound_available : true)
-    const target = takesInbound ? TWILIO_ACTIVITY_AVAILABLE : TWILIO_ACTIVITY_OFFLINE
+    if (!worker) {
+      // New hire — create their worker on the fly so routing works day one.
+      worker = await twilioClient.taskrouter.v1.workspaces(TWILIO_WORKSPACE_SID)
+        .workers.create({ friendlyName: repName, attributes: JSON.stringify(wanted) })
+    } else if (JSON.stringify(wanted) !== JSON.stringify(attrs)) {
+      await twilioClient.taskrouter.v1.workspaces(TWILIO_WORKSPACE_SID)
+        .workers(worker.sid).update({ attributes: JSON.stringify(wanted) })
+    }
+
+    if (skillsOnly) return res.json({ ok: true, skills: { inbound: wanted.inbound, dispatch: wanted.dispatch } })
+
+    const effStatus = status || prof.status
+    const target = effStatus === 'Available' ? TWILIO_ACTIVITY_AVAILABLE : TWILIO_ACTIVITY_OFFLINE
     if (worker.activitySid === target) return res.json({ ok: true, unchanged: true })
-
     await twilioClient.taskrouter.v1.workspaces(TWILIO_WORKSPACE_SID)
       .workers(worker.sid).update({ activitySid: target })
     res.json({ ok: true, activitySid: target })
@@ -3157,7 +3180,7 @@ function persistTx(callSid, e) {
   supabase.from('live_call_state').upsert({
     call_sid: callSid,
     data: { contactId: e.contactId, phone: e.phone, repName: e.repName, contactName: e.contactName,
-            direction: e.direction, startedAt: e.startedAt, parts: e.parts.slice(-400) },
+            direction: e.direction, line: e.line || null, startedAt: e.startedAt, parts: e.parts.slice(-400) },
     updated_at: new Date().toISOString(),
   }, { onConflict: 'call_sid' }).then(({ error }) => {
     if (error && !/live_call_state/.test(error.message)) console.warn('liveTx persist:', error.message)
@@ -3171,7 +3194,7 @@ async function restoreOrRecreateTx(callSid) {
     if (row?.data) {
       const d = row.data
       const e = { contactId: d.contactId || null, phone: d.phone || null, repName: d.repName || null,
-                  contactName: d.contactName || null, direction: d.direction || null,
+                  contactName: d.contactName || null, direction: d.direction || null, line: d.line || null,
                   startedAt: d.startedAt || Date.now(), parts: d.parts || [], lastRun: 0, running: false }
       _liveTx.set(callSid, e)
       console.log(`liveTx restored from DB for ${callSid} (${e.parts.length} lines)`)
@@ -3215,7 +3238,7 @@ async function runLiveDraft(callSid, entry) {
   const text = e.parts.map(p => `${p.who}: ${p.text}`).join('\n')
   if (text.length < 80) return
   e.running = true; e.lastRun = Date.now()
-  classifyBooking(callSid, e).catch(() => {})   // dropdowns fill alongside the notes
+  if (e.line !== 'dispatch') classifyBooking(callSid, e).catch(() => {})   // dropdowns fill alongside the notes
   try {
     const draft = await draftNotesFromTranscript(text)
     if (draft) {
@@ -3383,7 +3406,7 @@ app.post('/api/twilio/live-transcript', async (req, res) => {
     if (!e) e = await restoreOrRecreateTx(CallSid)
     e.parts.push({ who: Track === 'inbound_track' ? 'Customer' : 'Rep', text, at: Date.now() })
     persistTx(CallSid, e)
-    if (Track === 'inbound_track') detectCoach(CallSid, e, text).catch(() => {})
+    if (Track === 'inbound_track' && e.line !== 'dispatch') detectCoach(CallSid, e, text).catch(() => {})
     if (Date.now() - e.lastRun > 20_000) runLiveDraft(CallSid)
   } catch (err) { console.warn('live-transcript webhook:', err.message) }
 })
@@ -3659,6 +3682,7 @@ app.post('/api/admin/call-eval-config', async (req, res) => {
 
 async function evaluateCall({ callSid, recordingSid, duration, e }) {
   if (!ANTHROPIC_KEY) return
+  if (e.line === 'dispatch') return   // tech calls aren't QA'd against the CSR rubric
   const cfg = await getEvalCfg()
   if (!cfg.enabled) return
   if (duration != null && duration < cfg.minSeconds) return
@@ -4389,6 +4413,13 @@ const ROUTING_DEFAULTS = {
     overflow: { action: 'hold', maxWaitSec: 180, forwardNumber: '' },
   },
   voicemail: { maxSec: 120, emails: [], transcribe: true },
+  // The tech line: always open, dispatchers-only, voicemail after a short
+  // wait. None of the marketing/booking machinery touches these calls.
+  dispatchLine: {
+    greeting: 'Awesome Home Services dispatch. Hold tight — connecting you now.',
+    voicemail: 'All dispatchers are on other calls. Leave your name, job number, and what you need, and dispatch will get right back to you.',
+    maxWaitSec: 60,
+  },
 }
 
 let _routingCache = { at: 0, cfg: null }
@@ -4450,20 +4481,23 @@ function sendToVoicemail(twiml, cfg) {
   twiml.record({ maxLength: cfg.voicemail.maxSec || 120, playBeep: true, action: `${appUrl}/api/twilio/routing/voicemail-done` })
   routingSay(twiml, cfg, 'We did not receive a recording. Goodbye.')
 }
-function enqueueCall(twiml, cfg, { CallSid, From, contact, afterHours }) {
+function enqueueCall(twiml, cfg, { CallSid, From, contact, afterHours, line }) {
+  const qs = [afterHours ? 'ah=1' : null, line ? `line=${line}` : null].filter(Boolean).join('&')
   const enqueue = twiml.enqueue({
     workflowSid: TWILIO_WORKFLOW_SID,
-    waitUrl: `${appUrl}/api/twilio/queue/wait${afterHours ? '?ah=1' : ''}`,
+    waitUrl: `${appUrl}/api/twilio/queue/wait${qs ? `?${qs}` : ''}`,
     waitUrlMethod: 'POST',
-    action: `${appUrl}/api/twilio/routing/queue-done${afterHours ? '?ah=1' : ''}`,
+    action: `${appUrl}/api/twilio/routing/queue-done${qs ? `?${qs}` : ''}`,
   })
   // Attributes ride along to the assignment callback and the events webhook, so
-  // we know who's calling without a second lookup.
+  // we know who's calling without a second lookup. `line` is what the workflow
+  // routes on: 'dispatch' → the dispatchers-only queue.
   enqueue.task(JSON.stringify({
     call_sid: CallSid,
     from_number: From,
     contact_id: contact?.id || null,
     contact_name: contact?.name || null,
+    ...(line ? { line } : {}),
   }))
 }
 
@@ -4505,7 +4539,8 @@ app.post('/api/twilio/inbound', async (req, res) => {
     forwardedFrom: req.body.ForwardedFrom || null, calledVia: req.body.CalledVia || null,
   })
   if (_fwdTrace.length > 20) _fwdTrace.pop()
-  lookupSTChannel(From).catch(() => {})
+  const isDispatch = last10(req.body.To || '') === last10(DISPATCH_NUMBER)
+  if (!isDispatch) lookupSTChannel(From).catch(() => {})   // marketing attribution is a customer-line thing
   const normalizedPhone = (From || '').replace(/\D/g, '').slice(-10)
 
   let contact = null
@@ -4518,6 +4553,20 @@ app.post('/api/twilio/inbound', async (req, res) => {
   const cfg = await getRouting()
   const state = routingStateNow(cfg)
   const twiml = new VoiceResponse()
+
+  // ── Dispatch line: techs calling in. Always open (no hours/holiday check),
+  // routed to the dispatchers-only queue, voicemail after a short wait.
+  if (isDispatch) {
+    if (!TWILIO_WORKFLOW_SID) {
+      routingSay(twiml, cfg, cfg.dispatchLine.voicemail)
+      twiml.record({ maxLength: cfg.voicemail.maxSec || 120, playBeep: true, action: `${appUrl}/api/twilio/routing/voicemail-done` })
+    } else {
+      routingSay(twiml, cfg, cfg.dispatchLine.greeting)
+      enqueueCall(twiml, cfg, { CallSid, From, contact, line: 'dispatch' })
+    }
+    res.type('text/xml')
+    return res.send(twiml.toString())
+  }
 
   // Closed — emergency override, holiday, or outside hours.
   if (!state.open) {
@@ -4566,9 +4615,11 @@ app.post('/api/twilio/queue/wait', async (req, res) => {
   const twiml = new VoiceResponse()
   const waited = parseInt(req.body?.QueueTime || '0') || 0
   const afterHours = req.query.ah === '1'
-  // After-hours "try the floor" caps the wait hard; during open hours the
-  // overflow setting decides (hold = never leave).
-  const maxWait = afterHours ? (cfg.afterHours.floorWaitSec || 45)
+  const isDispatch = req.query.line === 'dispatch'
+  // Dispatch line and after-hours "try the floor" cap the wait hard; during
+  // open hours the overflow setting decides (hold = never leave).
+  const maxWait = isDispatch ? (cfg.dispatchLine.maxWaitSec || 60)
+    : afterHours ? (cfg.afterHours.floorWaitSec || 45)
     : cfg.queue.overflow.action !== 'hold' ? (cfg.queue.overflow.maxWaitSec || 180)
     : null
   if (maxWait != null && waited >= maxWait) {
@@ -4597,6 +4648,13 @@ app.post('/api/twilio/routing/queue-done', async (req, res) => {
   const cfg = await getRouting()
   const twiml = new VoiceResponse()
   const result = req.body?.QueueResult
+  if (result === 'leave' && req.query.line === 'dispatch') {
+    // No dispatcher grabbed it in time — dispatch voicemail, not the CSR flow.
+    routingSay(twiml, cfg, cfg.dispatchLine.voicemail)
+    twiml.record({ maxLength: cfg.voicemail.maxSec || 120, playBeep: true, action: `${appUrl}/api/twilio/routing/voicemail-done` })
+    res.type('text/xml')
+    return res.send(twiml.toString())
+  }
   if (result === 'leave') {
     const afterHours = req.query.ah === '1'
     const act = afterHours ? 'voicemail' : cfg.queue.overflow.action
@@ -5044,7 +5102,7 @@ app.post('/api/twilio/taskrouter/events', async (req, res) => {
     const now = new Date().toISOString()
 
     if (type === 'task.created') {
-      await supabase.from('call_tasks').upsert({
+      const row = {
         task_sid: taskSid,
         call_sid: attrs.call_sid || null,
         from_number: attrs.from_number || null,
@@ -5052,7 +5110,10 @@ app.post('/api/twilio/taskrouter/events', async (req, res) => {
         contact_name: attrs.contact_name || null,
         state: 'queued',
         queued_at: now,
-      }, { onConflict: 'task_sid' })
+      }
+      // `line` is a newer column — retry without it until the migration runs.
+      const { error: ctErr } = await supabase.from('call_tasks').upsert({ ...row, line: attrs.line || null }, { onConflict: 'task_sid' })
+      if (ctErr) await supabase.from('call_tasks').upsert(row, { onConflict: 'task_sid' })
       return
     }
 
@@ -5079,6 +5140,12 @@ app.post('/api/twilio/taskrouter/events', async (req, res) => {
         if (tattrs.call_sid) {
           startLiveTranscription(tattrs.call_sid, task?.contact_id || null, 'inbound',
             task?.from_number || tattrs.from_number, wattrs.name || req.body.WorkerName || null).catch(() => {})
+          // Dispatch-line calls skip the customer-call machinery (coach,
+          // booking classifier, QA evals) — flag the live entry.
+          if (tattrs.line === 'dispatch') {
+            const lt = _liveTx.get(tattrs.call_sid)
+            if (lt) lt.line = 'dispatch'
+          }
         }
       } catch (e) { console.warn('inbound live-tx:', e.message) }
       return
