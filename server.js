@@ -5102,12 +5102,11 @@ app.post('/api/twilio/taskrouter/assignment', async (req, res) => {
       // against a blank contact.
       from: taskAttrs.from_number || twilioPhone,
       post_work_activity_sid: TWILIO_ACTIVITY_AVAILABLE || undefined,
-      // Recording does NOT ride the dequeue: its record param proved
-      // unreliable (zero recordings on answered calls, Jul 31) and its
-      // status callback was always ignored. reservation.accepted starts a
-      // REST recording on the CUSTOMER leg instead — deterministic, with a
-      // real completion callback.
-      record: 'do-not-record',
+      // NO record key here, deliberately. Its value proved unreliable for
+      // recording (zero recordings Jul 31) and 'do-not-record' is flat-out
+      // INVALID for a dequeue instruction — TaskRouter rejected the whole
+      // assignment and reps stopped ringing. Absence = no recording;
+      // reservation.accepted REST-records the customer leg instead.
     })
   } catch (err) {
     console.error('TaskRouter assignment error:', err.message)
