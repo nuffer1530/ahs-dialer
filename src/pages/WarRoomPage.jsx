@@ -232,7 +232,11 @@ export default function WarRoomPage() {
       {/* Header */}
       <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', flexShrink:0 }}>
         <div style={{ display:'flex', alignItems:'center', gap:12 }}>
-          <span style={{ background:'#1A5C8A', color:'#fff', fontSize:15, fontWeight:800, padding:'4px 11px', borderRadius:6, letterSpacing:.5 }}>AHS</span>
+          <span className="pulse-mark" style={{ width:40, height:40, borderRadius:11, background:'#0b0c0f', display:'flex', alignItems:'center', justifyContent:'center', boxShadow:'0 6px 18px rgba(255,117,31,.15)' }}>
+            <svg width="26" height="26" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+              <polyline points="9,32 19,32 25,17 33,47 40,26 45,32 55,32" fill="none" stroke="#ff751f" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+          </span>
           <span style={{ fontSize:21, fontWeight:800, letterSpacing:.3 }}>Call Center</span>
           <div style={{ width:8, height:8, borderRadius:'50%', background:C.green, animation:'wr-pulse 1.5s infinite' }} />
           <span style={{ fontSize:12, color:C.muted, letterSpacing:1 }}>LIVE</span>
