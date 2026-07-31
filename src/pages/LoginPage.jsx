@@ -45,13 +45,12 @@ export default function LoginPage() {
 
         {/* Logo */}
         <div style={{ textAlign:'center', marginBottom:32 }}>
-          <div style={{ display:'inline-flex', alignItems:'center', gap:10, marginBottom:8 }}>
-            <svg width="36" height="36" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
-              <rect width="64" height="64" rx="14" fill="#111318"/>
+          <div className="pulse-mark" style={{ width:64, height:64, borderRadius:14, background:'#111318', display:'flex', alignItems:'center', justifyContent:'center', margin:'0 auto', boxShadow:'0 14px 34px rgba(255,117,31,.18)' }}>
+            <svg width="40" height="40" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
               <polyline points="9,32 19,32 25,17 33,47 40,26 45,32 55,32" fill="none" stroke="#ff751f" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round"/>
             </svg>
-            <span style={{ fontSize:28, fontWeight:400, letterSpacing:1, color:'var(--text-primary)', fontFamily:'-apple-system, BlinkMacSystemFont, sans-serif' }}>andi</span>
           </div>
+          <div style={{ fontSize:26, fontWeight:400, letterSpacing:1, color:'var(--text-primary)', fontFamily:'-apple-system, BlinkMacSystemFont, sans-serif', margin:'14px 0 2px' }}>andi</div>
           <div style={{ fontSize:13, color:'var(--text-muted)' }}>Awesome Home Services</div>
         </div>
 

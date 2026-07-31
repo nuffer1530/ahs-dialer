@@ -12,15 +12,14 @@ export default function App() {
   const needsSetup = Boolean(user?.user_metadata?.invited && !user?.user_metadata?.setup_done)
 
   if (loading) return (
-    <div style={{ display:'flex', alignItems:'center', justifyContent:'center', height:'100vh', flexDirection:'column', gap:16 }}>
-      <div style={{ display:'flex', alignItems:'center', gap:10 }}>
-        <svg width="36" height="36" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
-          <rect width="64" height="64" rx="14" fill="#111318"/>
+    // The heartbeat IS the loader — the waveform drawing itself says "working."
+    <div style={{ display:'flex', alignItems:'center', justifyContent:'center', height:'100vh', flexDirection:'column', gap:14 }}>
+      <div className="pulse-mark" style={{ width:64, height:64, borderRadius:14, background:'#111318', display:'flex', alignItems:'center', justifyContent:'center' }}>
+        <svg width="40" height="40" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
           <polyline points="9,32 19,32 25,17 33,47 40,26 45,32 55,32" fill="none" stroke="#ff751f" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round"/>
         </svg>
-        <span style={{ fontSize:24, fontWeight:400, letterSpacing:1, color:'var(--text-primary)', fontFamily:'-apple-system, BlinkMacSystemFont, sans-serif' }}>andi</span>
       </div>
-      <div className="spinner lg"></div>
+      <span style={{ fontSize:20, fontWeight:400, letterSpacing:1, color:'var(--text-primary)', fontFamily:'-apple-system, BlinkMacSystemFont, sans-serif' }}>andi</span>
     </div>
   )
 

@@ -196,3 +196,7 @@ textarea.form-input { resize: vertical; min-height: 72px; }
   stroke-dasharray: 120;
   animation: andi-draw-pulse 3.2s ease-in-out infinite;
 }
+.pulse-mark-fast polyline {
+  stroke-dasharray: 120;
+  animation: andi-draw-pulse 1.1s ease-in-out infinite;
+}

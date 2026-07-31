@@ -109,10 +109,13 @@ export default function AskAndi() {
       {/* The floating button */}
       {!open && (
         <button onClick={() => setOpen(true)} title="Ask Andi — policies, objections, how-tos"
-          style={{ position: 'fixed', bottom: 22, right: 22, zIndex: 1500, width: 52, height: 52, borderRadius: '50%',
-            border: 'none', background: 'var(--accent)', color: '#fff', fontSize: 23, cursor: 'pointer',
-            boxShadow: '0 6px 20px rgba(0,0,0,.3)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          💡
+          className="pulse-mark"
+          style={{ position: 'fixed', bottom: 22, right: 22, zIndex: 1500, width: 52, height: 52, borderRadius: 16,
+            border: 'none', background: '#111318', cursor: 'pointer',
+            boxShadow: '0 8px 22px rgba(0,0,0,.32)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <svg width="30" height="30" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+            <polyline points="9,32 19,32 25,17 33,47 40,26 45,32 55,32" fill="none" stroke="#ff751f" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
         </button>
       )}
 
@@ -121,11 +124,13 @@ export default function AskAndi() {
           height: 540, maxHeight: 'calc(100vh - 100px)', background: 'var(--surface)', borderRadius: 16,
           border: '1px solid var(--border)', boxShadow: '0 16px 48px rgba(0,0,0,.35)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
 
-          <div style={{ padding: '12px 16px', background: 'var(--accent)', color: '#fff', display: 'flex', alignItems: 'center', gap: 9, flexShrink: 0 }}>
-            <span style={{ fontSize: 17 }}>💡</span>
+          <div style={{ padding: '12px 16px', background: '#111318', color: '#fff', display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
+            <svg width="20" height="20" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" style={{ flexShrink: 0 }}>
+              <polyline points="9,32 19,32 25,17 33,47 40,26 45,32 55,32" fill="none" stroke="#ff751f" strokeWidth="7" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
             <div style={{ flex: 1 }}>
               <div style={{ fontSize: 13.5, fontWeight: 800 }}>Ask Andi</div>
-              <div style={{ fontSize: 10.5, opacity: .85 }}>Policies · objections · how-tos — answers cite their source</div>
+              <div style={{ fontSize: 10.5, opacity: .75 }}>Policies · objections · how-tos — answers cite their source</div>
             </div>
             <button onClick={() => setOpen(false)}
               style={{ border: 'none', background: 'rgba(255,255,255,.18)', color: '#fff', width: 26, height: 26, borderRadius: 8, cursor: 'pointer', fontSize: 14 }}>×</button>

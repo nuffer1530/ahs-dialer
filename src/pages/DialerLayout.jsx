@@ -195,6 +195,19 @@ function GlobalIncomingCall() {
   const { incomingCall, acceptIncoming, rejectIncoming } = usePhone()
   const navigate = useNavigate()
   const location = useLocation()
+  // Which marketing channel is ringing? The server looked it up in ST the
+  // moment the call hit — ride the same endpoint the notes poll uses.
+  const [channel, setChannel] = useState(null)
+  useEffect(() => {
+    setChannel(null)
+    const phone = incomingCall?.from
+    if (!phone || incomingCall?.isTeammate) return
+    const t = setTimeout(() => {   // give the ST lookup a beat to land
+      fetch(`/api/call-notes/latest?phone=${encodeURIComponent(phone)}`)
+        .then(r => r.json()).then(d => { if (d?.channel) setChannel(d.channel) }).catch(() => {})
+    }, 2500)
+    return () => clearTimeout(t)
+  }, [incomingCall?.from])
   if (!incomingCall) return null
 
   const st = incomingCall.stLookup
@@ -216,9 +229,9 @@ function GlobalIncomingCall() {
       animation:'pulse-ring 1.4s ease-in-out infinite',
     }}>
       <style>{`@keyframes pulse-ring{0%,100%{box-shadow:0 12px 40px rgba(0,0,0,.28),0 0 0 0 rgba(22,163,74,.45)}50%{box-shadow:0 12px 40px rgba(0,0,0,.28),0 0 0 10px rgba(22,163,74,0)}}`}</style>
-      <div style={{ width:38, height:38, borderRadius:'50%', background:'#16A34A22', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-          <path d="M5.4 11.1C6.8 13.9 9.1 16.1 12 17.5l2.3-2.3c.3-.3.7-.4 1-.2 1.1.4 2.3.6 3.7.6.6 0 1 .4 1 1v3.6c0 .6-.4 1-1 1C9.6 21.2 2.8 14.4 2.8 6c0-.6.4-1 1-1H7.4c.6 0 1 .4 1 1 0 1.4.2 2.6.6 3.7.1.4 0 .7-.3 1L5.4 11.1z" fill="#16A34A"/>
+      <div className="pulse-mark-fast" style={{ width:46, height:46, borderRadius:13, background:'#111318', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
+        <svg width="28" height="28" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+          <polyline points="9,32 19,32 25,17 33,47 40,26 45,32 55,32" fill="none" stroke="#ff751f" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round"/>
         </svg>
       </div>
       <div style={{ minWidth:0, flex:1 }}>
@@ -226,7 +239,9 @@ function GlobalIncomingCall() {
         <div style={{ fontSize:15, fontWeight:700, color:'var(--text-primary)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
           {known || (st === 'loading' ? 'Looking up…' : 'Unknown caller')}
         </div>
-        <div style={{ fontSize:12, color:'var(--text-muted)' }}>{incomingCall.from}</div>
+        <div style={{ fontSize:12, color:'var(--text-muted)' }}>
+          {incomingCall.from}{channel ? <span style={{ color:'var(--tone-purple-tx)', fontWeight:700 }}> · {channel}</span> : ''}
+        </div>
       </div>
       <button onClick={rejectIncoming}
         style={{ padding:'8px 14px', borderRadius:'var(--radius)', border:'1px solid var(--border)', background:'var(--surface-2)', color:'var(--text-secondary)', fontSize:13, fontWeight:600, cursor:'pointer' }}>
