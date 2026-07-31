@@ -2829,7 +2829,11 @@ app.post('/api/twilio/worker-activity', async (req, res) => {
     try { attrs = JSON.parse(worker?.attributes || '{}') } catch {}
     const wanted = {
       ...attrs,
-      contact_uri: attrs.contact_uri || `client:${identity}`,
+      // ALWAYS derived from the current name — the browser registers as
+      // client:<current name>, so a stale stored contact_uri means Twilio
+      // dials an identity nobody is registered under and the rep never
+      // rings (Brittany, renamed to BK ages ago, was unreachable).
+      contact_uri: `client:${identity}`,
       profile_id: profileId,
       name: repName,
       inbound: (prof.inbound_skill ? (prof.inbound_available ? 1 : 0) : 1),
