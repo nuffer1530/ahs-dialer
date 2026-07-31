@@ -253,7 +253,11 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
     if (breakBlocks[0]) { payload.break1_start = intervalToTime(breakBlocks[0].start); payload.break1_duration = breakBlocks[0].duration * 15 }
     if (lunchBlock) { payload.lunch_start = intervalToTime(lunchBlock.start); payload.lunch_duration = lunchBlock.duration * 15 }
     if (breakBlocks[1]) { payload.break2_start = intervalToTime(breakBlocks[1].start); payload.break2_duration = breakBlocks[1].duration * 15 }
-    await sb.from('schedules').upsert(payload, { onConflict: 'profile_id,date' })
+    {
+      // Edits are drafts until Publish (retry without the column pre-migration).
+      const { error: pubErr } = await sb.from('schedules').upsert({ ...payload, published_at: null }, { onConflict: 'profile_id,date' })
+      if (pubErr) await sb.from('schedules').upsert(payload, { onConflict: 'profile_id,date' })
+    }
     for (const b of pBlocks.filter(b => ['outbound','meeting'].includes(b.type) && b.dbId)) {
       await sb.from('schedule_blocks').update({ start_interval: b.start, duration_intervals: b.duration }).eq('id', b.dbId)
     }
@@ -293,7 +297,10 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
       template_color: isOff ? null : shiftForm.template_color || null,
       created_by: profile?.id,
     }
-    await sb.from('schedules').upsert(payload, { onConflict: 'profile_id,date' })
+    {
+      const { error: pubErr } = await sb.from('schedules').upsert({ ...payload, published_at: null }, { onConflict: 'profile_id,date' })
+      if (pubErr) await sb.from('schedules').upsert(payload, { onConflict: 'profile_id,date' })
+    }
     const { data } = await sb.from('schedules').select('*').eq('date', date)
     setSchedules(data || [])
     if (onUpdate) onUpdate()
@@ -646,6 +653,8 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
                     const w = block.duration * CELL_WIDTH - 2
                     const l = block.start * CELL_WIDTH + 1
                     const isShift = block.type === 'shift'
+                    const schedRow = schedules.find(s => s.profile_id === p.id)
+                    const isDraft = isShift && schedRow && 'published_at' in schedRow && !schedRow.published_at
                     return (
                       <div key={block.id}
                         onMouseDown={e => { if (!isAdmin || block.recurring) return; e.preventDefault(); e.stopPropagation(); dragStartX.current = e.clientX; setDragging({ profileId:p.id, blockId:block.id, mode:'move' }) }}
@@ -657,12 +666,13 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
                           const rect = e.currentTarget.getBoundingClientRect()
                           setTooltip({
                             x: rect.left + rect.width/2, y: rect.top - 8,
-                            content: `${bt.label}: ${fmtTime(intervalToTime(block.start))} – ${fmtTime(intervalToTime(block.start+block.duration))}${block.note ? ` — ${block.note}` : ''}${block.recurring ? ' · ↻ every week' : ''}`
+                            content: `${bt.label}: ${fmtTime(intervalToTime(block.start))} – ${fmtTime(intervalToTime(block.start+block.duration))}${block.note ? ` — ${block.note}` : ''}${block.recurring ? ' · ↻ every week' : ''}${isDraft ? ' · DRAFT — not published' : ''}`
                           })
                         }}
                         onMouseLeave={() => setTooltip(null)}
                         style={{ position:'absolute', left:Math.max(0, l), top: isShift ? 8 : 12, height: isShift ? ROW_HEIGHT - 24 : ROW_HEIGHT - 32,
                           width:Math.max(0, w), background:bt.bg, border:`1.5px solid ${bt.color}`, borderRadius:5,
+                          ...(isDraft ? { backgroundImage: 'repeating-linear-gradient(45deg, rgba(127,127,127,.25) 0 5px, transparent 5px 11px)', borderStyle: 'dashed' } : {}),
                           display:'flex', alignItems:'center', overflow:'hidden',
                           cursor: isAdmin ? 'grab' : 'default', zIndex: isShift ? 2 : 4, userSelect:'none' }}>
                         <span style={{ fontSize:9, fontWeight:700, color:bt.text, paddingLeft:6, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', flex:1 }}>

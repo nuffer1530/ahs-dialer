@@ -627,3 +627,10 @@ create policy "authenticated read call_evaluations" on call_evaluations for sele
 -- tags dispatch calls so dashboards can tell them apart.
 alter table profiles add column if not exists dispatch_skill boolean default false;
 alter table call_tasks add column if not exists line text;
+
+-- ── Draft vs published schedules (Jul 2026) ─────────────────────────────────
+-- Brittany's When-I-Work-style flow: schedule edits are DRAFTS (hatched in
+-- WFM, invisible to reps) until Publish + Email flips them live. Existing
+-- rows backfill as published so nothing vanishes from anyone's schedule.
+alter table schedules add column if not exists published_at timestamptz;
+update schedules set published_at = now() where published_at is null;

@@ -178,6 +178,7 @@ export default function AttendancePage() {
   const [publishing, setPublishing] = useState(false)
   const [publishResult, setPublishResult] = useState(null)
   const [pubSel, setPubSel] = useState({ all: true, ids: [] })
+  const [pubEmail, setPubEmail] = useState(true)   // uncheck to publish quietly
   const [pointModal, setPointModal] = useState(null)
   const [pointData, setPointData] = useState({ reason: 'late', points: 0.5, notes: '', date: new Date().toISOString().split('T')[0] })
   const [reportRange, setReportRange] = useState({ start: '', end: '' })
@@ -259,10 +260,16 @@ export default function AttendancePage() {
         if (!src) continue
         const dest = (destRows || []).find(r => r.profile_id === pid && r.date === weekDates[i])
         if (dest && !copyCfg.overwrite) { skipped++; continue }
-        const { id, created_at, updated_at, ...fields } = src
+        const { id, created_at, updated_at, published_at, ...fields } = src
         const payload = { ...fields, date: weekDates[i] }
-        if (dest) await sb.from('schedules').update(payload).eq('id', dest.id)
-        else await sb.from('schedules').insert(payload)
+        const draft = { ...payload, published_at: null }   // copies land as drafts
+        if (dest) {
+          const { error: e1 } = await sb.from('schedules').update(draft).eq('id', dest.id)
+          if (e1) await sb.from('schedules').update(payload).eq('id', dest.id)
+        } else {
+          const { error: e2 } = await sb.from('schedules').insert(draft)
+          if (e2) await sb.from('schedules').insert(payload)
+        }
         copied++
       }
     }
@@ -294,8 +301,14 @@ export default function AttendancePage() {
           lunch_start: t.lunch_start || null, lunch_duration: t.lunch_duration || null,
           template_color: t.color || null,
         }
-        if (dest) await sb.from('schedules').update(payload).eq('id', dest.id)
-        else await sb.from('schedules').insert(payload)
+        const draft = { ...payload, published_at: null }   // bulk fills land as drafts
+        if (dest) {
+          const { error: e1 } = await sb.from('schedules').update(draft).eq('id', dest.id)
+          if (e1) await sb.from('schedules').update(payload).eq('id', dest.id)
+        } else {
+          const { error: e2 } = await sb.from('schedules').insert(draft)
+          if (e2) await sb.from('schedules').insert(payload)
+        }
         applied++
       }
     }
@@ -313,11 +326,12 @@ export default function AttendancePage() {
       const r = await fetch('/api/schedule/publish', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session?.access_token}` },
-        body: JSON.stringify({ weekStart: weekDates[0], profileIds: pubSel.all ? 'all' : pubSel.ids, from: profile?.name || profile?.email || 'your manager' }),
+        body: JSON.stringify({ weekStart: weekDates[0], profileIds: pubSel.all ? 'all' : pubSel.ids, sendEmails: pubEmail, from: profile?.name || profile?.email || 'your manager' }),
       })
       const d = await r.json()
       if (!r.ok) throw new Error(d.error || 'Publish failed')
       setPublishResult(d)
+      await reloadSchedules()   // drafts just went solid — repaint the grid
     } catch (e) {
       setPublishResult({ error: e.message })
     } finally { setPublishing(false) }
@@ -375,11 +389,14 @@ export default function AttendancePage() {
     }
     const existing = getSchedule(profileId, date)
     let result
+    const draft = { ...payload, published_at: null }   // any hand edit reverts to draft
     if (existing) {
-      const { data } = await sb.from('schedules').update(payload).eq('id', existing.id).select().single()
+      let { data, error } = await sb.from('schedules').update(draft).eq('id', existing.id).select().single()
+      if (error) ({ data } = await sb.from('schedules').update(payload).eq('id', existing.id).select().single())
       result = data
     } else {
-      const { data } = await sb.from('schedules').insert(payload).select().single()
+      let { data, error } = await sb.from('schedules').insert(draft).select().single()
+      if (error) ({ data } = await sb.from('schedules').insert(payload).select().single())
       result = data
     }
     if (result) setSchedules(prev => existing ? prev.map(s => s.id === existing.id ? result : s) : [...prev, result])
@@ -589,20 +606,31 @@ export default function AttendancePage() {
                           const isToday = date === today
                           const isOff = sched && sched.day_type !== 'work'
                           const typeColor = sched ? DAY_TYPE_COLORS[sched.day_type] : null
+                          // Draft = saved but not published: reps can't see it
+                          // yet, so it wears the When-I-Work hatching here.
+                          const isDraft = sched && 'published_at' in sched && !sched.published_at
+                          const hatch = isDraft ? {
+                            backgroundImage: 'repeating-linear-gradient(45deg, rgba(127,127,127,.22) 0 5px, transparent 5px 11px)',
+                            borderStyle: 'dashed',
+                          } : {}
                           return (
                             <td key={date} style={{ padding:6, borderLeft:'1px solid var(--border)', background: isToday ? 'var(--accent-bg)' : 'transparent', verticalAlign:'top' }}>
                               {sched && !isOff ? (
                                 <div onClick={() => isAdmin && openEdit(p.id, date)}
-                                  style={{ padding:'8px 10px', borderRadius:'var(--radius)', background:'var(--success-bg)', border:'1px solid var(--success)', cursor: isAdmin ? 'pointer' : 'default', transition:'all .1s' }}
+                                  title={isDraft ? 'Draft — not published or emailed yet' : undefined}
+                                  style={{ padding:'8px 10px', borderRadius:'var(--radius)', background:'var(--success-bg)', border:'1px solid var(--success)', cursor: isAdmin ? 'pointer' : 'default', transition:'all .1s', ...hatch }}
                                   onMouseEnter={e => { if(isAdmin) e.currentTarget.style.opacity='.8' }}
                                   onMouseLeave={e => e.currentTarget.style.opacity='1'}>
                                   <div style={{ fontSize:11, fontWeight:600, color:'var(--success)' }}>{fmt(sched.shift_start)} – {fmt(sched.shift_end)}</div>
                                   {sched.lunch_start && <div style={{ fontSize:10, color:'var(--text-muted)', marginTop:2 }}>Lunch {fmt(sched.lunch_start)}</div>}
+                                  {isDraft && <div style={{ fontSize:9, fontWeight:800, letterSpacing:.5, color:'var(--text-muted)', marginTop:2 }}>DRAFT</div>}
                                 </div>
                               ) : sched && isOff ? (
                                 <div onClick={() => isAdmin && openEdit(p.id, date)}
-                                  style={{ padding:'8px 10px', borderRadius:'var(--radius)', background: typeColor + '18', border:`1px solid ${typeColor}`, cursor: isAdmin ? 'pointer' : 'default' }}>
+                                  title={isDraft ? 'Draft — not published or emailed yet' : undefined}
+                                  style={{ padding:'8px 10px', borderRadius:'var(--radius)', background: typeColor + '18', border:`1px solid ${typeColor}`, cursor: isAdmin ? 'pointer' : 'default', ...hatch }}>
                                   <div style={{ fontSize:11, fontWeight:600, color: typeColor }}>{DAY_TYPE_LABELS[sched.day_type]}</div>
+                                  {isDraft && <div style={{ fontSize:9, fontWeight:800, letterSpacing:.5, color:'var(--text-muted)', marginTop:2 }}>DRAFT</div>}
                                 </div>
                               ) : isAdmin ? (
                                 <button onClick={() => openEdit(p.id, date)}
@@ -1056,8 +1084,23 @@ export default function AttendancePage() {
         <Modal title={`Publish + Email — week of ${fmtDate(weekDates[0])}`} onClose={() => { setPublishModal(false); setPublishResult(null) }} width={440}>
           <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
             <div style={{ fontSize:12.5, color:'var(--text-muted)' }}>
-              Each person gets an email with <b>their own schedule</b> for this week — shift, breaks, lunch, and total hours.
+              Publishing makes this week's <b>draft shifts visible to the team</b> (striped cells go solid) and emails each
+              person their own schedule — shift, breaks, lunch, and total hours.
             </div>
+            {(() => {
+              const drafts = schedules.filter(s => weekDates.includes(s.date) && 'published_at' in s && !s.published_at).length
+              return drafts > 0 ? (
+                <div style={{ fontSize:12, fontWeight:700, color:'var(--tone-amber-tx)', padding:'7px 11px', background:'var(--tone-amber-bg)', border:'1px solid var(--tone-amber-bd)', borderRadius:8 }}>
+                  {drafts} unpublished shift{drafts === 1 ? '' : 's'} in this week
+                </div>
+              ) : (
+                <div style={{ fontSize:12, color:'var(--text-muted)' }}>No unpublished changes this week — emails will just resend the current schedule.</div>
+              )
+            })()}
+            <label style={{ display:'flex', alignItems:'center', gap:8, fontSize:13, fontWeight:600, cursor:'pointer' }}>
+              <input type="checkbox" checked={pubEmail} onChange={e => setPubEmail(e.target.checked)} />
+              Email everyone their schedule
+            </label>
             <div className="form-field">
               <label className="form-label">Who</label>
               <label style={{ display:'flex', alignItems:'center', gap:8, fontSize:13, fontWeight:600, cursor:'pointer', padding:'6px 2px' }}>

@@ -210,7 +210,7 @@ export default function MyPage() {
     const last = new Date(schedMonth.y, schedMonth.m + 1, 0)
     sb.from('schedules').select('*').eq('profile_id', profile.id)
       .gte('date', toYMD(first)).lte('date', toYMD(last))
-      .then(({ data }) => setMonthScheds(data || []))
+      .then(({ data }) => setMonthScheds((data || []).filter(r => !('published_at' in r) || r.published_at)))
   }, [schedView, schedMonth.y, schedMonth.m, profile?.id])
   const [schedules, setSchedules] = useState([])
   const [profiles, setProfiles] = useState([])
@@ -252,7 +252,8 @@ export default function MyPage() {
 
       const [{ data: profs }, { data: scheds }, { data: events }, { data: pts }, { data: wts }, { data: thr }, { data: tasks }, { data: cl }] = await Promise.all([
         sb.from('profiles').select('id, name, email, avatar, role').eq('active', true).order('name'),
-        sb.from('schedules').select('*').gte('date', fromStr).lte('date', toStr),
+        sb.from('schedules').select('*').gte('date', fromStr).lte('date', toStr)
+          .then(r => ({ ...r, data: (r.data || []).filter(x => !('published_at' in x) || x.published_at) })),   // drafts stay in WFM
         sb.from('status_events').select('*').eq('profile_id', profile.id).gte('started_at', fromStr + 'T00:00:00').order('started_at', { ascending: false }),
         sb.from('attendance_points').select('*').eq('profile_id', profile.id).gte('date', fromStr),
         sb.from('app_settings').select('value').eq('key', 'scorecard_weights').maybeSingle(),

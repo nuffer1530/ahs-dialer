@@ -1625,16 +1625,19 @@ app.post('/api/pto/decide', async (req, res) => {
       for (const d of dateRangeDays(row.date, row.end_date)) {
         const { data: existing } = await supabase.from('schedules')
           .select('id').eq('profile_id', row.profile_id).eq('date', d).maybeSingle()
+        // Approved PTO is official, not a draft — publish it immediately.
         if (existing) {
-          await supabase.from('schedules').update({
+          const upd = {
             day_type: row.kind, shift_start: null, shift_end: null,
             break1_start: null, break1_end: null, break2_start: null, break2_end: null,
             lunch_start: null, lunch_end: null,
-          }).eq('id', existing.id)
+          }
+          const { error: e1 } = await supabase.from('schedules').update({ ...upd, published_at: new Date().toISOString() }).eq('id', existing.id)
+          if (e1) await supabase.from('schedules').update(upd).eq('id', existing.id)
         } else {
-          await supabase.from('schedules').insert({
-            profile_id: row.profile_id, date: d, day_type: row.kind, created_by: me.id,
-          })
+          const ins = { profile_id: row.profile_id, date: d, day_type: row.kind, created_by: me.id }
+          const { error: e2 } = await supabase.from('schedules').insert({ ...ins, published_at: new Date().toISOString() })
+          if (e2) await supabase.from('schedules').insert(ins)
         }
       }
     }
@@ -5327,8 +5330,12 @@ const afterSwapCutoff = (date, shiftStart) => {
   return date > cd || (date === cd && String(shiftStart || '23:59') >= `${c.hour}:${c.minute}`)
 }
 
-const getScheduleRow = async (profileId, date) =>
-  (await supabase.from('schedules').select('*').eq('profile_id', profileId).eq('date', date).maybeSingle()).data
+const getScheduleRow = async (profileId, date) => {
+  const row = (await supabase.from('schedules').select('*').eq('profile_id', profileId).eq('date', date).maybeSingle()).data
+  // Drafts don't exist yet as far as swaps are concerned.
+  if (row && 'published_at' in row && !row.published_at) return null
+  return row
+}
 
 const shiftFieldsOf = (r) => ({
   day_type: 'work',
@@ -5485,9 +5492,12 @@ app.post('/api/swaps/decide', async (req, res) => {
       const dates = [row.requester_date, row.target_date].filter(Boolean)
       await supabase.from('schedules').delete()
         .in('profile_id', [row.requester_id, row.target_id]).in('date', dates)
-      const inserts = [{ profile_id: row.target_id, date: row.requester_date, ...shiftFieldsOf(mine), created_by: me.id }]
-      if (theirs) inserts.push({ profile_id: row.requester_id, date: row.target_date, ...shiftFieldsOf(theirs), created_by: me.id })
-      const { error: insErr } = await supabase.from('schedules').insert(inserts)
+      // An approved swap is agreed by both people + a manager — publish it.
+      const pub = new Date().toISOString()
+      const inserts = [{ profile_id: row.target_id, date: row.requester_date, ...shiftFieldsOf(mine), created_by: me.id, published_at: pub }]
+      if (theirs) inserts.push({ profile_id: row.requester_id, date: row.target_date, ...shiftFieldsOf(theirs), created_by: me.id, published_at: pub })
+      let { error: insErr } = await supabase.from('schedules').insert(inserts)
+      if (insErr) ({ error: insErr } = await supabase.from('schedules').insert(inserts.map(({ published_at, ...r }) => r)))
       if (insErr) throw new Error('schedule swap: ' + insErr.message)
     }
 
@@ -5588,12 +5598,13 @@ async function checkOppWatchBonus() {
 
   // Who shares: active reps + dispatchers with a WORK shift scheduled today.
   const [{ data: scheds }, { data: profs }] = await Promise.all([
-    supabase.from('schedules').select('profile_id, day_type, shift_start').eq('date', today),
+    supabase.from('schedules').select('*').eq('date', today),
     supabase.from('profiles').select('id, name, email, role').eq('active', true),
   ])
   const eligible = new Map((profs || []).filter(p => ['rep', 'dispatcher'].includes(p.role)).map(p => [p.id, p]))
   const recipients = [...new Set((scheds || [])
-    .filter(sc => (!sc.day_type || sc.day_type === 'work') && sc.shift_start && eligible.has(sc.profile_id))
+    .filter(sc => (!sc.day_type || sc.day_type === 'work') && sc.shift_start && eligible.has(sc.profile_id)
+      && (!('published_at' in sc) || sc.published_at))   // drafts aren't scheduled yet
     .map(sc => sc.profile_id))]
   if (!recipients.length) { console.warn('opp bonus: board unlocked but nobody scheduled — not paid'); return }
 
@@ -7434,6 +7445,19 @@ app.post('/api/schedule/publish', async (req, res) => {
     const { data: people } = await q
     const { data: scheds } = await supabase.from('schedules').select('*').gte('date', dates[0]).lte('date', dates[6])
 
+    // Publishing IS the state flip: drafts in this week become live (visible
+    // to reps) the moment this runs — the emails describe what's now real.
+    let published = 0
+    try {
+      let up = supabase.from('schedules').update({ published_at: new Date().toISOString() })
+        .gte('date', dates[0]).lte('date', dates[6]).is('published_at', null).select('id')
+      if (ids) up = up.in('profile_id', ids)
+      const { data: pubRows, error: pubErr } = await up
+      if (pubErr) console.warn('publish mark:', pubErr.message)
+      else published = pubRows?.length || 0
+    } catch (e) { console.warn('publish mark:', e.message) }
+    const sendEmails = req.body?.sendEmails !== false
+
     const fmt12 = (t) => { if (!t) return ''; const [h, m] = String(t).split(':').map(Number); return `${h % 12 || 12}:${String(m || 0).padStart(2, '0')} ${h >= 12 ? 'PM' : 'AM'}` }
     const dayLabel = (ds) => new Date(ds + 'T12:00:00Z').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' })
     const OFF_LABEL = { pto: 'PTO', sick: 'Sick', holiday: 'Holiday', off: 'Off' }
@@ -7447,7 +7471,7 @@ app.post('/api/schedule/publish', async (req, res) => {
 
     let sent = 0
     const skipped = []
-    for (const person of (people || [])) {
+    for (const person of (sendEmails ? (people || []) : [])) {
       if (!person.email) { skipped.push(person.name || person.id); continue }
       let total = 0
       const rows = dates.map(ds => {
@@ -7483,7 +7507,7 @@ app.post('/api/schedule/publish', async (req, res) => {
         skipped.push(person.name || person.email)
       }
     }
-    res.json({ sent, skipped })
+    res.json({ sent, skipped, published })
   } catch (err) {
     console.error('schedule publish:', err.message)
     res.status(500).json({ error: err.message })

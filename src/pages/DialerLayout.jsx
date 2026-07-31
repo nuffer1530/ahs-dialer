@@ -414,7 +414,8 @@ function DialerLayoutInner() {
     const checkAlerts = async () => {
       const { data: profiles } = await sb.from('profiles').select('id, name, status, status_since').eq('active', true).neq('status', 'Offline')
       if (!profiles) return
-      const { data: schedules } = await sb.from('schedules').select('*').eq('date', new Date().toISOString().slice(0,10))
+      const { data: schedulesRaw } = await sb.from('schedules').select('*').eq('date', new Date().toISOString().slice(0,10))
+      const schedules = (schedulesRaw || []).filter(r => !('published_at' in r) || r.published_at)
       const now = Date.now()
       const newAlerts = []
       for (const p of profiles) {

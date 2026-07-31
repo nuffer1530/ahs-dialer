@@ -73,7 +73,7 @@ export default function ScheduleAlerts() {
       const dateStr = localDate()
       const [{ data: scheds }, { data: blocks }] = await Promise.all([
         sb.from('schedules').select('*').eq('profile_id', profile.id).eq('date', dateStr).maybeSingle()
-          .then(r => ({ data: r.data ? [r.data] : [] })),
+          .then(r => ({ data: r.data && (!('published_at' in r.data) || r.data.published_at) ? [r.data] : [] })),
         sb.from('schedule_blocks').select('*').eq('profile_id', profile.id).eq('date', dateStr),
       ])
       if (stopped) return
