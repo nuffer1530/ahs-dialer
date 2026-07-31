@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
+import { toast } from '../lib/dialogs'
 import { sb } from '../lib/supabase'
 import { useAuth } from '../lib/AuthContext'
 import { useData } from '../lib/DataContext'
@@ -1083,10 +1084,10 @@ export default function AdminPage() {
     const file = e.target.files?.[0]
     e.target.value = ''   // allow re-selecting the same file
     if (!file) return
-    if (!file.type?.startsWith('image/')) { alert('Please choose an image file.'); return }
+    if (!file.type?.startsWith('image/')) { toast('Please choose an image file.'); return }
     const reader = new FileReader()
     reader.onload = () => setCropSrc(reader.result)   // open the crop tool
-    reader.onerror = () => alert('Could not read that file.')
+    reader.onerror = () => toast('Could not read that file.')
     reader.readAsDataURL(file)
   }
 

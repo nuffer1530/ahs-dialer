@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { toast } from '../lib/dialogs'
 import { useData } from '../lib/DataContext'
 import { useAuth } from '../lib/AuthContext'
 import { sb } from '../lib/supabase'
@@ -262,7 +263,7 @@ export default function DialerPage() {
     if (r.type === 'team') callTeammate(r.t)
     else {
       const num = String(r.d.number || '').replace(/[^\d+]/g, '')
-      if (num.replace(/\D/g, '').length < 10) { alert(`"${r.d.name}" has an invalid number saved (${r.d.number}).`); return }
+      if (num.replace(/\D/g, '').length < 10) { toast(`"${r.d.name}" has an invalid number saved (${r.d.number}).`); return }
       // Explicitly NOT the open customer tab's context — this is an internal call.
       phoneMakeCall(num, { contactId: '', contactName: r.d.name })
     }
@@ -346,7 +347,7 @@ export default function DialerPage() {
     if (ctlBusy) return
     setCtlBusy(true)
     try { const d = await ctlApi('/api/twilio/call/hold', { hold: !holdOn }); setHoldOn(!!d.held) }
-    catch (e) { alert(e.message) }
+    catch (e) { toast(e.message) }
     setCtlBusy(false)
   }
   const startXfer = async (to, label) => {
@@ -362,11 +363,11 @@ export default function DialerPage() {
       } else {
         setXferState({ status: 'calling', label, mode: 'warm' })
       }
-    } catch (e) { alert(e.message) }
+    } catch (e) { toast(e.message) }
     setCtlBusy(false)
   }
   const completeXfer = async () => {
-    try { await ctlApi('/api/twilio/call/transfer/complete') } catch (e) { alert(e.message); return }
+    try { await ctlApi('/api/twilio/call/transfer/complete') } catch (e) { toast(e.message); return }
     setXferOpen(false); setXferState(null); setHoldOn(false)
     hangUp()
   }
@@ -838,7 +839,7 @@ export default function DialerPage() {
   const sendEmail = () => {
     const contact = selectedContact
     const email = stCustomerInfo?.email || contact?.email
-    if (!email) { alert('No email on file for this customer.'); return }
+    if (!email) { toast('No email on file for this customer.'); return }
     const subject = encodeURIComponent('Awesome Home Services')
     const body = encodeURIComponent(`Hi ${contact?.name || ''},\n\n`)
     window.open(`mailto:${email}?subject=${subject}&body=${body}`, '_blank')
@@ -1071,7 +1072,7 @@ export default function DialerPage() {
     if (!selectedOutcome || !selectedContact) return
     const c = selectedContact
     const notes = notesVal.trim()
-    if (selectedOutcome === 'Booked' && !notes) { alert('Please add notes before booking.'); return }
+    if (selectedOutcome === 'Booked' && !notes) { toast('Please add notes before booking.'); return }
     const isCampaignContact = !!c.campaign_id
     const newAttempts = isCampaignContact ? (c.attempts || 0) + 1 : (c.attempts || 0)
     const isFinal = DONE_OUTCOMES.includes(selectedOutcome) || (isCampaignContact && newAttempts >= MAX_ATTEMPTS)
@@ -1206,9 +1207,9 @@ export default function DialerPage() {
   // ST Direct Booking — returns true on success, false otherwise
   const bookInST = async () => {
     const c = selectedContact
-    if (!c?.external_id) { alert('No ST Customer ID on this contact. Please link to ST first.'); return false }
-    if (!selectedJobType || !selectedBU) { alert('Please select a job type and business unit.'); return false }
-    if (!stCampaignId) { alert('Please select a marketing campaign — it is required to book.'); return false }
+    if (!c?.external_id) { toast('No ST Customer ID on this contact. Please link to ST first.'); return false }
+    if (!selectedJobType || !selectedBU) { toast('Please select a job type and business unit.'); return false }
+    if (!stCampaignId) { toast('Please select a marketing campaign — it is required to book.'); return false }
     const notes = notesVal.trim()
     setBooking(true); setBookingResult(null)
     try {
@@ -1267,8 +1268,8 @@ export default function DialerPage() {
 
   // Booked flow: create the ST job, sell the membership if asked, then log.
   const bookAndLog = async () => {
-    if (!notesVal.trim()) { alert('Please add call notes before booking.'); return }
-    if (alsoMembership && !membershipTypeId) { alert('Pick which membership, or untick "Sell Membership?".'); return }
+    if (!notesVal.trim()) { toast('Please add call notes before booking.'); return }
+    if (alsoMembership && !membershipTypeId) { toast('Pick which membership, or untick "Sell Membership?".'); return }
     const ok = await bookInST()
     if (!ok) return
     // Job booked. A membership failure from here shouldn't lose the booking —
@@ -2507,7 +2508,7 @@ export default function DialerPage() {
                     const d = dialDir[parseInt(dialDirSel)]
                     const num = String(d?.number || '').replace(/[^\d+]/g, '')
                     if (num.replace(/\D/g, '').length >= 10) { phoneMakeCall(num, { contactId: '', contactName: d.name }); setShowDialpad(false); setDialDirSel('') }
-                    else alert(`"${d?.name}" has an invalid number saved (${d?.number}). Ask an admin to fix it in Settings → Users.`)
+                    else toast(`"${d?.name}" has an invalid number saved (${d?.number}). Ask an admin to fix it in Settings → Users.`)
                   }}>
                   Call
                 </button>
@@ -2582,7 +2583,7 @@ export default function DialerPage() {
                         onClick={() => {
                           const num = String(d.number || '').replace(/[^\d+]/g, '')
                           if (num.replace(/\D/g, '').length >= 10) startXfer(num, d.name)
-                          else alert(`"${d.name}" has an invalid number saved.`)
+                          else toast(`"${d.name}" has an invalid number saved.`)
                         }}>
                         {d.name}{d.label ? ` — ${d.label}` : ''}
                       </button>

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { sb } from '../lib/supabase'
+import { confirmDlg } from '../lib/dialogs'
 import { useAuth } from '../lib/AuthContext'
 import { ATTENDANCE_DEFAULTS, invalidateOpsConfig, loadOpsConfig } from '../lib/opsConfig'
 import Modal from '../components/Modal'
@@ -234,7 +235,7 @@ export default function AttendancePage() {
   }
 
   const deleteTemplate = async (id) => {
-    if (!window.confirm('Delete this template? Days already scheduled with it keep their times.')) return
+    if (!(await confirmDlg('Delete this template? Days already scheduled with it keep their times.', { title: 'Delete template', confirmLabel: 'Delete', danger: true }))) return
     await sb.from('shift_templates').delete().eq('id', id)
     setTemplates(prev => prev.filter(t => t.id !== id))
   }

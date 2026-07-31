@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { toast } from '../lib/dialogs'
 import { sb } from '../lib/supabase'
 import { useAuth } from '../lib/AuthContext'
 import EvalModal, { ScoreChip } from '../components/EvalModal'
@@ -131,7 +132,7 @@ export default function RecordingsPage() {
     }
     audio.onended = () => { setPlayingId(null); setProgress(0) }
     audio.ontimeupdate = () => setProgress(audio.duration ? (audio.currentTime / audio.duration) * 100 : 0)
-    audio.onerror = () => { setPlayingId(null); alert('Could not load this recording.') }
+    audio.onerror = () => { setPlayingId(null); toast('Could not load this recording.') }
     audio.play().then(() => setPlayingId(rec.id)).catch(() => setPlayingId(null))
   }
 

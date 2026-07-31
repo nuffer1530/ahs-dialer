@@ -506,7 +506,7 @@ function LiveBoard() {
         <div className="card" style={{ padding:'13px 18px', marginBottom:14, borderLeft:'4px solid var(--accent)', fontSize:12.5,
           color: briefErr ? 'var(--danger)' : 'var(--text-muted)' }}>
           {briefBusy
-            ? '🧠 Andi is reading the board — first analysis takes about 30 seconds…'
+            ? 'Andi is reading the board — first analysis takes about 30 seconds…'
             : `Analysis unavailable: ${briefErr} `}
           {!briefBusy && <button className="btn sm" style={{ marginLeft:8 }} onClick={() => loadBrief(true)}>Retry</button>}
         </div>
@@ -516,7 +516,7 @@ function LiveBoard() {
         <div className="card" style={{ padding:'11px 15px', marginBottom:12, borderLeft:'3px solid var(--accent)' }}>
           <div style={{ display:'flex', alignItems:'baseline', justifyContent:'space-between', gap:10, flexWrap:'wrap' }}>
             <div style={{ fontSize:13, fontWeight:800, color:'var(--text-primary)' }}>
-              🧠 {day > 0 && <span style={{ fontSize:10, fontWeight:800, textTransform:'uppercase', letterSpacing:.5, padding:'2px 8px', borderRadius:99, marginRight:7, background:'var(--tone-blue-bg)', color:'var(--tone-blue-tx)', border:'1px solid var(--tone-blue-bd)', verticalAlign:'middle' }}>
+              {day > 0 && <span style={{ fontSize:10, fontWeight:800, textTransform:'uppercase', letterSpacing:.5, padding:'2px 8px', borderRadius:99, marginRight:7, background:'var(--tone-blue-bg)', color:'var(--tone-blue-tx)', border:'1px solid var(--tone-blue-bd)', verticalAlign:'middle' }}>
                 Game plan — {day === 1 ? 'tomorrow' : '2 days out'}
               </span>}{brief.brief.headline}
             </div>
@@ -575,7 +575,7 @@ function LiveBoard() {
           </button>
         </div>
         {scErr && <div style={{ fontSize:12, color:'var(--danger)', marginTop:8 }}>{scErr}</div>}
-        {scBusy && <div style={{ fontSize:12, color:'var(--text-muted)', marginTop:8 }}>🧠 Thinking through every assignment on the board — 15–30 seconds…</div>}
+        {scBusy && <div style={{ fontSize:12, color:'var(--text-muted)', marginTop:8 }}>Thinking through every assignment on the board — 15–30 seconds…</div>}
         {scPlan?.plan && (
           <div style={{ marginTop:10, paddingTop:10, borderTop:'1px solid var(--border)' }}>
             <div style={{ fontSize:13, fontWeight:800 }}>{scPlan.plan.headline}</div>

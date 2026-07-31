@@ -1,5 +1,6 @@
 // GraphicalSchedule v2 — 15min ticks + overflow scroll
 import { useState, useEffect, useRef } from 'react'
+import { toast } from '../lib/dialogs'
 import { sb } from '../lib/supabase'
 import { useAuth } from '../lib/AuthContext'
 import Avatar from './Avatar'
@@ -382,7 +383,7 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
       }).select().single()
       if (error && /note/.test(error.message)) {
         // schedule_blocks.note migration not run yet — save without the note.
-        alert('Meeting added, but the note could not be saved until the schedule_blocks.note migration is run.')
+        toast('Meeting added, but the note could not be saved until the schedule_blocks.note migration is run.')
         ;({ data: inserted } = await sb.from('schedule_blocks').insert({
           profile_id: profileId, date, type: 'meeting',
           start_interval: start, duration_intervals: duration, created_by: profile?.id,
@@ -398,9 +399,9 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
   // reps or the whole floor, one-off or weekly-recurring, in a single pass.
   const saveBulkEvent = async () => {
     const targets = bulkForm.all ? profiles.map(p => p.id) : bulkForm.profileIds
-    if (!targets.length) { alert('Pick at least one rep (or Everyone).'); return }
+    if (!targets.length) { toast('Pick at least one rep (or Everyone).'); return }
     const start = timeToInterval(bulkForm.startTime)
-    if (start == null) { alert('Pick a start time inside the schedule day.'); return }
+    if (start == null) { toast('Pick a start time inside the schedule day.'); return }
     const duration = Math.max(1, Math.round(bulkForm.durationMin / 15))
     const note = bulkForm.note.trim()
     setSaving(true)
@@ -420,7 +421,7 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
       }))
       let { data: inserted, error } = await sb.from('schedule_blocks').insert(rows).select()
       if (error && /note/.test(error.message)) {
-        alert('Events added without notes — run the schedule_blocks.note migration to save notes.')
+        toast('Events added without notes — run the schedule_blocks.note migration to save notes.')
         ;({ data: inserted } = await sb.from('schedule_blocks').insert(rows.map(({ note: _n, ...r }) => r)).select())
       }
       if (inserted?.length) setExtraBlocks(prev => [...prev, ...inserted])

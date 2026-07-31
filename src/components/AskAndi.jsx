@@ -85,7 +85,7 @@ export default function AskAndi() {
       if (!r.ok) throw new Error(d.error || 'Something went wrong')
       setMsgs(prev => [...prev, { role: 'assistant', content: d.answer, sources: d.sources, covered: d.covered, usedCraft: d.usedCraft, logId: d.logId }])
     } catch (e) {
-      setMsgs(prev => [...prev, { role: 'assistant', content: `⚠️ ${e.message}`, sources: [] }])
+      setMsgs(prev => [...prev, { role: 'assistant', content: `${e.message}`, sources: [] }])
     }
     setBusy(false)
   }
@@ -179,14 +179,14 @@ export default function AskAndi() {
                     {(m.sources || []).map(t => (
                       <span key={t} style={{ fontSize: 9.5, fontWeight: 700, padding: '1px 8px', borderRadius: 99,
                         background: 'var(--accent-bg)', color: 'var(--accent)', border: '1px solid var(--accent)' }}>
-                        📄 {t}
+                        {t}
                       </span>
                     ))}
                     {m.usedCraft && (
                       <span title="Blends your playbook with general sales expertise"
                         style={{ fontSize: 9.5, fontWeight: 700, padding: '1px 8px', borderRadius: 99,
                         background: 'var(--tone-purple-bg)', color: 'var(--tone-purple-tx)', border: '1px solid var(--tone-purple-bd)' }}>
-                        🧠 sales craft
+                        sales craft
                       </span>
                     )}
                     {m.covered === false && (

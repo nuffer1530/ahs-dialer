@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
+import { toast } from '../lib/dialogs'
 import { useData } from '../lib/DataContext'
 import { sb } from '../lib/supabase'
 import { getDupSet, getTimeframeBounds } from '../lib/utils'
@@ -150,7 +151,7 @@ export default function DashboardPage() {
       })
     } catch (e) {
       console.error('Export failed:', e)
-      alert('Export failed: ' + e.message)
+      toast('Export failed: ' + e.message)
     } finally { setExporting(false) }
   }
 

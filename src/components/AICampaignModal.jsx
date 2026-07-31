@@ -73,7 +73,7 @@ export default function AICampaignModal({ onClose, onCreated }) {
   const unsupported = plan && plan.recipe === 'unsupported'
 
   return (
-    <Modal title="✨ Build a campaign with AI" onClose={onClose} width={620}>
+    <Modal title="Build a campaign with AI" onClose={onClose} width={620}>
       {/* Step 1 — describe */}
       <div className="form-field">
         <label className="form-label">Who do you want to reach?</label>

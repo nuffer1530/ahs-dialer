@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { sb } from '../lib/supabase'
+import { confirmDlg } from '../lib/dialogs'
 
 // Settings → Call QA: structured rubric editor. Sections carry a % weight,
 // questions carry possible points + guidance text — the AI scores exactly
@@ -54,8 +55,8 @@ export default function CallQATab() {
     ? { ...s, items: [...s.items, { question: '', points: 5, guidance: '' }] } : s))
   const removeItem = (si, qi) => setSections(ss => ss.map((s, i) => i === si
     ? { ...s, items: s.items.filter((_, j) => j !== qi) } : s))
-  const removeSection = (si) => {
-    if (!window.confirm(`Delete the "${sections[si].name || 'unnamed'}" section and all its questions?`)) return
+  const removeSection = async (si) => {
+    if (!(await confirmDlg(`Delete the "${sections[si].name || 'unnamed'}" section and all its questions?`, { title: 'Delete section', confirmLabel: 'Delete', danger: true }))) return
     setSections(ss => ss.filter((_, i) => i !== si))
   }
 
@@ -147,8 +148,8 @@ export default function CallQATab() {
           <button className="btn sm" onClick={() => setSections(ss => [...ss, { name: '', weight: 0, items: [{ question: '', points: 5, guidance: '' }] }])}>
             + Add section
           </button>
-          <button className="btn sm" onClick={() => {
-            if (window.confirm('Replace the whole rubric with the original from the evaluation sheet?')) setSections(JSON.parse(JSON.stringify(defaults)))
+          <button className="btn sm" onClick={async () => {
+            if (await confirmDlg('Replace the whole rubric with the original from the evaluation sheet?', { title: 'Reset rubric', confirmLabel: 'Reset' })) setSections(JSON.parse(JSON.stringify(defaults)))
           }}>
             Reset to original rubric
           </button>

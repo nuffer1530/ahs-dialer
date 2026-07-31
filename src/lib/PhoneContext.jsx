@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useRef, useState, useCallback } from 'react'
+import { toast } from './dialogs'
 import { sb } from './supabase'
 import { loadOpsConfig } from './opsConfig'
 import { useAuth } from './AuthContext'
@@ -300,7 +301,7 @@ export function PhoneProvider({ children }) {
   }, [profile?.id, twilioReady])
 
   const makeCall = useCallback(async (number, meta = {}) => {
-    if (!deviceRef.current) { alert('Phone not ready yet'); return }
+    if (!deviceRef.current) { toast('Phone not ready yet'); return }
     if (callRef.current || connectingRef.current) {
       console.warn('Call already in progress — ignoring new dial')
       return

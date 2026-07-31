@@ -419,7 +419,7 @@ export default function MyPage() {
               onMouseDown={() => setAnnounceOpen(false)}>
               <div onMouseDown={e => e.stopPropagation()}
                 style={{ background:'var(--surface)', borderRadius:14, width:'100%', maxWidth:420, boxShadow:'0 12px 40px rgba(0,0,0,.25)', padding:'20px 22px' }}>
-                <div style={{ fontSize:15, fontWeight:700, marginBottom:2 }}>📣 Notify the team</div>
+                <div style={{ fontSize:15, fontWeight:700, marginBottom:2 }}>Notify the team</div>
                 <div style={{ fontSize:12, color:'var(--text-muted)', marginBottom:14 }}>Pops on their screen like a schedule alert — with a chime.</div>
                 <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
                   <div className="form-field">

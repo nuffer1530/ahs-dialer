@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { sb } from '../lib/supabase'
+import { confirmDlg } from '../lib/dialogs'
 
 // Settings → Knowledge: what Ask Andi knows. Every save writes a revision
 // (who/when/what changed) — the ledger of what the assistant is being fed.
@@ -47,13 +48,13 @@ export default function KnowledgeTab() {
 
   const importWebsite = async () => {
     if (importing) return
-    if (!window.confirm('Pull in pages from awesomeservice.com? New pages become Website articles; changed pages get updated with a revision; unchanged pages are left alone.')) return
+    if (!(await confirmDlg('Pull in pages from awesomeservice.com? New pages become Website articles; changed pages get updated with a revision; unchanged pages are left alone.', { title: 'Import website', confirmLabel: 'Import' }))) return
     setImporting(true); setImportMsg('')
     try {
       const d = await authed('/api/kb/import-website', { method: 'POST', body: JSON.stringify({}) })
       setImportMsg(`✓ ${d.added} added · ${d.changed} updated · ${d.unchanged} unchanged · ${d.skipped} skipped`)
       load()
-    } catch (e) { setImportMsg(`⚠️ ${e.message}`) }
+    } catch (e) { setImportMsg(`${e.message}`) }
     setImporting(false)
   }
 
@@ -73,7 +74,7 @@ export default function KnowledgeTab() {
     setSaving(false)
   }
   const remove = async (a) => {
-    if (!window.confirm(`Delete "${a.title}"? Its revision history goes with it.`)) return
+    if (!(await confirmDlg(`Delete "${a.title}"? Its revision history goes with it.`, { title: 'Delete article', confirmLabel: 'Delete', danger: true }))) return
     try { await authed('/api/kb/delete', { method: 'POST', body: JSON.stringify({ id: a.id }) }); load() }
     catch (e) { setErr(e.message) }
   }
@@ -95,7 +96,7 @@ export default function KnowledgeTab() {
     <div style={{ padding: 24, maxWidth: 1100, margin: '0 auto' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14, flexWrap: 'wrap' }}>
         <div style={{ fontSize: 12, color: 'var(--text-muted)', flex: 1, minWidth: 260 }}>
-          Everything Ask Andi 💡 is allowed to say about company facts lives here. Edits go live on the very
+          Everything Ask Andi is allowed to say about company facts lives here. Edits go live on the very
           next answer; every save keeps a revision with who changed what.
         </div>
         <input className="form-input" placeholder="Search…" value={search} onChange={e => setSearch(e.target.value)} style={{ width: 180 }} />
@@ -104,7 +105,7 @@ export default function KnowledgeTab() {
           {CATEGORIES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
         </select>
         <button className="btn" onClick={importWebsite} disabled={importing}>
-          {importing ? 'Importing…' : '🌐 Import website'}
+          {importing ? 'Importing…' : 'Import website'}
         </button>
         <button className="btn primary" onClick={() => openEdit(null)}>+ New article</button>
       </div>
@@ -114,7 +115,7 @@ export default function KnowledgeTab() {
         <div className="card" style={{ padding:'10px 14px', marginBottom:12, borderLeft:'3px solid var(--tone-amber-bd)' }}>
           <div onClick={() => setGapsOpen(o => !o)} style={{ display:'flex', alignItems:'center', gap:8, cursor:'pointer' }}>
             <span style={{ fontSize:12.5, fontWeight:700 }}>
-              🔍 {gaps.length} question{gaps.length === 1 ? '' : 's'} the knowledge base couldn't answer (last 30 days)
+              {gaps.length} question{gaps.length === 1 ? '' : 's'} the knowledge base couldn't answer (last 30 days)
             </span>
             <span style={{ fontSize:11, color:'var(--text-muted)' }}>— your "what to write next" list</span>
             <span style={{ marginLeft:'auto', fontSize:11, color:'var(--text-muted)' }}>{gapsOpen ? '▾ hide' : '▸ show'}</span>
@@ -165,7 +166,7 @@ export default function KnowledgeTab() {
                   {!a.active && (
                     <span style={{ marginLeft: 'auto', fontWeight: 700, color: 'var(--tone-amber-tx)' }}>hidden</span>
                   )}
-                  {a.source === 'website' && <span style={{ marginLeft: a.active ? 'auto' : 0 }}>🌐</span>}
+                  
                 </div>
               </div>
             ))}

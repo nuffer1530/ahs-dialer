@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
+import { toast } from '../lib/dialogs'
 import { useData } from '../lib/DataContext'
 import { useAuth } from '../lib/AuthContext'
 import { useNavigate } from 'react-router-dom'
@@ -121,7 +122,7 @@ export default function CampaignsPage() {
 
   const parseAndImport = async (text, campId) => {
     const lines = text.trim().split('\n').filter(l => l.trim())
-    if (lines.length < 2) { alert('CSV empty.'); return }
+    if (lines.length < 2) { toast('CSV empty.'); return }
     const headers = parseLine(lines[0])
     const cols = {}
     ;['name','phone','email','address','city','state','zip','source','notes','extid'].forEach(k => { cols[k] = findCol(headers, k) })
@@ -145,7 +146,7 @@ export default function CampaignsPage() {
       if (campId) rec.campaign_id = campId
       rows.push(rec)
     }
-    if (!rows.length) { alert('No valid rows.'); return }
+    if (!rows.length) { toast('No valid rows.'); return }
     const campName = campaigns.find(c => c.id === campId)?.name || campId
     if (!confirm(`Import ${rows.length} contacts to "${campName}"?${dncSkipped ? `\n\n ${dncSkipped} DNC matches skipped.` : ''}`)) return
     setImporting(campId); setImportProgress(`Importing 0/${rows.length}...`)
@@ -161,7 +162,7 @@ export default function CampaignsPage() {
       setImportProgress(`done ${created} imported!`)
       setTimeout(() => setImportProgress(''), 3000)
     } catch (e) {
-      alert('Import error: ' + e.message)
+      toast('Import error: ' + e.message)
     } finally { setImporting(null) }
   }
 
@@ -202,7 +203,7 @@ export default function CampaignsPage() {
         </div>
         {isAdmin && (
           <div style={{ display:'flex', gap:8 }}>
-            <button className="btn" onClick={() => setShowAI(true)} style={{ fontSize:13, padding:'8px 16px', lineHeight:1.2 }}>✨ AI campaign</button>
+            <button className="btn" onClick={() => setShowAI(true)} style={{ fontSize:13, padding:'8px 16px', lineHeight:1.2 }}>AI campaign</button>
             <button className="btn primary" onClick={openNew} style={{ fontSize:13, padding:'8px 16px', lineHeight:1.2 }}>+ New campaign</button>
           </div>
         )}

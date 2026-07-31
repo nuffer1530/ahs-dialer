@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
+import { toast } from '../lib/dialogs'
 import { sb } from '../lib/supabase'
 import PtoRequestModal from './PtoRequestModal'
 
@@ -68,14 +69,14 @@ export default function TimeOffTab({ profile }) {
     if (!confirm(msg)) return
     setDeciding(r.id)
     try { await authedPost('/api/pto/cancel', { id: r.id }); load() }
-    catch (e) { alert(e.message) }
+    catch (e) { toast(e.message) }
     setDeciding(null)
   }
 
   const decide = async (id, decision) => {
     setDeciding(id)
     try { await authedPost('/api/pto/decide', { id, decision }); load() }
-    catch (e) { alert(e.message) }
+    catch (e) { toast(e.message) }
     setDeciding(null)
   }
 

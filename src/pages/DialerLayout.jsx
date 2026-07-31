@@ -3,6 +3,7 @@ import { Routes, Route, NavLink, useNavigate, useLocation } from 'react-router-d
 import { useAuth } from '../lib/AuthContext'
 import WeatherStrip from '../components/WeatherStrip'
 import AskAndi from '../components/AskAndi'
+import { DialogHost } from '../lib/dialogs'
 import { useIsMobile } from '../lib/useIsMobile'
 import { loadOpsConfig } from '../lib/opsConfig'
 import { useData } from '../lib/DataContext'
@@ -740,7 +741,7 @@ function DialerLayoutInner() {
       <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden', minWidth:0 }}>
         {updateReady && (
           <div style={{ background:'#7C3AED', color:'#fff', padding:'7px 16px', display:'flex', alignItems:'center', justifyContent:'center', gap:12, fontSize:12.5, fontWeight:600, flexShrink:0, zIndex:200 }}>
-            <span>✨ Andi was updated — reload to get the latest (finish your call first).</span>
+            <span>Andi was updated — reload to get the latest (finish your call first).</span>
             <button onClick={() => window.location.reload()}
               style={{ background:'#fff', color:'#7C3AED', border:'none', borderRadius:99, padding:'3px 14px', fontSize:12, fontWeight:700, cursor:'pointer' }}>
               Reload now
@@ -749,6 +750,7 @@ function DialerLayoutInner() {
         )}
         {/* Top bar — reserves its own height; hidden on the War Room (full-screen TV) route */}
         {location.pathname !== '/warroom' && <AskAndi />}
+        <DialogHost />
         {location.pathname !== '/warroom' && (
         <div style={{ height:53, minHeight:53, boxSizing:'border-box', flexShrink:0, borderBottom:'1px solid var(--border)', background:'var(--surface)', display:'flex', alignItems:'center', justifyContent:'space-between', padding:'0 16px', position:'relative', zIndex:100 }}>
           {isMobile && (
