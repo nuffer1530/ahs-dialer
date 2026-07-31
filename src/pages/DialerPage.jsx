@@ -323,7 +323,7 @@ export default function DialerPage() {
   // dialer destroyed the Device and inbound calls could not be answered.
   const {
     twilioReady, callStatus, callDuration, incomingCall,
-    makeCall: phoneMakeCall, callTeammate, hangUp, startInteraction, endInteraction, getCallSid, callIsTeammate,
+    makeCall: phoneMakeCall, callTeammate, hangUp, startInteraction, endInteraction, getCallSid, callIsTeammate, callMeta,
     pendingInbound, setPendingInbound, callDirection,
   } = usePhone()
 
@@ -1011,8 +1011,13 @@ export default function DialerPage() {
   // idle polls are cheap no-ops.
   useEffect(() => {
     if (!selectedId) return
-    const cid = selectedId
-    const cphone = (contacts.find(x => x.id === cid)?.phone) || ''
+    // While a call (or its wrap-up) is in flight, ask about the CALL's
+    // contact — not whichever tab is open. Opening another customer mid-call
+    // used to silence the notes/coach/booking AI (Brittany's report).
+    const workingCall = ['calling', 'ringing', 'connected', 'ended'].includes(callStatus) || !!callDirection
+    const meta = workingCall ? callMeta : null
+    const cid = meta?.contactId || selectedId
+    const cphone = meta?.phone || (contacts.find(x => x.id === selectedId)?.phone) || ''
     const live = callStatus === 'connected' || callStatus === 'calling'
     const poll = async () => {
       try {
@@ -1038,7 +1043,7 @@ export default function DialerPage() {
     const t = setInterval(poll, live ? 6000 : 12000)
     return () => clearInterval(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [callStatus, selectedId])
+  }, [callStatus, selectedId, callDirection, callMeta])
 
   // Fill when the box is empty OR still holds the previous auto-draft — the
   // moment the rep types their own words, we stop touching the box and the
@@ -1046,7 +1051,11 @@ export default function DialerPage() {
   const seenCoachRef = useRef(new Set())
   const lastAutoRef = useRef('')
   useEffect(() => {
-    if (!autoNote || autoNote.contactId !== selectedId) return
+    if (!autoNote) return
+    // During a call (through wrap-up), the notes follow the tab the rep is
+    // WORKING — they may have opened the customer's real account mid-call.
+    const workingCall = ['calling', 'ringing', 'connected', 'ended'].includes(callStatus) || !!callDirection
+    if (autoNote.contactId !== selectedId && !workingCall) return
     if (!notesVal.trim() || notesVal === lastAutoRef.current) {
       setNotesVal(autoNote.text)
       lastAutoRef.current = autoNote.text
@@ -1058,7 +1067,9 @@ export default function DialerPage() {
   // both are empty or still holding OUR last pick. The moment the rep chooses
   // either one by hand, the suggestions stop touching them.
   useEffect(() => {
-    if (!bookSuggest || bookSuggest.forContact !== selectedId) return
+    if (!bookSuggest) return
+    const workingCallB = ['calling', 'ringing', 'connected', 'ended'].includes(callStatus) || !!callDirection
+    if (bookSuggest.forContact !== selectedId && !workingCallB) return
     const buId = bookSuggest.businessUnitId ? String(bookSuggest.businessUnitId) : ''
     const jtId = bookSuggest.jobTypeId ? String(bookSuggest.jobTypeId) : ''
     const buUntouched = !selectedBU || selectedBU === autoBookRef.current.bu

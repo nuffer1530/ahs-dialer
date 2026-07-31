@@ -29,6 +29,10 @@ export function PhoneProvider({ children }) {
   const [incomingCall, setIncomingCall] = useState(null) // { call, from, contactName, contactId, stLookup }
   const [callStatus, setCallStatus] = useState(null)
   const [callIsTeammate, setCallIsTeammate] = useState(false)   // internal call — no hold/transfer UI
+  // Who the CALL is with — captured at dial/answer, survives tab switches and
+  // wrap-up, so the live AI (notes, booking, coach) follows the call, not the
+  // tab that happened to be open when it started.
+  const [callMeta, setCallMeta] = useState(null)   // { contactId, phone }
   const [callDuration, setCallDuration] = useState(0)
 
   // Set when a call is accepted. DialerPage watches this and resolves it into a
@@ -317,6 +321,7 @@ export function PhoneProvider({ children }) {
       }
       const call = await deviceRef.current.connect({ params })
       callRef.current = call
+      setCallMeta({ contactId: meta.contactId || null, phone: number })
       setCallIsTeammate(meta.interactionType === 'Teammate')
       setCallStatus('calling')
       setCallDirection('outbound')
@@ -342,6 +347,7 @@ export function PhoneProvider({ children }) {
     if (!incomingCall?.call) return null
     const inc = incomingCall
     callRef.current = inc.call
+    setCallMeta({ contactId: inc.contactId || null, phone: inc.from || null })
     setCallIsTeammate(!!inc.isTeammate)
     setCallStatus('connected')
     startCallTimer()
@@ -369,7 +375,7 @@ export function PhoneProvider({ children }) {
 
   return (
     <PhoneContext.Provider value={{
-      twilioReady, incomingCall, callStatus, callDuration, callDirection, callIsTeammate,
+      twilioReady, incomingCall, callStatus, callDuration, callDirection, callIsTeammate, callMeta,
       makeCall, callTeammate, acceptIncoming, rejectIncoming, hangUp, cancelAutoWrap, startInteraction, endInteraction,
       pendingInbound, setPendingInbound,
       hasActiveCall: () => !!callRef.current,
