@@ -973,11 +973,14 @@ export default function DialerPage() {
   // pull their next lead automatically and claim it. Inbound wins — never
   // advance while an inbound call is ringing or in progress.
   useEffect(() => {
-    if (!skillsMode) return
     if (incomingCall || callStatus) return
     if (profile?.status !== 'Available') return
     if (selectedContact && !isDone(selectedContact)) return
-    serveLead(nextSkillLead(), true)
+    if (skillsMode) { serveLead(nextSkillLead(), true); return }
+    // Legacy pool reps (no campaign grants) auto-serve too — the Next/Next
+    // pending buttons are gone; going Available IS how work starts.
+    const next = filtered.find(x => !isDone(x) && x.status !== 'Max Attempts' && !x.claimed_by)
+    if (next) navigateActiveTo(next.id)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [skillsMode, incomingCall, callStatus, profile?.status, selectedContact, nextSkillLead])
 
@@ -1426,9 +1429,6 @@ export default function DialerPage() {
             <span style={{ position:'absolute', top:-3, right:-3, minWidth:8, height:8, borderRadius:99, background:'var(--danger)', border:'1.5px solid var(--surface)' }} />
           )}
         </button>
-        <button className="btn" disabled={selectedIdx <= 0} onClick={() => { const p = filtered[selectedIdx-1]; if(p) navigateActiveTo(p.id) }} style={{fontSize:11,padding:'4px 9px'}}>Prev</button>
-        <button className="btn" disabled={selectedIdx >= filtered.length-1} onClick={() => { const n = filtered[selectedIdx+1]; if(n) navigateActiveTo(n.id) }} style={{fontSize:11,padding:'4px 9px'}}>Next</button>
-        <button className="btn primary" onClick={navNextPending} style={{fontSize:11,padding:'4px 11px',fontWeight:600}}>Next pending</button>
         <QueueSelector />
         <button onClick={() => setShowDialpad(true)}
           style={{ display:'flex', alignItems:'center', gap:5, padding:'5px 12px', background: twilioReady ? 'var(--success)' : 'var(--border)', border:'none', borderRadius:'var(--radius)', cursor: twilioReady ? 'pointer' : 'not-allowed', fontSize:11, fontWeight:600, color:'#fff' }}>
@@ -1578,8 +1578,11 @@ export default function DialerPage() {
                 </svg>
               </div>
               <div style={{ fontSize:17, fontWeight:700, color:'var(--text-primary)', marginTop:22 }}>Ready to dial</div>
-              <div style={{ fontSize:12.5, color:'var(--text-muted)', marginTop:6 }}>Select a contact or hit Next pending</div>
-              <button className="btn primary" style={{ padding:'11px 30px', fontSize:13, fontWeight:700, marginTop:20 }} onClick={navNextPending}>Next pending</button>
+              <div style={{ fontSize:12.5, color:'var(--text-muted)', marginTop:6 }}>
+                {profile?.status === 'Available'
+                  ? 'Waiting for the next call or lead — work serves itself while you’re Available.'
+                  : 'Go Available and work will find you — inbound first, then your campaigns in priority order.'}
+              </div>
               <div style={{ marginTop:26, fontSize:11.5, color:'var(--text-muted)' }}>
                 Today: <b style={{ color:'var(--text-secondary)' }}>{myStats.calls} call{myStats.calls === 1 ? '' : 's'}</b>
                 {' · '}<b style={{ color:'var(--text-secondary)' }}>{myStats.booked} booked</b>

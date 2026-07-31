@@ -634,3 +634,5 @@ alter table call_tasks add column if not exists line text;
 -- rows backfill as published so nothing vanishes from anyone's schedule.
 alter table schedules add column if not exists published_at timestamptz;
 update schedules set published_at = now() where published_at is null;
+-- Dispatch self-toggle (Queues dropdown): granted people flip themselves in/out.
+alter table profiles add column if not exists dispatch_available boolean default true;

@@ -32,12 +32,14 @@ export default function QueueSelector() {
   const [open, setOpen] = useState(false)
   const [granted, setGranted] = useState([])            // granted outbound campaigns, priority order
   const [inboundAvail, setInboundAvail] = useState(false)
+  const [dispatchAvail, setDispatchAvail] = useState(true)
   const [activeCamps, setActiveCamps] = useState([])
   const ref = useRef(null)
 
   useEffect(() => {
     if (!profile?.id) return
     setInboundAvail(!!profile.inbound_available)
+    setDispatchAvail(profile.dispatch_available !== false)   // default on when granted
     setActiveCamps(Array.isArray(profile.active_campaign_ids) ? profile.active_campaign_ids : [])
     sb.from('csr_campaigns').select('campaign_id, priority').eq('profile_id', profile.id).eq('active', true)
       .then(({ data }) => setGranted((data || []).sort((a, b) => a.priority - b.priority)))
@@ -50,17 +52,26 @@ export default function QueueSelector() {
   }, [])
 
   const hasInbound = !!profile?.inbound_skill
+  const hasDispatch = !!profile?.dispatch_skill
   const campName = id => campaigns.find(c => c.id === id)?.name || 'Campaign'
   const grantedCampaigns = granted.map(g => ({ ...g, name: campName(g.campaign_id) }))
 
   // No skills granted → no control; the rep keeps the pre-skills lead pool.
-  if (!hasInbound && grantedCampaigns.length === 0) return null
+  if (!hasInbound && !hasDispatch && grantedCampaigns.length === 0) return null
 
   const toggleInbound = async () => {
     const next = !inboundAvail
     setInboundAvail(next)
     await sb.from('profiles').update({ inbound_available: next }).eq('id', profile.id)
     syncWorkerActivity(profile.id, profile.status)   // reflect into TaskRouter now
+    refreshProfile?.()
+  }
+  const toggleDispatch = async () => {
+    const next = !dispatchAvail
+    setDispatchAvail(next)
+    const { error } = await sb.from('profiles').update({ dispatch_available: next }).eq('id', profile.id)
+    if (error) { setDispatchAvail(!next); return }   // column not migrated yet
+    syncWorkerActivity(profile.id, profile.status)
     refreshProfile?.()
   }
   const toggleCamp = async (id) => {
@@ -71,6 +82,7 @@ export default function QueueSelector() {
   }
 
   const activeCount = (hasInbound && inboundAvail ? 1 : 0)
+    + (hasDispatch && dispatchAvail ? 1 : 0)
     + activeCamps.filter(id => grantedCampaigns.some(g => g.campaign_id === id)).length
 
   return (
@@ -84,6 +96,9 @@ export default function QueueSelector() {
       {open && (
         <div style={{ position:'absolute', top:'115%', left:0, zIndex:300, background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius)', boxShadow:'0 8px 28px rgba(0,0,0,.18)', minWidth:250, padding:8 }}>
           <div style={{ fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:.5, color:'var(--text-muted)', padding:'4px 8px 6px' }}>Go available for</div>
+          {hasDispatch && (
+            <Toggle label="Dispatch line" sub="Technician calls · (719) 259-2681" on={dispatchAvail} onClick={toggleDispatch} accent="#8B5CF6" />
+          )}
           {hasInbound && (
             <Toggle label="Inbound queue" sub="Live calls · always served first" on={inboundAvail} onClick={toggleInbound} accent="#16A34A" />
           )}

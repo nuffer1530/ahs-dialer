@@ -2833,7 +2833,7 @@ app.post('/api/twilio/worker-activity', async (req, res) => {
       profile_id: profileId,
       name: repName,
       inbound: (prof.inbound_skill ? (prof.inbound_available ? 1 : 0) : 1),
-      dispatch: prof.dispatch_skill ? 1 : 0,
+      dispatch: (prof.dispatch_skill && prof.dispatch_available !== false) ? 1 : 0,
     }
 
     if (!worker) {
