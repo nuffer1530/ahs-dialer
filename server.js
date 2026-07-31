@@ -6559,6 +6559,35 @@ app.get('/api/dispatch/live-board', async (req, res) => {
 let _briefBusy = false
 // Shared by the daily brief and Scenario AI: one signal-dense snapshot of
 // today's board, benches, capacity, and weather.
+// Job NOTES feed the analyzer: "customer wants Craig back to finish the
+// quote" lives only in the job's notes, and moving that job to another tech
+// kills the deal. ST has no batch notes endpoint, so fetch per job with
+// small concurrency, capped and cached per board day.
+const _jobNotesCache = new Map()   // day -> { expires, byJob: Map(jobId -> text) }
+async function fetchBoardJobNotes(day, jobIds) {
+  const hit = _jobNotesCache.get(day)
+  if (hit && hit.expires > Date.now()) return hit.byJob
+  const ids = [...new Set(jobIds)].filter(Boolean).slice(0, 80)
+  const byJob = new Map()
+  for (let i = 0; i < ids.length; i += 8) {
+    await Promise.all(ids.slice(i, i + 8).map(async (jid) => {
+      try {
+        const d = await stGet(`/jpm/v2/tenant/${ST_TENANT_ID}/jobs/${jid}/notes?pageSize=10`)
+        const txt = (d?.data || [])
+          .sort((a, b) => Date.parse(b.createdOn || 0) - Date.parse(a.createdOn || 0))
+          .slice(0, 3)
+          .map(n => stripHtml(n.text).replace(/\s+/g, ' ').trim())
+          .filter(Boolean)
+          .map(t => t.slice(0, 220))
+          .join(' | ')
+        if (txt) byJob.set(jid, txt.slice(0, 600))
+      } catch {}
+    }))
+  }
+  _jobNotesCache.set(day, { expires: Date.now() + 30 * 60_000, byJob })
+  return byJob
+}
+
 async function gatherDispatchFacts({ allCalls = false, day = 0 } = {}) {
   const hit = _liveBoardCache.get(day)
   const board = (hit && hit.expires > Date.now()) ? hit.data : await computeLiveBoardPayload(day)
@@ -6583,6 +6612,14 @@ async function gatherDispatchFacts({ allCalls = false, day = 0 } = {}) {
   }
   const dnvWin = (a, b) => { const x = dnv(a); if (!x) return null; const y = dnv(b); return y ? `${x}\u2013${y}` : x }
   const calls = board.calls || []
+  let jobNotes = new Map()
+  try {
+    jobNotes = await fetchBoardJobNotes(day, [
+      ...calls.map(c => c.jobId),
+      ...(board.unassigned || []).map(u => u.jobId),
+    ])
+  } catch (e) { console.warn('brief job notes:', e.message) }
+  const noteOf = (jid) => jobNotes.get(jid) || undefined
   const facts = {
     now: new Date().toLocaleString('en-US', { timeZone: 'America/Denver' }),
     analyzing: day === 0 ? 'TODAY' : `${board.date} (${day === 1 ? 'TOMORROW' : `${day} days out`}) — a FUTURE day being game-planned in advance`,
@@ -6591,6 +6628,7 @@ async function gatherDispatchFacts({ allCalls = false, day = 0 } = {}) {
     flagged: calls.filter(c => c.flags?.length).map(c => ({
       job: c.jobNumber, type: c.jobType, tech: c.techName, tier: c.techTier,
       window: dnvWin(c.windowStart, c.windowEnd), flag: c.flags[0]?.text, why: c.flags[0]?.why,
+      notes: noteOf(c.jobId),
     })),
     swaps: (board.swaps || []).map(x => ({ text: x.text, why: x.why, upside: x.upside })),
     unassignedTray: (board.unassigned || []).map(u => ({
@@ -6599,6 +6637,7 @@ async function gatherDispatchFacts({ allCalls = false, day = 0 } = {}) {
       opportunity: u.opportunity,
       why: (u.opportunityReasons || []).slice(0, 2).join(' · ') || undefined,
       canGoEarly: u.canGoEarly || undefined,
+      notes: noteOf(u.jobId),
     })),
     rescheduleCandidates: calls.filter(c => c.rescheduleCandidate)
       .map(c => ({ job: c.jobNumber, type: c.jobType, tech: c.techName, canGoEarly: c.canGoEarly || undefined })),
@@ -6627,8 +6666,22 @@ async function gatherDispatchFacts({ allCalls = false, day = 0 } = {}) {
       status: c.status, opportunity: c.opportunity ?? null,
       expectedRevenue: c.expectedRevenue ?? null,
       canGoEarly: c.canGoEarly || undefined,
+      notes: noteOf(c.jobId),
     }))
   }
+  // Dispatcher-entered tech notes (Tech Info tab) — capability and constraint
+  // facts like "only plumber with boiler experience". The prompts treat these
+  // as law when proposing assignments.
+  try {
+    const { data: tnRow } = await supabase.from('app_settings').select('value').eq('key', 'tech_notes').maybeSingle()
+    const tn = JSON.parse(tnRow?.value || '{}')
+    const nameOf = new Map((scores || []).map(r => [String(r.tech_id), r.tech_name]))
+    ;(board.techsToday || []).forEach(t => { if (t.name) nameOf.set(String(t.techId), t.name) })
+    const techNotes = Object.entries(tn)
+      .map(([id, note]) => ({ tech: nameOf.get(String(id)) || `Tech ${id}`, note: String(note || '').trim().slice(0, 300) }))
+      .filter(x => x.note)
+    if (techNotes.length) facts.techNotes = techNotes
+  } catch {}
   // Weather is demand context: a 98° day explains a full HVAC board and
   // argues for protecting no-cool slots. Failure to fetch never blocks the brief.
   try {
@@ -6668,6 +6721,8 @@ Every bench tech carries a 'today' field with their REAL availability right now.
 'unassignedTray' lists jobs sitting UNASSIGNED at the bottom of the dispatch board — booked customers with no tech attached yet. When a dispatcher says they "unassigned" jobs or asks what to keep, cut, or redistribute, they mean THESE — work the tray job by job, by opportunity score, and remember every tray job still holds its promised customer window.
 
 Arrival windows are PROMISES to customers — treat them as law too. Trading TECHS between two jobs is always window-safe (appointments stay put). Any move that changes a customer's window or day is only allowed when that job carries canGoEarly=true (the customer said the tech may come earlier) — and even then, say to call the customer first. Never propose shifting a customer's time otherwise; find the move that works within the promised windows instead.
+
+Job 'notes' are ground truth for relationship constraints. If a job's notes show the customer expects a specific tech back, a quote or deal is mid-flight with a tech, or a follow-up belongs to whoever ran the first visit — that job is LOCKED to that tech: never propose moving it to anyone else, and when it blocks an otherwise good move, say so. 'techNotes' are dispatcher-entered facts about technicians (skills, certifications, restrictions — e.g. "only plumber with boiler experience"). Treat them as law when proposing assignments or swaps: never suggest a tech for work their note rules out, and when a job needs a specialty only one tech has, that tech is the answer.
 
 Submit the analysis via the submit_brief tool. 3-6 actions, ordered by priority; empty arrays are fine. 'now' means act this hour; 'plan' means tomorrow/this week.`
 
@@ -7175,7 +7230,7 @@ You are given a JSON snapshot: every assignment on today's board (job number, ty
 
 Scenarios come in two shapes. DISRUPTIONS (a tech out sick, a truck down, a call running long): deal with the affected tech's specific assignments one by one — cover, swap, or push, cheapest move last. GOAL-SEEKING (sales are down, how do we squeeze more out of the board): hunt the profit levers in the data — high-opportunity calls sitting on red-tier techs that belong on green closers, strong closers burning slots on $0 maintenance/callbacks, unrouted swaps, reschedule candidates whose slots could take better calls, and tomorrow's capacity worth protecting. Name the specific moves and the dollar upside where computable.
 
-Rules: arrival windows are PROMISES — trading techs between jobs is window-safe (appointments stay put), but changing a customer's window or day is only allowed when that job carries canGoEarly=true (customer said the tech may come earlier), with an explicit 'call the customer to confirm' step; otherwise find moves that keep every customer inside their promised window, and when a cascade is needed, walk each hop and verify every touched customer stays in-window or gets a confirmation call. A tech whose 'today' says off / no time left / all-day install cannot take work. Protect high-opportunity calls (aging systems, replacements) with the strongest closers; low-opportunity and $0-collect calls are the ones to move or push to another day. If something genuinely can't be covered today, say which call moves to tomorrow and why it's the cheapest move. Submit via submit_plan: 3-8 ordered steps a dispatcher can execute top to bottom.`
+Rules: arrival windows are PROMISES — trading techs between jobs is window-safe (appointments stay put), but changing a customer's window or day is only allowed when that job carries canGoEarly=true (customer said the tech may come earlier), with an explicit 'call the customer to confirm' step; otherwise find moves that keep every customer inside their promised window, and when a cascade is needed, walk each hop and verify every touched customer stays in-window or gets a confirmation call. A tech whose 'today' says off / no time left / all-day install cannot take work. Job 'notes' are relationship law: notes showing the customer expects a specific tech back, or a deal mid-flight with a tech (quote to close, follow-up from a first visit), LOCK that job to that tech — never move it to someone else, and call the lock out when it constrains the plan. 'techNotes' are dispatcher-entered technician facts (skills, certifications, restrictions) — never propose a tech for work their note rules out, and route specialty work to the uniquely qualified tech. Protect high-opportunity calls (aging systems, replacements) with the strongest closers; low-opportunity and $0-collect calls are the ones to move or push to another day. If something genuinely can't be covered today, say which call moves to tomorrow and why it's the cheapest move. Submit via submit_plan: 3-8 ordered steps a dispatcher can execute top to bottom.`
 
     const r = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
