@@ -22,6 +22,21 @@ export function AuthProvider({ children }) {
     return () => subscription.unsubscribe()
   }, [])
 
+  // Keep OUR OWN profile row live. The status pill, queue toggles, and admin
+  // skill grants all write profiles — without this, useAuth().profile.status
+  // stays frozen at its login-time value, which silently disabled the
+  // auto-serve gate ("I'm Available but the dialer is blank").
+  useEffect(() => {
+    if (!user?.id) return
+    const ch = sb.channel(`own-profile-${user.id}`)
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'profiles', filter: `id=eq.${user.id}` },
+        (payload) => setProfile(prev => ({ ...(prev || {}), ...payload.new })))
+      .subscribe()
+    // Realtime websockets die silently on long-lived tabs — poll as a floor.
+    const t = setInterval(() => fetchProfile(user.id), 60_000)
+    return () => { sb.removeChannel(ch); clearInterval(t) }
+  }, [user?.id])
+
   const fetchProfile = async (userId) => {
     const { data } = await sb.from('profiles').select('*').eq('id', userId).single()
 

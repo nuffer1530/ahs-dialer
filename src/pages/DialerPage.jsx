@@ -892,6 +892,13 @@ export default function DialerPage() {
   }
   const closeTab = (id, e) => {
     if (e) e.stopPropagation()
+    // X means "stop serving me" — without this latch, auto-serve refills the
+    // tab instantly and the rep is trapped in an endless loop of leads.
+    setAutoServePaused(true)
+    // The auto-claim came with the auto-serve; closing un-dispositioned work
+    // hands the lead back to the pool instead of leaving it claimed forever.
+    const closing = contacts.find(c => c.id === id)
+    if (closing && closing.claimed_by === currentRep && !isDone(closing)) releaseContact(id)
     const idx = openTabIds.indexOf(id)
     const next = openTabIds.filter(x => x !== id)
     setOpenTabIds(next)
@@ -972,7 +979,12 @@ export default function DialerPage() {
   // Auto-progressive: when a skills-routed rep is free and nothing's loaded,
   // pull their next lead automatically and claim it. Inbound wins — never
   // advance while an inbound call is ringing or in progress.
+  const [autoServePaused, setAutoServePaused] = useState(false)
+  // Any deliberate re-engagement resumes the flow: flipping status or
+  // toggling a queue says "serve me again."
+  useEffect(() => { setAutoServePaused(false) }, [profile?.status, skillsMode, activeCampOrder])
   useEffect(() => {
+    if (autoServePaused) return
     if (incomingCall || callStatus) return
     if (profile?.status !== 'Available') return
     if (selectedContact && !isDone(selectedContact)) return
@@ -982,7 +994,7 @@ export default function DialerPage() {
     const next = filtered.find(x => !isDone(x) && x.status !== 'Max Attempts' && !x.claimed_by)
     if (next) navigateActiveTo(next.id)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [skillsMode, incomingCall, callStatus, profile?.status, selectedContact, nextSkillLead])
+  }, [autoServePaused, skillsMode, incomingCall, callStatus, profile?.status, selectedContact, nextSkillLead])
 
   const claimContact = async () => {
     if (!selectedContact || selectedContact.claimed_by) return
@@ -1588,12 +1600,22 @@ export default function DialerPage() {
                   <polyline points="9,32 19,32 25,17 33,47 40,26 45,32 55,32" fill="none" stroke="#ff751f" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round"/>
                 </svg>
               </div>
-              <div style={{ fontSize:17, fontWeight:700, color:'var(--text-primary)', marginTop:22 }}>Ready to dial</div>
-              <div style={{ fontSize:12.5, color:'var(--text-muted)', marginTop:6 }}>
-                {profile?.status === 'Available'
-                  ? 'Waiting for the next call or lead — work serves itself while you’re Available.'
-                  : 'Go Available and work will find you — inbound first, then your campaigns in priority order.'}
+              <div style={{ fontSize:17, fontWeight:700, color:'var(--text-primary)', marginTop:22 }}>
+                {autoServePaused ? 'Taking a breather' : 'Ready to dial'}
               </div>
+              <div style={{ fontSize:12.5, color:'var(--text-muted)', marginTop:6 }}>
+                {autoServePaused
+                  ? 'Auto-serve is paused because you closed the last contact.'
+                  : profile?.status === 'Available'
+                    ? 'Waiting for the next call or lead — work serves itself while you’re Available.'
+                    : 'Go Available and work will find you — inbound first, then your campaigns in priority order.'}
+              </div>
+              {autoServePaused && (
+                <button className="btn primary" style={{ padding:'11px 30px', fontSize:13, fontWeight:700, marginTop:20 }}
+                  onClick={() => setAutoServePaused(false)}>
+                  Serve me the next lead
+                </button>
+              )}
               <div style={{ marginTop:26, fontSize:11.5, color:'var(--text-muted)' }}>
                 Today: <b style={{ color:'var(--text-secondary)' }}>{myStats.calls} call{myStats.calls === 1 ? '' : 's'}</b>
                 {' · '}<b style={{ color:'var(--text-secondary)' }}>{myStats.booked} booked</b>

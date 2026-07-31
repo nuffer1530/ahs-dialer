@@ -256,6 +256,36 @@ function GlobalIncomingCall() {
   )
 }
 
+// "Work is waiting" nudge: a rep who goes Available anywhere but the dialer
+// never sees their auto-served lead — the serve engine only runs on the
+// dialer page. This pulls them back.
+function OutboundNudge({ agentStatus }) {
+  const { incomingCall, callStatus } = usePhone()
+  const { profile } = useAuth()
+  const navigate = useNavigate()
+  const location = useLocation()
+  if (location.pathname === '/' || location.pathname === '/warroom') return null
+  if (incomingCall || callStatus) return null
+  if (agentStatus !== 'Available') return null
+  if (!(Array.isArray(profile?.active_campaign_ids) && profile.active_campaign_ids.length)) return null
+  return (
+    <div onClick={() => navigate('/')} title="Open the dialer"
+      style={{ position:'fixed', top:16, right:20, zIndex:1900, display:'flex', alignItems:'center', gap:10,
+        padding:'10px 14px', background:'#111318', border:'1px solid rgba(255,117,31,.4)', borderRadius:12,
+        boxShadow:'0 10px 30px rgba(0,0,0,.35)', cursor:'pointer' }}>
+      <span className="pulse-mark" style={{ width:26, height:26, borderRadius:8, background:'#0b0c0f', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
+        <svg width="16" height="16" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+          <polyline points="9,32 19,32 25,17 33,47 40,26 45,32 55,32" fill="none" stroke="#ff751f" strokeWidth="7" strokeLinecap="round" strokeLinejoin="round"/>
+        </svg>
+      </span>
+      <div>
+        <div style={{ fontSize:12.5, fontWeight:800, color:'#ececee' }}>You're Available — outbound is waiting</div>
+        <div style={{ fontSize:10.5, color:'#9a9aa2' }}>Open the dialer to work your queue</div>
+      </div>
+    </div>
+  )
+}
+
 // The phone must be registered on every route, not just the dialer, so the
 // provider wraps the whole shell and the layout consumes it.
 export default function DialerLayout() {
@@ -853,6 +883,7 @@ function DialerLayoutInner() {
         </div>
         )}
         <GlobalIncomingCall />
+        <OutboundNudge agentStatus={agentStatus} />
         <ScheduleAlerts />
         <Routes>
           <Route path="/" element={<DialerPage />} />
