@@ -111,8 +111,9 @@ export default function AskAndi() {
         <button onClick={() => setOpen(true)} title="Ask Andi — policies, objections, how-tos"
           className="pulse-mark"
           style={{ position: 'fixed', bottom: 22, right: 22, zIndex: 1500, width: 52, height: 52, borderRadius: 16,
-            border: 'none', background: '#111318', cursor: 'pointer',
-            boxShadow: '0 8px 22px rgba(0,0,0,.32)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            border: '1px solid rgba(255,117,31,.25)', background: '#111318', cursor: 'pointer',
+            boxShadow: '0 10px 30px rgba(255,117,31,.35), 0 4px 14px rgba(0,0,0,.35)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <svg width="30" height="30" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
             <polyline points="9,32 19,32 25,17 33,47 40,26 45,32 55,32" fill="none" stroke="#ff751f" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round"/>
           </svg>
