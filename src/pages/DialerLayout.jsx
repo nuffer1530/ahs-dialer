@@ -576,11 +576,9 @@ function DialerLayoutInner() {
         <div style={{ display:'flex', alignItems:'center', justifyContent: navCollapsed ? 'center' : 'space-between', padding: navCollapsed ? '0' : '0 14px 0 16px', borderBottom:'1px solid var(--border)', flexShrink:0, height:53, minHeight:53, boxSizing:'border-box' }}>
           {!navCollapsed && (
             <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-              <svg width="24" height="24" viewBox="-2 0 112 100" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <circle cx="18" cy="50" r="10" fill="#ff751f"/>
-                <path d="M36 28 Q62 50 36 72" stroke="#ff751f" strokeWidth="8" fill="none" strokeLinecap="round"/>
-                <path d="M54 14 Q94 50 54 86" stroke="#ff751f" strokeWidth="8" fill="none" strokeLinecap="round"/>
-                <path d="M72 2 Q126 50 72 98" stroke="#ff751f" strokeWidth="8" fill="none" strokeLinecap="round"/>
+              <svg width="24" height="24" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+                <rect width="64" height="64" rx="14" fill="#111318"/>
+                <polyline points="9,32 19,32 25,17 33,47 40,26 45,32 55,32" fill="none" stroke="#ff751f" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round"/>
               </svg>
               <span style={{ fontSize:17, fontWeight:400, letterSpacing:1, color:'var(--text-primary)', fontFamily:'-apple-system, BlinkMacSystemFont, sans-serif' }}>andi</span>
             </div>
