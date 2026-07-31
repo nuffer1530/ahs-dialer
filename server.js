@@ -6584,6 +6584,20 @@ async function fetchBoardJobNotes(day, jobIds) {
       } catch {}
     }))
   }
+  // The booking SUMMARY is the other half — job 35317's embedded install
+  // lived there, not in notes. Batch-fetch and merge (summary first: it's
+  // what the CSR promised the customer).
+  try {
+    for (let i = 0; i < ids.length; i += 50) {
+      const d = await stGet(`/jpm/v2/tenant/${ST_TENANT_ID}/jobs?ids=${ids.slice(i, i + 50).join(',')}&pageSize=50`)
+      for (const j of (d?.data || [])) {
+        const sum = stripHtml(j.summary).replace(/\s+/g, ' ').trim().slice(0, 300)
+        if (!sum) continue
+        const existing = byJob.get(j.id)
+        byJob.set(j.id, existing ? `Booking: ${sum} | Notes: ${existing}`.slice(0, 700) : `Booking: ${sum}`)
+      }
+    }
+  } catch (e) { console.warn('board job summaries:', e.message) }
   _jobNotesCache.set(day, { expires: Date.now() + 30 * 60_000, byJob })
   return byJob
 }
