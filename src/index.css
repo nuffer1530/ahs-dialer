@@ -183,3 +183,16 @@ textarea.form-input { resize: vertical; min-height: 72px; }
   .data-table { min-width: 640px; }
   .card { overflow-x: auto; }
 }
+
+/* Dialer empty-state pulse: the logo's waveform draws itself in a slow
+   heartbeat loop while the rep is between calls. */
+@keyframes andi-draw-pulse {
+  0%   { stroke-dashoffset: 120; opacity: .25; }
+  45%  { stroke-dashoffset: 0;   opacity: 1; }
+  70%  { stroke-dashoffset: 0;   opacity: 1; }
+  100% { stroke-dashoffset: -120; opacity: .25; }
+}
+.pulse-mark polyline {
+  stroke-dasharray: 120;
+  animation: andi-draw-pulse 3.2s ease-in-out infinite;
+}

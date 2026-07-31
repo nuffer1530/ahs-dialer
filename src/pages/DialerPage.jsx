@@ -1566,26 +1566,23 @@ export default function DialerPage() {
             </div>
           )}
 
-          {/* EMPTY STATE */}
+          {/* EMPTY STATE — the pulse takes center stage (stat cards retired;
+              a whisper-quiet summary line keeps the numbers reachable). */}
           {!c && (
-            <div style={{ flex:1, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:20, padding:32 }}>
-              <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:12, width:'100%', maxWidth:560 }}>
-                {[
-                  { label:'Calls today', value:myStats.calls, color:'var(--accent)' },
-                  { label:'Booked today', value:myStats.booked, color:'var(--success)' },
-                  { label:'Booking rate', value:todayLogs.length ? Math.round((myStats.booked/todayLogs.length)*100)+'%' : '--', color:'#7C3AED' },
-                  { label:'Callbacks due', value:cbDue.length, color:'var(--tone-amber-tx)', click:()=>setFilter('callback') },
-                ].map(({ label, value, color, click }) => (
-                  <div key={label} onClick={click} style={{ background:'var(--surface)', border:'1px solid var(--border)', borderTop:`3px solid ${color}`, borderRadius:'var(--radius)', padding:'12px 14px', cursor: click ? 'pointer' : 'default' }}>
-                    <div style={{ fontSize:9, textTransform:'uppercase', letterSpacing:.6, color:'var(--text-muted)', marginBottom:4 }}>{label}</div>
-                    <div style={{ fontSize:22, fontWeight:700, color }}>{value}</div>
-                  </div>
-                ))}
+            <div style={{ flex:1, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', padding:32 }}>
+              <div className="pulse-mark" style={{ width:88, height:88, borderRadius:20, background:'#111318', display:'flex', alignItems:'center', justifyContent:'center',
+                boxShadow:'0 18px 44px rgba(255,117,31,.18), 0 4px 14px rgba(0,0,0,.25)' }}>
+                <svg width="56" height="56" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+                  <polyline points="9,32 19,32 25,17 33,47 40,26 45,32 55,32" fill="none" stroke="#ff751f" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
               </div>
-              <div style={{ textAlign:'center' }}>
-                <div style={{ fontSize:15, fontWeight:600, color:'var(--text-primary)', marginBottom:4 }}>Ready to dial</div>
-                <div style={{ fontSize:13, color:'var(--text-muted)', marginBottom:16 }}>Select a contact or hit Next pending</div>
-                <button className="btn primary" style={{ padding:'9px 28px', fontSize:14, fontWeight:600 }} onClick={navNextPending}>Next pending</button>
+              <div style={{ fontSize:17, fontWeight:700, color:'var(--text-primary)', marginTop:22 }}>Ready to dial</div>
+              <div style={{ fontSize:12.5, color:'var(--text-muted)', marginTop:6 }}>Select a contact or hit Next pending</div>
+              <button className="btn primary" style={{ padding:'11px 30px', fontSize:13, fontWeight:700, marginTop:20 }} onClick={navNextPending}>Next pending</button>
+              <div style={{ marginTop:26, fontSize:11.5, color:'var(--text-muted)' }}>
+                Today: <b style={{ color:'var(--text-secondary)' }}>{myStats.calls} call{myStats.calls === 1 ? '' : 's'}</b>
+                {' · '}<b style={{ color:'var(--text-secondary)' }}>{myStats.booked} booked</b>
+                {' · '}<b onClick={() => setFilter('callback')} style={{ color:'var(--text-secondary)', cursor:'pointer', textDecoration: cbDue.length ? 'underline' : 'none' }}>{cbDue.length} callback{cbDue.length === 1 ? '' : 's'} due</b>
               </div>
             </div>
           )}
