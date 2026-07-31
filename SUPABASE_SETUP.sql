@@ -594,3 +594,29 @@ alter table andi_bookings add column if not exists st_job_number text;
 -- hold the Whisper transcript and the heard/unheard state for the inbox.
 alter table call_recordings add column if not exists transcript text;
 alter table call_recordings add column if not exists heard_at timestamptz;
+
+-- ── Automated call evaluations (Jul 2026) ───────────────────────────────────
+-- One row per scored inbound call. scores holds per-criterion detail
+-- ({items:[{criterion,max,earned,applicable,evidence}], coaching_tip}).
+-- Monthly averages auto-fill scorecard_actuals.call_quality.
+create table if not exists call_evaluations (
+  id uuid primary key default gen_random_uuid(),
+  call_sid text unique,
+  recording_sid text,
+  contact_id uuid,
+  contact_name text,
+  phone text,
+  rep text,
+  profile_id uuid,
+  scores jsonb,
+  earned int,
+  possible int,
+  pct numeric,
+  summary text,
+  created_at timestamptz default now()
+);
+create index if not exists call_evaluations_profile_idx on call_evaluations (profile_id, created_at desc);
+create index if not exists call_evaluations_rep_idx on call_evaluations (rep, created_at desc);
+alter table call_evaluations enable row level security;
+drop policy if exists "authenticated read call_evaluations" on call_evaluations;
+create policy "authenticated read call_evaluations" on call_evaluations for select to authenticated using (true);

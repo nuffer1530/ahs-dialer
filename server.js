@@ -3342,6 +3342,11 @@ async function finalPassFromRest(callSid, e) {
     phone: e.phone || null,
     call_started_at: e.startedAt ? new Date(e.startedAt).toISOString() : new Date().toISOString(),
   }).catch(err => _wu(callSid, `registry: ${err.message}`))
+  // Automated QA — inbound conversations only.
+  if ((e.direction || 'inbound') === 'inbound') {
+    evaluateCall({ callSid, recordingSid: rec.sid, duration: dur, e })
+      .catch(err => console.warn('call eval:', err.message))
+  }
   // Attach to the rep's call log so inbound recordings show in the app too.
   if (e.contactId) {
     const { data: recentLog } = await supabase.from('call_logs').select('id')
@@ -3551,6 +3556,179 @@ async function sweepRecordings(hoursBack = 26) {
   }
   if (added) console.log(`Recording sweep: ${added} recording(s) backfilled`)
   return true
+}
+
+// ── 📋 AUTOMATED CALL EVALUATIONS (inbound only) ────────────────────────────
+// Every answered inbound call over the minimum length gets scored against the
+// admin-editable rubric (Settings → Call QA). The rubric is plain text the AI
+// re-parses on every call — edit it and the very next evaluation uses it.
+// N/A criteria are EXCLUDED from the denominator (a no-hold call scores out
+// of fewer points, per Brandyn). Monthly averages auto-fill the scorecard's
+// call_quality KPI.
+const EVAL_RUBRIC_DEFAULT = `ACCURACY & PROCEDURE (50%)
+1. Greeting used (5 pts) — Opened with the company greeting: "Thank you for calling Awesome Home Services, this is {name} speaking. How can we make your day Awesome?" Close variations acceptable; missing the Awesome greeting entirely is 0.
+2. Verified homeowner status (10 pts) — Asked whether we're speaking with the property owner ("Are you the homeowner?" / "Do you rent or own the property?").
+3. Verified address (5 pts) — Asked for or confirmed the service/property address.
+4. Verified email (5 pts) — Asked for or confirmed an email address ("Let me make sure I have the right email — is it …?").
+5. Asked age of home/unit (5 pts) — Asked how old the home or the equipment is.
+6. Confirmed best phone number (5 pts) — Asked for or confirmed the best number to reach the customer.
+7. Used/confirmed client name (5 pts) — Got the caller's full name or confirmed it, and used it during the call.
+8. Offered in-house plan (5 pts) — If the caller is not a member, offered the club membership plan. If they ARE a member, thanked them for being a member (that earns the points).
+9. Attempted/overcame objections (5 pts) — Acknowledged concerns and worked through them ("I understand your concern, here's how this works…"). N/A if the caller raised no objections.
+
+SOFT SKILLS & CUSTOMER EXPERIENCE (50%)
+10. Expressed empathy (10 pts) — Acknowledged the customer's situation ("I understand how frustrating that must be for you.").
+11. Minimal dead air/silence (5 pts) — Responded promptly; narrated pauses ("Let me check that for you") instead of going silent.
+12. Did not interrupt client (5 pts) — Let the caller explain fully before responding.
+13. Actively listened (5 pts) — Repeated or confirmed details back; referenced things the caller said earlier.
+14. Avoided slang/jargon (5 pts) — Professional language; no in-house acronyms or day-to-day slang.
+15. Friendly, polite, professional (5 pts) — Positive tone throughout, used the client's name, said please and thank you.
+16. Compliant & confident with company policies (5 pts) — Explained pricing, warranties, or fees per company rules; stayed calm and factual if questioned.
+17. Correct hold procedure (5 pts) — Asked permission before placing the caller on hold. N/A if no hold occurred.
+18. Checked in if hold over 3 minutes (5 pts) — After a long hold, thanked the caller and gave an update. N/A if no hold that long.`
+
+let _evalCfgCache = { at: 0, cfg: null }
+async function getEvalCfg() {
+  if (_evalCfgCache.cfg && Date.now() - _evalCfgCache.at < 60_000) return _evalCfgCache.cfg
+  let saved = null
+  try {
+    const { data } = await supabase.from('app_settings').select('value').eq('key', 'call_eval_rubric').maybeSingle()
+    saved = data?.value ? JSON.parse(data.value) : null
+  } catch {}
+  const cfg = {
+    enabled: saved?.enabled !== false,
+    minSeconds: Number(saved?.minSeconds) || 60,
+    rubric: (saved?.rubric || '').trim() || EVAL_RUBRIC_DEFAULT,
+  }
+  _evalCfgCache = { at: Date.now(), cfg }
+  return cfg
+}
+
+app.get('/api/admin/call-eval-config', async (req, res) => {
+  if (!(await requireAdmin(req, res))) return
+  res.json({ cfg: await getEvalCfg(), defaultRubric: EVAL_RUBRIC_DEFAULT })
+})
+app.post('/api/admin/call-eval-config', async (req, res) => {
+  if (!(await requireAdmin(req, res))) return
+  try {
+    const { rubric, minSeconds, enabled } = req.body || {}
+    const val = {
+      rubric: String(rubric || '').slice(0, 20000),
+      minSeconds: Math.max(0, parseInt(minSeconds) || 60),
+      enabled: enabled !== false,
+    }
+    const { error } = await supabase.from('app_settings').upsert({ key: 'call_eval_rubric', value: JSON.stringify(val) }, { onConflict: 'key' })
+    if (error) throw error
+    _evalCfgCache = { at: 0, cfg: null }   // next call scores against the new text
+    res.json({ ok: true, cfg: await getEvalCfg() })
+  } catch (err) { res.status(500).json({ error: err.message }) }
+})
+
+async function evaluateCall({ callSid, recordingSid, duration, e }) {
+  if (!ANTHROPIC_KEY) return
+  const cfg = await getEvalCfg()
+  if (!cfg.enabled) return
+  if (duration != null && duration < cfg.minSeconds) return
+  const transcript = (e.parts || []).map(p => `${p.who}: ${p.text}`).join('\n')
+  if (transcript.length < 200) return   // no real conversation captured
+
+  // Who took the call — call_tasks knows the agent AND their profile id.
+  let rep = e.repName || null, profileId = null
+  try {
+    const { data: ct } = await supabase.from('call_tasks')
+      .select('agent_name, agent_profile_id').eq('call_sid', callSid).maybeSingle()
+    if (ct) { rep = ct.agent_name || rep; profileId = ct.agent_profile_id || null }
+  } catch {}
+
+  const r = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: { 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+    body: JSON.stringify({
+      model: 'claude-sonnet-5', max_tokens: 2500,
+      system: `You are a strict but fair call-quality evaluator for Awesome Home Services' inbound CSRs. Score ONLY from the transcript. The rubric below is the single source of truth — parse its criteria and point values exactly as written (it changes over time; never assume a criterion that isn't in it). Transcription is imperfect: judge intent rather than exact wording, EXCEPT where the rubric demands specific phrasing (then accept close variations). Mark a criterion applicable=false when the situation never arose on this call (no hold → hold criteria N/A; no objections raised → objection criterion N/A). Partial credit is allowed where earned. Evidence must be a short quote from the transcript or a one-line reason.`,
+      tools: [{
+        name: 'submit_evaluation',
+        description: 'Submit the scored call evaluation',
+        input_schema: {
+          type: 'object',
+          properties: {
+            items: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  criterion: { type: 'string', description: 'Criterion name as written in the rubric' },
+                  max_points: { type: 'integer' },
+                  earned_points: { type: 'integer' },
+                  applicable: { type: 'boolean', description: 'false only when the situation never arose on this call' },
+                  evidence: { type: 'string', description: 'Short quote or one-line reason' },
+                },
+                required: ['criterion', 'max_points', 'earned_points', 'applicable', 'evidence'],
+              },
+            },
+            summary: { type: 'string', description: '2-3 sentence coaching summary addressed to the rep' },
+            coaching_tip: { type: 'string', description: 'The ONE thing to do better on the next call' },
+          },
+          required: ['items', 'summary', 'coaching_tip'],
+        },
+      }],
+      tool_choice: { type: 'tool', name: 'submit_evaluation' },
+      messages: [{ role: 'user', content: `RUBRIC:\n${cfg.rubric}\n\nCALL TRANSCRIPT (Rep = our CSR, Customer = the caller):\n${transcript.slice(0, 24000)}` }],
+    }),
+  })
+  if (!r.ok) { console.warn('call eval api:', r.status, (await r.text()).slice(0, 160)); return }
+  const out = (await r.json())?.content?.find(c => c.type === 'tool_use')?.input
+  if (!out?.items?.length) return
+
+  const items = out.items.map(i => ({
+    criterion: String(i.criterion || '').slice(0, 120),
+    max: Math.max(0, parseInt(i.max_points) || 0),
+    earned: Math.max(0, Math.min(parseInt(i.earned_points) || 0, parseInt(i.max_points) || 0)),
+    applicable: i.applicable !== false,
+    evidence: String(i.evidence || '').slice(0, 300),
+  }))
+  const appl = items.filter(i => i.applicable)
+  const possible = appl.reduce((s, i) => s + i.max, 0)
+  const earned = appl.reduce((s, i) => s + i.earned, 0)
+  if (possible <= 0) return
+  const pct = Math.round((earned / possible) * 1000) / 10
+
+  const { error } = await supabase.from('call_evaluations').insert({
+    call_sid: callSid, recording_sid: recordingSid || null,
+    contact_id: e.contactId || null, contact_name: e.contactName || null,
+    phone: e.phone || null, rep, profile_id: profileId,
+    scores: { items, coaching_tip: out.coaching_tip || null },
+    earned, possible, pct, summary: out.summary || null,
+  })
+  if (error) { console.warn('call eval save:', error.message); return }
+  console.log(`Call eval: ${rep || 'unknown'} scored ${pct}% (${earned}/${possible}) on ${callSid}`)
+  if (profileId) syncEvalScorecard(profileId).catch(err => console.warn('eval scorecard sync:', err.message))
+}
+
+// Roll this month's average into the scorecard's call_quality KPI. The KPI
+// becomes automated: manual edits to call_quality get overwritten by this.
+async function syncEvalScorecard(profileId) {
+  const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Denver', year: 'numeric', month: '2-digit',
+  }).formatToParts(new Date()).map(x => [x.type, x.value]))
+  const month = `${p.year}-${p.month}-01`
+  const monthStartUtc = new Date(Date.UTC(+p.year, +p.month - 1, 1, 7)).toISOString()
+  const { data: rows } = await supabase.from('call_evaluations')
+    .select('pct').eq('profile_id', profileId).gte('created_at', monthStartUtc).limit(1000)
+  if (!rows?.length) return
+  const avg = Math.round(rows.reduce((s, r) => s + Number(r.pct || 0), 0) / rows.length)
+  const { data: existing } = await supabase.from('scorecard_actuals')
+    .select('id').eq('profile_id', profileId).eq('month', month).maybeSingle()
+  if (existing) {
+    await supabase.from('scorecard_actuals').update({ call_quality: avg, updated_at: new Date().toISOString() }).eq('id', existing.id)
+  } else {
+    let weights = null
+    try {
+      const { data: w } = await supabase.from('app_settings').select('value').eq('key', 'scorecard_weights').maybeSingle()
+      weights = w?.value ? JSON.parse(w.value) : null
+    } catch {}
+    await supabase.from('scorecard_actuals').insert({ profile_id: profileId, month, call_quality: avg, weights })
+  }
 }
 
 app.post('/api/twilio/recording', async (req, res) => {

@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { sb } from '../lib/supabase'
 import { useAuth } from '../lib/AuthContext'
+import EvalModal, { ScoreChip } from '../components/EvalModal'
 
 // Recordings tab — reads the call_recordings registry via /api/recordings.
 // Every inbound and outbound customer call lands there at recording time;
@@ -90,12 +91,25 @@ export default function RecordingsPage() {
         const r = await fetch(`/api/recordings?${params}`)
         const d = await r.json()
         if (!r.ok) throw new Error(d.error || 'Could not load recordings')
-        setRecordings(d.data || [])
+        const rows = d.data || []
+        setRecordings(rows)
+        // Attach QA evaluations by call sid (inbound calls get scored).
+        const sids = rows.map(x => x.call_sid).filter(Boolean)
+        if (sids.length) {
+          const { data: evs } = await sb.from('call_evaluations')
+            .select('id, call_sid, rep, contact_name, pct, earned, possible, summary, scores, created_at')
+            .in('call_sid', sids.slice(0, 300))
+          if (evs?.length) {
+            const bySid = new Map(evs.map(e => [e.call_sid, e]))
+            setRecordings(prev => prev.map(x => ({ ...x, evaluation: bySid.get(x.call_sid) || null })))
+          }
+        }
       } catch (e) { setLoadErr(e.message); setRecordings([]) }
       setLoading(false)
     }
     if (profile) load()
   }, [profile, isAdmin, repFilter, dirFilter, bookedOnly, dateRange])
+  const [openEval, setOpenEval] = useState(null)
 
   // Audio player controls — everything plays through the authenticated proxy.
   const recSid = (rec) => rec.recording_sid || rec.url?.split('/').pop()?.replace('.mp3', '')
@@ -292,6 +306,11 @@ export default function RecordingsPage() {
                           {rec.outcome}
                         </span>
                       )}
+                      {rec.evaluation && (
+                        <span onClick={e => e.stopPropagation()}>
+                          <ScoreChip pct={rec.evaluation.pct} onClick={() => setOpenEval(rec.evaluation)} />
+                        </span>
+                      )}
                       {rec.st_job_id && (
                         <button onClick={(e) => { e.stopPropagation(); window.open(`https://go.servicetitan.com/#/Job/Index/${rec.st_job_id}`, '_blank') }}
                           title="Open this job in ServiceTitan"
@@ -347,6 +366,8 @@ export default function RecordingsPage() {
           })}
         </div>
       )}
+
+      {openEval && <EvalModal evalRow={openEval} onClose={() => setOpenEval(null)} />}
     </div>
   )
 }

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { sb } from '../lib/supabase'
 import TimeOffTab from '../components/TimeOffTab'
+import CallEvalsTab from '../components/CallEvalsTab'
 import PtoRequestModal from '../components/PtoRequestModal'
 import ShiftSwapModal from '../components/ShiftSwapModal'
 import SwapRequests from '../components/SwapRequests'
@@ -118,7 +119,7 @@ export default function MyPage() {
   const { profile, isAdmin } = useAuth()
   const isMobile = useIsMobile()
   const [searchParams, setSearchParams] = useSearchParams()
-  const VALID_TABS = ['my-schedule', 'team-schedule', 'stats', 'commissions', 'scorecard', 'time-off']
+  const VALID_TABS = ['my-schedule', 'team-schedule', 'stats', 'commissions', 'scorecard', 'call-evals', 'time-off']
   const initialTab = VALID_TABS.includes(searchParams.get('tab')) ? searchParams.get('tab') : 'my-schedule'
   const [tab, setTab] = useState(initialTab)
   // Click a day on My Schedule -> request time off for it.
@@ -374,6 +375,7 @@ export default function MyPage() {
     { id: 'stats',         label: 'My Stats' },
     { id: 'commissions',   label: 'Commissions' },
     { id: 'scorecard',     label: 'Scorecard' },
+    { id: 'call-evals',    label: 'Call Evals' },
     { id: 'time-off',      label: 'Time Off' },
   ]
 
@@ -574,6 +576,7 @@ export default function MyPage() {
           <>
             {/* MY SCHEDULE */}
             {tab === 'time-off' && <TimeOffTab profile={profile} />}
+            {tab === 'call-evals' && <CallEvalsTab profile={profile} isAdmin={isAdmin} />}
             {tab === 'my-schedule' && (
               <div>
                 <div style={{ display:'flex', alignItems:'center', marginBottom:10, gap:10, flexWrap:'wrap' }}>
