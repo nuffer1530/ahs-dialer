@@ -329,7 +329,8 @@ export default function DialerPage() {
   // ── Hold & transfer ──────────────────────────────────────────────────────
   const [holdOn, setHoldOn] = useState(false)
   const [ctlBusy, setCtlBusy] = useState(false)
-  const [callChannel, setCallChannel] = useState(null)   // marketing channel from ST
+  const [callChannel, setCallChannel] = useState(null)   // { name, id } marketing channel from ST
+  const autoCampRef = useRef('')                          // campaign WE auto-picked — rep edits win
   const [xferMode, setXferMode] = useState('warm')
   const [xferNum, setXferNum] = useState('')
   const [xferState, setXferState] = useState(null)   // { status, label, mode }
@@ -393,6 +394,21 @@ export default function DialerPage() {
     if (callStatus !== 'connected') { setHoldOn(false); setXferState(null); setXferOpen(false); setCtlBusy(false) }
     if (!callStatus) setCallChannel(null)
   }, [callStatus])
+
+  // The caller dialed a tracking number — pre-select that campaign in the
+  // booking panel. Same discipline as the BU/job-type auto-fill: only while
+  // the rep hasn't picked one themselves.
+  useEffect(() => {
+    if (!callChannel || !stCampaigns.length) return
+    const match = (callChannel.id && stCampaigns.find(c => String(c.id) === String(callChannel.id)))
+      || stCampaigns.find(c => (c.name || '').trim().toLowerCase() === callChannel.name.trim().toLowerCase())
+    if (!match) return
+    if (!stCampaignId || String(stCampaignId) === autoCampRef.current) {
+      setStCampaignId(String(match.id))
+      autoCampRef.current = String(match.id)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [callChannel, stCampaigns])
 
   // Skills-based outbound routing. When the rep has selected active campaigns
   // (via the Queues selector), Next / auto-advance serve leads from those
@@ -517,7 +533,7 @@ export default function DialerPage() {
     setSelectedBU(''); setSelectedJobType(''); setStCampaignId(null)
     setAvailability([]); setSelectedSlot(null); setAvailError(null)
     setShowAvailModal(false); setAvailWeekOffset(0); setGuidance(null)
-    setBookSuggest(null); autoBookRef.current = { bu: '', jt: '' }
+    setBookSuggest(null); autoBookRef.current = { bu: '', jt: '' }; autoCampRef.current = ''
   }
   useEffect(() => {
     setNotesVal(''); setBookingResult(null); setSelectedOutcome(null)
@@ -1003,7 +1019,8 @@ export default function DialerPage() {
         if (d?.suggest) setBookSuggest(prev =>
           (prev?.at === d.suggest.at && prev?.forContact === cid) ? prev : { ...d.suggest, forContact: cid })
         // Marketing channel the caller came in on (ST tracking-number lookup).
-        if (d?.channel) setCallChannel(d.channel)
+        if (d?.channel) setCallChannel(prev =>
+          (prev?.name === d.channel ? prev : { name: d.channel, id: d.channelId || null }))
         // 🎧 Live coach: the customer said a trigger phrase — pop Ask Andi
         // with the play. Once per tip, and only during the live call.
         if (live) for (const tip of (d?.coach || [])) {
@@ -1435,7 +1452,7 @@ export default function DialerPage() {
             {callChannel && (
               <span title="Marketing channel this caller dialed (from ServiceTitan)"
                 style={{ fontSize:9.5, fontWeight:800, padding:'1px 7px', borderRadius:99, background:'var(--tone-purple-bg)', color:'var(--tone-purple-tx)', border:'1px solid var(--tone-purple-bd)' }}>
-                {callChannel}
+                {callChannel.name}
               </span>
             )}
             {callStatus==='connected' && !callIsTeammate && (
@@ -1970,6 +1987,11 @@ export default function DialerPage() {
                                 </div>
                               )}
                               <SearchSelect label="Marketing campaign" value={String(stCampaignId||'')} onChange={v => setStCampaignId(v)} options={campOptions} placeholder="Select campaign..." />
+                              {stCampaignId && String(stCampaignId) === autoCampRef.current && (
+                                <div style={{ fontSize:10.5, color:'var(--text-muted)', marginTop:-4 }}>
+                                  Set from the number they dialed — {callChannel?.name || 'tracking line'}.
+                                </div>
+                              )}
 
                               {/* Sell a membership into ServiceTitan. Only types an admin has
                                   mapped to a sale task are offered — the rest can't be sold. */}

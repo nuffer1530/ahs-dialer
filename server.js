@@ -3445,12 +3445,12 @@ app.get('/api/call-notes/latest', (req, res) => {
     if (match(s) && (!suggest || s.at > suggest.at)) suggest = s
   }
   // Which marketing channel did they call in on? (ST telecom lookup.)
-  let channel = null
+  let channel = null, channelId = null
   if (phone) {
     const ch = _mktChannel.get(phone)
-    if (ch && Date.now() - ch.at < 3600_000) channel = ch.name
+    if (ch && Date.now() - ch.at < 3600_000) { channel = ch.name; channelId = ch.id || null }
   }
-  res.json({ ...(best ? { text: best.text, at: best.at } : {}), coach, ...(suggest ? { suggest } : {}), ...(channel ? { channel } : {}) })
+  res.json({ ...(best ? { text: best.text, at: best.at } : {}), coach, ...(suggest ? { suggest } : {}), ...(channel ? { channel, channelId } : {}) })
 })
 
 // ── Call recording registry ─────────────────────────────────────────────────
@@ -4256,7 +4256,7 @@ async function lookupSTChannel(fromNumber) {
         .filter(c => c.direction === 'Inbound' && last10(c.from) === p10 && c.campaign?.name)
         .sort((a, b) => Date.parse(b.receivedOn || 0) - Date.parse(a.receivedOn || 0))[0]
       if (hit) {
-        _mktChannel.set(p10, { name: hit.campaign.name, at: Date.now() })
+        _mktChannel.set(p10, { name: hit.campaign.name, id: hit.campaign.id || null, at: Date.now() })
         if (_mktChannel.size > 200) { for (const [k, v] of _mktChannel) if (Date.now() - v.at > 3600_000) _mktChannel.delete(k) }
         return
       }
