@@ -4658,6 +4658,10 @@ app.post('/api/twilio/inbound', async (req, res) => {
   // ── Dispatch line: techs calling in. Always open (no hours/holiday check),
   // routed to the dispatchers-only queue, voicemail after a short wait.
   if (isDispatch) {
+    // Leading pause: forwarded calls (Dialpad) finish bridging a beat after
+    // Twilio answers — TTS that starts instantly gets its first words clipped
+    // ("the greeting has broken up").
+    twiml.pause({ length: 1 })
     if (!TWILIO_WORKFLOW_SID) {
       routingSay(twiml, cfg, cfg.dispatchLine.voicemail)
       twiml.record({ maxLength: cfg.voicemail.maxSec || 120, playBeep: true, action: `${appUrl}/api/twilio/routing/voicemail-done` })
@@ -4668,6 +4672,9 @@ app.post('/api/twilio/inbound', async (req, res) => {
     res.type('text/xml')
     return res.send(twiml.toString())
   }
+
+  // Same leading pause for the main line — forwarded legs clip instant TTS.
+  twiml.pause({ length: 1 })
 
   // Closed — emergency override, holiday, or outside hours.
   if (!state.open) {

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useData } from '../lib/DataContext'
 import { useAuth } from '../lib/AuthContext'
 import { usePhone } from '../lib/PhoneContext'
@@ -64,6 +64,12 @@ export default function LivePage() {
   // 👁 Live Call X-Ray (admins): read any in-progress call's transcript live.
   const [xrayCalls, setXrayCalls] = useState([])
   const [watchSid, setWatchSid] = useState(null)
+  // Transcript auto-scroll: follow the live tail ONLY while the reader is at
+  // the bottom — scrolling up to reread must not get yanked back down by the
+  // 2.5s poll (Brittany's report).
+  const txBodyRef = useRef(null)
+  const txStickRef = useRef(true)
+  useEffect(() => { txStickRef.current = true }, [watchSid])
   const [watchTx, setWatchTx] = useState(null)
   const authedGet = async (path) => {
     const { data: { session } } = await sb.auth.getSession()
@@ -366,7 +372,14 @@ export default function LivePage() {
               <button className="btn sm" onClick={() => setWatchSid(null)}>Close</button>
             </div>
             <div style={{ flex:1, overflowY:'auto', padding:16, display:'flex', flexDirection:'column', gap:8 }}
-              ref={el => { if (el) el.scrollTop = el.scrollHeight }}>
+              ref={el => {
+                txBodyRef.current = el
+                if (el && txStickRef.current) el.scrollTop = el.scrollHeight
+              }}
+              onScroll={e => {
+                const el = e.currentTarget
+                txStickRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 60
+              }}>
               {(!watchTx || watchTx.lines.length === 0) && (
                 <div style={{ color:'var(--text-muted)', fontSize:13, textAlign:'center', padding:'40px 0' }}>
                   {watchTx?.active === false ? 'This call has ended.' : 'Waiting for the first words…'}
