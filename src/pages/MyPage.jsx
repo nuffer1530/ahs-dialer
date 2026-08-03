@@ -108,11 +108,13 @@ function getRating(kpi, value, thresholds) {
 }
 
 const RATING_LABELS = { 4: 'Exceeds', 3: 'Meets', 2: 'Needs Improvement', 1: 'Poor Performance' }
+// Theme-aware tone vars — hardcoded light-mode pastels made the dark-mode
+// scorecard an unreadable gray mush.
 const RATING_COLORS = {
-  4: { bg: '#d4edda', text: '#2E7D52', border: '#2E7D52' },
-  3: { bg: '#d4edda', text: '#2E7D52', border: '#2E7D52' },
-  2: { bg: 'var(--tone-amber-bg)', text: '#8A5A00', border: '#8A5A00' },
-  1: { bg: 'var(--tone-red-bg)', text: '#B5341A', border: '#B5341A' },
+  4: { bg: 'var(--tone-green-bg)', text: 'var(--tone-green-tx)', border: 'var(--tone-green-bd)' },
+  3: { bg: 'var(--tone-green-bg)', text: 'var(--tone-green-tx)', border: 'var(--tone-green-bd)' },
+  2: { bg: 'var(--tone-amber-bg)', text: 'var(--tone-amber-tx)', border: 'var(--tone-amber-bd)' },
+  1: { bg: 'var(--tone-red-bg)', text: 'var(--tone-red-tx)', border: 'var(--tone-red-bd)' },
 }
 
 export default function MyPage() {
@@ -1058,7 +1060,11 @@ export default function MyPage() {
                           const cs = RATING_COLORS[colRating]
                           const isMyRating = rating === colRating
                           return (
-                            <div key={ci} style={{ padding:'14px 8px', textAlign:'center', fontSize:12, fontWeight: isMyRating ? 700 : 400, background: isMyRating ? cs.bg : cs.bg + '44', color: cs.text, borderLeft:'1px solid var(--border)', display:'flex', alignItems:'center', justifyContent:'center' }}>
+                            <div key={ci} style={{ padding:'14px 8px', textAlign:'center', fontSize:12, fontWeight: isMyRating ? 700 : 400,
+                              background: isMyRating ? cs.bg : 'transparent',
+                              color: isMyRating ? cs.text : 'var(--text-muted)',
+                              boxShadow: isMyRating ? `inset 0 0 0 1.5px ${cs.border}` : 'none',
+                              borderLeft:'1px solid var(--border)', display:'flex', alignItems:'center', justifyContent:'center' }}>
                               {val}{isMyRating && ' *'}
                             </div>
                           )

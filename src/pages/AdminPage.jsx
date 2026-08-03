@@ -1221,10 +1221,10 @@ export default function AdminPage() {
   }
   const SC_RATING_LABELS = { 4:'Exceeds', 3:'Meets', 2:'Needs Improvement', 1:'Poor Performance' }
   const SC_RATING_COLORS = {
-    4: { bg:'#d4edda', text:'#2E7D52' },
-    3: { bg:'#d4edda', text:'#2E7D52' },
-    2: { bg:'#FBF3E0', text:'#8A5A00' },
-    1: { bg:'#FBEEEA', text:'#B5341A' },
+    4: { bg:'var(--tone-green-bg)', text:'var(--tone-green-tx)', border:'var(--tone-green-bd)' },
+    3: { bg:'var(--tone-green-bg)', text:'var(--tone-green-tx)', border:'var(--tone-green-bd)' },
+    2: { bg:'var(--tone-amber-bg)', text:'var(--tone-amber-tx)', border:'var(--tone-amber-bd)' },
+    1: { bg:'var(--tone-red-bg)', text:'var(--tone-red-tx)', border:'var(--tone-red-bd)' },
   }
 
   // Load scorecard data when profile/month changes
@@ -2390,8 +2390,10 @@ export default function AdminPage() {
                           const isMyRating = rating === r
                           const val = thr[key]
                           return (
-                            <div key={key} style={{ padding:'8px', background: isMyRating ? cs.bg : cs.bg + '33', borderLeft:'1px solid var(--border)', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:4 }}>
-                              <div style={{ fontSize:9, fontWeight:700, textTransform:'uppercase', letterSpacing:.4, color: cs.text, opacity:.7 }}>{label}</div>
+                            <div key={key} style={{ padding:'8px', background: isMyRating ? cs.bg : 'transparent',
+                              boxShadow: isMyRating ? `inset 0 0 0 1.5px ${cs.border}` : 'none',
+                              borderLeft:'1px solid var(--border)', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:4 }}>
+                              <div style={{ fontSize:9, fontWeight:700, textTransform:'uppercase', letterSpacing:.4, color: isMyRating ? cs.text : 'var(--text-muted)' }}>{label}</div>
                               <input type="number"
                                 value={val}
                                 onChange={e => setScThresholds(prev => ({ ...prev, [kpi.id]: { ...prev[kpi.id], [key]: parseFloat(e.target.value) || 0 } }))}
@@ -2409,10 +2411,12 @@ export default function AdminPage() {
                             ? `>${thr.improvement}${unit || ''}`
                             : `<${thr.improvement}${unit || ''}`
                           return (
-                            <div style={{ padding:'8px', background: isMyRating ? cs.bg : cs.bg + '33', borderLeft:'1px solid var(--border)', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:4 }}>
-                              <div style={{ fontSize:9, fontWeight:700, textTransform:'uppercase', letterSpacing:.4, color: cs.text, opacity:.7 }}>Poor</div>
-                              <div style={{ fontSize:12, fontWeight: isMyRating ? 700 : 500, color: cs.text }}>{poorVal}</div>
-                              <div style={{ fontSize:9, color: cs.text, opacity:.6 }}>auto</div>
+                            <div style={{ padding:'8px', background: isMyRating ? cs.bg : 'transparent',
+                              boxShadow: isMyRating ? `inset 0 0 0 1.5px ${cs.border}` : 'none',
+                              borderLeft:'1px solid var(--border)', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:4 }}>
+                              <div style={{ fontSize:9, fontWeight:700, textTransform:'uppercase', letterSpacing:.4, color: isMyRating ? cs.text : 'var(--text-muted)' }}>Poor</div>
+                              <div style={{ fontSize:12, fontWeight: isMyRating ? 700 : 500, color: isMyRating ? cs.text : 'var(--text-secondary)' }}>{poorVal}</div>
+                              <div style={{ fontSize:9, color: 'var(--text-muted)' }}>auto</div>
                             </div>
                           )
                         })()}
