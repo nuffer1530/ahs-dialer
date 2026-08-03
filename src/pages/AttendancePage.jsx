@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { sb } from '../lib/supabase'
-import { confirmDlg } from '../lib/dialogs'
+import { confirmDlg, toast } from '../lib/dialogs'
 import { useAuth } from '../lib/AuthContext'
 import { ATTENDANCE_DEFAULTS, invalidateOpsConfig, loadOpsConfig } from '../lib/opsConfig'
 import Modal from '../components/Modal'
@@ -196,7 +196,12 @@ export default function AttendancePage() {
     const load = async () => {
       const [{ data: p }, { data: s }, { data: ev }, { data: t }, { data: ap }] = await Promise.all([
         sb.from('profiles').select('id, name, email, avatar').eq('active', true).order('name'),
-        sb.from('schedules').select('*').gte('date', (() => { const d = new Date(); d.setDate(d.getDate()-30); return d.toISOString().split('T')[0] })()).lte('date', (() => { const d = new Date(); d.setDate(d.getDate()+30); return d.toISOString().split('T')[0] })()),
+        // Window must COVER THE VISIBLE WEEK — the old fixed today±30 threw
+        // away weeks navigated past it: shifts saved fine, then vanished from
+        // the grid, and re-adds died on the invisible row's unique constraint.
+        sb.from('schedules').select('*')
+          .gte('date', (() => { const d = new Date(); d.setDate(d.getDate()-30); const s = d.toISOString().split('T')[0]; return s < weekDates[0] ? s : weekDates[0] })())
+          .lte('date', (() => { const d = new Date(); d.setDate(d.getDate()+30); const s = d.toISOString().split('T')[0]; return s > weekDates[6] ? s : weekDates[6] })()),
         sb.from('status_events').select('*').gte('started_at', weekDates[0] + 'T00:00:00').lte('started_at', weekDates[6] + 'T23:59:59'),
         sb.from('shift_templates').select('*').order('name'),
         sb.from('attendance_points').select('*').gte('date', new Date().getFullYear() + '-01-01').order('date', { ascending: false }),
@@ -210,7 +215,9 @@ export default function AttendancePage() {
   const reloadSchedules = async () => {
     const from = new Date(); from.setDate(from.getDate() - 30)
     const to = new Date(); to.setDate(to.getDate() + 30)
-    const { data } = await sb.from('schedules').select('*').gte('date', toYMD(from)).lte('date', toYMD(to))
+    const lo = toYMD(from) < weekDates[0] ? toYMD(from) : weekDates[0]
+    const hi = toYMD(to) > weekDates[6] ? toYMD(to) : weekDates[6]
+    const { data } = await sb.from('schedules').select('*').gte('date', lo).lte('date', hi)
     setSchedules(data || [])
   }
 
@@ -387,23 +394,14 @@ export default function AttendancePage() {
       lunch_duration: isOff ? null : editData.lunch_duration || null,
       template_color: editData.template_color || null,
     }
-    const existing = getSchedule(profileId, date)
-    let result
+    // UPSERT on (profile_id,date): the grid's state can miss rows that exist
+    // (other tabs, other admins), and a blind insert dies silently on the
+    // unique constraint. Errors surface as a toast instead of vanishing.
     const draft = { ...payload, published_at: null }   // any hand edit reverts to draft
-    if (existing) {
-      let { data, error } = await sb.from('schedules').update(draft).eq('id', existing.id).select().single()
-      if (error) ({ data } = await sb.from('schedules').update(payload).eq('id', existing.id).select().single())
-      result = data
-    } else {
-      let { data, error } = await sb.from('schedules').insert(draft).select().single()
-      if (error) ({ data } = await sb.from('schedules').insert(payload).select().single())
-      result = data
-    }
-    if (result) setSchedules(prev => existing ? prev.map(s => s.id === existing.id ? result : s) : [...prev, result])
-    // Also refresh wide window so Graphical tab stays in sync
-    const from = new Date(); from.setDate(from.getDate() - 30)
-    const to = new Date(); to.setDate(to.getDate() + 30)
-    sb.from('schedules').select('*').gte('date', from.toISOString().split('T')[0]).lte('date', to.toISOString().split('T')[0]).then(({ data }) => setSchedules(data || []))
+    let { error } = await sb.from('schedules').upsert(draft, { onConflict: 'profile_id,date' })
+    if (error) ({ error } = await sb.from('schedules').upsert(payload, { onConflict: 'profile_id,date' }))
+    if (error) toast(`Could not save the shift: ${error.message}`)
+    await reloadSchedules()
     setSaving(false); setEditCell(null)
   }
 
@@ -613,15 +611,18 @@ export default function AttendancePage() {
                             backgroundImage: 'repeating-linear-gradient(45deg, rgba(127,127,127,.22) 0 5px, transparent 5px 11px)',
                             borderStyle: 'dashed',
                           } : {}
+                          // Shift cells wear their template's color (Brittany:
+                          // "colors do not populate for shifts").
+                          const tc = !isOff ? sched?.template_color : null
                           return (
                             <td key={date} style={{ padding:6, borderLeft:'1px solid var(--border)', background: isToday ? 'var(--accent-bg)' : 'transparent', verticalAlign:'top' }}>
                               {sched && !isOff ? (
                                 <div onClick={() => isAdmin && openEdit(p.id, date)}
                                   title={isDraft ? 'Draft — not published or emailed yet' : undefined}
-                                  style={{ padding:'8px 10px', borderRadius:'var(--radius)', background:'var(--success-bg)', border:'1px solid var(--success)', cursor: isAdmin ? 'pointer' : 'default', transition:'all .1s', ...hatch }}
+                                  style={{ padding:'8px 10px', borderRadius:'var(--radius)', background: tc ? `${tc}26` : 'var(--success-bg)', border:`1px solid ${tc || 'var(--success)'}`, cursor: isAdmin ? 'pointer' : 'default', transition:'all .1s', ...hatch }}
                                   onMouseEnter={e => { if(isAdmin) e.currentTarget.style.opacity='.8' }}
                                   onMouseLeave={e => e.currentTarget.style.opacity='1'}>
-                                  <div style={{ fontSize:11, fontWeight:600, color:'var(--success)' }}>{fmt(sched.shift_start)} – {fmt(sched.shift_end)}</div>
+                                  <div style={{ fontSize:11, fontWeight:600, color: tc || 'var(--success)' }}>{fmt(sched.shift_start)} – {fmt(sched.shift_end)}</div>
                                   {sched.lunch_start && <div style={{ fontSize:10, color:'var(--text-muted)', marginTop:2 }}>Lunch {fmt(sched.lunch_start)}</div>}
                                   {isDraft && <div style={{ fontSize:9, fontWeight:800, letterSpacing:.5, color:'var(--text-muted)', marginTop:2 }}>DRAFT</div>}
                                 </div>
