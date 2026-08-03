@@ -207,8 +207,11 @@ export default function WarRoomPage() {
   const queueColor = queued.length === 0 ? C.green : longestWait > 60 ? C.red : C.amber
 
   return (
-    <div ref={rootRef} style={{ minHeight:'100vh', height:'100vh', background:C.bg, color:C.text,
+    <div ref={rootRef} style={{ minHeight:'calc(100vh / 1.08)', height:'calc(100vh / 1.08)', background:C.bg, color:C.text,
       fontFamily:'-apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif',
+      // Readable-from-across-the-floor: everything 8% bigger, height
+      // compensated so the board still exactly fills the TV.
+      zoom: 1.08,
       padding:20, display:'flex', flexDirection:'column', gap:14, overflow:'hidden', boxSizing:'border-box' }}>
 
       {/* Floor ticker — one strip that sweeps the admin-set messages across the
