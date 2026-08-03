@@ -3788,6 +3788,65 @@ async function evaluateCall({ callSid, recordingSid, duration, e }) {
   if (profileId) syncEvalScorecard(profileId).catch(err => console.warn('eval scorecard sync:', err.message))
 }
 
+// ── Scorecard auto-fill ─────────────────────────────────────────────────────
+// Attendance (points log) and Call Quality (eval averages) already populate
+// themselves; this fills the remaining KPIs hourly so nobody hand-enters
+// numbers: booked_calls = real ST jobs booked through Andi (andi_bookings),
+// booking_pct = inbound calls that produced a booking ÷ inbound answered,
+// memberships = ST-attributed membership sales (commission rows). These
+// columns are automated now — manual edits get overwritten.
+async function syncScorecardActuals() {
+  const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Denver', year: 'numeric', month: '2-digit',
+  }).formatToParts(new Date()).map(x => [x.type, x.value]))
+  const month = `${p.year}-${p.month}-01`
+  const startIso = new Date(Date.UTC(+p.year, +p.month - 1, 1, 7)).toISOString()
+
+  const [{ data: profs }, { data: bks }, { data: tasks }, { data: recs }, { data: mems }] = await Promise.all([
+    supabase.from('profiles').select('id, name, email, role').eq('active', true),
+    supabase.from('andi_bookings').select('profile_id').gte('booked_at', startIso).limit(5000),
+    supabase.from('call_tasks').select('agent_profile_id').eq('state', 'answered').gte('answered_at', startIso).limit(5000),
+    supabase.from('call_recordings').select('rep').eq('direction', 'inbound').not('st_job_id', 'is', null).gte('call_started_at', startIso).limit(5000),
+    supabase.from('commissions').select('profile_id').not('st_membership_id', 'is', null).gte('earned_at', startIso).limit(5000),
+  ])
+
+  const count = (rows, key) => {
+    const m = new Map()
+    for (const r of (rows || [])) { const k = r[key]; if (k) m.set(String(k), (m.get(String(k)) || 0) + 1) }
+    return m
+  }
+  const booked = count(bks, 'profile_id')
+  const answered = count(tasks, 'agent_profile_id')
+  const inbBookedByName = count(recs, 'rep')
+  const memCount = count(mems, 'profile_id')
+
+  let weights = null
+  try {
+    const { data: w } = await supabase.from('app_settings').select('value').eq('key', 'scorecard_weights').maybeSingle()
+    weights = w?.value ? JSON.parse(w.value) : null
+  } catch {}
+
+  for (const prof of (profs || [])) {
+    const pid = String(prof.id)
+    const name = prof.name || prof.email
+    const bookedN = booked.get(pid) || 0
+    const answeredN = answered.get(pid) || 0
+    const inbBookedN = inbBookedByName.get(name) || 0
+    const memsN = memCount.get(pid) || 0
+    if (!bookedN && !answeredN && !memsN) continue   // no phone activity, nothing to write
+    const patch = {
+      booked_calls: bookedN,
+      memberships: memsN,
+      booking_pct: answeredN > 0 ? Math.round(Math.min(inbBookedN, answeredN) / answeredN * 100) : null,
+      updated_at: new Date().toISOString(),
+    }
+    const { data: existing } = await supabase.from('scorecard_actuals')
+      .select('id').eq('profile_id', prof.id).eq('month', month).maybeSingle()
+    if (existing) await supabase.from('scorecard_actuals').update(patch).eq('id', existing.id)
+    else await supabase.from('scorecard_actuals').insert({ profile_id: prof.id, month, ...patch, weights })
+  }
+}
+
 // Roll this month's average into the scorecard's call_quality KPI. The KPI
 // becomes automated: manual edits to call_quality get overwritten by this.
 async function syncEvalScorecard(profileId) {
@@ -8454,6 +8513,13 @@ if (LEAD_POLL_SECONDS > 0) {
 } else {
   console.log('Lead inbox poll disabled (LEAD_POLL_SECONDS=0)')
 }
+
+// Scorecard KPIs fill themselves hourly (booked calls, booking %, memberships).
+setTimeout(() => {
+  syncScorecardActuals().catch(e => console.warn('scorecard sync:', e.message))
+  setInterval(() => syncScorecardActuals().catch(e => console.warn('scorecard sync:', e.message)), 60 * 60_000)
+}, 120_000)
+console.log('Scorecard actuals sync hourly')
 
 // Recording registry sweep: a week-deep backfill that keeps retrying until
 // the call_recordings table exists (the migration may land after this boots),
