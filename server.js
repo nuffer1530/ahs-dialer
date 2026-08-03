@@ -3796,18 +3796,28 @@ async function evaluateCall({ callSid, recordingSid, duration, e }) {
 // memberships = ST-attributed membership sales (commission rows). These
 // columns are automated now — manual edits get overwritten.
 async function syncScorecardActuals() {
+  // Current month AND the previous one: early-month reviews look at last
+  // month, and late-arriving data (membership commissions sync after
+  // month-end) must keep landing there.
+  await syncScorecardMonth(0)
+  await syncScorecardMonth(1)
+}
+async function syncScorecardMonth(monthsBack) {
   const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', {
     timeZone: 'America/Denver', year: 'numeric', month: '2-digit',
   }).formatToParts(new Date()).map(x => [x.type, x.value]))
-  const month = `${p.year}-${p.month}-01`
-  const startIso = new Date(Date.UTC(+p.year, +p.month - 1, 1, 7)).toISOString()
+  let y = +p.year, m = +p.month - monthsBack
+  while (m < 1) { m += 12; y -= 1 }
+  const month = `${y}-${String(m).padStart(2, '0')}-01`
+  const startIso = new Date(Date.UTC(y, m - 1, 1, 7)).toISOString()
+  const endIso = new Date(Date.UTC(y, m, 1, 7)).toISOString()
 
   const [{ data: profs }, { data: bks }, { data: tasks }, { data: recs }, { data: mems }] = await Promise.all([
     supabase.from('profiles').select('id, name, email, role').eq('active', true),
-    supabase.from('andi_bookings').select('profile_id').gte('booked_at', startIso).limit(5000),
-    supabase.from('call_tasks').select('agent_profile_id').eq('state', 'answered').gte('answered_at', startIso).limit(5000),
-    supabase.from('call_recordings').select('rep').eq('direction', 'inbound').not('st_job_id', 'is', null).gte('call_started_at', startIso).limit(5000),
-    supabase.from('commissions').select('profile_id').not('st_membership_id', 'is', null).gte('earned_at', startIso).limit(5000),
+    supabase.from('andi_bookings').select('profile_id').gte('booked_at', startIso).lt('booked_at', endIso).limit(5000),
+    supabase.from('call_tasks').select('agent_profile_id').eq('state', 'answered').gte('answered_at', startIso).lt('answered_at', endIso).limit(5000),
+    supabase.from('call_recordings').select('rep').eq('direction', 'inbound').not('st_job_id', 'is', null).gte('call_started_at', startIso).lt('call_started_at', endIso).limit(5000),
+    supabase.from('commissions').select('profile_id').not('st_membership_id', 'is', null).gte('earned_at', startIso).lt('earned_at', endIso).limit(5000),
   ])
 
   const count = (rows, key) => {
