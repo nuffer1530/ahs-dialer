@@ -33,6 +33,7 @@ export function PhoneProvider({ children }) {
   // wrap-up, so the live AI (notes, booking, coach) follows the call, not the
   // tab that happened to be open when it started.
   const [callMeta, setCallMeta] = useState(null)   // { contactId, phone }
+  const [netWarning, setNetWarning] = useState(null)   // SDK quality warning while live
   const [callDuration, setCallDuration] = useState(0)
 
   // Set when a call is accepted. DialerPage watches this and resolves it into a
@@ -131,8 +132,19 @@ export function PhoneProvider({ children }) {
   const wireCallEvents = useCallback((call) => {
     call.on('ringing', () => setCallStatus('ringing'))
     call.on('accept', () => { setCallStatus('connected'); startCallTimer() })
+    // Live network-quality telemetry: the SDK raises warnings (high-jitter,
+    // high-packet-loss, high-rtt, low-mos) when THIS browser's connection
+    // degrades. Shown as a chip and breadcrumbed to the server so "calls are
+    // choppy" becomes "whose network, when, and how bad."
+    call.on('warning', (name) => {
+      setNetWarning(name)
+      console.warn('call quality warning:', name)
+      fetch('/api/twilio/net-warning', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rep: currentRep, warning: name }) }).catch(() => {})
+    })
+    call.on('warning-cleared', () => setNetWarning(null))
     call.on('disconnect', () => {
-      callRef.current = null; setCallStatus('ended'); stopCallTimer()
+      callRef.current = null; setCallStatus('ended'); stopCallTimer(); setNetWarning(null)
       setTimeout(() => setCallStatus(null), 3000); enterWrapUp()
     })
     call.on('error', () => {
@@ -375,7 +387,7 @@ export function PhoneProvider({ children }) {
 
   return (
     <PhoneContext.Provider value={{
-      twilioReady, incomingCall, callStatus, callDuration, callDirection, callIsTeammate, callMeta,
+      twilioReady, incomingCall, callStatus, callDuration, callDirection, callIsTeammate, callMeta, netWarning,
       makeCall, callTeammate, acceptIncoming, rejectIncoming, hangUp, cancelAutoWrap, startInteraction, endInteraction,
       pendingInbound, setPendingInbound,
       hasActiveCall: () => !!callRef.current,

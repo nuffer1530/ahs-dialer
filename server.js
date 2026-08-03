@@ -3464,7 +3464,7 @@ app.get('/api/live-calls/:sid/transcript', async (req, res) => {
 app.get('/api/call-notes/health', (req, res) => {
   res.json({
     openaiKey: Boolean(OPENAI_KEY), anthropicKey: Boolean(ANTHROPIC_KEY), uptimeSec: Math.round(process.uptime()),
-    liveCalls: _liveTx.size, drafts: _callNotes.size, whisper: _wuTrace, inboundTrace: _fwdTrace,
+    liveCalls: _liveTx.size, drafts: _callNotes.size, whisper: _wuTrace, inboundTrace: _fwdTrace, netTrace: _netTrace,
     entries: [..._callNotes.entries()].map(([sid, v]) => ({
       sid: sid.slice(-8), contactId: v.contactId, phone: v.phone || null,
       chars: v.text.length, ageSec: Math.round((Date.now() - v.at) / 1000),
@@ -5165,6 +5165,15 @@ app.post('/api/twilio/routing/after-dial', (req, res) => {
   res.type('text/xml')
   if (ctl?.pendingConf) return res.send(confTwiml(ctl.confName, false))
   res.send('<?xml version="1.0" encoding="UTF-8"?><Response/>')
+})
+
+// Browser-side call quality warnings — "calls are choppy" becomes whose
+// network, when, and what kind. Last 50 in memory, visible in health.
+const _netTrace = []
+app.post('/api/twilio/net-warning', (req, res) => {
+  res.json({ ok: true })
+  _netTrace.unshift({ at: new Date().toISOString(), rep: String(req.body?.rep || '').slice(0, 60), warning: String(req.body?.warning || '').slice(0, 60) })
+  if (_netTrace.length > 50) _netTrace.pop()
 })
 
 // Mark a voicemail heard (clears the New badge for everyone).

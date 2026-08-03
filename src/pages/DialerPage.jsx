@@ -324,7 +324,7 @@ export default function DialerPage() {
   const {
     twilioReady, callStatus, callDuration, incomingCall,
     makeCall: phoneMakeCall, callTeammate, hangUp, startInteraction, endInteraction, getCallSid, callIsTeammate, callMeta,
-    pendingInbound, setPendingInbound, callDirection,
+    pendingInbound, setPendingInbound, callDirection, netWarning,
   } = usePhone()
 
   // ── Hold & transfer ──────────────────────────────────────────────────────
@@ -1472,6 +1472,12 @@ export default function DialerPage() {
             {callStatus==='calling' ? 'Dialing...' : callStatus==='ringing' ? 'Ringing...' : callStatus==='connected' ? fmtDuration(callDuration) : 'Ended'}
             {holdOn && (
               <span style={{ fontSize:9.5, fontWeight:800, padding:'1px 6px', borderRadius:99, background:'var(--tone-amber-bg)', color:'var(--tone-amber-tx)', border:'1px solid var(--tone-amber-bd)' }}>ON HOLD</span>
+            )}
+            {netWarning && (
+              <span title={`Your connection is degrading this call (${netWarning}) — check Wi-Fi or switch to wired`}
+                style={{ fontSize:9.5, fontWeight:800, padding:'1px 6px', borderRadius:99, background:'var(--tone-red-bg)', color:'var(--tone-red-tx)', border:'1px solid var(--tone-red-bd)' }}>
+                WEAK NETWORK
+              </span>
             )}
             {callChannel && (
               <span title="Marketing channel this caller dialed (from ServiceTitan)"
