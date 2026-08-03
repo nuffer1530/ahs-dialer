@@ -3722,6 +3722,17 @@ async function evaluateCall({ callSid, recordingSid, duration, e }) {
     if (ct) { rep = ct.agent_name || rep; profileId = ct.agent_profile_id || null }
   } catch {}
 
+  // Who called — inbound callers usually aren't in Andi's contacts (that's
+  // the outbound list), but ServiceTitan knows them. Same lookup the
+  // screen-pop uses, so evals stop reading "Unknown caller".
+  let contactName = e.contactName || null
+  if (!contactName && e.phone) {
+    try {
+      const cust = await stGet(`/crm/v2/tenant/${ST_TENANT_ID}/customers?phone=${last10(e.phone)}&pageSize=1`)
+      contactName = cust?.data?.[0]?.name || null
+    } catch {}
+  }
+
   const r = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: { 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
@@ -3796,7 +3807,7 @@ async function evaluateCall({ callSid, recordingSid, duration, e }) {
 
   const { error } = await supabase.from('call_evaluations').insert({
     call_sid: callSid, recording_sid: recordingSid || null,
-    contact_id: e.contactId || null, contact_name: e.contactName || null,
+    contact_id: e.contactId || null, contact_name: contactName,
     phone: e.phone || null, rep, profile_id: profileId,
     scores: { items, sections, coaching_tip: out.coaching_tip || null },
     earned, possible, pct, summary: out.summary || null,

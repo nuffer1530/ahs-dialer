@@ -40,7 +40,7 @@ export default function EvalModal({ evalRow, onClose }) {
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 14, fontWeight: 800 }}>Call Evaluation — {evalRow.rep || 'Unknown rep'}</div>
             <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 2 }}>
-              {evalRow.contact_name || 'Unknown caller'} · {when} · {evalRow.earned}/{evalRow.possible} pts
+              {evalRow.contact_name || (evalRow.phone ? `(${String(evalRow.phone).slice(0,3)}) ${String(evalRow.phone).slice(3,6)}-${String(evalRow.phone).slice(6)}` : 'Unknown caller')} · {when} · {evalRow.earned}/{evalRow.possible} pts
             </div>
           </div>
           <button onClick={onClose} style={{ border: 'none', background: 'var(--surface-2)', width: 28, height: 28, borderRadius: 8, cursor: 'pointer', fontSize: 15, color: 'var(--text-secondary)', flexShrink: 0 }}>×</button>

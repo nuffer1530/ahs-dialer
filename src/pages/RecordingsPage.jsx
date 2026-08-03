@@ -98,7 +98,7 @@ export default function RecordingsPage() {
         const sids = rows.map(x => x.call_sid).filter(Boolean)
         if (sids.length) {
           const { data: evs } = await sb.from('call_evaluations')
-            .select('id, call_sid, rep, contact_name, pct, earned, possible, summary, scores, created_at')
+            .select('id, call_sid, rep, contact_name, phone, pct, earned, possible, summary, scores, created_at')
             .in('call_sid', sids.slice(0, 300))
           if (evs?.length) {
             const bySid = new Map(evs.map(e => [e.call_sid, e]))

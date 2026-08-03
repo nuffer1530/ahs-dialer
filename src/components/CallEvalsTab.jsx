@@ -82,7 +82,7 @@ export default function CallEvalsTab({ profile, isAdmin }) {
               <ScoreChip pct={r.pct} size="md" />
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 13, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {r.contact_name || 'Unknown caller'}
+                  {r.contact_name || (r.phone ? `(${String(r.phone).slice(0,3)}) ${String(r.phone).slice(3,6)}-${String(r.phone).slice(6)}` : 'Unknown caller')}
                   {isAdmin && <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}> · {r.rep || '—'}</span>}
                 </div>
                 {r.summary && (
