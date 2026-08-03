@@ -1307,6 +1307,24 @@ app.post('/api/st/book', async (req, res) => {
           contact_id: contactId || null,
         }, { onConflict: 'st_job_id' })
         if (bkErr) await supabase.from('andi_bookings').upsert(bookingRow, { onConflict: 'st_job_id' })
+
+        // Link the booking back onto the call recording. saveRecording links
+        // forward (booking-then-hangup), but wrap-up bookings land AFTER the
+        // recording row exists — backfill the most recent unlinked recording
+        // for this contact.
+        if (contactId) {
+          try {
+            const { data: recRows } = await supabase.from('call_recordings')
+              .select('id').eq('contact_id', contactId).is('st_job_id', null)
+              .gte('call_started_at', new Date(Date.now() - 4 * 3600_000).toISOString())
+              .order('call_started_at', { ascending: false }).limit(1)
+            if (recRows?.length) {
+              await supabase.from('call_recordings')
+                .update({ st_job_id: jobId, st_job_number: jobNumber ? String(jobNumber) : null })
+                .eq('id', recRows[0].id)
+            }
+          } catch (e) { console.warn('recording booking link:', e.message) }
+        }
       }
     } catch (e) { console.warn('andi_bookings insert:', e.message) }
 
