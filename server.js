@@ -3613,7 +3613,7 @@ const DEFAULT_EVAL_SECTIONS = [
   {
     name: 'Soft Skills & Customer Experience', weight: 50,
     items: [
-      { question: 'Expressed empathy', points: 10, guidance: 'Acknowledged the customer\'s situation ("I understand how frustrating that must be for you.").' },
+      { question: 'Expressed empathy', points: 10, guidance: 'Acknowledged the customer\'s situation or feelings in words at least once ("I understand how frustrating that must be", "Sorry you\'re dealing with no AC in this heat"). ONE genuine, well-placed acknowledgment earns full points — it does not need repeating. N/A when the call is purely routine and the customer expressed no problem, frustration, or worry (quick reschedule, simple confirmation, routine maintenance booking with a happy customer).' },
       { question: 'Minimal dead air/silence', points: 5, guidance: 'Responded promptly; narrated pauses ("Let me check that for you") instead of going silent.' },
       { question: 'Did not interrupt client', points: 5, guidance: 'Let the caller explain fully before responding.' },
       { question: 'Actively listened', points: 5, guidance: 'Repeated or confirmed details back; referenced things the caller said earlier.' },
@@ -3738,7 +3738,7 @@ async function evaluateCall({ callSid, recordingSid, duration, e }) {
         },
       }],
       tool_choice: { type: 'tool', name: 'submit_evaluation' },
-      messages: [{ role: 'user', content: `RUBRIC:\n${evalRubricText(cfg.sections)}\n\nCALL TRANSCRIPT (Rep = our CSR, Customer = the caller):\n${transcript.slice(0, 24000)}` }],
+      messages: [{ role: 'user', content: `RUBRIC:\n${evalRubricText(cfg.sections)}\n\nTHE CSR BEING EVALUATED IS: ${rep || 'unknown'}. Address the summary and coaching tip to them by exactly this name — never guess or use any other name, even if other names come up in the call.\n\nCALL TRANSCRIPT (Rep = our CSR, Customer = the caller):\n${transcript.slice(0, 24000)}` }],
     }),
   })
   if (!r.ok) { console.warn('call eval api:', r.status, (await r.text()).slice(0, 160)); return }
