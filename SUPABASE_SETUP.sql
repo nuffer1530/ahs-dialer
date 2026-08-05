@@ -702,3 +702,45 @@ select tablename, rowsecurity
 from pg_tables
 where schemaname = 'public'
 order by rowsecurity, tablename;
+-- ═══════════════════════════════════════════════════════════════════════════
+-- SECURITY FIX — ROUND 2. Run this whole block at once.
+--
+-- Round 1 enabled RLS, but four tables carry LEGACY policies from early setup
+-- that grant access to everyone — those override the new rules. This sweeps
+-- every policy off those four and recreates only the logged-in-users one.
+-- Also locks the three remaining rowsecurity=false tables from your results.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- 1. Sweep ALL policies off the four still-open tables (names vary, so this
+--    drops whatever exists rather than guessing).
+do $$
+declare p record;
+begin
+  for p in
+    select policyname, tablename from pg_policies
+    where schemaname = 'public'
+      and tablename in ('profiles','shift_templates','app_settings','scorecard_actuals')
+  loop
+    execute format('drop policy %I on %I', p.policyname, p.tablename);
+  end loop;
+end $$;
+
+-- 2. Recreate exactly one rule each: full access for logged-in users only.
+create policy "auth all profiles" on profiles
+  for all to authenticated using (true) with check (true);
+create policy "auth all app_settings" on app_settings
+  for all to authenticated using (true) with check (true);
+create policy "auth all shift_templates" on shift_templates
+  for all to authenticated using (true) with check (true);
+create policy "auth all scorecard_actuals" on scorecard_actuals
+  for all to authenticated using (true) with check (true);
+
+-- 3. The three stragglers from your verification output (server-only tables:
+--    RLS on, no policies = only the service key reaches them).
+alter table andi_membership_sales enable row level security;
+alter table commission_events     enable row level security;
+alter table commission_settings   enable row level security;
+
+-- 4. Verify: should return ZERO rows.
+select tablename from pg_tables
+where schemaname = 'public' and rowsecurity = false;
