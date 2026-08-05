@@ -6771,6 +6771,45 @@ async function fetchBoardJobNotes(day, jobIds) {
   return byJob
 }
 
+// ── Sales projection: sold-so-far (ST sold estimates today, the same number
+// the leadership sheet uses) + expected value of every opportunity still
+// live on the board (per-tech EV/opp from the batting-order stats).
+async function computeSalesProjection() {
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Denver' }).format(new Date())
+  const soldRows = await stPageAll(pg => `/sales/v2/tenant/${ST_TENANT_ID}/estimates?soldAfter=${today}T06:00:00Z&pageSize=500&page=${pg}`, 3000)
+  const tradeOf = (n) => { n = (n || '').toLowerCase(); return n.includes('hvac') ? 'HVAC' : n.includes('plumb') ? 'Plumbing' : n.includes('electric') ? 'Electrical' : n.includes('garage') ? 'Garage Doors' : null }
+  let soldTotal = 0, soldCount = 0
+  const soldByTrade = {}
+  for (const e of soldRows) {
+    if ((e.status || {}).name !== 'Sold') continue
+    const t = tradeOf(e.businessUnitName)
+    if (!t) continue
+    const amt = Number(e.subtotal) || 0
+    soldTotal += amt; soldCount++
+    soldByTrade[t] = Math.round((soldByTrade[t] || 0) + amt)
+  }
+  const hit = _liveBoardCache.get(0)
+  const board = (hit && hit.expires > Date.now()) ? hit.data : await computeLiveBoardPayload(0)
+  let remainingExpected = 0, remainingOpps = 0
+  for (const c of (board.calls || [])) {
+    if (c.outcome) continue                    // already ran and resolved
+    if (!c.expectedRevenue) continue
+    remainingExpected += Number(c.expectedRevenue) || 0
+    remainingOpps++
+  }
+  const trayHighOpps = (board.unassigned || []).filter(u => (u.opportunity || 0) >= 3).length
+  return {
+    date: today,
+    soldSoFar: Math.round(soldTotal), soldCount, soldByTrade,
+    remainingOpps, remainingExpected: Math.round(remainingExpected), trayHighOpps,
+    projectedDayEnd: Math.round(soldTotal + remainingExpected),
+  }
+}
+app.get('/api/board/sales-projection', async (req, res) => {
+  try { res.json(await computeSalesProjection()) }
+  catch (err) { res.status(500).json({ error: err.message }) }
+})
+
 async function gatherDispatchFacts({ allCalls = false, day = 0 } = {}) {
   const hit = _liveBoardCache.get(day)
   const board = (hit && hit.expires > Date.now()) ? hit.data : await computeLiveBoardPayload(day)
@@ -6808,6 +6847,9 @@ async function gatherDispatchFacts({ allCalls = false, day = 0 } = {}) {
     analyzing: day === 0 ? 'TODAY' : `${board.date} (${day === 1 ? 'TOMORROW' : `${day} days out`}) — a FUTURE day being game-planned in advance`,
     counts: board.counts,
     revenue: board.dayRevenue,
+    // Today only: sold-estimates-so-far + projected day-end sales (sold +
+    // EV of remaining opportunities) — speak to it in the huddle read.
+    ...(day === 0 ? await computeSalesProjection().then(sp => ({ salesProjection: sp })).catch(() => ({})) : {}),
     flagged: calls.filter(c => c.flags?.length).map(c => ({
       job: c.jobNumber, type: c.jobType, tech: c.techName, tier: c.techTier,
       window: dnvWin(c.windowStart, c.windowEnd), flag: c.flags[0]?.text, why: c.flags[0]?.why,
