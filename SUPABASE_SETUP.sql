@@ -636,3 +636,69 @@ alter table schedules add column if not exists published_at timestamptz;
 update schedules set published_at = now() where published_at is null;
 -- Dispatch self-toggle (Queues dropdown): granted people flip themselves in/out.
 alter table profiles add column if not exists dispatch_available boolean default true;
+-- ═══════════════════════════════════════════════════════════════════════════
+-- SECURITY FIX — close public access to 15 tables (Supabase alert, Aug 2026)
+-- Run this whole block at once in the Supabase SQL editor.
+--
+-- What it does: turns Row-Level Security ON everywhere it's missing, then
+-- grants access ONLY to logged-in users ("authenticated"), matching how the
+-- app actually uses each table. The server keeps full access — it uses the
+-- service key, which bypasses RLS by design. Nothing in the app should
+-- change; anonymous strangers lose all access.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- ── 1. Tables ONLY the server touches → no browser access at all ───────────
+alter table kb_articles       enable row level security;
+alter table kb_revisions      enable row level security;
+alter table assistant_logs    enable row level security;
+alter table customer_briefs   enable row level security;
+alter table andi_bookings     enable row level security;
+alter table csr_st_users      enable row level security;
+alter table live_call_state   enable row level security;
+alter table sync_state        enable row level security;
+-- (no policies = only the service key can reach them)
+
+-- ── 2. Tables the app READS from the browser ───────────────────────────────
+alter table job_type_spiffs        enable row level security;
+alter table membership_type_spiffs enable row level security;
+
+drop policy if exists "auth read job_type_spiffs" on job_type_spiffs;
+create policy "auth read job_type_spiffs" on job_type_spiffs
+  for select to authenticated using (true);
+
+drop policy if exists "auth read membership_type_spiffs" on membership_type_spiffs;
+create policy "auth read membership_type_spiffs" on membership_type_spiffs
+  for select to authenticated using (true);
+
+-- ── 3. Tables the app READS AND WRITES from the browser ────────────────────
+alter table profiles           enable row level security;
+alter table app_settings       enable row level security;
+alter table commissions        enable row level security;
+alter table scorecard_actuals  enable row level security;
+alter table shift_templates    enable row level security;
+
+drop policy if exists "auth all profiles" on profiles;
+create policy "auth all profiles" on profiles
+  for all to authenticated using (true) with check (true);
+
+drop policy if exists "auth all app_settings" on app_settings;
+create policy "auth all app_settings" on app_settings
+  for all to authenticated using (true) with check (true);
+
+drop policy if exists "auth all commissions" on commissions;
+create policy "auth all commissions" on commissions
+  for all to authenticated using (true) with check (true);
+
+drop policy if exists "auth all scorecard_actuals" on scorecard_actuals;
+create policy "auth all scorecard_actuals" on scorecard_actuals
+  for all to authenticated using (true) with check (true);
+
+drop policy if exists "auth all shift_templates" on shift_templates;
+create policy "auth all shift_templates" on shift_templates
+  for all to authenticated using (true) with check (true);
+
+-- ── 4. Verify: every table below should now say rowsecurity = true ─────────
+select tablename, rowsecurity
+from pg_tables
+where schemaname = 'public'
+order by rowsecurity, tablename;
