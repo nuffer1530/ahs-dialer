@@ -237,11 +237,15 @@ export default function LeadershipPage() {
 
           {/* Headline cards */}
           <div style={{ display: 'flex', gap: 10, marginTop: 16, flexWrap: 'wrap' }}>
-            <Card label="Wk Sales" value={money(f.totals.sales)} sub={`goal ${money(f.totals.salesGoal)}`} tone={f.totals.hitGoal ? 'good' : 'bad'} />
-            <Card label="Wk Revenue" value={money(f.totals.revenue)} sub={`${money(f.totals.unpaid)} uncollected`} />
+            <Card label="Wk Sales" value={money(f.totals.sales)}
+              sub={`goal ${money(f.totals.salesGoal)}${f.compare?.yoyWeek?.salesDelta != null ? ` · YoY ${f.compare.yoyWeek.salesDelta >= 0 ? '+' : ''}${pct(f.compare.yoyWeek.salesDelta)}` : ''}`}
+              tone={f.totals.hitGoal ? 'good' : 'bad'} />
+            <Card label="Wk Revenue" value={money(f.totals.revenue)}
+              sub={`${money(f.totals.unpaid)} uncollected${f.compare?.yoyWeek?.revenueDelta != null ? ` · YoY ${f.compare.yoyWeek.revenueDelta >= 0 ? '+' : ''}${pct(f.compare.yoyWeek.revenueDelta)}` : ''}`} />
             <Card label="Close Rate" value={pct(f.totals.closeRate)} sub={`${f.totals.opps} opportunities`} />
             <Card label="Booking %" value={pct(f.totals.booking.rate)} sub={`${f.totals.booking.total} lead calls`} />
-            <Card label="MTD Revenue" value={money(f.mtd.revenue)} sub={`pace ${money(f.mtd.pacedTarget)} · proj ${money(f.mtd.projected)}`}
+            <Card label="MTD Revenue" value={money(f.mtd.revenue)}
+              sub={`pace ${money(f.mtd.pacedTarget)} · proj ${money(f.mtd.projected)}${f.compare?.priorMonthMtd?.revenueDelta != null ? ` · MoM ${f.compare.priorMonthMtd.revenueDelta >= 0 ? '+' : ''}${pct(f.compare.priorMonthMtd.revenueDelta)}` : ''}`}
               tone={f.mtd.revenue >= f.mtd.pacedTarget ? 'good' : 'bad'} />
           </div>
 
