@@ -9,6 +9,7 @@ import { renderBoardEmail, boardEmailSubject } from './lib/boardEmail.js'
 import { computeBattingOrder, computeZipValue, computeJobTypeOrder, DEFAULT_WEIGHTS, NON_DISPATCH_TEAM } from './lib/dispatchMetrics.js'
 import { driveTimes, straightLine, pairKey, driveTimeEnabled, geocode, suggestAddresses } from './lib/driveTime.js'
 import { buildDailyDigest } from './lib/dailyDigest.js'
+import { gatherWeeklyFacts, generateAgendaAI, renderLeadershipHtml, latestCompletedSunday } from './lib/leadershipReport.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
@@ -7909,6 +7910,169 @@ app.get('/api/admin/daily-digest', async (req, res) => {
 })
 
 // ═══════════════════════════════════════════════════════════════════════════
+// 📋 WEEKLY LEADERSHIP REPORT — the meeting agenda, generated and archived.
+//
+// Brandyn-only (viewers list in app_settings 'leadership_viewers'; default
+// below). Reports are keyed by week-ending Sunday and saved to
+// `leadership_reports` (facts + AI read-only; `notes` holds the fill-ins:
+// topics, projects, parking lot, wins, quote, payroll override). Until that
+// table's migration runs, generation still works — saving warns and continues.
+// ═══════════════════════════════════════════════════════════════════════════
+
+const LEADERSHIP_DEFAULT_VIEWERS = ['brandynnuffer@gmail.com', 'brandyn.nuffer@awesomeservice.com']
+
+async function requireLeadership(req, res) {
+  const token = (req.headers.authorization || '').replace(/^Bearer\s+/i, '')
+  if (!token) { res.status(401).json({ error: 'Not signed in' }); return null }
+  const { data: { user }, error } = await supabase.auth.getUser(token)
+  if (error || !user) { res.status(401).json({ error: 'Invalid session' }); return null }
+  const { data: prof } = await supabase
+    .from('profiles').select('id, name, role, active').eq('id', user.id).maybeSingle()
+  if (prof?.role !== 'admin' || prof?.active === false) {
+    res.status(403).json({ error: 'Admins only' }); return null
+  }
+  let viewers = LEADERSHIP_DEFAULT_VIEWERS
+  try {
+    const { data } = await supabase.from('app_settings').select('value').eq('key', 'leadership_viewers').maybeSingle()
+    const arr = JSON.parse(data?.value || 'null')
+    if (Array.isArray(arr) && arr.length) viewers = arr.map(s => String(s).toLowerCase())
+  } catch {}
+  if (!viewers.includes((user.email || '').toLowerCase())) {
+    res.status(403).json({ error: 'Not authorized for leadership reports' }); return null
+  }
+  return prof
+}
+
+const leadershipDeps = (weekEnd) => ({
+  stGet, stPageAll, supabase, tenantId: ST_TENANT_ID, anthropicKey: ANTHROPIC_KEY, weekEnd,
+})
+
+async function loadLeadershipRow(weekEnd) {
+  try {
+    const { data } = await supabase.from('leadership_reports').select('*').eq('week_ending', weekEnd).maybeSingle()
+    return data || null
+  } catch (e) { console.warn('leadership load (migration pending?):', e.message); return null }
+}
+
+async function saveLeadershipRow(weekEnd, patch) {
+  try {
+    const { error } = await supabase.from('leadership_reports')
+      .upsert({ week_ending: weekEnd, ...patch, updated_at: new Date().toISOString() }, { onConflict: 'week_ending' })
+    if (error) throw error
+    return true
+  } catch (e) { console.warn('leadership save (migration pending?):', e.message); return false }
+}
+
+// Projects roll forward week to week — the standing agenda shouldn't retype.
+async function carriedNotes(weekEnd) {
+  try {
+    const { data } = await supabase.from('leadership_reports')
+      .select('notes').lt('week_ending', weekEnd)
+      .order('week_ending', { ascending: false }).limit(1).maybeSingle()
+    const prev = data?.notes || {}
+    return { projects: prev.projects || [], topics: [] }
+  } catch { return {} }
+}
+
+async function generateLeadershipReport(weekEnd, existingNotes) {
+  const facts = await gatherWeeklyFacts(leadershipDeps(weekEnd))
+  const ai = await generateAgendaAI(facts, ANTHROPIC_KEY)
+  const notes = existingNotes ?? await carriedNotes(weekEnd)
+  const saved = await saveLeadershipRow(weekEnd, { facts, ai, notes })
+  return { weekEnd, facts, ai, notes, saved }
+}
+
+// List archived weeks (newest first).
+app.get('/api/admin/leadership/weeks', async (req, res) => {
+  if (!(await requireLeadership(req, res))) return
+  try {
+    const { data, error } = await supabase.from('leadership_reports')
+      .select('week_ending, updated_at').order('week_ending', { ascending: false }).limit(60)
+    if (error) throw error
+    res.json({ weeks: (data || []).map(r => r.week_ending), latestCompleted: latestCompletedSunday() })
+  } catch (e) { res.json({ weeks: [], latestCompleted: latestCompletedSunday(), migrationPending: true }) }
+})
+
+// Fetch (or generate) a week's report. ?refresh=1 regenerates facts + AI but
+// keeps the fill-ins.
+app.get('/api/admin/leadership/report', async (req, res) => {
+  if (!(await requireLeadership(req, res))) return
+  try {
+    const weekEnd = /^\d{4}-\d{2}-\d{2}$/.test(req.query.week || '') ? req.query.week : latestCompletedSunday()
+    const row = await loadLeadershipRow(weekEnd)
+    if (row && req.query.refresh !== '1') {
+      return res.json({ weekEnd, facts: row.facts, ai: row.ai, notes: row.notes || {}, saved: true })
+    }
+    const report = await generateLeadershipReport(weekEnd, row?.notes)
+    res.json(report)
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
+
+// Save the fill-ins (topics, projects, parking lot, wins, quote, overrides).
+app.post('/api/admin/leadership/notes', async (req, res) => {
+  if (!(await requireLeadership(req, res))) return
+  try {
+    const { week, notes } = req.body || {}
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(week || '') || typeof notes !== 'object') {
+      return res.status(400).json({ error: 'week (YYYY-MM-DD) and notes required' })
+    }
+    const ok = await saveLeadershipRow(week, { notes })
+    res.json({ ok, ...(ok ? {} : { error: 'Save failed — leadership_reports migration pending?' }) })
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
+
+// Email the agenda (uses saved facts/notes; ?week= defaults to latest).
+app.post('/api/admin/leadership/email', async (req, res) => {
+  if (!(await requireLeadership(req, res))) return
+  try {
+    const week = /^\d{4}-\d{2}-\d{2}$/.test(req.body?.week || '') ? req.body.week : latestCompletedSunday()
+    const row = await loadLeadershipRow(week)
+    const report = row ? { facts: row.facts, ai: row.ai, notes: row.notes || {} } : await generateLeadershipReport(week)
+    let to = req.body?.to
+    if (!to) {
+      try {
+        const { data } = await supabase.from('app_settings').select('value').eq('key', 'leadership_report_to').maybeSingle()
+        to = String(data?.value || '').replace(/^"|"$/g, '').trim()
+      } catch {}
+    }
+    if (!to) to = LEADERSHIP_DEFAULT_VIEWERS[1]
+    const html = renderLeadershipHtml(report.facts, report.ai, report.notes)
+    const label = new Date(`${week}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })
+    await sendResend({ to, subject: `Weekly Leadership Agenda — W/E ${label}`, html })
+    res.json({ ok: true, sent: to })
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
+
+// Monday mornings: generate + archive last week's report automatically so the
+// page is instant and the history builds itself. Same replica-safe claim
+// pattern as the digest.
+const LEADERSHIP_GEN_KEY = 'leadership_report_generated_for'
+async function maybeGenerateLeadershipReport() {
+  try {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/Denver', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', hour12: false, weekday: 'short',
+    }).formatToParts(new Date()).reduce((a, p) => (a[p.type] = p.value, a), {})
+    if (parts.weekday !== 'Mon') return
+    const hour = Number(parts.hour === '24' ? 0 : parts.hour)
+    if (hour < 6 || hour >= 10) return
+    const weekEnd = latestCompletedSunday()
+    const { data: row } = await supabase.from('app_settings').select('value').eq('key', LEADERSHIP_GEN_KEY).maybeSingle()
+    const prev = row?.value ?? null
+    if (String(prev).replace(/"/g, '') === weekEnd) return
+    if (row) {
+      const { data: claimed } = await supabase.from('app_settings')
+        .update({ value: weekEnd }).eq('key', LEADERSHIP_GEN_KEY).eq('value', prev).select()
+      if (!claimed || claimed.length === 0) return
+    } else {
+      const { error } = await supabase.from('app_settings').insert({ key: LEADERSHIP_GEN_KEY, value: weekEnd })
+      if (error) return
+    }
+    const report = await generateLeadershipReport(weekEnd)
+    console.log(`LEADERSHIP: generated W/E ${weekEnd} (saved=${report.saved})`)
+  } catch (e) { console.warn('leadership auto-gen:', e.message) }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // LEAD INBOX — mirrors the ServiceTitan Bookings tab into `st_leads`.
 //
 // These are PAID leads (Angi/HomeAdvisor ~$52 each, Scorpion, etc). Revin AI
@@ -8633,6 +8797,7 @@ if (SYNC_INTERVAL_MIN > 0) {
 if (BOARD_EMAIL_TO && RESEND_KEY) {
   setInterval(maybeSendDailyBoardEmail, 60_000)   // 1-min tick: a 5-min one made 7:00 land as late as 7:04
   setInterval(maybeSendDailyDigest, 60_000)       // morning digest rides the same tick
+  setInterval(maybeGenerateLeadershipReport, 5 * 60_000)   // Monday AM: archive last week's agenda
   setTimeout(maybeSendDailyBoardEmail, 20_000)
   console.log(`Board email daily at ${BOARD_EMAIL_HOUR}:00 ${BOARD_EMAIL_TZ} to ${BOARD_EMAIL_TO}`)
 } else {

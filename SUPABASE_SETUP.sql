@@ -744,3 +744,18 @@ alter table commission_settings   enable row level security;
 -- 4. Verify: should return ZERO rows.
 select tablename from pg_tables
 where schemaname = 'public' and rowsecurity = false;
+
+-- ── Weekly Leadership Report (Aug 2026) ─────────────────────────────────────
+-- One row per week (keyed by its Sunday). facts/ai are generated; notes holds
+-- the meeting fill-ins (topics, projects, parking lot, wins, overrides).
+-- Server-only table: RLS on, NO policies — the browser goes through
+-- /api/admin/leadership/* (service key bypasses RLS).
+create table if not exists leadership_reports (
+  week_ending date primary key,
+  facts jsonb,
+  ai jsonb,
+  notes jsonb default '{}'::jsonb,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+alter table leadership_reports enable row level security;

@@ -24,6 +24,7 @@ import WarRoomPage from './WarRoomPage'
 import AttendancePage from './AttendancePage'
 import RecordingsPage from './RecordingsPage'
 import MyPage from './MyPage'
+import LeadershipPage from './LeadershipPage'
 import WinCelebration from '../components/WinCelebration'
 import ScheduleAlerts from '../components/ScheduleAlerts'
 import Avatar from '../components/Avatar'
@@ -91,6 +92,17 @@ const NAV_ICONS = {
         <circle cx="6.5" cy="18" r="1.9" stroke={c} strokeWidth="1.7" fill="none"/>
         <circle cx="17" cy="18" r="1.9" stroke={c} strokeWidth="1.7" fill="none"/>
         <path d="M8.4 18h6.7" stroke={c} strokeWidth="1.5" strokeLinecap="round"/>
+      </svg>
+    )
+  },
+  leadership: (active) => {
+    const c = active ? ICON_COLOR : ICON_MUTED
+    return (
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M9 4h6v3H9z" stroke={c} strokeWidth="1.8" fill="none" strokeLinejoin="round"/>
+        <path d="M15 5h3a1 1 0 011 1v14a1 1 0 01-1 1H6a1 1 0 01-1-1V6a1 1 0 011-1h3" stroke={c} strokeWidth="1.8" fill="none" strokeLinejoin="round"/>
+        <path d="M8.5 12l2 2 4-4" stroke={c} strokeWidth="1.8" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+        <path d="M8.5 17.5h7" stroke={c} strokeWidth="1.8" strokeLinecap="round"/>
       </svg>
     )
   },
@@ -164,6 +176,7 @@ const NAV_ITEMS = [
   { to:'/analytics', label:'Analytics', iconKey:'analytics' },
   { to:'/recordings', label:'Recordings', iconKey:'recordings' },
   { to:'/attendance', label:'WFM', iconKey:'wfm', adminOnly:true },
+  { to:'/leadership', label:'Leadership', iconKey:'leadership', leaderOnly:true },
   { to:'/notes', label:'Notes', iconKey:'notes' },
   { to:'/warroom', label:'Call Center TV', iconKey:'tv' },
 ]
@@ -319,6 +332,10 @@ function DialerLayoutInner() {
     return () => clearInterval(t)
   }, [])
   const canDispatch = isAdmin || isDispatcher
+  // Leadership page is owner-only by default; server enforces the real list
+  // (app_settings 'leadership_viewers') — this just controls nav visibility.
+  const isLeader = isAdmin && ['brandynnuffer@gmail.com', 'brandyn.nuffer@awesomeservice.com']
+    .includes((profile?.email || '').toLowerCase())
   const { contacts, syncStatus, reload } = useData()
   const { cancelAutoWrap } = usePhone()
   const navigate = useNavigate()
@@ -639,7 +656,7 @@ function DialerLayoutInner() {
 
         {/* Nav links */}
         <div style={{ flex:1, overflowY:'auto', padding:'10px 8px', display:'flex', flexDirection:'column' }}>
-          {NAV_ITEMS.filter(n => (!n.adminOnly || isAdmin) && (!n.dispatchOnly || canDispatch)).map(({ to, label, iconKey, end }) => (
+          {NAV_ITEMS.filter(n => (!n.adminOnly || isAdmin) && (!n.dispatchOnly || canDispatch) && (!n.leaderOnly || isLeader)).map(({ to, label, iconKey, end }) => (
             <NavLink key={to} to={to} end={end} style={navLinkStyle} title={navCollapsed ? label : undefined}
               onMouseEnter={e => { const isActive = e.currentTarget.style.fontWeight === '600'; handleNavHover(e, isActive) }}
               onMouseLeave={e => { const isActive = e.currentTarget.style.fontWeight === '600'; handleNavLeave(e, isActive) }}>
@@ -893,6 +910,7 @@ function DialerLayoutInner() {
           <Route path="/analytics" element={<DashboardPage />} />
           <Route path="/recordings" element={<RecordingsPage />} />
           {isAdmin && <Route path="/attendance" element={<AttendancePage />} />}
+          {isLeader && <Route path="/leadership" element={<LeadershipPage />} />}
           <Route path="/notes" element={<NotesPage />} />
           <Route path="/warroom" element={<WarRoomPage />} />
           <Route path="/mypage" element={<MyPage />} />
