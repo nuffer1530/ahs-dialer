@@ -689,6 +689,8 @@ export default function AdminPage() {
   const [wxQuery, setWxQuery] = useState('')
   const [wxSugs, setWxSugs] = useState([])
   const [opsMsg, setOpsMsg] = useState('')
+  const [digestBusy, setDigestBusy] = useState(false)
+  const [digestMsg, setDigestMsg] = useState('')
   const [opsSaving, setOpsSaving] = useState(false)
   const [opsDirty, setOpsDirty] = useState(false)
   // 🎯 Opportunity Watch Bonus config — read by the server's 10-min sweep.
@@ -1713,6 +1715,29 @@ export default function AdminPage() {
                   Hours of operation and the holiday schedule now live in
                   <button className="btn sm" onClick={() => setSettingsTab('routing')}>Call Routing</button>
                   where they actually control the phones.
+                </div>
+              </div>
+
+              {/* Morning digest — send one on demand instead of waiting for 7 AM */}
+              <div className="card">
+                <div className="card-header">
+                  <div className="card-title">Morning digest</div>
+                  <span style={{ fontSize:11, color:'var(--text-muted)' }}>Yesterday's sales, close rates, techs, call center, and marketing — emailed at 7 AM</span>
+                </div>
+                <div className="card-body" style={{ display:'flex', alignItems:'center', gap:10, flexWrap:'wrap' }}>
+                  <button className="btn sm primary" disabled={digestBusy} onClick={async () => {
+                    setDigestBusy(true); setDigestMsg('')
+                    try {
+                      const { data: { session } } = await sb.auth.getSession()
+                      const r = await fetch('/api/admin/daily-digest?send=1', { headers: { Authorization: `Bearer ${session?.access_token}` } })
+                      const d = await r.json()
+                      if (!r.ok) throw new Error(d.error || 'Send failed')
+                      setDigestMsg(`Sent to ${d.sent}`)
+                    } catch (e) { setDigestMsg(`Error: ${e.message}`) }
+                    setDigestBusy(false)
+                  }}>{digestBusy ? 'Building…' : 'Email me yesterday’s digest'}</button>
+                  {digestMsg && <span style={{ fontSize:12.5, fontWeight:600, color: digestMsg.startsWith('Error') ? 'var(--danger)' : 'var(--success)' }}>{digestMsg}</span>}
+                  <span style={{ fontSize:11.5, color:'var(--text-muted)', marginLeft:'auto' }}>Takes ~30s to build — it queries a full day of ServiceTitan.</span>
                 </div>
               </div>
               <div style={{ fontSize:12, color: opsMsg.startsWith('Error') ? 'var(--danger)' : 'var(--text-muted)' }}>
