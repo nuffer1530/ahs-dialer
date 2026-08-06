@@ -7970,7 +7970,11 @@ async function carriedNotes(weekEnd) {
       .select('notes').lt('week_ending', weekEnd)
       .order('week_ending', { ascending: false }).limit(1).maybeSingle()
     const prev = data?.notes || {}
-    return { projects: prev.projects || [], topics: [] }
+    return {
+      projects: prev.projects || [], topics: [],
+      // Standing prompt from the original agenda sheet — same every week.
+      positive: prev.positive || 'Everyone shares either personal or professional positive news from last week or the upcoming week',
+    }
   } catch { return {} }
 }
 

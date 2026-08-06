@@ -13,7 +13,13 @@ import { sb } from '../lib/supabase'
 const money = (n) => `$${Math.round(Number(n) || 0).toLocaleString()}`
 const pct = (n) => (n == null ? '—' : `${Math.round(Number(n) * 100)}%`)
 
+// The standing meeting-opener prompt from the original agenda sheet — shown
+// every week unless Brandyn types something else.
+const DEFAULT_POSITIVE = 'Everyone shares either personal or professional positive news from last week or the upcoming week'
+
 const S = {
+  // The app shell is overflow:hidden — every page owns its scroll.
+  scroll: { flex: 1, overflowY: 'auto' },
   page: { maxWidth: 1000, margin: '0 auto', padding: '20px 24px 60px' },
   h1: { fontSize: 22, fontWeight: 800, color: 'var(--text-primary)', margin: 0 },
   sub: { fontSize: 13, color: 'var(--text-secondary)' },
@@ -177,13 +183,17 @@ export default function LeadershipPage() {
   const weekLabel = f ? `${f.weekStart} → ${f.weekEnd}` : week
 
   return (
+    <div style={S.scroll}>
     <div style={S.page}>
       <style>{`
         @media print {
+          /* The app shell is 100vh + overflow:hidden, which clips printing to
+             one page — undo all of that for print only. */
+          html, body, body * { overflow: visible !important; height: auto !important; max-height: none !important; }
           body * { visibility: hidden !important; }
           #leadership-print, #leadership-print * { visibility: visible !important; }
           #leadership-print { position: absolute; top: 0; left: 0; width: 100%; }
-          #leadership-print input { border: none !important; background: transparent !important; }
+          #leadership-print input, #leadership-print textarea { border: none !important; background: transparent !important; }
           .no-print { display: none !important; }
         }
       `}</style>
@@ -221,7 +231,7 @@ export default function LeadershipPage() {
             <div style={{ display: 'grid', gap: 8 }}>
               <input style={S.input} placeholder="Quote of the day…" value={notes.quote || ''} onChange={e => patchNotes({ quote: e.target.value })} />
               <input style={S.input} placeholder="Ice breaker…" value={notes.icebreaker || ''} onChange={e => patchNotes({ icebreaker: e.target.value })} />
-              <input style={S.input} placeholder="Positive news prompt…" value={notes.positive || ''} onChange={e => patchNotes({ positive: e.target.value })} />
+              <input style={S.input} placeholder="Positive news prompt…" value={notes.positive ?? DEFAULT_POSITIVE} onChange={e => patchNotes({ positive: e.target.value })} />
             </div>
           </div>
 
@@ -469,6 +479,7 @@ export default function LeadershipPage() {
           </div>
         </div>
       )}
+    </div>
     </div>
   )
 }
