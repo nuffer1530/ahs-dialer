@@ -8,6 +8,7 @@ import { existsSync } from 'fs'
 import { renderBoardEmail, boardEmailSubject } from './lib/boardEmail.js'
 import { computeBattingOrder, computeZipValue, computeJobTypeOrder, DEFAULT_WEIGHTS, NON_DISPATCH_TEAM } from './lib/dispatchMetrics.js'
 import { driveTimes, straightLine, pairKey, driveTimeEnabled, geocode, suggestAddresses } from './lib/driveTime.js'
+import { buildDailyDigest } from './lib/dailyDigest.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
@@ -7832,6 +7833,80 @@ async function maybeSendDailyBoardEmail() {
   }
 }
 
+// ── 📬 MORNING DIGEST — what happened yesterday, 7 AM Denver ────────────────
+// Recipients live in app_settings ('daily_digest_to') so they can change
+// without a redeploy; DIGEST_EMAIL_TO env overrides. Same replica-safe
+// day-claim as the board email so two Railway instances can't double-send.
+const DIGEST_SENT_KEY = 'daily_digest_sent_on'
+const DIGEST_HOUR = Number(process.env.DIGEST_EMAIL_HOUR || 7)
+
+async function digestRecipients() {
+  if (process.env.DIGEST_EMAIL_TO) return process.env.DIGEST_EMAIL_TO
+  try {
+    const { data } = await supabase.from('app_settings').select('value').eq('key', 'daily_digest_to').maybeSingle()
+    const v = String(data?.value || '').replace(/^"|"$/g, '').trim()
+    return v || ''
+  } catch { return '' }
+}
+
+const digestDeps = (dateStr) => ({
+  stGet, stPageAll, supabase, tenantId: ST_TENANT_ID,
+  anthropicKey: ANTHROPIC_KEY, dateStr,
+})
+
+// Yesterday in Denver, as YYYY-MM-DD.
+function digestYesterday() {
+  const now = new Date(Date.now() - 24 * 3600_000)
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Denver' }).format(now)
+}
+
+async function maybeSendDailyDigest() {
+  const to = await digestRecipients()
+  if (!to || !RESEND_KEY) return
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Denver', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', hour12: false,
+  }).formatToParts(new Date()).reduce((a, p) => (a[p.type] = p.value, a), {})
+  const localDate = `${parts.year}-${parts.month}-${parts.day}`
+  const localHour = Number(parts.hour === '24' ? 0 : parts.hour)
+  if (localHour < DIGEST_HOUR || localHour >= DIGEST_HOUR + 3) return
+
+  try {
+    const { data: row } = await supabase.from('app_settings').select('value').eq('key', DIGEST_SENT_KEY).maybeSingle()
+    const prev = row?.value ?? null
+    if (String(prev).replace(/"/g, '') === localDate) return
+    if (row) {
+      const { data: claimed } = await supabase.from('app_settings')
+        .update({ value: localDate }).eq('key', DIGEST_SENT_KEY).eq('value', prev).select()
+      if (!claimed || claimed.length === 0) return
+    } else {
+      const { error } = await supabase.from('app_settings').insert({ key: DIGEST_SENT_KEY, value: localDate })
+      if (error) return
+    }
+    const { subject, html } = await buildDailyDigest(digestDeps(digestYesterday()))
+    await sendResend({ to, subject, html })
+    console.log(`DIGEST: sent to ${to} — ${subject}`)
+  } catch (err) {
+    console.error('DIGEST: send FAILED:', err.message)
+  }
+}
+
+// Preview or force-send. ?date=YYYY-MM-DD for a specific day, ?send=1 to email.
+app.get('/api/admin/daily-digest', async (req, res) => {
+  if (!(await requireAdmin(req, res))) return
+  try {
+    const dateStr = /^\d{4}-\d{2}-\d{2}$/.test(req.query.date || '') ? req.query.date : digestYesterday()
+    const { subject, html, facts } = await buildDailyDigest(digestDeps(dateStr))
+    if (req.query.send === '1') {
+      const to = req.query.to || await digestRecipients()
+      if (!to) return res.status(400).json({ error: 'No recipients configured' })
+      await sendResend({ to, subject, html })
+      return res.json({ ok: true, sent: to, subject })
+    }
+    if (req.query.json === '1') return res.json({ subject, facts })
+    res.type('html').send(html)
+  } catch (err) { res.status(500).json({ error: err.message }) }
+})
+
 // ═══════════════════════════════════════════════════════════════════════════
 // LEAD INBOX — mirrors the ServiceTitan Bookings tab into `st_leads`.
 //
@@ -8556,6 +8631,7 @@ if (SYNC_INTERVAL_MIN > 0) {
 // cannot email anyone by accident.
 if (BOARD_EMAIL_TO && RESEND_KEY) {
   setInterval(maybeSendDailyBoardEmail, 60_000)   // 1-min tick: a 5-min one made 7:00 land as late as 7:04
+  setInterval(maybeSendDailyDigest, 60_000)       // morning digest rides the same tick
   setTimeout(maybeSendDailyBoardEmail, 20_000)
   console.log(`Board email daily at ${BOARD_EMAIL_HOUR}:00 ${BOARD_EMAIL_TZ} to ${BOARD_EMAIL_TO}`)
 } else {
