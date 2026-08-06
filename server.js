@@ -7852,6 +7852,7 @@ async function digestRecipients() {
 const digestDeps = (dateStr) => ({
   stGet, stPageAll, supabase, tenantId: ST_TENANT_ID,
   anthropicKey: ANTHROPIC_KEY, dateStr,
+  getBoard3Day: build3DayBoard,   // today's capacity → "what to fill this morning"
 })
 
 // Yesterday in Denver, as YYYY-MM-DD.
