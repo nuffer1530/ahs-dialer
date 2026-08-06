@@ -245,31 +245,36 @@ export default function LeadershipPage() {
               tone={f.mtd.revenue >= f.mtd.pacedTarget ? 'good' : 'bad'} />
           </div>
 
-          {/* AI read */}
+          {/* AI read — a 60-second scan: headline, top highlights, actions by dept */}
           {ai && (
             <div style={{ ...S.section, borderLeft: '4px solid var(--accent)' }}>
-              <div style={S.sectionTitle}>The week, read by AI</div>
-              {ai.headline && <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--text-primary)', marginBottom: 8 }}>{ai.headline}</div>}
-              {(ai.summary || []).map((s, i) => <div key={i} style={{ fontSize: 13, lineHeight: 1.6, color: 'var(--text-primary)' }}>• {s}</div>)}
-              {(ai.actionItems || []).length > 0 && <>
+              {ai.headline && <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--text-primary)', marginBottom: 10 }}>{ai.headline}</div>}
+              {(ai.highlights || ai.summary || []).length > 0 && <>
+                <div style={S.sectionTitle}>Top highlights</div>
+                {(ai.highlights || ai.summary).map((s, i) => (
+                  <div key={i} style={{ fontSize: 13, lineHeight: 1.7, color: 'var(--text-primary)' }}>• {s}</div>
+                ))}
+              </>}
+              {(ai.actionsByDept || []).length > 0 && <>
+                <div style={{ ...S.sectionTitle, marginTop: 14 }}>Action items by department</div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '10px 20px' }}>
+                  {ai.actionsByDept.map((d, i) => (
+                    <div key={i}>
+                      <div style={{ fontSize: 12.5, fontWeight: 800, color: 'var(--accent)' }}>{d.dept}</div>
+                      {(d.actions || []).map((a, j) => (
+                        <div key={j} style={{ fontSize: 13, lineHeight: 1.6, color: 'var(--text-primary)', paddingLeft: 10 }}>→ {a}</div>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+              </>}
+              {!(ai.actionsByDept || []).length && (ai.actionItems || []).length > 0 && <>
                 <div style={{ ...S.sectionTitle, marginTop: 12 }}>Action items</div>
                 {ai.actionItems.map((a, i) => (
                   <div key={i} style={{ fontSize: 13, lineHeight: 1.6, color: 'var(--text-primary)' }}>
                     → {a.action} {a.owner && <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>({a.owner})</span>}
                   </div>
                 ))}
-              </>}
-              {(ai.watchouts || []).length > 0 && <>
-                <div style={{ ...S.sectionTitle, marginTop: 12 }}>Watch-outs</div>
-                {ai.watchouts.map((w, i) => <div key={i} style={{ fontSize: 13, lineHeight: 1.6, color: 'var(--warning)' }}>⚠ {w}</div>)}
-              </>}
-              {(ai.techNotes || []).length > 0 && <>
-                <div style={{ ...S.sectionTitle, marginTop: 12 }}>Tech callouts</div>
-                {ai.techNotes.map((t, i) => <div key={i} style={{ fontSize: 13, lineHeight: 1.6, color: 'var(--text-primary)' }}>• {t}</div>)}
-              </>}
-              {(ai.csrNotes || []).length > 0 && <>
-                <div style={{ ...S.sectionTitle, marginTop: 12 }}>CSR callouts</div>
-                {ai.csrNotes.map((t, i) => <div key={i} style={{ fontSize: 13, lineHeight: 1.6, color: 'var(--text-primary)' }}>• {t}</div>)}
               </>}
             </div>
           )}
@@ -377,8 +382,8 @@ export default function LeadershipPage() {
           </div>
 
           <div style={S.section}>
-            <div style={S.sectionTitle}>CSRs — composite: booked 40 · book rate 30 · QA 30</div>
-            <Table headers={['CSR', 'Score', 'Booked', 'Answered', 'Book rate', 'QA']}
+            <div style={S.sectionTitle}>CSRs — from ServiceTitan · composite: booked 40 · book rate 30 · QA 30</div>
+            <Table headers={['CSR', 'Score', 'Booked', 'Lead calls', 'Book rate', 'QA (Andi)']}
               rows={f.csrs.filter(c => c.score != null).map(c => [
                 c.name, String(c.score), String(c.booked), String(c.answered),
                 c.bookRate != null ? pct(c.bookRate) : '—', c.qa != null ? `${c.qa}%` : '—',
