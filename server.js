@@ -9,7 +9,7 @@ import { renderBoardEmail, boardEmailSubject } from './lib/boardEmail.js'
 import { computeBattingOrder, computeZipValue, computeJobTypeOrder, DEFAULT_WEIGHTS, NON_DISPATCH_TEAM } from './lib/dispatchMetrics.js'
 import { driveTimes, straightLine, pairKey, driveTimeEnabled, geocode, suggestAddresses } from './lib/driveTime.js'
 import { buildDailyDigest } from './lib/dailyDigest.js'
-import { gatherWeeklyFacts, generateAgendaAI, renderLeadershipHtml, latestCompletedSunday } from './lib/leadershipReport.js'
+import { gatherWeeklyFacts, generateAgendaAI, renderLeadershipHtml, latestCompletedSunday, upcomingSunday } from './lib/leadershipReport.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
@@ -8017,8 +8017,8 @@ app.get('/api/admin/leadership/weeks', async (req, res) => {
     const { data, error } = await supabase.from('leadership_reports')
       .select('week_ending, updated_at').order('week_ending', { ascending: false }).limit(60)
     if (error) throw error
-    res.json({ weeks: (data || []).map(r => r.week_ending), latestCompleted: latestCompletedSunday() })
-  } catch (e) { res.json({ weeks: [], latestCompleted: latestCompletedSunday(), migrationPending: true }) }
+    res.json({ weeks: (data || []).map(r => r.week_ending), latestCompleted: latestCompletedSunday(), current: upcomingSunday() })
+  } catch (e) { res.json({ weeks: [], latestCompleted: latestCompletedSunday(), current: upcomingSunday(), migrationPending: true }) }
 })
 
 // Fetch (or generate) a week's report. ?refresh=1 regenerates facts + AI but
@@ -8095,7 +8095,10 @@ async function maybeGenerateLeadershipReport() {
       const { error } = await supabase.from('app_settings').insert({ key: LEADERSHIP_GEN_KEY, value: weekEnd })
       if (error) return
     }
-    const report = await generateLeadershipReport(weekEnd)
+    // Pass any existing notes through — the week may already have fill-ins
+    // from being viewed in progress, and regeneration must not clobber them.
+    const existing = await loadLeadershipRow(weekEnd)
+    const report = await generateLeadershipReport(weekEnd, existing?.notes)
     console.log(`LEADERSHIP: generated W/E ${weekEnd} (saved=${report.saved})`)
   } catch (e) { console.warn('leadership auto-gen:', e.message) }
 }

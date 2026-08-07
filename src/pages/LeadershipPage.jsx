@@ -110,6 +110,7 @@ function EditList({ items, onChange, mark }) {
 export default function LeadershipPage() {
   const [weeks, setWeeks] = useState([])
   const [week, setWeek] = useState(null)
+  const [currentWeek, setCurrentWeek] = useState(null)
   const [report, setReport] = useState(null)
   const [notes, setNotes] = useState({})
   const [loading, setLoading] = useState(true)
@@ -131,8 +132,10 @@ export default function LeadershipPage() {
       .then(r => r.json())
       .then(d => {
         const latest = d.latestCompleted
-        const list = [...new Set([latest, ...(d.weeks || [])])].sort().reverse()
+        // The in-progress week is selectable too — its data reads "through today".
+        const list = [...new Set([d.current, latest, ...(d.weeks || [])])].filter(Boolean).sort().reverse()
         setWeeks(list)
+        setCurrentWeek(d.current || null)
         setWeek(w => w || latest)
       })
       .catch(() => setError('Could not load weeks'))
@@ -144,7 +147,13 @@ export default function LeadershipPage() {
     authHeaders()
       .then(h => fetch(`/api/admin/leadership/report?week=${wk}${refresh ? '&refresh=1' : ''}`, { headers: h }))
       .then(async r => { if (!r.ok) throw new Error((await r.json()).error || `HTTP ${r.status}`); return r.json() })
-      .then(d => { setReport(d); setNotes(d.notes || {}) })
+      .then(d => {
+        // A saved snapshot of an in-progress week goes stale by the next day —
+        // regenerate instead of showing Tuesday's numbers on Friday.
+        const todayDenver = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Denver' }).format(new Date())
+        if (!refresh && d.saved && d.facts?.partial && d.facts.asOf < todayDenver) { load(wk, true); return }
+        setReport(d); setNotes(d.notes || {})
+      })
       .catch(e => setError(e.message))
       .finally(() => setLoading(false))
   }, [authHeaders])
@@ -204,8 +213,14 @@ export default function LeadershipPage() {
           <div style={S.sub}>Week ending&nbsp;
             <select value={week || ''} onChange={e => setWeek(e.target.value)}
               style={{ ...S.input, width: 'auto', display: 'inline-block', padding: '3px 6px' }}>
-              {weeks.map(w => <option key={w} value={w}>{w}</option>)}
+              {weeks.map(w => <option key={w} value={w}>{w}{w === currentWeek ? ' — this week (in progress)' : ''}</option>)}
             </select>
+            {report?.facts?.partial && (
+              <span style={{ marginLeft: 10, fontSize: 11.5, fontWeight: 700, padding: '2px 8px', borderRadius: 20,
+                background: 'var(--tone-amber-bg)', border: '1px solid var(--tone-amber-bd)', color: 'var(--tone-amber-tx)' }}>
+                data through {report.facts.asOf}
+              </span>
+            )}
             {saving === 'saving' && <span style={{ marginLeft: 10, color: 'var(--text-muted)', fontSize: 12 }}>Saving…</span>}
             {saving === 'saved' && <span style={{ marginLeft: 10, color: 'var(--success)', fontSize: 12 }}>Saved ✓</span>}
             {saving === 'error' && <span style={{ marginLeft: 10, color: 'var(--danger)', fontSize: 12 }}>Save failed (migration pending?)</span>}
