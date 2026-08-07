@@ -1312,18 +1312,27 @@ app.post('/api/st/book', async (req, res) => {
 
         // Link the booking back onto the call recording. saveRecording links
         // forward (booking-then-hangup), but wrap-up bookings land AFTER the
-        // recording row exists — backfill the most recent unlinked recording
-        // for this contact.
+        // recording row exists. Only a call whose window (start → end + 20 min
+        // of wrap-up) contains RIGHT NOW, taken by the booking rep, qualifies —
+        // "most recent for the contact" glued repeat callers to old jobs.
         if (contactId) {
           try {
+            const now = Date.now()
             const { data: recRows } = await supabase.from('call_recordings')
-              .select('id').eq('contact_id', contactId).is('st_job_id', null)
-              .gte('call_started_at', new Date(Date.now() - 4 * 3600_000).toISOString())
-              .order('call_started_at', { ascending: false }).limit(1)
-            if (recRows?.length) {
+              .select('id, rep, call_started_at, duration').eq('contact_id', contactId).is('st_job_id', null)
+              .gte('call_started_at', new Date(now - 4 * 3600_000).toISOString())
+              .order('call_started_at', { ascending: false }).limit(10)
+            const rep = bookingRow.csr_name || null
+            const match = (recRows || []).find(r => {
+              const start = Date.parse(r.call_started_at) || 0
+              const end = start + (Number(r.duration) || 0) * 1000
+              if (start > now || now > end + 20 * 60_000) return false
+              return !rep || !r.rep || r.rep === rep
+            })
+            if (match) {
               await supabase.from('call_recordings')
                 .update({ st_job_id: jobId, st_job_number: jobNumber ? String(jobNumber) : null })
-                .eq('id', recRows[0].id)
+                .eq('id', match.id)
             }
           } catch (e) { console.warn('recording booking link:', e.message) }
         }
@@ -3517,14 +3526,27 @@ app.get('/api/call-notes/latest', (req, res) => {
 async function saveRecording(row) {
   if (!row?.recording_sid || !row?.url) return
   try {
-    // Booked on this call? The booking lands mid-call and the recording only
-    // arrives after hangup, so the andi_bookings row already exists by now.
+    // Booked on THIS call? The booking lands mid-call or during wrap-up, so it
+    // must fall inside this call's window — start through end + 20 min — by the
+    // rep who took this call. A same-number call minutes later must NOT inherit
+    // the link (job 35752: five calls from one contact all glued to one job).
     if (row.contact_id && !row.st_job_id) {
-      const since = new Date((Date.parse(row.call_started_at) || Date.now()) - 10 * 60_000).toISOString()
-      const { data: bk } = await supabase.from('andi_bookings')
-        .select('st_job_id, st_job_number').eq('contact_id', row.contact_id)
-        .gte('booked_at', since).order('booked_at', { ascending: false }).limit(1).maybeSingle()
-      if (bk) { row.st_job_id = bk.st_job_id; row.st_job_number = bk.st_job_number || null }
+      const start = Date.parse(row.call_started_at) || Date.now()
+      const end = start + (Number(row.duration) || 0) * 1000
+      const { data: bks } = await supabase.from('andi_bookings')
+        .select('st_job_id, st_job_number, booked_at, csr_name').eq('contact_id', row.contact_id)
+        .gte('booked_at', new Date(start - 60_000).toISOString())
+        .lte('booked_at', new Date(end + 20 * 60_000).toISOString())
+        .order('booked_at', { ascending: false }).limit(5)
+      const bk = (bks || []).find(b => !row.rep || !b.csr_name || b.csr_name === row.rep)
+      if (bk) {
+        // One job links to exactly one call — never steal a link another
+        // recording already holds.
+        const { data: taken } = await supabase.from('call_recordings')
+          .select('recording_sid').eq('st_job_id', bk.st_job_id)
+          .neq('recording_sid', row.recording_sid).limit(1).maybeSingle()
+        if (!taken) { row.st_job_id = bk.st_job_id; row.st_job_number = bk.st_job_number || null }
+      }
     }
   } catch {}
   const { error } = await supabase.from('call_recordings').upsert(row, { onConflict: 'recording_sid' })

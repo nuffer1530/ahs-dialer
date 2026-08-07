@@ -972,6 +972,7 @@ export default function DialerPage() {
       if (serveLead(nextSkillLead(), true)) startInteraction?.('Outbound')
       return
     }
+    if (repCampPriority.length) return   // grants exist, all toggled off — no outbound
     const next = filtered.find(x => !isDone(x) && x.status !== 'Max Attempts' && !x.claimed_by)
     if (next) { navigateActiveTo(next.id); startInteraction?.('Outbound') }
   }
@@ -989,8 +990,10 @@ export default function DialerPage() {
     if (profile?.status !== 'Available') return
     if (selectedContact && !isDone(selectedContact)) return
     if (skillsMode) { serveLead(nextSkillLead(), true); return }
-    // Legacy pool reps (no campaign grants) auto-serve too — the Next/Next
-    // pending buttons are gone; going Available IS how work starts.
+    // A rep WITH campaign grants who has toggled them all off has said "no
+    // outbound" — serve nothing. The blended pool below is only for legacy
+    // reps with no grants at all, where Available IS how work starts.
+    if (repCampPriority.length) return
     const next = filtered.find(x => !isDone(x) && x.status !== 'Max Attempts' && !x.claimed_by)
     if (next) navigateActiveTo(next.id)
     // eslint-disable-next-line react-hooks/exhaustive-deps
