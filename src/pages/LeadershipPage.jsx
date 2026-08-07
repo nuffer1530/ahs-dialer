@@ -299,9 +299,11 @@ export default function LeadershipPage() {
               </>}
               {(ai.actionsByDept || []).length > 0 && <>
                 <div style={{ ...S.sectionTitle, marginTop: 14 }}>Action items by department</div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '10px 20px' }}>
+                {/* Column flow (not grid): blocks pack top-to-bottom so a short
+                    department never gets stranded next to a tall one. */}
+                <div style={{ columns: '2 300px', columnGap: 24 }}>
                   {ai.actionsByDept.map((d, i) => (
-                    <div key={i}>
+                    <div key={i} style={{ breakInside: 'avoid', marginBottom: 12 }}>
                       <div style={{ fontSize: 12.5, fontWeight: 800, color: 'var(--accent)' }}>{d.dept}</div>
                       {(d.actions || []).map((a, j) => (
                         <div key={j} style={{ fontSize: 13, lineHeight: 1.6, color: 'var(--text-primary)', paddingLeft: 10 }}>→ {a}</div>
