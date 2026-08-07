@@ -8071,35 +8071,54 @@ app.post('/api/admin/leadership/email', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }) }
 })
 
-// Monday mornings: generate + archive last week's report automatically so the
-// page is instant and the history builds itself. Same replica-safe claim
-// pattern as the digest.
+// Two automatic runs, one claim key (compare-and-set, replica-safe like the
+// digest):
+//  - FRIDAY ~6 AM: the meeting is Friday, so build the week-so-far (Mon-Thu
+//    complete) and EMAIL it — that's what the meeting discusses.
+//  - MONDAY ~6 AM: quietly finalize the completed week for the archive, so
+//    history and YoY baselines are full weeks. No email.
 const LEADERSHIP_GEN_KEY = 'leadership_report_generated_for'
 async function maybeGenerateLeadershipReport() {
   try {
     const parts = new Intl.DateTimeFormat('en-CA', {
       timeZone: 'America/Denver', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', hour12: false, weekday: 'short',
     }).formatToParts(new Date()).reduce((a, p) => (a[p.type] = p.value, a), {})
-    if (parts.weekday !== 'Mon') return
     const hour = Number(parts.hour === '24' ? 0 : parts.hour)
     if (hour < 6 || hour >= 10) return
-    const weekEnd = latestCompletedSunday()
+    let weekEnd, claimValue, email
+    if (parts.weekday === 'Fri') {
+      weekEnd = upcomingSunday(); claimValue = `fri-${weekEnd}`; email = true
+    } else if (parts.weekday === 'Mon') {
+      weekEnd = latestCompletedSunday(); claimValue = weekEnd; email = false
+    } else return
     const { data: row } = await supabase.from('app_settings').select('value').eq('key', LEADERSHIP_GEN_KEY).maybeSingle()
     const prev = row?.value ?? null
-    if (String(prev).replace(/"/g, '') === weekEnd) return
+    if (String(prev).replace(/"/g, '') === claimValue) return
     if (row) {
       const { data: claimed } = await supabase.from('app_settings')
-        .update({ value: weekEnd }).eq('key', LEADERSHIP_GEN_KEY).eq('value', prev).select()
+        .update({ value: claimValue }).eq('key', LEADERSHIP_GEN_KEY).eq('value', prev).select()
       if (!claimed || claimed.length === 0) return
     } else {
-      const { error } = await supabase.from('app_settings').insert({ key: LEADERSHIP_GEN_KEY, value: weekEnd })
+      const { error } = await supabase.from('app_settings').insert({ key: LEADERSHIP_GEN_KEY, value: claimValue })
       if (error) return
     }
     // Pass any existing notes through — the week may already have fill-ins
     // from being viewed in progress, and regeneration must not clobber them.
     const existing = await loadLeadershipRow(weekEnd)
     const report = await generateLeadershipReport(weekEnd, existing?.notes)
-    console.log(`LEADERSHIP: generated W/E ${weekEnd} (saved=${report.saved})`)
+    console.log(`LEADERSHIP: generated W/E ${weekEnd} (saved=${report.saved}, email=${email})`)
+    if (email && RESEND_KEY) {
+      let to = ''
+      try {
+        const { data } = await supabase.from('app_settings').select('value').eq('key', 'leadership_report_to').maybeSingle()
+        to = String(data?.value || '').replace(/^"|"$/g, '').trim()
+      } catch {}
+      if (!to) to = LEADERSHIP_DEFAULT_VIEWERS[1]
+      const html = renderLeadershipHtml(report.facts, report.ai, report.notes)
+      const label = new Date(`${weekEnd}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })
+      await sendResend({ to, subject: `Weekly Leadership Agenda — meeting day (W/E ${label}, through Thursday)`, html })
+      console.log(`LEADERSHIP: Friday agenda emailed to ${to}`)
+    }
   } catch (e) { console.warn('leadership auto-gen:', e.message) }
 }
 
