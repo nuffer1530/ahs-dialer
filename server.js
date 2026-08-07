@@ -7972,6 +7972,8 @@ async function carriedNotes(weekEnd) {
     const prev = data?.notes || {}
     return {
       projects: prev.projects || [], topics: [],
+      // Budgets persist until Brandyn changes them for a new month.
+      budgets: prev.budgets || {},
       // Standing prompt from the original agenda sheet — same every week.
       positive: prev.positive || 'Everyone shares either personal or professional positive news from last week or the upcoming week',
     }

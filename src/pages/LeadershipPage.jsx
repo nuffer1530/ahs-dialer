@@ -244,10 +244,48 @@ export default function LeadershipPage() {
               sub={`${money(f.totals.unpaid)} uncollected${f.compare?.yoyWeek?.revenueDelta != null ? ` · YoY ${f.compare.yoyWeek.revenueDelta >= 0 ? '+' : ''}${pct(f.compare.yoyWeek.revenueDelta)}` : ''}`} />
             <Card label="Close Rate" value={pct(f.totals.closeRate)} sub={`${f.totals.opps} opportunities`} />
             <Card label="Booking %" value={pct(f.totals.booking.rate)} sub={`${f.totals.booking.total} lead calls`} />
-            <Card label="MTD Revenue" value={money(f.mtd.revenue)}
-              sub={`pace ${money(f.mtd.pacedTarget)} · proj ${money(f.mtd.projected)}${f.compare?.priorMonthMtd?.revenueDelta != null ? ` · MoM ${f.compare.priorMonthMtd.revenueDelta >= 0 ? '+' : ''}${pct(f.compare.priorMonthMtd.revenueDelta)}` : ''}`}
-              tone={f.mtd.revenue >= f.mtd.pacedTarget ? 'good' : 'bad'} />
           </div>
+
+          {/* Pacing vs budgets — budgets editable, carried forward week to week */}
+          {(() => {
+            const b = notes.budgets || {}
+            const mSales = Number(b.monthSales) || f.mtd.salesTarget
+            const mRev = Number(b.monthRevenue) || f.mtd.target
+            const ySales = Number(b.yearSales) || f.ytd?.target
+            const mFrac = f.mtd.dayOfMonth / f.mtd.daysInMonth
+            const yFrac = f.ytd ? f.ytd.dayOfYear / f.ytd.daysInYear : 0
+            const mSalesPace = Math.round(mSales * mFrac), mRevPace = Math.round(mRev * mFrac)
+            const ySalesPace = Math.round((ySales || 0) * yFrac)
+            const budgetInput = (key, val, ph) => (
+              <label style={{ fontSize: 12, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                {ph}
+                <input style={{ ...S.input, width: 110 }} inputMode="numeric" placeholder="$"
+                  value={b[key] ?? ''}
+                  onChange={e => patchNotes({ budgets: { ...b, [key]: e.target.value.replace(/[^0-9]/g, '') } })} />
+              </label>
+            )
+            return (
+              <div style={S.section}>
+                <div style={S.sectionTitle}>Sales & revenue pacing</div>
+                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                  <Card label="MTD Sales" value={money(f.mtd.sales)}
+                    sub={`budget ${money(mSales)} · pace ${money(mSalesPace)} · proj ${money(f.mtd.salesProjected)}`}
+                    tone={f.mtd.sales >= mSalesPace ? 'good' : 'bad'} />
+                  <Card label="MTD Revenue" value={money(f.mtd.revenue)}
+                    sub={`budget ${money(mRev)} · pace ${money(mRevPace)} · proj ${money(f.mtd.projected)}${f.compare?.priorMonthMtd?.revenueDelta != null ? ` · MoM ${f.compare.priorMonthMtd.revenueDelta >= 0 ? '+' : ''}${pct(f.compare.priorMonthMtd.revenueDelta)}` : ''}`}
+                    tone={f.mtd.revenue >= mRevPace ? 'good' : 'bad'} />
+                  {f.ytd && <Card label="YTD Sales" value={money(f.ytd.sales)}
+                    sub={`target ${money(ySales)} · pace ${money(ySalesPace)} · proj ${money(f.ytd.projected)}`}
+                    tone={f.ytd.sales >= ySalesPace ? 'good' : 'bad'} />}
+                </div>
+                <div className="no-print" style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginTop: 10 }}>
+                  {budgetInput('monthSales', b.monthSales, 'Month sales budget')}
+                  {budgetInput('monthRevenue', b.monthRevenue, 'Month revenue budget')}
+                  {budgetInput('yearSales', b.yearSales, 'Annual sales target')}
+                </div>
+              </div>
+            )
+          })()}
 
           {/* AI read — a 60-second scan: headline, top highlights, actions by dept */}
           {ai && (
@@ -366,18 +404,35 @@ export default function LeadershipPage() {
             </div>
           </div>
 
-          {/* Leaderboards */}
+          {/* Leaderboards — top 3 + lowest per department, not the whole roster */}
           <div style={S.section}>
-            <div style={S.sectionTitle}>Technicians — composite: revenue 40 · close 30 · $/opp 30</div>
-            <Table headers={['Tech', 'Score', 'Sold', 'Close', '$/Opp', 'Jobs', 'Callbacks']}
-              rows={f.technicians.filter(t => t.score != null).map(t => [
-                t.name, String(t.score), money(t.soldAmount),
+            <div style={S.sectionTitle}>Technicians — top 3 + lowest per department · composite: revenue 40 · close 30 · $/opp 30</div>
+            {['HVAC', 'Plumbing', 'Electrical', 'Garage Doors'].map(trade => {
+              const scored = f.technicians.filter(t => t.score != null && t.trade === trade)
+              if (!scored.length) return null
+              const top = scored.slice(0, 3)
+              const lowest = scored.length > 3 ? scored[scored.length - 1] : null
+              const row = (t, isLow) => [
+                isLow ? <span style={{ color: 'var(--danger)', fontWeight: 700 }}>{t.name}</span> : t.name,
+                String(t.score), money(t.soldAmount),
                 t.closeRate != null ? pct(t.closeRate) : '—',
                 t.dollarsPerOpp != null ? money(t.dollarsPerOpp) : '—',
                 String(t.jobsRan),
                 t.callbacks ? <span style={{ color: 'var(--warning)', fontWeight: 700 }}>{t.callbacks}</span> : '0',
-              ])}
-            />
+              ]
+              return (
+                <div key={trade} style={{ marginBottom: 12 }}>
+                  <div style={{ fontSize: 12.5, fontWeight: 800, color: 'var(--accent)', marginBottom: 4 }}>{trade}</div>
+                  <Table headers={['Tech', 'Score', 'Sold', 'Close', '$/Opp', 'Jobs', 'Callbacks']}
+                    rows={[...top.map(t => row(t, false)), ...(lowest ? [row(lowest, true)] : [])]} />
+                </div>
+              )
+            })}
+            {f.technicians.some(t => t.score != null && !t.trade) && (
+              <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
+                Unassigned to a department: {f.technicians.filter(t => t.score != null && !t.trade).map(t => t.name).join(', ')}
+              </div>
+            )}
             {f.callbacks.total > 0 && (
               <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 8 }}>
                 {f.callbacks.total} callback/warranty jobs this week: {Object.entries(f.callbacks.byType).map(([n, c]) => `${n} (${c})`).join(' · ')}
@@ -386,13 +441,19 @@ export default function LeadershipPage() {
           </div>
 
           <div style={S.section}>
-            <div style={S.sectionTitle}>CSRs — from ServiceTitan · composite: booked 40 · book rate 30 · QA 30</div>
-            <Table headers={['CSR', 'Score', 'Booked', 'Lead calls', 'Book rate', 'QA (Andi)']}
-              rows={f.csrs.filter(c => c.score != null).map(c => [
-                c.name, String(c.score), String(c.booked), String(c.answered),
+            <div style={S.sectionTitle}>CSRs — top 3 + lowest · from ServiceTitan · composite: booked 40 · book rate 30 · QA 30</div>
+            {(() => {
+              const scored = f.csrs.filter(c => c.score != null)
+              const top = scored.slice(0, 3)
+              const lowest = scored.length > 3 ? scored[scored.length - 1] : null
+              const row = (c, isLow) => [
+                isLow ? <span style={{ color: 'var(--danger)', fontWeight: 700 }}>{c.name}</span> : c.name,
+                String(c.score), String(c.booked), String(c.answered),
                 c.bookRate != null ? pct(c.bookRate) : '—', c.qa != null ? `${c.qa}%` : '—',
-              ])}
-            />
+              ]
+              return <Table headers={['CSR', 'Score', 'Booked', 'Lead calls', 'Book rate', 'QA (Andi)']}
+                rows={[...top.map(c => row(c, false)), ...(lowest ? [row(lowest, true)] : [])]} />
+            })()}
           </div>
 
           {/* Marketing */}
