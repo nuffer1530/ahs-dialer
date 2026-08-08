@@ -8071,12 +8071,9 @@ app.post('/api/admin/leadership/email', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }) }
 })
 
-// Two automatic runs, one claim key (compare-and-set, replica-safe like the
-// digest):
-//  - FRIDAY ~6 AM: the meeting is Friday, so build the week-so-far (Mon-Thu
-//    complete) and EMAIL it — that's what the meeting discusses.
-//  - MONDAY ~6 AM: quietly finalize the completed week for the archive, so
-//    history and YoY baselines are full weeks. No email.
+// MONDAY ~6 AM (the meeting is Monday morning): finalize last week's report,
+// archive it, and EMAIL it so the agenda is in the inbox before the meeting.
+// Same replica-safe compare-and-set claim as the digest.
 const LEADERSHIP_GEN_KEY = 'leadership_report_generated_for'
 async function maybeGenerateLeadershipReport() {
   try {
@@ -8085,12 +8082,10 @@ async function maybeGenerateLeadershipReport() {
     }).formatToParts(new Date()).reduce((a, p) => (a[p.type] = p.value, a), {})
     const hour = Number(parts.hour === '24' ? 0 : parts.hour)
     if (hour < 6 || hour >= 10) return
-    let weekEnd, claimValue, email
-    if (parts.weekday === 'Fri') {
-      weekEnd = upcomingSunday(); claimValue = `fri-${weekEnd}`; email = true
-    } else if (parts.weekday === 'Mon') {
-      weekEnd = latestCompletedSunday(); claimValue = weekEnd; email = false
-    } else return
+    if (parts.weekday !== 'Mon') return
+    const weekEnd = latestCompletedSunday()
+    const claimValue = weekEnd
+    const email = true
     const { data: row } = await supabase.from('app_settings').select('value').eq('key', LEADERSHIP_GEN_KEY).maybeSingle()
     const prev = row?.value ?? null
     if (String(prev).replace(/"/g, '') === claimValue) return
@@ -8116,8 +8111,8 @@ async function maybeGenerateLeadershipReport() {
       if (!to) to = LEADERSHIP_DEFAULT_VIEWERS[1]
       const html = renderLeadershipHtml(report.facts, report.ai, report.notes)
       const label = new Date(`${weekEnd}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })
-      await sendResend({ to, subject: `Weekly Leadership Agenda — meeting day (W/E ${label}, through Thursday)`, html })
-      console.log(`LEADERSHIP: Friday agenda emailed to ${to}`)
+      await sendResend({ to, subject: `Weekly Leadership Agenda — W/E ${label}`, html })
+      console.log(`LEADERSHIP: Monday agenda emailed to ${to}`)
     }
   } catch (e) { console.warn('leadership auto-gen:', e.message) }
 }
