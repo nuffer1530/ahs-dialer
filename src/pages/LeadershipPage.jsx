@@ -342,7 +342,7 @@ export default function LeadershipPage() {
           <div style={S.section}>
             <div style={S.sectionTitle}>Department scorecard</div>
             <Table
-              headers={['Dept', 'Wk Sales', 'Budget', 'Var', 'Wk Rev', 'Rev Tgt', 'Close / Tgt', 'Avg Sale', 'Opps', 'Missed $', 'Callbacks', 'True Labor %', 'GP after labor']}
+              headers={['Dept', 'Wk Sales', 'Budget', 'Var', 'Wk Rev', 'Rev Tgt', 'Close / Tgt', 'Avg Sale', 'Opps', 'Missed $', 'Callbacks', 'True Labor %']}
               rows={[
                 ...f.scorecard.map(d => [
                   d.trade, money(d.sales), money(d.budget),
@@ -356,9 +356,6 @@ export default function LeadershipPage() {
                   d.trueLaborPct != null
                     ? <span style={d.trueLaborPct <= (d.laborTarget || 0.25) ? S.good : S.bad}>{pct(d.trueLaborPct)}</span>
                     : '—',
-                  d.gpPct != null
-                    ? <span style={d.gpPct >= (d.gmTarget || 0.55) ? S.good : S.bad}>{money(d.gp)} ({pct(d.gpPct)})</span>
-                    : '—',
                 ]),
                 [
                   <b>AWESOME</b>, <b>{money(f.totals.sales)}</b>, <b>{money(f.scorecard.reduce((a, d) => a + d.budget, 0))}</b>,
@@ -368,13 +365,9 @@ export default function LeadershipPage() {
                   money(f.scorecard.reduce((a, d) => a + (d.missedSales || 0), 0)),
                   <b>{String(f.scorecard.reduce((a, d) => a + (d.callbacks || 0), 0))}</b>,
                   pct(f.labor.laborPctOfRevenue),
-                  <b>{money(f.scorecard.reduce((a, d) => a + (d.gp || 0), 0))}</b>,
                 ],
               ]}
             />
-            <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 6 }}>
-              GP after labor = revenue − true burdened field labor (ADP model). Material costs aren't tracked in ServiceTitan, so this is not full gross margin.
-            </div>
           </div>
 
           {/* KPIs + opportunities side-by-side feel */}
