@@ -10,7 +10,7 @@ import { computeBattingOrder, computeZipValue, computeJobTypeOrder, DEFAULT_WEIG
 import { driveTimes, straightLine, pairKey, driveTimeEnabled, geocode, suggestAddresses } from './lib/driveTime.js'
 import { buildDailyDigest } from './lib/dailyDigest.js'
 import { gatherWeeklyFacts, generateAgendaAI, renderLeadershipHtml, latestCompletedSunday, upcomingSunday } from './lib/leadershipReport.js'
-import { parseAdpPayrollInvoice, aggregateAdpActuals } from './lib/adpInvoice.js'
+import { parseAdpUpload, aggregateAdpActuals, REGISTER_BURDEN_DEFAULTS } from './lib/adpInvoice.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
@@ -8100,13 +8100,17 @@ app.post('/api/admin/leadership/payroll', async (req, res) => {
   try {
     const b64 = String(req.body?.dataBase64 || '')
     if (!b64) return res.status(400).json({ error: 'dataBase64 required' })
-    const parsed = parseAdpPayrollInvoice(Buffer.from(b64, 'base64'))
-    let deptMap = {}
+    const parsed = parseAdpUpload(Buffer.from(b64, 'base64'))
+    let deptMap = {}, rates = REGISTER_BURDEN_DEFAULTS
     try {
       const { data } = await supabase.from('app_settings').select('value').eq('key', 'adp_employee_depts').maybeSingle()
       deptMap = JSON.parse(data?.value || '{}')
     } catch {}
-    const agg = aggregateAdpActuals(parsed, deptMap)
+    try {
+      const { data } = await supabase.from('app_settings').select('value').eq('key', 'labor_burden').maybeSingle()
+      rates = { ...REGISTER_BURDEN_DEFAULTS, ...JSON.parse(data?.value || '{}') }
+    } catch {}
+    const agg = aggregateAdpActuals(parsed, deptMap, rates)
     // Merge into the actuals ledger, newest 26 weeks kept.
     let all = {}
     try {

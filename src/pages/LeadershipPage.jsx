@@ -457,7 +457,7 @@ export default function LeadershipPage() {
           <div style={S.section}>
             <div style={S.sectionTitle}>
               True labor {f.labor.source === 'adp'
-                ? <span style={{ color: 'var(--success)' }}>— ACTUALS from ADP invoice {f.labor.actual?.invoiceNo} ✓</span>
+                ? <span style={{ color: 'var(--success)' }}>— ACTUALS from ADP {f.labor.actual?.source === 'invoice' ? `invoice ${f.labor.actual?.invoiceNo}` : f.labor.actual?.invoiceNo}{f.labor.actual?.approx ? ' (burden estimated from measured rates)' : ''} ✓</span>
                 : '(ADP-burdened model)'}
             </div>
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
@@ -474,7 +474,7 @@ export default function LeadershipPage() {
             )}
             <div className="no-print" style={{ display: 'flex', gap: 12, alignItems: 'center', marginTop: 10, flexWrap: 'wrap' }}>
               <label style={{ ...S.btn, cursor: 'pointer', display: 'inline-block' }}>
-                {busy === 'payroll' ? 'Parsing…' : '📎 Upload ADP payroll invoice (.xls)'}
+                {busy === 'payroll' ? 'Parsing…' : '📎 Upload ADP payroll (.xls — invoice or register)'}
                 <input type="file" accept=".xls,.xlsx" style={{ display: 'none' }} disabled={busy === 'payroll'}
                   onChange={e => uploadPayroll(e.target.files?.[0])} />
               </label>
