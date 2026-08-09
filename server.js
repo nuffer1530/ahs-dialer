@@ -8010,6 +8010,25 @@ async function generateLeadershipReport(weekEnd, existingNotes) {
   return { weekEnd, facts, ai, notes, saved }
 }
 
+// Generation takes ~a minute; a gateway timeout on the first request must not
+// throw that work away (especially pre-migration, when nothing persists).
+// In-flight requests for the same week share one promise, and finished
+// reports are served from memory for 15 minutes.
+const leadershipInflight = new Map()   // weekEnd -> Promise<report>
+const leadershipGenCache = new Map()   // weekEnd -> { report, at }
+function getLeadershipReport(weekEnd, { refresh = false, notes } = {}) {
+  if (!refresh) {
+    const c = leadershipGenCache.get(weekEnd)
+    if (c && Date.now() - c.at < 15 * 60_000) return Promise.resolve(c.report)
+    if (leadershipInflight.has(weekEnd)) return leadershipInflight.get(weekEnd)
+  }
+  const p = generateLeadershipReport(weekEnd, notes)
+    .then(r => { leadershipGenCache.set(weekEnd, { report: r, at: Date.now() }); return r })
+    .finally(() => leadershipInflight.delete(weekEnd))
+  leadershipInflight.set(weekEnd, p)
+  return p
+}
+
 // List archived weeks (newest first).
 app.get('/api/admin/leadership/weeks', async (req, res) => {
   if (!(await requireLeadership(req, res))) return
@@ -8031,7 +8050,7 @@ app.get('/api/admin/leadership/report', async (req, res) => {
     if (row && req.query.refresh !== '1') {
       return res.json({ weekEnd, facts: row.facts, ai: row.ai, notes: row.notes || {}, saved: true })
     }
-    const report = await generateLeadershipReport(weekEnd, row?.notes)
+    const report = await getLeadershipReport(weekEnd, { refresh: req.query.refresh === '1', notes: row?.notes })
     res.json(report)
   } catch (e) { res.status(500).json({ error: e.message }) }
 })

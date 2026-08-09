@@ -111,6 +111,8 @@ export default function LeadershipPage() {
   const [weeks, setWeeks] = useState([])
   const [week, setWeek] = useState(null)
   const [currentWeek, setCurrentWeek] = useState(null)
+  const [migrationPending, setMigrationPending] = useState(false)
+  const retriedRef = useRef({})
   const [report, setReport] = useState(null)
   const [notes, setNotes] = useState({})
   const [loading, setLoading] = useState(true)
@@ -136,6 +138,7 @@ export default function LeadershipPage() {
         const list = [...new Set([d.current, latest, ...(d.weeks || [])])].filter(Boolean).sort().reverse()
         setWeeks(list)
         setCurrentWeek(d.current || null)
+        setMigrationPending(!!d.migrationPending)
         setWeek(w => w || latest)
       })
       .catch(() => setError('Could not load weeks'))
@@ -152,9 +155,21 @@ export default function LeadershipPage() {
         // regenerate instead of showing Tuesday's numbers on Friday.
         const todayDenver = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Denver' }).format(new Date())
         if (!refresh && d.saved && d.facts?.partial && d.facts.asOf < todayDenver) { load(wk, true); return }
+        retriedRef.current[wk] = 0
         setReport(d); setNotes(d.notes || {})
       })
-      .catch(e => setError(e.message))
+      .catch(e => {
+        // NEVER leave another week's numbers on screen under this week's label —
+        // clear, then retry once (the server kept generating; retry is instant).
+        setReport(null)
+        if ((retriedRef.current[wk] || 0) < 1) {
+          retriedRef.current[wk] = 1
+          setError('First try timed out — the server is still building it, retrying…')
+          setTimeout(() => load(wk), 10000)
+        } else {
+          setError(`${e.message} — hit Refresh numbers to try again`)
+        }
+      })
       .finally(() => setLoading(false))
   }, [authHeaders])
 
@@ -231,13 +246,25 @@ export default function LeadershipPage() {
         <button style={S.btnPrimary} disabled={busy === 'email'} onClick={emailIt}>{busy === 'email' ? 'Sending…' : '✉ Email it'}</button>
       </div>
 
+      {migrationPending && (
+        <div className="no-print" style={{ ...S.section, borderColor: 'var(--tone-amber-bd)', background: 'var(--tone-amber-bg)', color: 'var(--tone-amber-tx)', fontSize: 13 }}>
+          <b>Archive not enabled yet:</b> the <code>leadership_reports</code> table hasn't been created in Supabase, so nothing saves — every visit
+          rebuilds from scratch (~1 min) and fill-ins are lost. Run the SQL block from SUPABASE_SETUP.sql (bottom) in the Supabase SQL editor.
+        </div>
+      )}
       {error && <div style={{ ...S.section, borderColor: 'var(--danger)', color: 'var(--danger)' }}>{error}</div>}
-      {loading && <div style={{ ...S.section, color: 'var(--text-secondary)' }}>Building the week from ServiceTitan + Andi — 20–60s on a fresh pull…</div>}
+      {loading && <div style={{ ...S.section, color: 'var(--text-secondary)' }}>Building W/E {week} from ServiceTitan + Andi — 20–60s on a fresh pull…</div>}
 
       {f && !loading && (
         <div id="leadership-print">
           <div style={{ display: 'none' }} className="print-only">
             <h1 style={S.h1}>Weekly Leadership Agenda — {weekLabel}</h1>
+          </div>
+
+          {/* Self-identifying: which window these numbers actually cover */}
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', margin: '2px 0 6px' }}>
+            Numbers cover <b>{f.weekStart} → {f.weekEnd}</b>{f.asOf && f.asOf !== f.weekEnd ? <> · data through <b>{f.asOf}</b></> : null}
+            {f.mtd?.dayOfMonth != null ? <> · MTD/YTD as of day {f.mtd.dayOfMonth} of {f.mtd.daysInMonth}</> : null}
           </div>
 
           {/* Meeting openers */}
