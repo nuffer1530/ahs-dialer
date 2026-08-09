@@ -202,6 +202,30 @@ export default function LeadershipPage() {
       .finally(() => setBusy(''))
   }
 
+  // Upload the weekly ADP payroll invoice — the file itself declares its week
+  // (End Date), so the server may land it on a different week than selected.
+  const uploadPayroll = (file) => {
+    if (!file) return
+    setBusy('payroll')
+    const fr = new FileReader()
+    fr.onerror = () => { setBusy(''); alert('Could not read that file') }
+    fr.onload = () => {
+      const dataBase64 = String(fr.result).split(',')[1] || ''
+      authHeaders()
+        .then(h => fetch('/api/admin/leadership/payroll', { method: 'POST', headers: h, body: JSON.stringify({ dataBase64 }) }))
+        .then(async r => { const d = await r.json(); if (!r.ok || !d.ok) throw new Error(d.error || 'upload failed'); return d })
+        .then(d => {
+          const un = (d.unmatched || []).length
+          alert(`Parsed invoice ${d.invoiceNo}: ${d.employees} employees, week ending ${d.weekEnd}.\nField ${'$' + d.totals.field.cost.toLocaleString()} · Office ${'$' + d.totals.office.cost.toLocaleString()}${un ? `\n${un} unmapped employee(s)` : ''}\nRebuilding the report with actuals…`)
+          if (d.weekEnd !== week) setWeek(d.weekEnd)
+          else load(week, true)
+        })
+        .catch(e => alert(`Upload failed: ${e.message}`))
+        .finally(() => setBusy(''))
+    }
+    fr.readAsDataURL(file)
+  }
+
   const f = report?.facts
   const ai = report?.ai
   const weekLabel = f ? `${f.weekStart} → ${f.weekEnd}` : week
@@ -431,22 +455,34 @@ export default function LeadershipPage() {
 
           {/* True labor */}
           <div style={S.section}>
-            <div style={S.sectionTitle}>True labor (ADP-burdened)</div>
-            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-              <Card label="Field labor (true)" value={money(f.labor.estFieldBurdened)} sub={`${money(f.labor.impliedCommissions)} commissions + pool + burden`} />
-              <Card label="Office labor" value={money(f.labor.officeWeeklyCost)} sub="burdened weekly baseline" />
-              <Card label="All-in labor %" value={pct(f.labor.laborPctOfRevenue)} sub="of week revenue" tone={f.labor.laborPctOfRevenue <= 0.36 ? 'good' : 'bad'} />
-              <Card label="Hidden pool" value={money(f.labor.hiddenPool)} sub="field pay not tied to a job" />
+            <div style={S.sectionTitle}>
+              True labor {f.labor.source === 'adp'
+                ? <span style={{ color: 'var(--success)' }}>— ACTUALS from ADP invoice {f.labor.actual?.invoiceNo} ✓</span>
+                : '(ADP-burdened model)'}
             </div>
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 10 }}>
-              <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Actual ADP field gross this week (optional override):</span>
-              <input style={{ ...S.input, width: 140 }} placeholder="$" value={notes.fieldPayrollActual || ''}
-                onChange={e => patchNotes({ fieldPayrollActual: e.target.value.replace(/[^0-9.]/g, '') })} />
-              {notes.fieldPayrollActual && f.labor.estFieldGross > 0 && (
-                <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
-                  model said {money(f.labor.estFieldGross)} → {Math.abs(Number(notes.fieldPayrollActual) - f.labor.estFieldGross) / f.labor.estFieldGross <= 0.1 ? 'within 10% ✓' : 'model drift — worth a look'}
-                </span>
-              )}
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+              <Card label="Field labor (true)" value={money(f.labor.estFieldBurdened)}
+                sub={f.labor.source === 'adp' ? `${money(f.labor.actual.totals.field.gross)} gross · ${f.labor.actual.totals.field.n} employees` : `${money(f.labor.impliedCommissions)} commissions + pool + burden`} />
+              <Card label="Office labor" value={money(f.labor.officeWeeklyCost)} sub={f.labor.source === 'adp' ? `${f.labor.actual.totals.office.n} employees` : 'burdened weekly baseline'} />
+              <Card label="All-in labor %" value={pct(f.labor.laborPctOfRevenue)} sub="of week revenue" tone={f.labor.laborPctOfRevenue <= 0.36 ? 'good' : 'bad'} />
+              <Card label="Hidden pool" value={money(f.labor.hiddenPool)} sub={f.labor.source === 'adp' ? 'actual field gross − job commissions' : 'field pay not tied to a job'} />
+            </div>
+            {f.labor.source === 'adp' && (f.labor.actual.unmatched || []).length > 0 && (
+              <div style={{ fontSize: 12, color: 'var(--warning)', marginTop: 8 }}>
+                No department mapping for: {f.labor.actual.unmatched.join(', ')} — upload a recent benefits invoice or tell Claude to remap.
+              </div>
+            )}
+            <div className="no-print" style={{ display: 'flex', gap: 12, alignItems: 'center', marginTop: 10, flexWrap: 'wrap' }}>
+              <label style={{ ...S.btn, cursor: 'pointer', display: 'inline-block' }}>
+                {busy === 'payroll' ? 'Parsing…' : '📎 Upload ADP payroll invoice (.xls)'}
+                <input type="file" accept=".xls,.xlsx" style={{ display: 'none' }} disabled={busy === 'payroll'}
+                  onChange={e => uploadPayroll(e.target.files?.[0])} />
+              </label>
+              {f.labor.source !== 'adp' && <>
+                <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>or type actual field gross:</span>
+                <input style={{ ...S.input, width: 140 }} placeholder="$" value={notes.fieldPayrollActual || ''}
+                  onChange={e => patchNotes({ fieldPayrollActual: e.target.value.replace(/[^0-9.]/g, '') })} />
+              </>}
             </div>
           </div>
 

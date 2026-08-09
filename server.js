@@ -10,13 +10,14 @@ import { computeBattingOrder, computeZipValue, computeJobTypeOrder, DEFAULT_WEIG
 import { driveTimes, straightLine, pairKey, driveTimeEnabled, geocode, suggestAddresses } from './lib/driveTime.js'
 import { buildDailyDigest } from './lib/dailyDigest.js'
 import { gatherWeeklyFacts, generateAgendaAI, renderLeadershipHtml, latestCompletedSunday, upcomingSunday } from './lib/leadershipReport.js'
+import { parseAdpPayrollInvoice, aggregateAdpActuals } from './lib/adpInvoice.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
 
 const app = express()
 app.use(cors())
-app.use(express.json())
+app.use(express.json({ limit: '4mb' }))   // ADP invoice uploads ride JSON as base64
 app.use(express.urlencoded({ extended: false }))
 
 const accountSid = process.env.TWILIO_ACCOUNT_SID
@@ -8088,6 +8089,37 @@ app.post('/api/admin/leadership/email', async (req, res) => {
     await sendResend({ to, subject: `Weekly Leadership Agenda — W/E ${label}`, html })
     res.json({ ok: true, sent: to })
   } catch (e) { res.status(500).json({ error: e.message }) }
+})
+
+// Upload the weekly ADP TotalSource payroll invoice (.xls, base64 in JSON).
+// The invoice itself says which week it covers (End Date) — we trust the file,
+// not the page's selected week. Actuals land in app_settings and the report
+// generator prefers them over the commission model for that week.
+app.post('/api/admin/leadership/payroll', async (req, res) => {
+  if (!(await requireLeadership(req, res))) return
+  try {
+    const b64 = String(req.body?.dataBase64 || '')
+    if (!b64) return res.status(400).json({ error: 'dataBase64 required' })
+    const parsed = parseAdpPayrollInvoice(Buffer.from(b64, 'base64'))
+    let deptMap = {}
+    try {
+      const { data } = await supabase.from('app_settings').select('value').eq('key', 'adp_employee_depts').maybeSingle()
+      deptMap = JSON.parse(data?.value || '{}')
+    } catch {}
+    const agg = aggregateAdpActuals(parsed, deptMap)
+    // Merge into the actuals ledger, newest 26 weeks kept.
+    let all = {}
+    try {
+      const { data } = await supabase.from('app_settings').select('value').eq('key', 'adp_payroll_actuals').maybeSingle()
+      all = JSON.parse(data?.value || '{}')
+    } catch {}
+    all[agg.weekEnd] = { ...agg, uploadedAt: new Date().toISOString() }
+    const keep = Object.keys(all).sort().reverse().slice(0, 26)
+    all = Object.fromEntries(keep.map(k => [k, all[k]]))
+    await supabase.from('app_settings').upsert({ key: 'adp_payroll_actuals', value: JSON.stringify(all) }, { onConflict: 'key' })
+    leadershipGenCache.delete(agg.weekEnd)   // next report build sees the actuals
+    res.json({ ok: true, ...agg })
+  } catch (e) { res.status(400).json({ error: e.message }) }
 })
 
 // MONDAY ~6 AM (the meeting is Monday morning): finalize last week's report,
