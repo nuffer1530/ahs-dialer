@@ -7994,7 +7994,9 @@ async function carriedNotes(weekEnd) {
       .order('week_ending', { ascending: false }).limit(1).maybeSingle()
     const prev = data?.notes || {}
     return {
-      projects: prev.projects || [], topics: [],
+      // Projects ride along week to week until someone marks them Done.
+      projects: (prev.projects || []).filter(p => String(p?.status || '').toLowerCase() !== 'done'),
+      topics: [],
       // Budgets persist until Brandyn changes them for a new month.
       budgets: prev.budgets || {},
       // Standing prompt from the original agenda sheet — same every week.

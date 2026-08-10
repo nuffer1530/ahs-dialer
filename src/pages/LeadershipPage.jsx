@@ -72,19 +72,39 @@ function EditRows({ rows, cols, onChange }) {
     onChange(next.filter(r => cols.some(c => String(r[c.key] || '').trim())))
   }
   return (
-    <div style={{ overflowX: 'auto' }}>
-      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-        <thead><tr>{cols.map(c => <th key={c.key} style={{ ...S.th, textAlign: 'left', width: c.width }}>{c.label}</th>)}</tr></thead>
-        <tbody>{display.map((r, ri) => (
-          <tr key={ri}>{cols.map(c => (
-            <td key={c.key} style={{ padding: '3px 4px', borderBottom: '1px solid var(--border)' }}>
-              <input style={S.input} value={r[c.key] || ''} placeholder={ri === display.length - 1 ? c.placeholder || '' : ''}
-                onChange={e => set(ri, c.key, e.target.value)} />
-            </td>
-          ))}</tr>
-        ))}</tbody>
-      </table>
-    </div>
+    <>
+      <div style={{ overflowX: 'auto' }} className="no-print">
+        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead><tr>{cols.map(c => <th key={c.key} style={{ ...S.th, textAlign: 'left', width: c.width }}>{c.label}</th>)}</tr></thead>
+          <tbody>{display.map((r, ri) => (
+            <tr key={ri}>{cols.map(c => (
+              <td key={c.key} style={{ padding: '3px 4px', borderBottom: '1px solid var(--border)' }}>
+                {c.options ? (
+                  <select style={S.input} value={r[c.key] || ''} onChange={e => set(ri, c.key, e.target.value)}>
+                    <option value=""></option>
+                    {c.options.map(o => <option key={o} value={o}>{o}</option>)}
+                  </select>
+                ) : (
+                  <input style={S.input} value={r[c.key] || ''} placeholder={ri === display.length - 1 ? c.placeholder || '' : ''}
+                    onChange={e => set(ri, c.key, e.target.value)} />
+                )}
+              </td>
+            ))}</tr>
+          ))}</tbody>
+        </table>
+      </div>
+      {/* Inputs clip when printed — print a plain static table instead. */}
+      {items.length > 0 && (
+        <table className="print-only" style={{ display: 'none', width: '100%', borderCollapse: 'collapse' }}>
+          <thead><tr>{cols.map(c => <th key={c.key} style={{ ...S.th, textAlign: 'left', width: c.width }}>{c.label}</th>)}</tr></thead>
+          <tbody>{items.map((r, ri) => (
+            <tr key={ri}>{cols.map(c => (
+              <td key={c.key} style={{ padding: '4px 6px', borderBottom: '1px solid var(--border)', fontSize: 12, verticalAlign: 'top' }}>{r[c.key] || ''}</td>
+            ))}</tr>
+          ))}</tbody>
+        </table>
+      )}
+    </>
   )
 }
 
@@ -96,14 +116,21 @@ function EditList({ items, onChange, mark }) {
     onChange(next.filter(x => String(x).trim()))
   }
   return (
-    <div>
-      {display.map((x, i) => (
-        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-          <span style={{ color: 'var(--text-muted)', width: 14 }}>{mark}</span>
-          <input style={S.input} value={x} placeholder={i === display.length - 1 ? 'Add…' : ''} onChange={e => set(i, e.target.value)} />
-        </div>
-      ))}
-    </div>
+    <>
+      <div className="no-print">
+        {display.map((x, i) => (
+          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+            <span style={{ color: 'var(--text-muted)', width: 14 }}>{mark}</span>
+            <input style={S.input} value={x} placeholder={i === display.length - 1 ? 'Add…' : ''} onChange={e => set(i, e.target.value)} />
+          </div>
+        ))}
+      </div>
+      <div className="print-only" style={{ display: 'none' }}>
+        {(items || []).map((x, i) => (
+          <div key={i} style={{ fontSize: 12.5, lineHeight: 1.7 }}>{mark} {x}</div>
+        ))}
+      </div>
+    </>
   )
 }
 
@@ -238,11 +265,23 @@ export default function LeadershipPage() {
           /* The app shell is 100vh + overflow:hidden, which clips printing to
              one page — undo all of that for print only. */
           html, body, body * { overflow: visible !important; height: auto !important; max-height: none !important; }
+          body { background: #fff !important; }
           body * { visibility: hidden !important; }
           #leadership-print, #leadership-print * { visibility: visible !important; }
-          #leadership-print { position: absolute; top: 0; left: 0; width: 100%; }
-          #leadership-print input, #leadership-print textarea { border: none !important; background: transparent !important; }
+          #leadership-print { position: absolute; top: 0; left: 0; width: 100%; font-size: 12px; }
+          /* Print in a light palette even if the app is in dark mode. */
+          #leadership-print {
+            --bg: #fff; --surface: #fff; --surface-2: #f5f5f4; --border: #c8c8c4; --border-strong: #999;
+            --text-primary: #111; --text-secondary: #3a3a38; --text-muted: #6a6a66;
+            --accent: #1A5C8A; --success: #15803D; --danger: #B91C1C; --warning: #8A5A00;
+            --tone-amber-bg: #fff; --tone-amber-bd: #c8c8c4; --tone-amber-tx: #6a6a66;
+          }
+          /* Keep each section whole on a page. */
+          #leadership-print > div { break-inside: avoid; }
+          /* Editors are replaced by their static .print-only twins. */
           .no-print { display: none !important; }
+          .print-only { display: block !important; }
+          table.print-only { display: table !important; }
         }
       `}</style>
 
@@ -295,9 +334,16 @@ export default function LeadershipPage() {
           <div style={S.section}>
             <div style={S.sectionTitle}>Quote · Ice breaker · Positive news</div>
             <div style={{ display: 'grid', gap: 8 }}>
-              <input style={S.input} placeholder="Quote of the day…" value={notes.quote || ''} onChange={e => patchNotes({ quote: e.target.value })} />
-              <input style={S.input} placeholder="Ice breaker…" value={notes.icebreaker || ''} onChange={e => patchNotes({ icebreaker: e.target.value })} />
-              <input style={S.input} placeholder="Positive news prompt…" value={notes.positive ?? DEFAULT_POSITIVE} onChange={e => patchNotes({ positive: e.target.value })} />
+              <div className="no-print" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <input style={S.input} placeholder="Quote of the day…" value={notes.quote || ''} onChange={e => patchNotes({ quote: e.target.value })} />
+                <input style={S.input} placeholder="Ice breaker…" value={notes.icebreaker || ''} onChange={e => patchNotes({ icebreaker: e.target.value })} />
+                <input style={S.input} placeholder="Positive news prompt…" value={notes.positive ?? DEFAULT_POSITIVE} onChange={e => patchNotes({ positive: e.target.value })} />
+              </div>
+              <div className="print-only" style={{ display: 'none', fontSize: 12.5, lineHeight: 1.7 }}>
+                {notes.quote && <div><b>Quote:</b> {notes.quote}</div>}
+                {notes.icebreaker && <div><b>Ice breaker:</b> {notes.icebreaker}</div>}
+                <div><b>Positive news:</b> {notes.positive ?? DEFAULT_POSITIVE}</div>
+              </div>
             </div>
           </div>
 
@@ -581,15 +627,18 @@ export default function LeadershipPage() {
           </div>
 
           <div style={S.section}>
-            <div style={S.sectionTitle}>Ongoing projects (carry forward week to week)</div>
+            <div style={S.sectionTitle}>Ongoing projects — carry forward every week until marked Done</div>
             <EditRows rows={notes.projects} onChange={v => patchNotes({ projects: v })}
               cols={[
                 { key: 'project', label: 'Project', placeholder: 'Add a project…' },
                 { key: 'owner', label: 'Owner', width: 130 },
-                { key: 'status', label: 'Status', width: 110 },
+                { key: 'status', label: 'Status', width: 130, options: ['Planning', 'On Track', 'At Risk', 'Stuck', 'Done'] },
                 { key: 'target', label: 'Target', width: 110 },
                 { key: 'notes', label: 'Notes' },
               ]} />
+            <div className="no-print" style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 4 }}>
+              Projects marked <b>Done</b> stay on this week's agenda and drop off next week's automatically.
+            </div>
           </div>
 
           <div style={S.section}>
@@ -620,8 +669,10 @@ export default function LeadershipPage() {
 
           <div style={S.section}>
             <div style={S.sectionTitle}>Notes & key takeaways</div>
-            <textarea style={{ ...S.input, minHeight: 90, resize: 'vertical' }} value={notes.notesText || ''}
+            <textarea className="no-print" style={{ ...S.input, minHeight: 90, resize: 'vertical' }} value={notes.notesText || ''}
               placeholder="Meeting notes…" onChange={e => patchNotes({ notesText: e.target.value })} />
+            {/* Textareas print only their visible rows — print the full text. */}
+            <div className="print-only" style={{ display: 'none', fontSize: 12.5, lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{notes.notesText || ''}</div>
           </div>
 
           <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 18, lineHeight: 1.6 }}>
