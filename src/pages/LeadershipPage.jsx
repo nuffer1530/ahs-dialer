@@ -455,7 +455,7 @@ export default function LeadershipPage() {
           <div style={S.section}>
             <div style={S.sectionTitle}>Department scorecard</div>
             <Table
-              headers={['Dept', 'Wk Sales', 'Budget', 'Var', 'Wk Rev', 'Rev Tgt', 'Close / Tgt', 'Avg Sale', 'Opps', 'Missed $', 'Callbacks', 'True Labor %']}
+              headers={['Dept', 'Wk Sales', 'Budget', 'Var', 'Wk Rev', 'Rev Tgt', 'Close / Tgt', 'Avg Sale', 'Opps', 'Missed $', '5★', 'Clubs', 'Callbacks', 'True Labor %']}
               rows={[
                 ...f.scorecard.map(d => [
                   d.trade, money(d.sales), money(d.budget),
@@ -468,6 +468,8 @@ export default function LeadershipPage() {
                   d.avgSale != null ? money(d.avgSale) : '—',
                   String(d.opps),
                   d.missedSales ? <span style={S.bad}>{money(d.missedSales)}</span> : '—',
+                  String(d.fiveStar || 0),
+                  String(d.clubs || 0),
                   d.callbacks ? <span style={{ color: 'var(--warning)', fontWeight: 700 }}>{d.callbacks}</span> : '0',
                   d.trueLaborPct != null
                     ? <span style={d.trueLaborPct <= (d.laborTarget || 0.25) ? S.good : S.bad}>{pct(d.trueLaborPct)}</span>
@@ -480,6 +482,8 @@ export default function LeadershipPage() {
                   <b>{money(f.scorecard.reduce((a, d) => a + d.revTarget, 0))}</b>,
                   <span style={goalTone(f.totals.closeRate, 0.7)}>{pct(f.totals.closeRate)}</span>, '—', <b>{String(f.totals.opps)}</b>,
                   money(f.scorecard.reduce((a, d) => a + (d.missedSales || 0), 0)),
+                  <b>{String(f.kpis.find(k => k.kpi === '5 Star Reviews')?.thisWk ?? f.scorecard.reduce((a, d) => a + (d.fiveStar || 0), 0))}</b>,
+                  <b>{String(f.kpis.find(k => k.kpi === 'Clubs Sold')?.thisWk ?? f.scorecard.reduce((a, d) => a + (d.clubs || 0), 0))}</b>,
                   <b>{String(f.scorecard.reduce((a, d) => a + (d.callbacks || 0), 0))}</b>,
                   pct(f.labor.laborPctOfRevenue),
                 ],
