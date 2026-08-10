@@ -177,7 +177,10 @@ export default function LeadershipPage() {
         setWeeks(list)
         setCurrentWeek(d.current || null)
         setMigrationPending(!!d.migrationPending)
-        setWeek(w => w || latest)
+        // Default to the newest week: the in-progress one — except on Monday
+        // (meeting day), when the agenda under review is last completed week.
+        const dowDenver = new Date().toLocaleDateString('en-US', { weekday: 'short', timeZone: 'America/Denver' })
+        setWeek(w => w || (dowDenver === 'Mon' ? latest : (d.current || latest)))
       })
       .catch(() => setError('Could not load weeks'))
   }, [authHeaders])
