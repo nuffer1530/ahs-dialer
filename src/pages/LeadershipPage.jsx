@@ -31,6 +31,7 @@ const S = {
   btn: { padding: '7px 14px', border: '1px solid var(--border)', borderRadius: 7, background: 'var(--surface)', color: 'var(--text-primary)', fontSize: 13, fontWeight: 600, cursor: 'pointer' },
   btnPrimary: { padding: '7px 14px', border: '1px solid var(--accent)', borderRadius: 7, background: 'var(--accent)', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer' },
   good: { color: 'var(--success)', fontWeight: 700 },
+  warn: { color: 'var(--warning)', fontWeight: 700 },
   bad: { color: 'var(--danger)', fontWeight: 700 },
   card: { flex: 1, border: '1px solid var(--border)', borderRadius: 10, padding: '12px 14px', minWidth: 150 },
   cardLabel: { fontSize: 10, fontWeight: 700, letterSpacing: 0.8, textTransform: 'uppercase', color: 'var(--text-muted)' },
@@ -38,11 +39,21 @@ const S = {
   cardSub: { fontSize: 11, color: 'var(--text-secondary)', marginTop: 2 },
 }
 
+// Green = goal hit · yellow = within 90% · red = clearly missed.
+const goalTone = (val, goal) => {
+  if (val == null || !goal) return {}
+  return val >= goal ? S.good : val >= goal * 0.9 ? S.warn : S.bad
+}
+const goalToneName = (val, goal) => {
+  if (val == null || !goal) return undefined
+  return val >= goal ? 'good' : val >= goal * 0.9 ? 'warn' : 'bad'
+}
+
 function Card({ label, value, sub, tone }) {
   return (
     <div style={S.card}>
       <div style={S.cardLabel}>{label}</div>
-      <div style={{ ...S.cardValue, ...(tone === 'good' ? { color: 'var(--success)' } : tone === 'bad' ? { color: 'var(--danger)' } : {}) }}>{value}</div>
+      <div style={{ ...S.cardValue, ...(tone === 'good' ? { color: 'var(--success)' } : tone === 'warn' ? { color: 'var(--warning)' } : tone === 'bad' ? { color: 'var(--danger)' } : {}) }}>{value}</div>
       {sub && <div style={S.cardSub}>{sub}</div>}
     </div>
   )
@@ -354,8 +365,10 @@ export default function LeadershipPage() {
               tone={f.totals.hitGoal ? 'good' : 'bad'} />
             <Card label="Wk Revenue" value={money(f.totals.revenue)}
               sub={`${money(f.totals.unpaid)} uncollected${f.compare?.yoyWeek?.revenueDelta != null ? ` · YoY ${f.compare.yoyWeek.revenueDelta >= 0 ? '+' : ''}${pct(f.compare.yoyWeek.revenueDelta)}` : ''}`} />
-            <Card label="Close Rate" value={pct(f.totals.closeRate)} sub={`${f.totals.opps} opportunities`} />
-            <Card label="Booking %" value={pct(f.totals.booking.rate)} sub={`${f.totals.booking.total} lead calls`} />
+            <Card label="Close Rate" value={pct(f.totals.closeRate)} sub={`${f.totals.opps} opportunities`}
+              tone={goalToneName(f.totals.closeRate, f.kpis.find(k => k.kpi === 'Close Rate')?.goal || 0.7)} />
+            <Card label="Booking %" value={pct(f.totals.booking.rate)} sub={`${f.totals.booking.total} lead calls`}
+              tone={goalToneName(f.totals.booking.rate, f.kpis.find(k => k.kpi === 'Booking %')?.goal || 0.8)} />
           </div>
 
           {/* Pacing vs budgets — budgets editable, carried forward week to week */}
@@ -444,8 +457,11 @@ export default function LeadershipPage() {
                 ...f.scorecard.map(d => [
                   d.trade, money(d.sales), money(d.budget),
                   <span style={d.variance >= 0 ? S.good : S.bad}>{d.variance >= 0 ? '+' : ''}{money(d.variance)}</span>,
-                  money(d.revenue), money(d.revTarget),
-                  d.closeRate != null ? `${pct(d.closeRate)} / ${pct(d.convTarget)}` : '—',
+                  <span style={goalTone(d.revenue, d.revTarget)}>{money(d.revenue)}</span>,
+                  money(d.revTarget),
+                  d.closeRate != null
+                    ? <span style={goalTone(d.closeRate, d.convTarget || 0.7)}>{pct(d.closeRate)} <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>/ {pct(d.convTarget)}</span></span>
+                    : '—',
                   d.avgSale != null ? money(d.avgSale) : '—',
                   String(d.opps),
                   d.missedSales ? <span style={S.bad}>{money(d.missedSales)}</span> : '—',
@@ -457,8 +473,9 @@ export default function LeadershipPage() {
                 [
                   <b>AWESOME</b>, <b>{money(f.totals.sales)}</b>, <b>{money(f.scorecard.reduce((a, d) => a + d.budget, 0))}</b>,
                   (() => { const v = f.totals.sales - f.scorecard.reduce((a, d) => a + d.budget, 0); return <span style={v >= 0 ? S.good : S.bad}>{v >= 0 ? '+' : ''}{money(v)}</span> })(),
-                  <b>{money(f.totals.revenue)}</b>, <b>{money(f.scorecard.reduce((a, d) => a + d.revTarget, 0))}</b>,
-                  pct(f.totals.closeRate), '—', <b>{String(f.totals.opps)}</b>,
+                  <b><span style={goalTone(f.totals.revenue, f.scorecard.reduce((a, d) => a + d.revTarget, 0))}>{money(f.totals.revenue)}</span></b>,
+                  <b>{money(f.scorecard.reduce((a, d) => a + d.revTarget, 0))}</b>,
+                  <span style={goalTone(f.totals.closeRate, 0.7)}>{pct(f.totals.closeRate)}</span>, '—', <b>{String(f.totals.opps)}</b>,
                   money(f.scorecard.reduce((a, d) => a + (d.missedSales || 0), 0)),
                   <b>{String(f.scorecard.reduce((a, d) => a + (d.callbacks || 0), 0))}</b>,
                   pct(f.labor.laborPctOfRevenue),
@@ -474,8 +491,14 @@ export default function LeadershipPage() {
               rows={f.kpis.map(k => {
                 const fmtV = (v) => v == null ? '—' : (k.fmt === 'pct' ? pct(v) : String(v))
                 const d = (k.thisWk != null && k.lastWk != null) ? k.thisWk - k.lastWk : null
+                // Green = goal hit, yellow = within 90%, red = clearly missed.
+                const tone = (k.goal && k.thisWk != null)
+                  ? (k.thisWk >= k.goal ? S.good : k.thisWk >= k.goal * 0.9 ? S.warn : S.bad)
+                  : null
                 return [
-                  k.kpi, fmtV(k.thisWk), fmtV(k.lastWk),
+                  k.kpi,
+                  tone ? <span style={{ ...tone, fontWeight: 700 }}>{fmtV(k.thisWk)}</span> : fmtV(k.thisWk),
+                  fmtV(k.lastWk),
                   d == null ? '—' : <span style={d >= 0 ? S.good : S.bad}>{d >= 0 ? '+' : ''}{k.fmt === 'pct' ? `${Math.round(d * 100)}pt` : Math.round(d)}</span>,
                   k.goal == null ? '—' : `${fmtV(k.goal)} ${k.thisWk != null ? (k.thisWk >= k.goal ? '✓' : '✗') : ''}`,
                 ]
