@@ -8019,16 +8019,22 @@ async function generateLeadershipReport(weekEnd, existingNotes) {
 // reports are served from memory for 15 minutes.
 const leadershipInflight = new Map()   // weekEnd -> Promise<report>
 const leadershipGenCache = new Map()   // weekEnd -> { report, at }
+let leadershipChain = Promise.resolve()   // one build at a time, ever
 function getLeadershipReport(weekEnd, { refresh = false, notes } = {}) {
+  // A running build for this week satisfies everyone — including refreshers.
+  // Stacked concurrent builds (each one dozens of big ST pulls) starved the
+  // event loop badly enough to 502 the whole app.
+  if (leadershipInflight.has(weekEnd)) return leadershipInflight.get(weekEnd)
   if (!refresh) {
     const c = leadershipGenCache.get(weekEnd)
     if (c && Date.now() - c.at < 15 * 60_000) return Promise.resolve(c.report)
-    if (leadershipInflight.has(weekEnd)) return leadershipInflight.get(weekEnd)
   }
-  const p = generateLeadershipReport(weekEnd, notes)
+  const p = leadershipChain
+    .then(() => generateLeadershipReport(weekEnd, notes))
     .then(r => { leadershipGenCache.set(weekEnd, { report: r, at: Date.now() }); return r })
     .finally(() => leadershipInflight.delete(weekEnd))
   leadershipInflight.set(weekEnd, p)
+  leadershipChain = p.catch(() => {})
   return p
 }
 
