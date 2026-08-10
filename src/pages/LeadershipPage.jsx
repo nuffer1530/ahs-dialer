@@ -380,10 +380,6 @@ export default function LeadershipPage() {
             const mSales = Number(b.monthSales) || f.mtd.salesTarget
             const mRev = Number(b.monthRevenue) || f.mtd.target
             const ySales = Number(b.yearSales) || f.ytd?.target
-            const mFrac = f.mtd.dayOfMonth / f.mtd.daysInMonth
-            const yFrac = f.ytd ? f.ytd.dayOfYear / f.ytd.daysInYear : 0
-            const mSalesPace = Math.round(mSales * mFrac), mRevPace = Math.round(mRev * mFrac)
-            const ySalesPace = Math.round((ySales || 0) * yFrac)
             const budgetInput = (key, val, ph) => (
               <label style={{ fontSize: 12, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 6 }}>
                 {ph}
@@ -397,14 +393,14 @@ export default function LeadershipPage() {
                 <div style={S.sectionTitle}>Sales & revenue pacing</div>
                 <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
                   <Card label="MTD Sales" value={money(f.mtd.sales)}
-                    sub={`budget ${money(mSales)} · pace ${money(mSalesPace)} · proj ${money(f.mtd.salesProjected)}`}
-                    tone={f.mtd.sales >= mSalesPace ? 'good' : 'bad'} />
+                    sub={`budget ${money(mSales)} · proj ${money(f.mtd.salesProjected)}`}
+                    tone={goalToneName(f.mtd.salesProjected, mSales)} />
                   <Card label="MTD Revenue" value={money(f.mtd.revenue)}
-                    sub={`budget ${money(mRev)} · pace ${money(mRevPace)} · proj ${money(f.mtd.projected)}${f.compare?.priorMonthMtd?.revenueDelta != null ? ` · MoM ${f.compare.priorMonthMtd.revenueDelta >= 0 ? '+' : ''}${pct(f.compare.priorMonthMtd.revenueDelta)}` : ''}`}
-                    tone={f.mtd.revenue >= mRevPace ? 'good' : 'bad'} />
+                    sub={`budget ${money(mRev)} · proj ${money(f.mtd.projected)}`}
+                    tone={goalToneName(f.mtd.projected, mRev)} />
                   {f.ytd && <Card label="YTD Sales" value={money(f.ytd.sales)}
-                    sub={`target ${money(ySales)} · pace ${money(ySalesPace)} · proj ${money(f.ytd.projected)}`}
-                    tone={f.ytd.sales >= ySalesPace ? 'good' : 'bad'} />}
+                    sub={`target ${money(ySales)} · proj ${money(f.ytd.projected)}`}
+                    tone={goalToneName(f.ytd.projected, ySales)} />}
                 </div>
                 <div className="no-print" style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginTop: 10 }}>
                   {budgetInput('monthSales', b.monthSales, 'Month sales budget')}
