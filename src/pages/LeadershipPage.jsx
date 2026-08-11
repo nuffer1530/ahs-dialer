@@ -515,7 +515,7 @@ function LeadershipPageInner() {
                   <span style={goalTone(f.totals.closeRate, 0.7)}>{pct(f.totals.closeRate)}</span>, '—', <b>{String(f.totals.opps)}</b>,
                   money(f.scorecard.reduce((a, d) => a + (d.missedSales || 0), 0)),
                   <b>{String(f.kpis.find(k => k.kpi === '5 Star Reviews')?.thisWk ?? f.scorecard.reduce((a, d) => a + (d.fiveStar || 0), 0))}</b>,
-                  <b>{String(f.kpis.find(k => k.kpi === 'Clubs Sold')?.thisWk ?? f.scorecard.reduce((a, d) => a + (d.clubs || 0), 0))}</b>,
+                  <b>{String(f.totals.clubsSold ?? f.scorecard.reduce((a, d) => a + (d.clubs || 0), 0))}</b>,
                   <b>{String(f.scorecard.reduce((a, d) => a + (d.callbacks || 0), 0))}</b>,
                   pct(f.labor.laborPctOfRevenue),
                 ],
