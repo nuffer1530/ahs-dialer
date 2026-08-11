@@ -300,6 +300,11 @@ function LeadershipPageInner() {
 
   const f = report?.facts
   const ai = report?.ai
+  // The AI occasionally returns a string where an array belongs — never let
+  // that reach .map() (it white-screened the page once).
+  const aiHighlights = [ai?.highlights, ai?.summary].map(v => (Array.isArray(v) ? v : [])).find(v => v.length) || []
+  const aiActions = Array.isArray(ai?.actionsByDept) ? ai.actionsByDept.filter(d => d && Array.isArray(d.actions)) : []
+  const aiItems = Array.isArray(ai?.actionItems) ? ai.actionItems : []
   const weekLabel = f ? `${f.weekStart} → ${f.weekEnd}` : week
 
   return (
@@ -446,32 +451,32 @@ function LeadershipPageInner() {
           {ai && (
             <div style={{ ...S.section, borderLeft: '4px solid var(--accent)' }}>
               {ai.headline && <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--text-primary)', marginBottom: 10 }}>{ai.headline}</div>}
-              {(ai.highlights || ai.summary || []).length > 0 && <>
+              {aiHighlights.length > 0 && <>
                 <div style={S.sectionTitle}>Top highlights</div>
-                {(ai.highlights || ai.summary).map((s, i) => (
-                  <div key={i} style={{ fontSize: 13, lineHeight: 1.7, color: 'var(--text-primary)' }}>• {s}</div>
+                {aiHighlights.map((s, i) => (
+                  <div key={i} style={{ fontSize: 13, lineHeight: 1.7, color: 'var(--text-primary)' }}>• {String(s)}</div>
                 ))}
               </>}
-              {(ai.actionsByDept || []).length > 0 && <>
+              {aiActions.length > 0 && <>
                 <div style={{ ...S.sectionTitle, marginTop: 14 }}>Action items by department</div>
                 {/* Column flow (not grid): blocks pack top-to-bottom so a short
                     department never gets stranded next to a tall one. */}
                 <div style={{ columns: '2 300px', columnGap: 24 }}>
-                  {ai.actionsByDept.map((d, i) => (
+                  {aiActions.map((d, i) => (
                     <div key={i} style={{ breakInside: 'avoid', marginBottom: 12 }}>
                       <div style={{ fontSize: 12.5, fontWeight: 800, color: 'var(--accent)' }}>{d.dept}</div>
-                      {(d.actions || []).map((a, j) => (
-                        <div key={j} style={{ fontSize: 13, lineHeight: 1.6, color: 'var(--text-primary)', paddingLeft: 10 }}>→ {a}</div>
+                      {d.actions.map((a, j) => (
+                        <div key={j} style={{ fontSize: 13, lineHeight: 1.6, color: 'var(--text-primary)', paddingLeft: 10 }}>→ {String(a)}</div>
                       ))}
                     </div>
                   ))}
                 </div>
               </>}
-              {!(ai.actionsByDept || []).length && (ai.actionItems || []).length > 0 && <>
+              {!aiActions.length && aiItems.length > 0 && <>
                 <div style={{ ...S.sectionTitle, marginTop: 12 }}>Action items</div>
-                {ai.actionItems.map((a, i) => (
+                {aiItems.map((a, i) => (
                   <div key={i} style={{ fontSize: 13, lineHeight: 1.6, color: 'var(--text-primary)' }}>
-                    → {a.action} {a.owner && <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>({a.owner})</span>}
+                    → {String(a.action || '')} {a.owner && <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>({a.owner})</span>}
                   </div>
                 ))}
               </>}
