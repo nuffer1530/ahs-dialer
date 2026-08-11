@@ -7,7 +7,7 @@
 // app chrome. Server gates access to the leadership viewers list — this page
 // simply won't load data for anyone else.
 
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, Component } from 'react'
 import { sb } from '../lib/supabase'
 
 const money = (n) => `$${Math.round(Number(n) || 0).toLocaleString()}`
@@ -145,7 +145,38 @@ function EditList({ items, onChange, mark }) {
   )
 }
 
+// A render error in React 18 unmounts the ENTIRE app — one bad field in a
+// generated report must never white-screen all of Andi. This shows the real
+// error instead, scoped to this page.
+class LeadershipErrorBoundary extends Component {
+  constructor(props) { super(props); this.state = { error: null } }
+  static getDerivedStateFromError(error) { return { error } }
+  componentDidCatch(error, info) { console.error('Leadership render crash:', error, info?.componentStack) }
+  render() {
+    if (this.state.error) {
+      return (
+        <div style={{ flex: 1, overflowY: 'auto', padding: 24 }}>
+          <div style={{ maxWidth: 700, margin: '40px auto', background: 'var(--surface)', border: '1px solid var(--danger)', borderRadius: 12, padding: '20px 24px' }}>
+            <div style={{ fontSize: 16, fontWeight: 800, color: 'var(--danger)', marginBottom: 8 }}>The Leadership page hit an error rendering this report</div>
+            <div style={{ fontSize: 13, color: 'var(--text-primary)', fontFamily: 'monospace', whiteSpace: 'pre-wrap', background: 'var(--surface-2)', borderRadius: 8, padding: '10px 12px', marginBottom: 12 }}>
+              {String(this.state.error?.message || this.state.error)}
+            </div>
+            <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', marginBottom: 12 }}>Screenshot this box for Claude — it names the exact field that broke.</div>
+            <button style={{ padding: '7px 14px', border: '1px solid var(--border)', borderRadius: 7, background: 'var(--surface)', color: 'var(--text-primary)', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}
+              onClick={() => { this.setState({ error: null }) }}>Try again</button>
+          </div>
+        </div>
+      )
+    }
+    return this.props.children
+  }
+}
+
 export default function LeadershipPage() {
+  return <LeadershipErrorBoundary><LeadershipPageInner /></LeadershipErrorBoundary>
+}
+
+function LeadershipPageInner() {
   const [weeks, setWeeks] = useState([])
   const [week, setWeek] = useState(null)
   const [currentWeek, setCurrentWeek] = useState(null)
@@ -534,8 +565,8 @@ export default function LeadershipPage() {
             </div>
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
               <Card label="Field labor (true)" value={money(f.labor.estFieldBurdened)}
-                sub={f.labor.source === 'adp' ? `${money(f.labor.actual.totals.field.gross)} gross · ${f.labor.actual.totals.field.n} employees` : `${money(f.labor.impliedCommissions)} commissions + pool + burden`} />
-              <Card label="Office labor" value={money(f.labor.officeWeeklyCost)} sub={f.labor.source === 'adp' ? `${f.labor.actual.totals.office.n} employees` : 'burdened weekly baseline'} />
+                sub={f.labor.source === 'adp' ? `${money(f.labor.actual?.totals?.field?.gross)} gross · ${f.labor.actual?.totals?.field?.n ?? '—'} employees` : `${money(f.labor.impliedCommissions)} commissions + pool + burden`} />
+              <Card label="Office labor" value={money(f.labor.officeWeeklyCost)} sub={f.labor.source === 'adp' ? `${f.labor.actual?.totals?.office?.n ?? '—'} employees` : 'burdened weekly baseline'} />
               <Card label="All-in labor %" value={pct(f.labor.laborPctOfRevenue)} sub="of week revenue" tone={f.labor.laborPctOfRevenue <= 0.36 ? 'good' : 'bad'} />
               <Card label="Hidden pool" value={money(f.labor.hiddenPool)} sub={f.labor.source === 'adp' ? 'actual field gross − job commissions' : 'field pay not tied to a job'} />
             </div>
