@@ -333,16 +333,64 @@ export default function AttendancePage() {
       const r = await fetch('/api/schedule/publish', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session?.access_token}` },
-        body: JSON.stringify({ weekStart: weekDates[0], profileIds: pubSel.all ? 'all' : pubSel.ids, sendEmails: pubEmail, from: profile?.name || profile?.email || 'your manager' }),
+        body: JSON.stringify({ weekStart: pubRange.from, endDate: pubRange.to, profileIds: pubSel.all ? 'all' : pubSel.ids, sendEmails: pubEmail, from: profile?.name || profile?.email || 'your manager' }),
       })
       const d = await r.json()
       if (!r.ok) throw new Error(d.error || 'Publish failed')
       setPublishResult(d)
       await reloadSchedules()   // drafts just went solid — repaint the grid
+      refreshDraftCount()
     } catch (e) {
       setPublishResult({ error: e.message })
     } finally { setPublishing(false) }
   }
+
+  // Bulk publish range (Brittany: "publish dates xx/xx – xx/xx so I don't have
+  // to send each week at a time"). Defaults to the visible week.
+  const [pubRange, setPubRange] = useState({ from: '', to: '' })
+  useEffect(() => {
+    if (publishModal) setPubRange({ from: weekDates[0], to: weekDates[6] })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [publishModal])
+
+  // Drafts-in-range counter, counted server-side — the locally loaded window
+  // only spans ±30 days, so a wide range must ask the database.
+  const [rangeDrafts, setRangeDrafts] = useState(null)
+  useEffect(() => {
+    if (!publishModal || !pubRange.from || !pubRange.to) return
+    let dead = false
+    sb.from('schedules').select('id', { count: 'exact', head: true })
+      .is('published_at', null).gte('date', pubRange.from).lte('date', pubRange.to)
+      .then(({ count, error }) => { if (!dead) setRangeDrafts(error ? null : count) })
+    return () => { dead = true }
+  }, [publishModal, pubRange.from, pubRange.to])
+
+  // Toolbar chip: how many upcoming shifts are still unpublished anywhere
+  // (Brittany: "an unpublished counter so I know how many are not published").
+  const [draftCount, setDraftCount] = useState(0)
+  const refreshDraftCount = () => {
+    sb.from('schedules').select('id', { count: 'exact', head: true })
+      .is('published_at', null).gte('date', today)
+      .then(({ count, error }) => { if (!error) setDraftCount(count || 0) })
+  }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { refreshDraftCount() }, [schedules, tab])
+
+  // Scheduled hours for one person across the visible week — drafts included,
+  // since this is the planning view. Same math the schedule emails use.
+  const weekHours = (pid) => {
+    let total = 0
+    for (const date of weekDates) {
+      const sd = schedules.find(s => s.profile_id === pid && s.date === date)
+      if (!sd || (sd.day_type && sd.day_type !== 'work') || !sd.shift_start || !sd.shift_end) continue
+      const [sh, sm] = String(sd.shift_start).split(':').map(Number)
+      const [eh, em] = String(sd.shift_end).split(':').map(Number)
+      let h = (eh + (em || 0) / 60) - (sh + (sm || 0) / 60); if (h < 0) h += 24
+      total += Math.max(0, h - (Number(sd.lunch_duration) || 0) / 60)
+    }
+    return total
+  }
+  const fmtH = (h) => (h % 1 ? h.toFixed(1) : String(h))
 
   const getSchedule = (profileId, date) => schedules.find(s => s.profile_id === profileId && s.date === date)
   const getEvents = (profileId, date) => statusEvents.filter(e => e.profile_id === profileId && e.started_at.startsWith(date)).sort((a, b) => new Date(a.started_at) - new Date(b.started_at))
@@ -550,10 +598,16 @@ export default function AttendancePage() {
                 Copy Week
               </button>
               <button onClick={() => setPublishModal(true)}
-                style={{ padding:'6px 16px', fontSize:12, fontWeight:600, border:'none', borderRadius:'var(--radius)', background:'var(--accent)', color:'#fff', cursor:'pointer', transition:'opacity .1s' }}
+                style={{ padding:'6px 16px', fontSize:12, fontWeight:600, border:'none', borderRadius:'var(--radius)', background:'var(--accent)', color:'#fff', cursor:'pointer', transition:'opacity .1s', display:'flex', alignItems:'center', gap:7 }}
                 onMouseEnter={e => e.currentTarget.style.opacity='.9'}
                 onMouseLeave={e => e.currentTarget.style.opacity='1'}>
                 Publish + Email
+                {draftCount > 0 && (
+                  <span title={`${draftCount} upcoming shift${draftCount === 1 ? '' : 's'} not yet published`}
+                    style={{ background:'rgba(255,255,255,.25)', borderRadius:99, padding:'1px 8px', fontSize:11, fontWeight:800 }}>
+                    {draftCount} draft{draftCount === 1 ? '' : 's'}
+                  </span>
+                )}
               </button>
             </div>
           )}
@@ -571,7 +625,10 @@ export default function AttendancePage() {
                 <table style={{ width:'100%', borderCollapse:'collapse', minWidth:900 }}>
                   <thead>
                     <tr style={{ background:'var(--surface-2)' }}>
-                      <th style={{ padding:'12px 16px', textAlign:'left', fontSize:11, fontWeight:600, textTransform:'uppercase', letterSpacing:.5, color:'var(--text-muted)', width:180, borderBottom:'1px solid var(--border)' }}>Agent</th>
+                      <th style={{ padding:'12px 16px', textAlign:'left', fontSize:11, fontWeight:600, textTransform:'uppercase', letterSpacing:.5, color:'var(--text-muted)', width:180, borderBottom:'1px solid var(--border)' }}>
+                        Agent
+                        {(() => { const t = profiles.reduce((a, p) => a + weekHours(p.id), 0); return t > 0 ? <span style={{ textTransform:'none', letterSpacing:0, fontWeight:700, color:'var(--text-secondary)' }}> · {fmtH(t)}h total</span> : null })()}
+                      </th>
                       {weekDates.map((date, i) => {
                         const isToday = date === today
                         return (
@@ -595,6 +652,7 @@ export default function AttendancePage() {
                               <div style={{ fontSize:13, fontWeight:500, color:'var(--text-primary)' }}>{p.name || p.email}</div>
                               <div style={{ fontSize:10, color:'var(--text-muted)', marginTop:1 }}>
                                 {yearPoints(p.id).toFixed(1)} pts YTD
+                                {weekHours(p.id) > 0 && <span style={{ fontWeight:700, color:'var(--text-secondary)' }}> · {fmtH(weekHours(p.id))}h this wk</span>}
                               </div>
                             </div>
                           </div>
@@ -1082,22 +1140,34 @@ export default function AttendancePage() {
 
       {/* ── PUBLISH + EMAIL MODAL ── */}
       {publishModal && (
-        <Modal title={`Publish + Email — week of ${fmtDate(weekDates[0])}`} onClose={() => { setPublishModal(false); setPublishResult(null) }} width={440}>
+        <Modal title="Publish + Email" onClose={() => { setPublishModal(false); setPublishResult(null) }} width={440}>
           <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
             <div style={{ fontSize:12.5, color:'var(--text-muted)' }}>
-              Publishing makes this week's <b>draft shifts visible to the team</b> (striped cells go solid) and emails each
-              person their own schedule — shift, breaks, lunch, and total hours.
+              Publishing makes <b>draft shifts in this date range visible to the team</b> (striped cells go solid) and emails
+              each person their own schedule — shift, breaks, lunch, and total hours. Widen the range to publish several
+              weeks at once.
             </div>
-            {(() => {
-              const drafts = schedules.filter(s => weekDates.includes(s.date) && 'published_at' in s && !s.published_at).length
-              return drafts > 0 ? (
-                <div style={{ fontSize:12, fontWeight:700, color:'var(--tone-amber-tx)', padding:'7px 11px', background:'var(--tone-amber-bg)', border:'1px solid var(--tone-amber-bd)', borderRadius:8 }}>
-                  {drafts} unpublished shift{drafts === 1 ? '' : 's'} in this week
-                </div>
-              ) : (
-                <div style={{ fontSize:12, color:'var(--text-muted)' }}>No unpublished changes this week — emails will just resend the current schedule.</div>
-              )
-            })()}
+            <div style={{ display:'flex', gap:10, alignItems:'end' }}>
+              <div className="form-field" style={{ flex:1, margin:0 }}>
+                <label className="form-label">From</label>
+                <input type="date" className="form-input" value={pubRange.from}
+                  onChange={e => setPubRange(p => ({ ...p, from: e.target.value }))} />
+              </div>
+              <div className="form-field" style={{ flex:1, margin:0 }}>
+                <label className="form-label">Through</label>
+                <input type="date" className="form-input" value={pubRange.to}
+                  onChange={e => setPubRange(p => ({ ...p, to: e.target.value }))} />
+              </div>
+            </div>
+            {pubRange.to < pubRange.from ? (
+              <div style={{ fontSize:12, fontWeight:700, color:'var(--tone-red-tx)' }}>End date is before start date.</div>
+            ) : rangeDrafts == null ? null : rangeDrafts > 0 ? (
+              <div style={{ fontSize:12, fontWeight:700, color:'var(--tone-amber-tx)', padding:'7px 11px', background:'var(--tone-amber-bg)', border:'1px solid var(--tone-amber-bd)', borderRadius:8 }}>
+                {rangeDrafts} unpublished shift{rangeDrafts === 1 ? '' : 's'} in this range
+              </div>
+            ) : (
+              <div style={{ fontSize:12, color:'var(--text-muted)' }}>No unpublished changes in this range — emails will just resend the current schedule.</div>
+            )}
             <label style={{ display:'flex', alignItems:'center', gap:8, fontSize:13, fontWeight:600, cursor:'pointer' }}>
               <input type="checkbox" checked={pubEmail} onChange={e => setPubEmail(e.target.checked)} />
               Email everyone their schedule
@@ -1135,7 +1205,7 @@ export default function AttendancePage() {
                 {publishResult && !publishResult.error ? 'Done' : 'Cancel'}
               </button>
               <button className="btn primary" onClick={publishSchedules}
-                disabled={publishing || (!pubSel.all && !pubSel.ids.length)}>
+                disabled={publishing || (!pubSel.all && !pubSel.ids.length) || !pubRange.from || !pubRange.to || pubRange.to < pubRange.from}>
                 {publishing ? 'Sending…' : pubSel.all ? 'Email everyone' : `Email (${pubSel.ids.length})`}
               </button>
             </div>

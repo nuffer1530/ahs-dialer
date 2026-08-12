@@ -7657,7 +7657,15 @@ app.post('/api/schedule/publish', async (req, res) => {
   try {
     const weekStart = String(req.body?.weekStart || '')
     if (!/^\d{4}-\d{2}-\d{2}$/.test(weekStart)) return res.status(400).json({ error: 'weekStart (YYYY-MM-DD) required' })
-    const dates = Array.from({ length: 7 }, (_, i) => {
+    // Optional endDate turns this into a bulk range publish (Brittany: publish
+    // several weeks at once instead of week by week). Default stays one week.
+    let endDate = /^\d{4}-\d{2}-\d{2}$/.test(String(req.body?.endDate || '')) ? String(req.body.endDate) : null
+    if (endDate && endDate < weekStart) return res.status(400).json({ error: 'End date is before start date' })
+    const spanDays = endDate
+      ? Math.round((Date.parse(endDate + 'T12:00:00Z') - Date.parse(weekStart + 'T12:00:00Z')) / 86400_000) + 1
+      : 7
+    if (spanDays > 92) return res.status(400).json({ error: 'Range too large — 92 days max' })
+    const dates = Array.from({ length: spanDays }, (_, i) => {
       const d = new Date(weekStart + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + i)
       return d.toISOString().split('T')[0]
     })
@@ -7668,14 +7676,14 @@ app.post('/api/schedule/publish', async (req, res) => {
     let q = supabase.from('profiles').select('id, name, email').eq('active', true).order('name')
     if (ids) q = q.in('id', ids)
     const { data: people } = await q
-    const { data: scheds } = await supabase.from('schedules').select('*').gte('date', dates[0]).lte('date', dates[6])
+    const { data: scheds } = await supabase.from('schedules').select('*').gte('date', dates[0]).lte('date', dates[dates.length - 1])
 
     // Publishing IS the state flip: drafts in this week become live (visible
     // to reps) the moment this runs — the emails describe what's now real.
     let published = 0
     try {
       let up = supabase.from('schedules').update({ published_at: new Date().toISOString() })
-        .gte('date', dates[0]).lte('date', dates[6]).is('published_at', null).select('id')
+        .gte('date', dates[0]).lte('date', dates[dates.length - 1]).is('published_at', null).select('id')
       if (ids) up = up.in('profile_id', ids)
       const { data: pubRows, error: pubErr } = await up
       if (pubErr) console.warn('publish mark:', pubErr.message)
@@ -7692,7 +7700,7 @@ app.post('/api/schedule/publish', async (req, res) => {
       let h = (eh + (em || 0) / 60) - (sh + (sm || 0) / 60); if (h < 0) h += 24
       return Math.max(0, h - (Number(sd.lunch_duration) || 0) / 60)
     }
-    const weekTitle = `week of ${dayLabel(dates[0])}`
+    const weekTitle = dates.length > 7 ? `${dayLabel(dates[0])} – ${dayLabel(dates[dates.length - 1])}` : `week of ${dayLabel(dates[0])}`
 
     let sent = 0
     const skipped = []
@@ -7721,7 +7729,7 @@ app.post('/api/schedule/publish', async (req, res) => {
       }).join('')
       const html = `<div style="font-family:-apple-system,Segoe UI,Arial,sans-serif;max-width:520px;margin:0 auto;color:#0F172A">` +
         `<h2 style="margin:18px 0 2px">Your schedule — ${weekTitle}</h2>` +
-        `<p style="margin:0 0 14px;color:#64748B">${total % 1 ? total.toFixed(1) : total} scheduled hours this week</p>` +
+        `<p style="margin:0 0 14px;color:#64748B">${total % 1 ? total.toFixed(1) : total} scheduled hours ${dates.length > 7 ? 'in this range' : 'this week'}</p>` +
         `<table style="border-collapse:collapse;width:100%;font-size:14px">${rows}</table>` +
         `<p style="margin:16px 0;color:#94A3B8;font-size:12px">Sent from Andi by ${String(req.body?.from || 'your manager')}. Questions? Ask your manager.</p></div>`
       try {
