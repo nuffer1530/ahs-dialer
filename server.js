@@ -3758,12 +3758,24 @@ async function evaluateCall({ callSid, recordingSid, duration, e }) {
     } catch {}
   }
 
+  return runEvalScoring({
+    cfg, transcript, rep, profileId, contactName,
+    contactId: e.contactId || null, phone: e.phone || null,
+    callSid, recordingSid,
+  })
+}
+
+// The scoring core, shared by the live Andi path (labeled browser transcript)
+// and the nightly ServiceTitan sweep (Whisper transcript, speakers unlabeled).
+async function runEvalScoring({ cfg, transcript, rep, profileId, contactName, contactId, phone, callSid, recordingSid }) {
+  if (!ANTHROPIC_KEY) return
+  cfg = cfg || await getEvalCfg()
   const r = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: { 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
     body: JSON.stringify({
       model: 'claude-sonnet-5', max_tokens: 2500,
-      system: `You are a strict but fair call-quality evaluator for Awesome Home Services' inbound CSRs. Score ONLY from the transcript. The rubric below is the single source of truth — score exactly the questions it lists, with their point values, under their exact section names (it changes over time; never assume a question that isn't in it). Transcription is imperfect: judge intent rather than exact wording, EXCEPT where the rubric demands specific phrasing (then accept close variations). Mark a question applicable=false when the situation never arose on this call (no hold → hold questions N/A; no objections raised → objection question N/A). Partial credit is allowed where earned. Evidence must be a short quote from the transcript or a one-line reason.`,
+      system: `You are a strict but fair call-quality evaluator for Awesome Home Services' inbound CSRs. Score ONLY from the transcript. The rubric below is the single source of truth — score exactly the questions it lists, with their point values, under their exact section names (it changes over time; never assume a question that isn't in it). Transcription is imperfect: judge intent rather than exact wording, EXCEPT where the rubric demands specific phrasing (then accept close variations). If the transcript is unlabeled (no Rep:/Customer: tags), infer who is speaking from context — the CSR answers the phone. Mark a question applicable=false when the situation never arose on this call (no hold → hold questions N/A; no objections raised → objection question N/A). Partial credit is allowed where earned. Evidence must be a short quote from the transcript or a one-line reason.`,
       tools: [{
         name: 'submit_evaluation',
         description: 'Submit the scored call evaluation',
@@ -3832,14 +3844,141 @@ async function evaluateCall({ callSid, recordingSid, duration, e }) {
 
   const { error } = await supabase.from('call_evaluations').insert({
     call_sid: callSid, recording_sid: recordingSid || null,
-    contact_id: e.contactId || null, contact_name: contactName,
-    phone: e.phone || null, rep, profile_id: profileId,
+    contact_id: contactId || null, contact_name: contactName,
+    phone: phone || null, rep, profile_id: profileId,
     scores: { items, sections, coaching_tip: out.coaching_tip || null },
     earned, possible, pct, summary: out.summary || null,
   })
   if (error) { console.warn('call eval save:', error.message); return }
   console.log(`Call eval: ${rep || 'unknown'} scored ${pct}% (${earned}/${possible}) on ${callSid}`)
   if (profileId) syncEvalScorecard(profileId).catch(err => console.warn('eval scorecard sync:', err.message))
+  return { pct, rep }
+}
+
+// ── ServiceTitan eval sweep ─────────────────────────────────────────────────
+// Until the whole team takes calls in Andi, their recordings live only in ST.
+// Nightly: pull yesterday's lead calls (Booked/Unbooked, human agent, ≥60s),
+// transcribe via OpenAI Whisper, and score them through the same rubric as
+// Andi-native evals. Excused/NotLead/vendor calls and Revin AI are skipped.
+// (OPENAI_KEY is declared with the wrap-up autopilot, which already runs
+// Whisper — same key, already live on Railway.)
+
+async function openaiTranscribe(buf) {
+  const fd = new FormData()
+  fd.append('file', new Blob([buf], { type: 'audio/mpeg' }), 'call.mp3')
+  fd.append('model', 'whisper-1')
+  fd.append('response_format', 'text')
+  fd.append('language', 'en')
+  const r = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+    method: 'POST', headers: { Authorization: `Bearer ${OPENAI_KEY}` }, body: fd,
+  })
+  if (!r.ok) throw new Error(`whisper ${r.status}: ${(await r.text()).slice(0, 140)}`)
+  return (await r.text()).trim()
+}
+
+const stDurSec = (d) => {
+  const m = /^(\d+):(\d+):(\d+(?:\.\d+)?)$/.exec(String(d || ''))
+  return m ? Math.round(+m[1] * 3600 + +m[2] * 60 + +m[3]) : null
+}
+
+async function sweepStEvals(dateStr, { limit = Number(process.env.ST_EVAL_MAX) || 60 } = {}) {
+  const out = { date: dateStr, candidates: 0, evaluated: 0, already: 0, noRecording: 0, errors: [] }
+  if (!OPENAI_KEY) { out.errors.push('OPENAI_API_KEY not set'); return out }
+  const cfg = await getEvalCfg()
+  if (!cfg.enabled) { out.errors.push('evals disabled in Call QA settings'); return out }
+
+  const calls = await stPageAll(pg =>
+    `/telecom/v2/tenant/${ST_TENANT_ID}/calls?createdOnOrAfter=${dateStr}T06:00:00Z&createdBefore=${nextDayStr(dateStr)}T06:00:00Z&pageSize=500&page=${pg}`, 3000)
+
+  const cands = []
+  for (const c of (calls || [])) {
+    const lc = c.leadCall || c
+    if ((lc.direction || '') !== 'Inbound') continue
+    if (!['Booked', 'Unbooked'].includes(lc.callType)) continue
+    const agent = (lc.agent || {}).name || ''
+    if (!agent || /revin/i.test(agent)) continue   // no agent / AI receptionist
+    const dur = stDurSec(lc.duration)
+    if (dur == null || dur < (cfg.minSeconds || 60)) continue
+    cands.push({ lc, dur, agent: agent.trim(), agentId: (lc.agent || {}).id })
+  }
+  out.candidates = cands.length
+
+  // Skip anything already scored (call_sid is the idempotency key).
+  const sids = cands.map(x => `st-${x.lc.id}`)
+  const done = new Set()
+  for (let i = 0; i < sids.length; i += 100) {
+    const { data } = await supabase.from('call_evaluations').select('call_sid').in('call_sid', sids.slice(i, i + 100))
+    for (const r of (data || [])) done.add(r.call_sid)
+  }
+
+  // ST user → Andi profile, so scores land on the right scorecard. Falls back
+  // to the ST display name so unmapped CSRs still get team-view evals.
+  const { data: maps } = await supabase.from('csr_st_users').select('profile_id, st_user_id')
+  const { data: profs } = await supabase.from('profiles').select('id, name, email')
+  const profOf = new Map((maps || []).map(m => [String(m.st_user_id), m.profile_id]))
+  const nameOf = new Map((profs || []).map(p => [p.id, p.name || p.email]))
+
+  for (const cand of cands) {
+    if (out.evaluated >= limit) { out.errors.push(`daily cap ${limit} reached`); break }
+    const sid = `st-${cand.lc.id}`
+    if (done.has(sid)) { out.already++; continue }
+    try {
+      const rec = await stGetBinary(`/telecom/v2/tenant/${ST_TENANT_ID}/calls/${cand.lc.id}/recording`)
+      if (!rec || rec.byteLength < 8000) { out.noRecording++; continue }
+      const text = await openaiTranscribe(rec)
+      if (text.length < 200) { out.noRecording++; continue }
+      const profileId = profOf.get(String(cand.agentId)) || null
+      const rep = (profileId && nameOf.get(profileId)) || cand.agent
+      await runEvalScoring({
+        cfg,
+        transcript: `[Single-channel ServiceTitan recording — speaker labels unavailable]\n${text}`,
+        rep, profileId,
+        contactName: (cand.lc.customer || {}).name || null,
+        contactId: null, phone: cand.lc.from || null,
+        callSid: sid, recordingSid: null,
+      })
+      out.evaluated++
+    } catch (e) { out.errors.push(`${cand.lc.id}: ${e.message}`) }
+  }
+  console.log(`ST eval sweep ${dateStr}: ${out.evaluated} scored of ${out.candidates} candidates (${out.already} already done, ${out.noRecording} no usable recording)`)
+  return out
+}
+
+function nextDayStr(dateStr) {
+  const d = new Date(dateStr + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + 1)
+  return d.toISOString().slice(0, 10)
+}
+
+async function stGetBinary(path) {
+  const token = await getSTToken()
+  const r = await fetch(`https://api.servicetitan.io${path}`, {
+    headers: { Authorization: `Bearer ${token}`, 'ST-App-Key': process.env.ST_APP_KEY },
+  })
+  if (!r.ok) return null
+  return Buffer.from(await r.arrayBuffer())
+}
+
+// Replica-safe nightly trigger, same day-claim pattern as the digest: first
+// replica past 2 AM Denver claims the day and sweeps yesterday.
+const ST_EVAL_SWEEP_KEY = 'st_eval_sweep_done_on'
+async function maybeRunStEvalSweep() {
+  if (!OPENAI_KEY) return
+  try {
+    const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/Denver', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', hour12: false,
+    }).formatToParts(new Date()).map(x => [x.type, x.value]))
+    const hour = +p.hour
+    if (hour < 2 || hour >= 7) return
+    const todayDenver = `${p.year}-${p.month}-${p.day}`
+    const { data: cur } = await supabase.from('app_settings').select('value').eq('key', ST_EVAL_SWEEP_KEY).maybeSingle()
+    if (cur && JSON.parse(cur.value || '""') === todayDenver) return
+    const claim = cur
+      ? await supabase.from('app_settings').update({ value: JSON.stringify(todayDenver) }).eq('key', ST_EVAL_SWEEP_KEY).eq('value', cur.value).select('key')
+      : await supabase.from('app_settings').insert({ key: ST_EVAL_SWEEP_KEY, value: JSON.stringify(todayDenver) }).select('key')
+    if (claim.error || !claim.data?.length) return   // another replica got it
+    const y = new Date(todayDenver + 'T12:00:00Z'); y.setUTCDate(y.getUTCDate() - 1)
+    await sweepStEvals(y.toISOString().slice(0, 10))
+  } catch (e) { console.warn('st eval sweep tick:', e.message) }
 }
 
 // ── Scorecard auto-fill ─────────────────────────────────────────────────────
@@ -3866,13 +4005,20 @@ async function syncScorecardMonth(monthsBack) {
   const startIso = new Date(Date.UTC(y, m - 1, 1, 7)).toISOString()
   const endIso = new Date(Date.UTC(y, m, 1, 7)).toISOString()
 
-  const [{ data: profs }, { data: bks }, { data: tasks }, { data: recs }, { data: mems }] = await Promise.all([
+  const [{ data: profs }, { data: bks }, { data: tasks }, { data: recs }, { data: mems }, { data: stMaps }] = await Promise.all([
     supabase.from('profiles').select('id, name, email, role').eq('active', true),
     supabase.from('andi_bookings').select('profile_id').gte('booked_at', startIso).lt('booked_at', endIso).limit(5000),
     supabase.from('call_tasks').select('agent_profile_id').eq('state', 'answered').gte('answered_at', startIso).lt('answered_at', endIso).limit(5000),
     supabase.from('call_recordings').select('rep').eq('direction', 'inbound').not('st_job_id', 'is', null).gte('call_started_at', startIso).lt('call_started_at', endIso).limit(5000),
     supabase.from('commissions').select('profile_id').not('st_membership_id', 'is', null).gte('earned_at', startIso).lt('earned_at', endIso).limit(5000),
+    supabase.from('csr_st_users').select('profile_id, st_user_id'),
   ])
+
+  // ST telecom is ground truth for booking stats while the team still answers
+  // outside Andi: per-agent Booked/(Booked+Unbooked), the leadership-sheet
+  // definition. Cached — this runs hourly and a month of telecom is heavy.
+  let stStats = null
+  try { stStats = await stTelecomMonthStats(month, startIso, endIso) } catch (e) { console.warn('scorecard ST stats:', e.message) }
 
   const count = (rows, key) => {
     const m = new Map()
@@ -3890,6 +4036,12 @@ async function syncScorecardMonth(monthsBack) {
     weights = w?.value ? JSON.parse(w.value) : null
   } catch {}
 
+  const stIdsOf = new Map()
+  for (const mp of (stMaps || [])) {
+    const arr = stIdsOf.get(String(mp.profile_id)) || []
+    arr.push(String(mp.st_user_id)); stIdsOf.set(String(mp.profile_id), arr)
+  }
+
   for (const prof of (profs || [])) {
     const pid = String(prof.id)
     const name = prof.name || prof.email
@@ -3897,11 +4049,22 @@ async function syncScorecardMonth(monthsBack) {
     const answeredN = answered.get(pid) || 0
     const inbBookedN = inbBookedByName.get(name) || 0
     const memsN = memCount.get(pid) || 0
-    if (!bookedN && !answeredN && !memsN) continue   // no phone activity, nothing to write
+
+    // ST override: if this profile maps to ST users with lead-call activity,
+    // their booking numbers come from ST regardless of Andi usage.
+    let stBooked = 0, stUnbooked = 0
+    for (const sid of (stIdsOf.get(pid) || [])) {
+      const s = stStats?.get(sid)
+      if (s) { stBooked += s.booked; stUnbooked += s.unbooked }
+    }
+    const stLeads = stBooked + stUnbooked
+
+    if (!bookedN && !answeredN && !memsN && !stLeads) continue   // no phone activity, nothing to write
     const patch = {
-      booked_calls: bookedN,
+      booked_calls: stLeads ? stBooked : bookedN,
       memberships: memsN,
-      booking_pct: answeredN > 0 ? Math.round(Math.min(inbBookedN, answeredN) / answeredN * 100) : null,
+      booking_pct: stLeads ? Math.round(stBooked / stLeads * 100)
+        : answeredN > 0 ? Math.round(Math.min(inbBookedN, answeredN) / answeredN * 100) : null,
       updated_at: new Date().toISOString(),
     }
     const { data: existing } = await supabase.from('scorecard_actuals')
@@ -3909,6 +4072,29 @@ async function syncScorecardMonth(monthsBack) {
     if (existing) await supabase.from('scorecard_actuals').update(patch).eq('id', existing.id)
     else await supabase.from('scorecard_actuals').insert({ profile_id: prof.id, month, ...patch, weights })
   }
+}
+
+// Month-scoped telecom stats per ST agent, cached 4h — the scorecard sync
+// runs hourly and re-paging a whole month from ST every time would hammer it.
+const _stMonthStats = new Map()
+async function stTelecomMonthStats(month, startIso, endIso) {
+  const hit = _stMonthStats.get(month)
+  if (hit && Date.now() - hit.at < 4 * 3600_000) return hit.stats
+  const calls = await stPageAll(pg =>
+    `/telecom/v2/tenant/${ST_TENANT_ID}/calls?createdOnOrAfter=${startIso}&createdBefore=${endIso}&pageSize=500&page=${pg}`, 10000)
+  const stats = new Map()
+  for (const c of (calls || [])) {
+    const lc = c.leadCall || c
+    if ((lc.direction || '') !== 'Inbound') continue
+    if (!['Booked', 'Unbooked'].includes(lc.callType)) continue
+    const aid = String((lc.agent || {}).id || '')
+    if (!aid) continue
+    const s = stats.get(aid) || { booked: 0, unbooked: 0 }
+    if (lc.callType === 'Booked') s.booked++; else s.unbooked++
+    stats.set(aid, s)
+  }
+  _stMonthStats.set(month, { at: Date.now(), stats })
+  return stats
 }
 
 // Roll this month's average into the scorecard's call_quality KPI. The KPI
@@ -7924,6 +8110,26 @@ async function maybeSendDailyDigest() {
 }
 
 // Preview or force-send. ?date=YYYY-MM-DD for a specific day, ?send=1 to email.
+// Run (or re-run) the ST eval sweep on demand: ?date=YYYY-MM-DD (default
+// yesterday), ?limit=N. Already-scored calls are skipped, so re-runs are safe.
+app.get('/api/admin/st-eval-sweep', async (req, res) => {
+  const prof = await requireAdmin(req, res)
+  if (!prof) return
+  try {
+    let date = String(req.query.date || '')
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', {
+        timeZone: 'America/Denver', year: 'numeric', month: '2-digit', day: '2-digit',
+      }).formatToParts(new Date()).map(x => [x.type, x.value]))
+      const y = new Date(`${p.year}-${p.month}-${p.day}T12:00:00Z`); y.setUTCDate(y.getUTCDate() - 1)
+      date = y.toISOString().slice(0, 10)
+    }
+    const limit = Math.min(200, Math.max(1, parseInt(req.query.limit) || 60))
+    const out = await sweepStEvals(date, { limit })
+    res.json({ ...out, openaiKey: !!OPENAI_KEY })
+  } catch (err) { res.status(500).json({ error: err.message }) }
+})
+
 app.get('/api/admin/daily-digest', async (req, res) => {
   if (!(await requireAdmin(req, res))) return
   try {
@@ -8913,6 +9119,7 @@ if (SYNC_INTERVAL_MIN > 0) {
 if (BOARD_EMAIL_TO && RESEND_KEY) {
   setInterval(maybeSendDailyBoardEmail, 60_000)   // 1-min tick: a 5-min one made 7:00 land as late as 7:04
   setInterval(maybeSendDailyDigest, 60_000)       // morning digest rides the same tick
+  setInterval(maybeRunStEvalSweep, 60_000)        // 2 AM: score yesterday's ST calls
   setInterval(maybeGenerateLeadershipReport, 5 * 60_000)   // Monday AM: archive last week's agenda
   setTimeout(maybeSendDailyBoardEmail, 20_000)
   console.log(`Board email daily at ${BOARD_EMAIL_HOUR}:00 ${BOARD_EMAIL_TZ} to ${BOARD_EMAIL_TO}`)
