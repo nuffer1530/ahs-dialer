@@ -3914,9 +3914,33 @@ async function sweepStEvals(dateStr, { limit = Number(process.env.ST_EVAL_MAX) |
   // ST user → Andi profile, so scores land on the right scorecard. Falls back
   // to the ST display name so unmapped CSRs still get team-view evals.
   const { data: maps } = await supabase.from('csr_st_users').select('profile_id, st_user_id')
-  const { data: profs } = await supabase.from('profiles').select('id, name, email')
+  const { data: profs } = await supabase.from('profiles').select('id, name, email').eq('active', true)
   const profOf = new Map((maps || []).map(m => [String(m.st_user_id), m.profile_id]))
   const nameOf = new Map((profs || []).map(p => [p.id, p.name || p.email]))
+
+  // Auto-map by email: an unmapped ST agent whose ST employee email matches
+  // an Andi profile gets a csr_st_users row on the spot (Aug 15: 33 evals
+  // landed profile-less because nobody had hand-mapped the CSRs).
+  const unmappedIds = [...new Set(cands.map(c => String(c.agentId)).filter(id => id && !profOf.has(id)))]
+  if (unmappedIds.length) {
+    try {
+      const emps = await stPageAll(pg => `/settings/v2/tenant/${ST_TENANT_ID}/employees?active=true&pageSize=200&page=${pg}`, 1000)
+      const byEmail = new Map((profs || []).filter(p => p.email).map(p => [p.email.toLowerCase(), p]))
+      const inserts = []
+      for (const emp of (emps || [])) {
+        if (!unmappedIds.includes(String(emp.id))) continue
+        const p = byEmail.get(String(emp.email || '').toLowerCase())
+        if (!p) continue
+        inserts.push({ profile_id: p.id, st_user_id: emp.id, st_user_name: emp.name })
+        profOf.set(String(emp.id), p.id)
+      }
+      if (inserts.length) {
+        const { error } = await supabase.from('csr_st_users').insert(inserts)
+        if (error) console.warn('csr auto-map:', error.message)
+        else console.log(`csr auto-map: linked ${inserts.map(i => i.st_user_name).join(', ')}`)
+      }
+    } catch (e) { console.warn('csr auto-map:', e.message) }
+  }
 
   for (const cand of cands) {
     if (out.evaluated >= limit) { out.errors.push(`daily cap ${limit} reached`); break }
@@ -3941,6 +3965,9 @@ async function sweepStEvals(dateStr, { limit = Number(process.env.ST_EVAL_MAX) |
     } catch (e) { out.errors.push(`${cand.lc.id}: ${e.message}`) }
   }
   console.log(`ST eval sweep ${dateStr}: ${out.evaluated} scored of ${out.candidates} candidates (${out.already} already done, ${out.noRecording} no usable recording)`)
+  // Roll fresh scores into scorecards now rather than waiting for the hourly
+  // sync — the sweep is the moment call_quality actually changes.
+  if (out.evaluated) syncScorecardActuals().catch(e => console.warn('post-sweep scorecard sync:', e.message))
   return out
 }
 
@@ -4030,6 +4057,20 @@ async function syncScorecardMonth(monthsBack) {
   const inbBookedByName = count(recs, 'rep')
   const memCount = count(mems, 'profile_id')
 
+  // Call quality: month average of evals per profile. Owned here too (not
+  // only at insert time) so relinked or backfilled evals reach the scorecard.
+  const qaAvg = new Map()
+  try {
+    const { data: evs } = await supabase.from('call_evaluations').select('profile_id, pct')
+      .not('profile_id', 'is', null).gte('created_at', startIso).lt('created_at', endIso).limit(5000)
+    const acc = new Map()
+    for (const e of (evs || [])) {
+      const a = acc.get(String(e.profile_id)) || { s: 0, n: 0 }
+      a.s += Number(e.pct) || 0; a.n++; acc.set(String(e.profile_id), a)
+    }
+    for (const [k, a] of acc) if (a.n) qaAvg.set(k, Math.round(a.s / a.n))
+  } catch (e) { console.warn('scorecard qa avg:', e.message) }
+
   let weights = null
   try {
     const { data: w } = await supabase.from('app_settings').select('value').eq('key', 'scorecard_weights').maybeSingle()
@@ -4059,7 +4100,8 @@ async function syncScorecardMonth(monthsBack) {
     }
     const stLeads = stBooked + stUnbooked
 
-    if (!bookedN && !answeredN && !memsN && !stLeads) continue   // no phone activity, nothing to write
+    const qa = qaAvg.get(pid)
+    if (!bookedN && !answeredN && !memsN && !stLeads && qa == null) continue   // no phone activity, nothing to write
     const patch = {
       booked_calls: stLeads ? stBooked : bookedN,
       memberships: memsN,
@@ -4067,6 +4109,7 @@ async function syncScorecardMonth(monthsBack) {
         : answeredN > 0 ? Math.round(Math.min(inbBookedN, answeredN) / answeredN * 100) : null,
       updated_at: new Date().toISOString(),
     }
+    if (qa != null) patch.call_quality = qa
     const { data: existing } = await supabase.from('scorecard_actuals')
       .select('id').eq('profile_id', prof.id).eq('month', month).maybeSingle()
     if (existing) await supabase.from('scorecard_actuals').update(patch).eq('id', existing.id)

@@ -37,9 +37,18 @@ export default function CallEvalsTab({ profile, isAdmin }) {
   const myName = profile?.name || profile?.email
   const shown = rows.filter(r => {
     if (!isAdmin) return r.profile_id === profile?.id || r.rep === myName
-    if (repFilter) return r.rep === repFilter || r.profile_id === repFilter
+    // Filter values are "id:<profile id>" or "name:<rep string>" — evals from
+    // the ServiceTitan sweep carry the ST display name ("Alicia Ketter"), not
+    // the Andi username ("alicia.ketter"), so matching by name alone missed.
+    if (repFilter.startsWith('id:')) return r.profile_id === repFilter.slice(3)
+    if (repFilter.startsWith('name:')) return r.rep === repFilter.slice(5) && !r.profile_id
     return true
   })
+  // Dropdown: every Andi profile, plus any evaluated rep name that isn't
+  // linked to a profile yet (so nobody's calls become invisible).
+  const linkedIds = new Set(rows.map(r => r.profile_id).filter(Boolean))
+  const unlinkedNames = [...new Set(rows.filter(r => !r.profile_id && r.rep).map(r => r.rep))].sort()
+  const evalCountFor = (pid) => rows.filter(r => r.profile_id === pid).length
   const avg = shown.length ? Math.round(shown.reduce((s, r) => s + Number(r.pct || 0), 0) / shown.length) : null
   const avgTone = avg == null ? 'gray' : avg >= 90 ? 'green' : avg >= 75 ? 'amber' : 'red'
 
@@ -55,7 +64,16 @@ export default function CallEvalsTab({ profile, isAdmin }) {
             <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: .6, color: 'var(--text-muted)', marginBottom: 4 }}>Rep</div>
             <select className="form-input" value={repFilter} onChange={e => setRepFilter(e.target.value)} style={{ minWidth: 160 }}>
               <option value="">Whole team</option>
-              {profiles.map(p => <option key={p.id} value={p.name || p.email}>{p.name || p.email}</option>)}
+              {profiles.map(p => (
+                <option key={p.id} value={`id:${p.id}`}>
+                  {p.name || p.email}{linkedIds.has(p.id) ? ` (${evalCountFor(p.id)})` : ''}
+                </option>
+              ))}
+              {unlinkedNames.length > 0 && (
+                <optgroup label="Not linked to an Andi profile">
+                  {unlinkedNames.map(n => <option key={n} value={`name:${n}`}>{n}</option>)}
+                </optgroup>
+              )}
             </select>
           </div>
         )}
