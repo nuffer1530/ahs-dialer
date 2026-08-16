@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { localYMD } from '../lib/utils'
 import { sb } from '../lib/supabase'
 import { confirmDlg, toast } from '../lib/dialogs'
 import { useAuth } from '../lib/AuthContext'
@@ -180,7 +181,7 @@ export default function AttendancePage() {
   const [pubSel, setPubSel] = useState({ all: true, ids: [] })
   const [pubEmail, setPubEmail] = useState(true)   // uncheck to publish quietly
   const [pointModal, setPointModal] = useState(null)
-  const [pointData, setPointData] = useState({ reason: 'late', points: 0.5, notes: '', date: new Date().toISOString().split('T')[0] })
+  const [pointData, setPointData] = useState({ reason: 'late', points: 0.5, notes: '', date: localYMD() })
   const [reportRange, setReportRange] = useState({ start: '', end: '' })
   const [reportData, setReportData] = useState(null)
   const [copyModal, setCopyModal] = useState(false)
@@ -190,7 +191,7 @@ export default function AttendancePage() {
   const [tplBusy, setTplBusy] = useState(false)
 
   const weekDates = getWeekDates(weekBase)
-  const today = new Date().toISOString().split('T')[0]
+  const today = localYMD()
 
   useEffect(() => {
     const load = async () => {
@@ -200,8 +201,8 @@ export default function AttendancePage() {
         // away weeks navigated past it: shifts saved fine, then vanished from
         // the grid, and re-adds died on the invisible row's unique constraint.
         sb.from('schedules').select('*')
-          .gte('date', (() => { const d = new Date(); d.setDate(d.getDate()-30); const s = d.toISOString().split('T')[0]; return s < weekDates[0] ? s : weekDates[0] })())
-          .lte('date', (() => { const d = new Date(); d.setDate(d.getDate()+30); const s = d.toISOString().split('T')[0]; return s > weekDates[6] ? s : weekDates[6] })()),
+          .gte('date', (() => { const d = new Date(); d.setDate(d.getDate()-30); const s = localYMD(d); return s < weekDates[0] ? s : weekDates[0] })())
+          .lte('date', (() => { const d = new Date(); d.setDate(d.getDate()+30); const s = localYMD(d); return s > weekDates[6] ? s : weekDates[6] })()),
         sb.from('status_events').select('*').gte('started_at', weekDates[0] + 'T00:00:00').lte('started_at', weekDates[6] + 'T23:59:59'),
         sb.from('shift_templates').select('*').order('name'),
         sb.from('attendance_points').select('*').gte('date', new Date().getFullYear() + '-01-01').order('date', { ascending: false }),
@@ -511,8 +512,8 @@ export default function AttendancePage() {
     const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type:'text/csv' })); a.download = `WFM_Report_${reportRange.start}_${reportRange.end}.csv`; a.click()
   }
 
-  const prevWeek = () => { const d = new Date(weekBase); d.setDate(d.getDate() - 7); setWeekBase(d.toISOString().split('T')[0]) }
-  const nextWeek = () => { const d = new Date(weekBase); d.setDate(d.getDate() + 7); setWeekBase(d.toISOString().split('T')[0]) }
+  const prevWeek = () => { const d = new Date(weekBase + 'T12:00:00'); d.setDate(d.getDate() - 7); setWeekBase(localYMD(d)) }
+  const nextWeek = () => { const d = new Date(weekBase + 'T12:00:00'); d.setDate(d.getDate() + 7); setWeekBase(localYMD(d)) }
   const yearPoints = (profileId) => attendancePoints.filter(p => p.profile_id === profileId).reduce((sum, p) => sum + parseFloat(p.points), 0)
 
   const weekLabel = `${new Date(weekDates[0] + 'T12:00:00').toLocaleDateString('en-US', { month:'short', day:'numeric' })} – ${new Date(weekDates[6] + 'T12:00:00').toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' })}`

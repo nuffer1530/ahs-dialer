@@ -1,5 +1,6 @@
 // GraphicalSchedule v2 — 15min ticks + overflow scroll
 import { useState, useEffect, useRef } from 'react'
+import { localYMD } from '../lib/utils'
 import { toast } from '../lib/dialogs'
 import { sb } from '../lib/supabase'
 import { useAuth } from '../lib/AuthContext'
@@ -62,7 +63,7 @@ function isoToInterval(iso) {
 export default function GraphicalSchedule({ profiles, onUpdate }) {
   const { profile, isAdmin } = useAuth()
   const containerRef = useRef(null)
-  const [date, setDate] = useState(new Date().toISOString().split('T')[0])
+  const [date, setDate] = useState(localYMD())
   const [schedules, setSchedules] = useState([])
   const [statusEvents, setStatusEvents] = useState([])
   const [blocks, setBlocks] = useState({})
@@ -98,7 +99,7 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
     ? Math.max(MIN_CELL_WIDTH, Math.floor(Math.max(containerWidth - LABEL_WIDTH, MIN_TIMELINE_WIDTH) / TOTAL_INTERVALS))
     : MIN_CELL_WIDTH
 
-  const today = new Date().toISOString().split('T')[0]
+  const today = localYMD()
   const isToday = date === today
 
   // Load data
@@ -464,8 +465,8 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
   }
 
   const formatDate = (d) => new Date(d + 'T12:00:00').toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric', year:'numeric' })
-  const prevDay = () => { const d = new Date(date + 'T12:00:00'); d.setDate(d.getDate()-1); setDate(d.toISOString().split('T')[0]) }
-  const nextDay = () => { const d = new Date(date + 'T12:00:00'); d.setDate(d.getDate()+1); setDate(d.toISOString().split('T')[0]) }
+  const prevDay = () => { const d = new Date(date + 'T12:00:00'); d.setDate(d.getDate()-1); setDate(localYMD(d)) }
+  const nextDay = () => { const d = new Date(date + 'T12:00:00'); d.setDate(d.getDate()+1); setDate(localYMD(d)) }
 
   // Coverage calculation
   const getCoverage = (interval) => profiles.filter(p => {

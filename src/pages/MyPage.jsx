@@ -13,7 +13,13 @@ import Avatar from '../components/Avatar'
 
 const DAYS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun']
 
-function toYMD(d) { return d.toISOString().split('T')[0] }
+// LOCAL calendar date, never toISOString(): that converts to UTC, and after
+// 6 PM Denver "today" is already tomorrow in UTC — the whole week grid
+// shifted a day (Monday's shifts rendered under Sunday's header) every
+// evening. AttendancePage does it this way already.
+function toYMD(d) {
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0')
+}
 function getTodayMonday() {
   const d = new Date()
   const dow = d.getDay()
@@ -21,7 +27,7 @@ function getTodayMonday() {
   return toYMD(d)
 }
 function getWeekDates(base) {
-  const d = new Date(base + 'T00:00:00')
+  const d = new Date(base + 'T12:00:00')
   return Array.from({ length: 7 }, (_, i) => {
     const x = new Date(d); x.setDate(d.getDate() + i); return toYMD(x)
   })

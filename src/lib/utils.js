@@ -144,3 +144,11 @@ export const getTimeframeBounds = (tf) => {
     default: return { start: new Date(0), end: now, label: 'All time' }
   }
 }
+
+// Local calendar date as YYYY-MM-DD. NEVER use toISOString().split('T')[0]
+// for a "what day is it" question — that returns the UTC date, which in
+// Denver is already tomorrow after 6 PM (5 PM in winter). Schedule grids
+// keyed on it shifted a whole day every evening.
+export function localYMD(d = new Date()) {
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0')
+}
