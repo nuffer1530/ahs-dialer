@@ -3891,6 +3891,51 @@ async function sweepStEvals(dateStr, { limit = Number(process.env.ST_EVAL_MAX) |
   const calls = await stPageAll(pg =>
     `/telecom/v2/tenant/${ST_TENANT_ID}/calls?createdOnOrAfter=${dateStr}T06:00:00Z&createdBefore=${nextDayStr(dateStr)}T06:00:00Z&pageSize=500&page=${pg}`, 3000)
 
+  // Register EVERY answered ST call in the recordings registry, eval-worthy
+  // or not, so the Recordings tab is the complete record of the phones — not
+  // just the calls that happened to route through Andi. Idempotent on
+  // recording_sid 'st-<id>'; jobs link via the call's ST job when present.
+  try {
+    // Rep names on registry rows use the ANDI profile name where the ST agent
+    // is mapped (csr_st_users), so the Recordings rep filter — which offers
+    // Andi names — matches; unmapped agents keep their ST display name.
+    const { data: regMaps } = await supabase.from('csr_st_users').select('profile_id, st_user_id')
+    const { data: regProfs } = await supabase.from('profiles').select('id, name, email')
+    const regNameOf = new Map((regProfs || []).map(p => [p.id, p.name || p.email]))
+    const andiNameFor = new Map((regMaps || []).map(m => [String(m.st_user_id), regNameOf.get(m.profile_id)]).filter(x => x[1]))
+    const regRows = []
+    for (const c of (calls || [])) {
+      const lc = c.leadCall || c
+      const dur = stDurSec(lc.duration)
+      const agentId = String((lc.agent || {}).id || (lc.createdBy || {}).id || '')
+      const agent = (andiNameFor.get(agentId) || (lc.agent || {}).name || (lc.createdBy || {}).name || '').trim()
+      if (!dur || dur < 5) continue                       // never connected
+      if (!agent && (lc.direction || '') === 'Inbound' && lc.callType === 'Abandoned') continue
+      if (!lc.recordingUrl) continue                      // no audio in ST → nothing to play
+      const isDispatch = /dispatch/i.test((lc.campaign || {}).name || '')
+      regRows.push({
+        recording_sid: `st-${lc.id}`, call_sid: `st-${lc.id}`,
+        url: `/api/st/recording/${lc.id}`,
+        duration: dur,
+        direction: (lc.direction || '') === 'Outbound' ? 'outbound' : 'inbound',
+        rep: /revin/i.test(agent) ? 'Revin AI' : (agent || null),
+        contact_id: null,
+        contact_name: (lc.customer || {}).name || null,
+        phone: last10((lc.direction || '') === 'Outbound' ? lc.to : lc.from) || null,
+        call_started_at: lc.receivedOn || lc.createdOn || null,
+        st_job_id: c.jobNumber && c.id ? c.id : null,
+        st_job_number: c.jobNumber ? String(c.jobNumber) : null,
+        transcript: isDispatch ? '[dispatch line]' : null,
+      })
+    }
+    for (let i = 0; i < regRows.length; i += 200) {
+      const { error } = await supabase.from('call_recordings')
+        .upsert(regRows.slice(i, i + 200), { onConflict: 'recording_sid', ignoreDuplicates: true })
+      if (error) { console.warn('st recordings register:', error.message); break }
+    }
+    out.registered = regRows.length
+  } catch (e) { console.warn('st recordings register:', e.message) }
+
   const cands = []
   for (const c of (calls || [])) {
     const lc = c.leadCall || c

@@ -97,9 +97,15 @@ export default function RecordingsPage() {
         // Attach QA evaluations by call sid (inbound calls get scored).
         const sids = rows.map(x => x.call_sid).filter(Boolean)
         if (sids.length) {
-          const { data: evs } = await sb.from('call_evaluations')
-            .select('id, call_sid, rep, contact_name, phone, pct, earned, possible, summary, scores, created_at')
-            .in('call_sid', sids.slice(0, 300))
+          // Chunk the IN list — with ServiceTitan calls registered the page
+          // holds far more than the old 300-sid cap allowed.
+          let evs = []
+          for (let i = 0; i < sids.length; i += 200) {
+            const { data } = await sb.from('call_evaluations')
+              .select('id, call_sid, recording_sid, rep, contact_name, phone, pct, earned, possible, summary, scores, created_at')
+              .in('call_sid', sids.slice(i, i + 200))
+            if (data?.length) evs = evs.concat(data)
+          }
           if (evs?.length) {
             const bySid = new Map(evs.map(e => [e.call_sid, e]))
             setRecordings(prev => prev.map(x => ({ ...x, evaluation: bySid.get(x.call_sid) || null })))
@@ -122,7 +128,24 @@ export default function RecordingsPage() {
     }
     if (audioRef.current) { audioRef.current.pause() }
     const sid = recSid(rec)
-    const audio = new Audio(sid ? `/api/twilio/recording/${sid}` : rec.url)
+    // ServiceTitan calls ('st-<id>') need a short-lived signed URL first —
+    // ST ids are guessable, so that proxy isn't open like Twilio's.
+    if (String(sid || '').startsWith('st-')) {
+      ;(async () => {
+        try {
+          const { data: { session } } = await sb.auth.getSession()
+          const r = await fetch(`/api/st/recording-url/${sid}`, { headers: { Authorization: `Bearer ${session?.access_token}` } })
+          const d = await r.json()
+          if (!r.ok) throw new Error(d.error || 'No recording')
+          startAudio(rec, d.url)
+        } catch (e) { toast(`Could not load this recording — ${e.message}`) }
+      })()
+      return
+    }
+    startAudio(rec, sid ? `/api/twilio/recording/${sid}` : rec.url)
+  }
+  const startAudio = (rec, src) => {
+    const audio = new Audio(src)
     audioRef.current = audio
     // Playing a fresh voicemail marks it heard for the whole team.
     if (rec.direction === 'voicemail' && !rec.heard_at) {
@@ -138,7 +161,18 @@ export default function RecordingsPage() {
 
   useEffect(() => () => { audioRef.current?.pause() }, [])
 
-  const downloadRec = (rec) => {
+  const downloadRec = async (rec) => {
+    const sid0 = recSid(rec)
+    if (String(sid0 || '').startsWith('st-')) {
+      try {
+        const { data: { session } } = await sb.auth.getSession()
+        const r = await fetch(`/api/st/recording-url/${sid0}`, { headers: { Authorization: `Bearer ${session?.access_token}` } })
+        const d = await r.json()
+        if (!r.ok) throw new Error(d.error || 'No recording')
+        window.open(`${d.url}&download=1`, '_blank')
+      } catch (e) { toast(`Could not download — ${e.message}`) }
+      return
+    }
     const sid = recSid(rec)
     window.open(sid ? `/api/twilio/recording/${sid}?download=1` : rec.url, '_blank')
   }
