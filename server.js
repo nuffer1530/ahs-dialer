@@ -5,6 +5,7 @@ import cors from 'cors'
 import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
 import { existsSync } from 'fs'
+import crypto from 'crypto'
 import { renderBoardEmail, boardEmailSubject } from './lib/boardEmail.js'
 import { computeBattingOrder, computeZipValue, computeJobTypeOrder, DEFAULT_WEIGHTS, NON_DISPATCH_TEAM } from './lib/dispatchMetrics.js'
 import { driveTimes, straightLine, pairKey, driveTimeEnabled, geocode, suggestAddresses } from './lib/driveTime.js'
@@ -3895,6 +3896,9 @@ async function sweepStEvals(dateStr, { limit = Number(process.env.ST_EVAL_MAX) |
     const lc = c.leadCall || c
     if ((lc.direction || '') !== 'Inbound') continue
     if (!['Booked', 'Unbooked'].includes(lc.callType)) continue
+    // Dispatch-line calls are techs coordinating, not customers booking — a
+    // CSR booking rubric would trash them. ST tags them by tracking number.
+    if (/dispatch/i.test((lc.campaign || {}).name || '')) continue
     const agent = (lc.agent || {}).name || ''
     if (!agent || /revin/i.test(agent)) continue   // no agent / AI receptionist
     const dur = stDurSec(lc.duration)
@@ -3959,7 +3963,9 @@ async function sweepStEvals(dateStr, { limit = Number(process.env.ST_EVAL_MAX) |
         rep, profileId,
         contactName: (cand.lc.customer || {}).name || null,
         contactId: null, phone: cand.lc.from || null,
-        callSid: sid, recordingSid: null,
+        // recording_sid 'st-<id>' → served by /api/st/recording/<id>, so the
+        // eval modal can play the call exactly like an Andi-native one.
+        callSid: sid, recordingSid: sid,
       })
       out.evaluated++
     } catch (e) { out.errors.push(`${cand.lc.id}: ${e.message}`) }
@@ -4277,6 +4283,41 @@ app.get('/api/twilio/recording/:sid', async (req, res) => {
     res.send(buf)
   } catch (err) {
     console.error('Recording proxy error:', err.message)
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// ServiceTitan call audio, proxied — ST needs a bearer token the browser
+// doesn't have. Streams the mp3 the eval sweep transcribed. ST call ids are
+// sequential (guessable), so unlike the Twilio proxy this one is gated: an
+// <audio> tag can't send headers, so the page first asks for a short-lived
+// signed URL with its session, then plays that.
+const REC_SIGN_SECRET = process.env.SUPABASE_SERVICE_KEY || 'andi'
+const signRec = (id, exp) => crypto.createHmac('sha256', REC_SIGN_SECRET).update(`${id}.${exp}`).digest('hex').slice(0, 32)
+app.get('/api/st/recording-url/:callId', async (req, res) => {
+  const me = await requireUser(req, res)
+  if (!me) return
+  const id = String(req.params.callId || '').replace(/^st-/, '')
+  if (!/^\d+$/.test(id)) return res.status(400).json({ error: 'bad call id' })
+  const exp = Date.now() + 2 * 3600_000
+  res.json({ url: `/api/st/recording/${id}?exp=${exp}&sig=${signRec(id, exp)}` })
+})
+app.get('/api/st/recording/:callId', async (req, res) => {
+  const id = String(req.params.callId || '').replace(/^st-/, '')
+  if (!/^\d+$/.test(id)) return res.status(400).json({ error: 'bad call id' })
+  const exp = Number(req.query.exp || 0)
+  if (!exp || exp < Date.now() || String(req.query.sig || '') !== signRec(id, exp)) {
+    return res.status(401).json({ error: 'Link expired — reopen the evaluation' })
+  }
+  try {
+    const buf = await stGetBinary(`/telecom/v2/tenant/${ST_TENANT_ID}/calls/${id}/recording`)
+    if (!buf || buf.byteLength < 1000) return res.status(404).json({ error: 'Recording not available' })
+    res.setHeader('Content-Type', 'audio/mpeg')
+    res.setHeader('Cache-Control', 'private, max-age=86400')
+    if (req.query.download) res.setHeader('Content-Disposition', `attachment; filename="st-call-${id}.mp3"`)
+    res.send(buf)
+  } catch (err) {
+    console.error('ST recording proxy:', err.message)
     res.status(500).json({ error: err.message })
   }
 })

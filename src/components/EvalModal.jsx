@@ -2,7 +2,35 @@
 // Shows per-criterion points with evidence, the coaching summary, and the
 // one-thing-to-fix tip. N/A criteria are visibly excluded from the math.
 
+import { useEffect, useState } from 'react'
+import { sb } from '../lib/supabase'
+
 const scoreTone = (pct) => pct >= 90 ? 'green' : pct >= 75 ? 'amber' : 'red'
+
+// Resolve a playable URL for the eval's recording. Andi-native evals carry a
+// Twilio recording sid (open proxy, unguessable sid); ServiceTitan-sweep
+// evals carry 'st-<callId>' and need a short-lived signed URL first.
+function useRecordingUrl(recordingSid) {
+  const [url, setUrl] = useState(null)
+  const [err, setErr] = useState(null)
+  useEffect(() => {
+    setUrl(null); setErr(null)
+    if (!recordingSid) return
+    if (!String(recordingSid).startsWith('st-')) { setUrl(`/api/twilio/recording/${recordingSid}`); return }
+    let dead = false
+    ;(async () => {
+      try {
+        const { data: { session } } = await sb.auth.getSession()
+        const r = await fetch(`/api/st/recording-url/${recordingSid}`, { headers: { Authorization: `Bearer ${session?.access_token}` } })
+        const d = await r.json()
+        if (!r.ok) throw new Error(d.error || 'No recording')
+        if (!dead) setUrl(d.url)
+      } catch (e) { if (!dead) setErr(e.message) }
+    })()
+    return () => { dead = true }
+  }, [recordingSid])
+  return { url, err }
+}
 
 export function ScoreChip({ pct, onClick, size = 'sm' }) {
   if (pct == null) return null
@@ -18,8 +46,10 @@ export function ScoreChip({ pct, onClick, size = 'sm' }) {
 }
 
 export default function EvalModal({ evalRow, onClose }) {
+  const { url: audioUrl, err: audioErr } = useRecordingUrl(evalRow?.recording_sid)
   if (!evalRow) return null
   const items = evalRow.scores?.items || []
+  const fromST = String(evalRow.call_sid || '').startsWith('st-')
   const tip = evalRow.scores?.coaching_tip
   const t = scoreTone(Number(evalRow.pct))
   const when = evalRow.created_at
@@ -45,6 +75,21 @@ export default function EvalModal({ evalRow, onClose }) {
           </div>
           <button onClick={onClose} style={{ border: 'none', background: 'var(--surface-2)', width: 28, height: 28, borderRadius: 8, cursor: 'pointer', fontSize: 15, color: 'var(--text-secondary)', flexShrink: 0 }}>×</button>
         </div>
+
+        {(audioUrl || audioErr) && (
+          <div style={{ padding: '10px 18px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 12, background: 'var(--surface-2)', flexShrink: 0 }}>
+            {audioUrl ? (
+              <>
+                <audio controls preload="none" src={audioUrl} style={{ flex: 1, height: 34 }} />
+                <a href={`${audioUrl}${audioUrl.includes('?') ? '&' : '?'}download=1`} title="Download recording"
+                  style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--text-secondary)', textDecoration: 'none', whiteSpace: 'nowrap' }}>Download</a>
+              </>
+            ) : (
+              <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>Recording unavailable — {audioErr}</span>
+            )}
+            {fromST && <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: .4, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>via ServiceTitan</span>}
+          </div>
+        )}
 
         <div style={{ flex: 1, overflowY: 'auto', padding: 18 }}>
           {evalRow.summary && (
