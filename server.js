@@ -4072,6 +4072,11 @@ async function maybeRunStEvalSweep() {
     if (claim.error || !claim.data?.length) return   // another replica got it
     const y = new Date(todayDenver + 'T12:00:00Z'); y.setUTCDate(y.getUTCDate() - 1)
     await sweepStEvals(y.toISOString().slice(0, 10))
+    // Second pass over the day before: transient Whisper/API failures left
+    // calls unscored with no retry (Deanna: "not grading every call") —
+    // already-scored calls skip instantly, so this only picks up strays.
+    y.setUTCDate(y.getUTCDate() - 1)
+    await sweepStEvals(y.toISOString().slice(0, 10))
   } catch (e) { console.warn('st eval sweep tick:', e.message) }
 }
 
