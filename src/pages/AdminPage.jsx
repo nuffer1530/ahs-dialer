@@ -868,7 +868,9 @@ export default function AdminPage() {
       const d = await r.json()
       if (!r.ok) throw new Error(d.error || 'Invite failed')
       if (d.emailed) {
-        setInvMsg({ ok: true, text: `Invite emailed to ${email} — they'll set their own name and password.` })
+        setInvMsg({ ok: true, text: d.resent
+          ? `${email} already had a pending invite — a fresh link was emailed (the old one expired).`
+          : `Invite emailed to ${email} — they'll set their own name and password.` })
       } else {
         // The account and link exist even though the email bounced — hand the
         // admin the link so they can text/DM it instead of dead-ending.

@@ -2043,6 +2043,7 @@ app.post('/api/admin/user/invite', async (req, res) => {
     return res.status(400).json({ error: 'Enter a valid email address' })
   }
   try {
+    let link = null, resent = false, userId = null
     const { data, error } = await supabase.auth.admin.generateLink({
       type: 'invite',
       email,
@@ -2051,30 +2052,45 @@ app.post('/api/admin/user/invite', async (req, res) => {
         redirectTo: `${appUrl}/welcome`,
       },
     })
-    if (error) {
-      const msg = /already|registered|exist/i.test(error.message)
-        ? 'That email already has an account. If they were removed, use Restore instead.'
-        : error.message
-      return res.status(400).json({ error: msg })
+    if (error && /already|registered|exist/i.test(error.message)) {
+      // Invite links die after 24h and the auth user already exists by then,
+      // so re-inviting used to dead-end (Brittany: "their links have expired
+      // and I'm not sure what to do"). If they never finished setup, mint a
+      // fresh sign-in link — the still-set `invited` flag routes them to
+      // /welcome to pick a name and password exactly like the original.
+      const { data: ml, error: mlErr } = await supabase.auth.admin.generateLink({
+        type: 'magiclink', email, options: { redirectTo: `${appUrl}/welcome` },
+      })
+      const meta = ml?.user?.user_metadata || {}
+      if (mlErr || !meta.invited || meta.setup_done) {
+        return res.status(400).json({ error: 'That email already has a working account. If they were removed, use Restore; if they forgot their password, they can reset it from the login page.' })
+      }
+      link = ml?.properties?.action_link
+      userId = ml?.user?.id || null
+      resent = true
+    } else if (error) {
+      return res.status(400).json({ error: error.message })
+    } else {
+      link = data?.properties?.action_link
+      userId = data?.user?.id || null
     }
-    const link = data?.properties?.action_link
     if (!link) return res.status(500).json({ error: 'Supabase returned no invite link' })
-    if (data?.user?.id && role !== 'rep') {
-      try { await supabase.from('profiles').update({ role }).eq('id', data.user.id) }
+    if (userId && role !== 'rep') {
+      try { await supabase.from('profiles').update({ role }).eq('id', userId) }
       catch (e) { console.warn('invite role set:', e.message) }
     }
     let emailed = false, emailError = null
     try {
       await sendResend({
         to: email,
-        subject: "You're invited to Andi — Awesome Home Services",
+        subject: resent ? 'Your Andi invite — fresh link inside' : "You're invited to Andi — Awesome Home Services",
         html: `
 <div style="font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;max-width:520px;margin:0 auto;padding:28px 20px;color:#111827;">
   <div style="font-size:22px;font-weight:800;color:#ff751f;margin-bottom:4px;">andi</div>
-  <div style="font-size:15px;font-weight:700;margin-bottom:12px;">You've been invited to join the Awesome Home Services team on Andi.</div>
-  <p style="font-size:13px;color:#374151;line-height:1.5;">Click below to accept the invite and set up your account — you'll pick your own password.</p>
+  <div style="font-size:15px;font-weight:700;margin-bottom:12px;">${resent ? 'Here’s a fresh link to finish setting up your Andi account.' : "You've been invited to join the Awesome Home Services team on Andi."}</div>
+  <p style="font-size:13px;color:#374151;line-height:1.5;">${resent ? 'Your previous invite link expired — this one replaces it.' : ''} Click below to accept the invite and set up your account — you'll pick your own password.</p>
   <p style="margin:22px 0;">
-    <a href="${link}" style="background:#ff751f;color:#ffffff;text-decoration:none;font-size:14px;font-weight:700;padding:11px 22px;border-radius:8px;display:inline-block;">Accept invite &amp; create account</a>
+    <a href="${link}" style="background:#ff751f;color:#ffffff;text-decoration:none;font-size:14px;font-weight:700;padding:11px 22px;border-radius:8px;display:inline-block;">${resent ? 'Finish setting up my account' : 'Accept invite &amp; create account'}</a>
   </p>
   <p style="font-size:11px;color:#9CA3AF;line-height:1.5;">This link is for ${esc2(email)} and expires in 24 hours. If it expires, ask your admin to send a new one. If you weren't expecting this, you can ignore it.</p>
 </div>`,
@@ -2086,7 +2102,7 @@ app.post('/api/admin/user/invite', async (req, res) => {
     }
     // If Resend failed the invite still exists — hand the admin the link so
     // they can deliver it themselves rather than dead-ending.
-    res.json({ ok: true, emailed, ...(emailed ? {} : { link, emailError }) })
+    res.json({ ok: true, emailed, resent, ...(emailed ? {} : { link, emailError }) })
   } catch (e) {
     console.error('invite error:', e.message)
     res.status(500).json({ error: e.message })
