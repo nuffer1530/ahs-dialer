@@ -263,7 +263,9 @@ export default function MyPage() {
         sb.from('schedules').select('*').gte('date', fromStr).lte('date', toStr)
           .then(r => ({ ...r, data: (r.data || []).filter(x => !('published_at' in x) || x.published_at) })),   // drafts stay in WFM
         sb.from('status_events').select('*').eq('profile_id', profile.id).gte('started_at', fromStr + 'T00:00:00').order('started_at', { ascending: false }),
-        sb.from('attendance_points').select('*').eq('profile_id', profile.id).gte('date', fromStr),
+        // Whole year, not the 60-day window: the scorecard month picker goes
+        // back to January and points get backfilled months later.
+        sb.from('attendance_points').select('*').eq('profile_id', profile.id).gte('date', `${new Date().getFullYear()}-01-01`),
         sb.from('app_settings').select('value').eq('key', 'scorecard_weights').maybeSingle(),
         sb.from('app_settings').select('value').eq('key', 'scorecard_thresholds').maybeSingle(),
         // Real telephony, same sources the Analytics page uses.

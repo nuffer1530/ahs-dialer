@@ -468,12 +468,27 @@ export default function AttendancePage() {
     const payload = {
       profile_id: pointModal.id, date: pointData.date,
       points: parseFloat(pointData.points), reason: pointData.reason,
-      notes: pointData.notes, auto_generated: false, created_by: profile.id,
+      notes: pointData.notes, auto_generated: false,
     }
-    const { data } = await sb.from('attendance_points').insert(payload).select().single()
-    if (data) setAttendancePoints(prev => [data, ...prev])
+    if (pointData.editId) {
+      // Edit in place (Brittany: had to delete the whole entry to fix a note).
+      const { data, error } = await sb.from('attendance_points').update(payload).eq('id', pointData.editId).select().single()
+      if (error) toast(`Couldn't save: ${error.message}`)
+      else if (data) setAttendancePoints(prev => prev.map(p => p.id === data.id ? data : p))
+    } else {
+      const { data, error } = await sb.from('attendance_points').insert({ ...payload, created_by: profile.id }).select().single()
+      if (error) toast(`Couldn't save: ${error.message}`)
+      else if (data) setAttendancePoints(prev => [data, ...prev])
+    }
     setSaving(false); setPointModal(null)
     setPointData({ reason: 'late', points: 0.5, notes: '', date: today })
+  }
+
+  const editPoint = (pt) => {
+    const person = profiles.find(p => p.id === pt.profile_id)
+    if (!person) return
+    setPointModal(person)
+    setPointData({ editId: pt.id, reason: pt.reason, points: parseFloat(pt.points), notes: pt.notes || '', date: pt.date })
   }
 
   const deletePoint = async (id) => {
@@ -878,7 +893,12 @@ export default function AttendancePage() {
                             <td style={{ padding:'8px 12px', fontSize:12 }}>{POINT_REASONS.find(r => r.value === pt.reason)?.label || pt.reason}</td>
                             <td style={{ padding:'8px 12px', fontSize:13, fontWeight:700, textAlign:'center', color: parseFloat(pt.points) >= 1 ? 'var(--danger)' : '#f59e0b' }}>{parseFloat(pt.points).toFixed(1)}</td>
                             <td style={{ padding:'8px 12px', fontSize:11, color:'var(--text-muted)' }}>{pt.notes || '—'}</td>
-                            {isAdmin && <td style={{ padding:'8px 12px' }}><button className="btn sm danger" onClick={() => deletePoint(pt.id)}>Remove</button></td>}
+                            {isAdmin && (
+                              <td style={{ padding:'8px 12px', whiteSpace:'nowrap' }}>
+                                <button className="btn sm" style={{ marginRight:6 }} onClick={() => editPoint(pt)}>Edit</button>
+                                <button className="btn sm danger" onClick={() => deletePoint(pt.id)}>Remove</button>
+                              </td>
+                            )}
                           </tr>
                         ))}
                       </tbody>
@@ -1282,7 +1302,7 @@ export default function AttendancePage() {
 
       {/* ── ADD POINT MODAL ── */}
       {pointModal && (
-        <Modal title={`Add Attendance Point — ${pointModal.name || pointModal.email}`} onClose={() => setPointModal(null)} width={440}>
+        <Modal title={`${pointData.editId ? 'Edit' : 'Add'} Attendance Point — ${pointModal.name || pointModal.email}`} onClose={() => { setPointModal(null); setPointData({ reason: 'late', points: 0.5, notes: '', date: today }) }} width={440}>
           <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
             <div className="form-field">
               <label className="form-label">Date</label>
@@ -1308,7 +1328,7 @@ export default function AttendancePage() {
           </div>
           <div className="modal-actions">
             <button className="btn" onClick={() => setPointModal(null)}>Cancel</button>
-            <button className="btn primary" onClick={addPoint} disabled={saving}>{saving ? 'Saving...' : 'Add point'}</button>
+            <button className="btn primary" onClick={addPoint} disabled={saving}>{saving ? 'Saving...' : pointData.editId ? 'Save changes' : 'Add point'}</button>
           </div>
         </Modal>
       )}
