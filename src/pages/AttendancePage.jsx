@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { localYMD, shiftChanged } from '../lib/utils'
 import { sb } from '../lib/supabase'
 import { confirmDlg, toast } from '../lib/dialogs'
@@ -393,6 +393,83 @@ export default function AttendancePage() {
   }
   const fmtH = (h) => (h % 1 ? h.toFixed(1) : String(h))
 
+  // ── Break overlap detection + auto-stagger (Brittany: "3 people on the
+  // same shift — don't put two people on the same break"). A break is
+  // {start, end} in minutes; any two people's breaks intersecting on the
+  // same day is a conflict. Flagged on the grid; "Stagger breaks" fixes it.
+  const toMin = (t) => { if (!t) return null; const [h, m] = String(t).split(':').map(Number); return h * 60 + (m || 0) }
+  const toTime = (m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`
+  const breaksOf = (sd) => {
+    if (!sd || (sd.day_type && sd.day_type !== 'work') || !sd.shift_start) return []
+    const out = []
+    const add = (kind, start, dur) => { const m = toMin(start); if (m != null) out.push({ kind, start: m, end: m + (Number(dur) || (kind === 'lunch' ? 30 : 15)) }) }
+    add('break1', sd.break1_start, sd.break1_duration); add('lunch', sd.lunch_start, sd.lunch_duration); add('break2', sd.break2_start, sd.break2_duration)
+    return out
+  }
+  const overlaps = (a, b) => a.start < b.end && b.start < a.end
+  const breakConflicts = useMemo(() => {
+    const map = new Map()   // date -> Set(profile_id)
+    for (const date of weekDates) {
+      const rows = schedules.filter(x => x.date === date && breaksOf(x).length)
+      for (let i = 0; i < rows.length; i++) for (let j = i + 1; j < rows.length; j++) {
+        const a = breaksOf(rows[i]), b = breaksOf(rows[j])
+        if (a.some(x => b.some(y => overlaps(x, y)))) {
+          if (!map.has(date)) map.set(date, new Set())
+          map.get(date).add(rows[i].profile_id); map.get(date).add(rows[j].profile_id)
+        }
+      }
+    }
+    return map
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [schedules, weekDates.join()])
+  const conflictCount = [...breakConflicts.values()].reduce((a, s) => a + s.size, 0)
+
+  const [staggering, setStaggering] = useState(false)
+  const staggerBreaks = async () => {
+    if (staggering) return
+    setStaggering(true)
+    let moved = 0, days = 0
+    try {
+      for (const date of weekDates) {
+        const people = schedules.filter(x => x.date === date && breaksOf(x).length)
+          .sort((a, b) => (toMin(a.shift_start) - toMin(b.shift_start)) || String(a.profile_id).localeCompare(String(b.profile_id)))
+        const taken = []
+        let dayMoved = 0
+        for (const sd of people) {
+          const sStart = toMin(sd.shift_start), sEnd = toMin(sd.shift_end)
+          const patch = {}
+          const mine = []
+          for (const br of breaksOf(sd)) {
+            const dur = br.end - br.start
+            // Try the current slot first, then ±15-min steps outward (≤ 90 min),
+            // staying inside the shift with a 30-min margin at either end.
+            const offsets = [0, 15, -15, 30, -30, 45, -45, 60, -60, 75, -75, 90, -90]
+            let placed = null
+            for (const off of offsets) {
+              const st = br.start + off, en = st + dur
+              if (st < sStart + 30 || en > sEnd - 30) continue
+              const slot = { start: st, end: en }
+              if (taken.some(t => overlaps(t, slot)) || mine.some(t => overlaps(t, slot))) continue
+              placed = slot; break
+            }
+            if (!placed) placed = { start: br.start, end: br.end }   // nothing free — leave it, flag stays
+            mine.push(placed); taken.push(placed)
+            if (placed.start !== br.start) { patch[`${br.kind}_start`] = toTime(placed.start); dayMoved++ }
+          }
+          if (Object.keys(patch).length) {
+            const { error } = await sb.from('schedules')
+              .update({ ...patch, published_at: null })   // a moved break is a real change → draft
+              .eq('id', sd.id)
+            if (error) toast(`Could not move a break: ${error.message}`)
+          }
+        }
+        if (dayMoved) { moved += dayMoved; days++ }
+      }
+      await reloadSchedules()
+      toast(moved ? `Moved ${moved} break${moved === 1 ? '' : 's'} across ${days} day${days === 1 ? '' : 's'} — now drafts, publish when ready.` : 'No overlapping breaks this week.')
+    } finally { setStaggering(false) }
+  }
+
   const getSchedule = (profileId, date) => schedules.find(s => s.profile_id === profileId && s.date === date)
   const getEvents = (profileId, date) => statusEvents.filter(e => e.profile_id === profileId && e.started_at.startsWith(date)).sort((a, b) => new Date(a.started_at) - new Date(b.started_at))
 
@@ -615,6 +692,12 @@ export default function AttendancePage() {
                 onMouseLeave={e => { e.currentTarget.style.background='var(--surface)'; e.currentTarget.style.color='var(--text-secondary)' }}>
                 Copy Week
               </button>
+              <button onClick={staggerBreaks} disabled={staggering}
+                title={conflictCount ? `${conflictCount} people share a break slot this week — spread them out` : 'Spread overlapping breaks so no two people are off the phones at once'}
+                style={{ padding:'6px 14px', fontSize:12, fontWeight:500, border:`1px solid ${conflictCount ? 'var(--tone-amber-bd)' : 'var(--border)'}`, borderRadius:'var(--radius)', background: conflictCount ? 'var(--tone-amber-bg)' : 'var(--surface)', color: conflictCount ? 'var(--tone-amber-tx)' : 'var(--text-secondary)', cursor:'pointer', display:'flex', alignItems:'center', gap:6 }}>
+                {staggering ? 'Moving…' : 'Stagger breaks'}
+                {conflictCount > 0 && <span style={{ background:'var(--tone-amber-tx)', color:'#fff', borderRadius:99, padding:'0 7px', fontSize:10.5, fontWeight:800 }}>{conflictCount}</span>}
+              </button>
               <button onClick={() => setPublishModal(true)}
                 style={{ padding:'6px 16px', fontSize:12, fontWeight:600, border:'none', borderRadius:'var(--radius)', background:'var(--accent)', color:'#fff', cursor:'pointer', transition:'opacity .1s', display:'flex', alignItems:'center', gap:7 }}
                 onMouseEnter={e => e.currentTarget.style.opacity='.9'}
@@ -700,6 +783,10 @@ export default function AttendancePage() {
                                   onMouseLeave={e => e.currentTarget.style.opacity='1'}>
                                   <div style={{ fontSize:11, fontWeight:600, color: tc || 'var(--success)' }}>{fmt(sched.shift_start)} – {fmt(sched.shift_end)}</div>
                                   {sched.lunch_start && <div style={{ fontSize:10, color:'var(--text-muted)', marginTop:2 }}>Lunch {fmt(sched.lunch_start)}</div>}
+                                  {breakConflicts.get(date)?.has(p.id) && (
+                                    <div title="A break or lunch here overlaps someone else's on the same day — use Stagger breaks"
+                                      style={{ fontSize:9.5, fontWeight:700, color:'var(--tone-amber-tx)', marginTop:2 }}>⚠ break overlap</div>
+                                  )}
                                   {isDraft && <div style={{ fontSize:9, fontWeight:800, letterSpacing:.5, color:'var(--text-muted)', marginTop:2 }}>DRAFT</div>}
                                 </div>
                               ) : sched && isOff ? (
