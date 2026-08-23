@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { localYMD } from '../lib/utils'
+import { localYMD, shiftChanged } from '../lib/utils'
 import { sb } from '../lib/supabase'
 import { confirmDlg, toast } from '../lib/dialogs'
 import { useAuth } from '../lib/AuthContext'
@@ -446,7 +446,9 @@ export default function AttendancePage() {
     // UPSERT on (profile_id,date): the grid's state can miss rows that exist
     // (other tabs, other admins), and a blind insert dies silently on the
     // unique constraint. Errors surface as a toast instead of vanishing.
-    const draft = { ...payload, published_at: null }   // any hand edit reverts to draft
+    // A REAL change reverts to draft; re-saving an unchanged cell leaves the
+    // published state alone (omitting published_at keeps the existing value).
+    const draft = shiftChanged(getSchedule(profileId, date), payload) ? { ...payload, published_at: null } : payload
     let { error } = await sb.from('schedules').upsert(draft, { onConflict: 'profile_id,date' })
     if (error) ({ error } = await sb.from('schedules').upsert(payload, { onConflict: 'profile_id,date' }))
     if (error) toast(`Could not save the shift: ${error.message}`)

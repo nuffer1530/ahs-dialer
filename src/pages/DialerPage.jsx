@@ -972,7 +972,7 @@ export default function DialerPage() {
       if (serveLead(nextSkillLead(), true)) startInteraction?.('Outbound')
       return
     }
-    if (repCampPriority.length) return   // grants exist, all toggled off — no outbound
+    if (repCampPriority.length || Array.isArray(profile?.active_campaign_ids)) return   // nothing switched on — no outbound
     const next = filtered.find(x => !isDone(x) && x.status !== 'Max Attempts' && !x.claimed_by)
     if (next) { navigateActiveTo(next.id); startInteraction?.('Outbound') }
   }
@@ -990,10 +990,12 @@ export default function DialerPage() {
     if (profile?.status !== 'Available') return
     if (selectedContact && !isDone(selectedContact)) return
     if (skillsMode) { serveLead(nextSkillLead(), true); return }
-    // A rep WITH campaign grants who has toggled them all off has said "no
-    // outbound" — serve nothing. The blended pool below is only for legacy
-    // reps with no grants at all, where Available IS how work starts.
-    if (repCampPriority.length) return
+    // Outbound only flows from campaigns the rep has switched ON. A rep with
+    // grants toggled off, OR one with no grants at all (Brittany: admin, no
+    // csr_campaigns rows, still getting RMC pops), gets nothing. The blended
+    // pool survives only for profiles that predate queue config entirely
+    // (active_campaign_ids never set).
+    if (repCampPriority.length || Array.isArray(profile?.active_campaign_ids)) return
     const next = filtered.find(x => !isDone(x) && x.status !== 'Max Attempts' && !x.claimed_by)
     if (next) navigateActiveTo(next.id)
     // eslint-disable-next-line react-hooks/exhaustive-deps

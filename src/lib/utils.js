@@ -152,3 +152,23 @@ export const getTimeframeBounds = (tf) => {
 export function localYMD(d = new Date()) {
   return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0')
 }
+
+// Did a schedule save actually change the shift? Compares the fields a rep
+// would see (times, breaks, lunch, day type, color), tolerant of HH:MM vs
+// HH:MM:SS and string/number durations. Saves that change nothing must NOT
+// revert a published shift to draft — dragging a meeting block or re-saving
+// a cell untouched was silently unpublishing shifts every time.
+export function shiftChanged(existing, payload) {
+  if (!existing) return true
+  const t = (v) => (v == null || v === '' ? '' : String(v).slice(0, 5))
+  const n = (v) => (v == null || v === '' ? '' : String(Number(v)))
+  const s = (v) => (v == null ? '' : String(v))
+  const fields = [
+    ['shift_start', t], ['shift_end', t],
+    ['break1_start', t], ['break1_duration', n],
+    ['break2_start', t], ['break2_duration', n],
+    ['lunch_start', t], ['lunch_duration', n],
+    ['day_type', s], ['template_color', s],
+  ]
+  return fields.some(([k, f]) => k in payload && f(existing[k]) !== f(payload[k]))
+}

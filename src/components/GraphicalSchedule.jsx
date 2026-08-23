@@ -1,6 +1,6 @@
 // GraphicalSchedule v2 — 15min ticks + overflow scroll
 import { useState, useEffect, useRef } from 'react'
-import { localYMD } from '../lib/utils'
+import { localYMD, shiftChanged } from '../lib/utils'
 import { toast } from '../lib/dialogs'
 import { sb } from '../lib/supabase'
 import { useAuth } from '../lib/AuthContext'
@@ -255,8 +255,12 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
     if (lunchBlock) { payload.lunch_start = intervalToTime(lunchBlock.start); payload.lunch_duration = lunchBlock.duration * 15 }
     if (breakBlocks[1]) { payload.break2_start = intervalToTime(breakBlocks[1].start); payload.break2_duration = breakBlocks[1].duration * 15 }
     {
-      // Edits are drafts until Publish (retry without the column pre-migration).
-      const { error: pubErr } = await sb.from('schedules').upsert({ ...payload, published_at: null }, { onConflict: 'profile_id,date' })
+      // Edits are drafts until Publish — but ONLY when the shift itself moved.
+      // Dragging a meeting/outbound block re-saves the shift too, and that
+      // used to unpublish it every time (Brittany: "sched keeps unpublishing").
+      const existing = schedules.find(x => x.profile_id === profileId)
+      const row = shiftChanged(existing, payload) ? { ...payload, published_at: null } : payload
+      const { error: pubErr } = await sb.from('schedules').upsert(row, { onConflict: 'profile_id,date' })
       if (pubErr) await sb.from('schedules').upsert(payload, { onConflict: 'profile_id,date' })
     }
     for (const b of pBlocks.filter(b => ['outbound','meeting'].includes(b.type) && b.dbId)) {
@@ -299,7 +303,9 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
       created_by: profile?.id,
     }
     {
-      const { error: pubErr } = await sb.from('schedules').upsert({ ...payload, published_at: null }, { onConflict: 'profile_id,date' })
+      const existing = schedules.find(x => x.profile_id === shiftModal)
+      const row = shiftChanged(existing, payload) ? { ...payload, published_at: null } : payload
+      const { error: pubErr } = await sb.from('schedules').upsert(row, { onConflict: 'profile_id,date' })
       if (pubErr) await sb.from('schedules').upsert(payload, { onConflict: 'profile_id,date' })
     }
     const { data } = await sb.from('schedules').select('*').eq('date', date)
