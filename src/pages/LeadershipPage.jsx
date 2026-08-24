@@ -546,18 +546,31 @@ function LeadershipPageInner() {
           </div>
 
           <div style={S.section}>
-            <div style={S.sectionTitle}>Opportunities — ran vs needed to hit budget</div>
+            <div style={S.sectionTitle}>Opportunities — ran vs needed vs capacity</div>
             <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 8 }}>
-              "Needed" = budget ÷ (actual close rate × actual avg sale). Short of needed = lead-flow problem; had them and missed = conversion problem.
+              "Needed" = budget ÷ (actual close rate × actual avg sale). "Capacity" = techs on working shifts that week × the
+              board's calls-per-tech. Short of needed AND under capacity = lead-flow (we had empty truck slots); needed beyond
+              capacity = staffing ceiling — marketing can't fix that part.
             </div>
-            <Table headers={['Dept', 'Ran', 'Needed', 'Diff', 'Verdict']}
-              rows={f.scorecard.map(d => [
-                d.trade, String(d.opps), d.oppsNeeded != null ? String(d.oppsNeeded) : '—',
-                d.oppsNeeded != null ? <span style={d.opps >= d.oppsNeeded ? S.good : S.bad}>{d.opps >= d.oppsNeeded ? '+' : ''}{d.opps - d.oppsNeeded}</span> : '—',
-                d.oppsNeeded == null ? '—' : d.opps >= d.oppsNeeded
-                  ? (d.sales >= d.budget ? <span style={S.good}>hit it</span> : <span style={S.bad}>had the opps — conversion</span>)
-                  : <span style={S.bad}>lead-flow gap</span>,
-              ])}
+            <Table headers={['Dept', 'Ran', 'Needed', 'Capacity', 'Open slots', 'Verdict']}
+              rows={f.scorecard.map(d => {
+                const cap = d.oppCapacity
+                const open = cap != null ? Math.max(0, cap - d.opps) : null
+                let verdict
+                if (d.oppsNeeded == null) verdict = '—'
+                else if (d.opps >= d.oppsNeeded) verdict = d.sales >= d.budget
+                  ? <span style={S.good}>hit it</span>
+                  : <span style={S.bad}>had the opps — conversion</span>
+                else if (cap == null) verdict = <span style={S.bad}>lead-flow gap</span>
+                else if (d.oppsNeeded <= cap) verdict = <span style={S.bad}>lead-flow gap — {Math.min(d.oppsNeeded - d.opps, open)} more fit the trucks</span>
+                else verdict = <span style={S.bad}>staffing ceiling — full trucks max {cap} of {d.oppsNeeded} needed</span>
+                return [
+                  d.trade, String(d.opps), d.oppsNeeded != null ? String(d.oppsNeeded) : '—',
+                  cap != null ? String(cap) : '—',
+                  open != null ? (open > 0 ? <span style={S.bad}>{open}</span> : <span style={S.good}>full</span>) : '—',
+                  verdict,
+                ]
+              })}
             />
           </div>
 
