@@ -487,7 +487,7 @@ function LeadershipPageInner() {
           <div style={S.section}>
             <div style={S.sectionTitle}>Department scorecard</div>
             <Table
-              headers={['Dept', 'Wk Sales', 'Budget', 'Var', 'Wk Rev', 'Rev Tgt', 'Close / Tgt', 'Avg Sale', 'Opps', 'Missed $', '5★', 'Clubs', 'Callbacks', 'True Labor %']}
+              headers={['Dept', 'Wk Sales', 'Budget', 'Var', 'Wk Rev', 'Rev Tgt', 'Close / Tgt', 'Avg Sale', 'Opps', 'Missed $', '5★', 'Clubs', 'Callbacks', 'LW True Labor %']}
               rows={[
                 ...f.scorecard.map(d => [
                   d.trade, money(d.sales), money(d.budget),
@@ -564,16 +564,16 @@ function LeadershipPageInner() {
           {/* True labor */}
           <div style={S.section}>
             <div style={S.sectionTitle}>
-              True labor {f.labor.source === 'adp'
+              Last week's true labor{f.labor.weekEnd ? ` — wk ending ${f.labor.weekEnd}` : ''} {f.labor.source === 'adp'
                 ? <span style={{ color: 'var(--success)' }}>— ACTUALS from ADP {f.labor.actual?.source === 'invoice' ? `invoice ${f.labor.actual?.invoiceNo}` : f.labor.actual?.invoiceNo}{f.labor.actual?.approx ? ' (burden estimated from measured rates)' : ''} ✓</span>
                 : '(ADP-burdened model)'}
             </div>
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-              <Card label="Field labor (true)" value={money(f.labor.estFieldBurdened)}
+              <Card label="LW field labor (true)" value={money(f.labor.estFieldBurdened)}
                 sub={f.labor.source === 'adp' ? `${money(f.labor.actual?.totals?.field?.gross)} gross · ${f.labor.actual?.totals?.field?.n ?? '—'} employees` : `${money(f.labor.impliedCommissions)} commissions + pool + burden`} />
-              <Card label="Office labor" value={money(f.labor.officeWeeklyCost)} sub={f.labor.source === 'adp' ? `${f.labor.actual?.totals?.office?.n ?? '—'} employees` : 'burdened weekly baseline'} />
-              <Card label="All-in labor %" value={pct(f.labor.laborPctOfRevenue)} sub="of week revenue" tone={f.labor.laborPctOfRevenue <= 0.36 ? 'good' : 'bad'} />
-              <Card label="Hidden pool" value={money(f.labor.hiddenPool)} sub={f.labor.source === 'adp' ? 'actual field gross − job commissions' : 'field pay not tied to a job'} />
+              <Card label="LW office labor" value={money(f.labor.officeWeeklyCost)} sub={f.labor.source === 'adp' ? `${f.labor.actual?.totals?.office?.n ?? '—'} employees` : 'burdened weekly baseline'} />
+              <Card label="LW all-in labor %" value={pct(f.labor.laborPctOfRevenue)} sub="of last week\u2019s revenue" tone={f.labor.laborPctOfRevenue <= 0.36 ? 'good' : 'bad'} />
+              <Card label="LW hidden pool" value={money(f.labor.hiddenPool)} sub={f.labor.source === 'adp' ? 'actual field gross − job commissions' : 'field pay not tied to a job'} />
             </div>
             {f.labor.source === 'adp' && (f.labor.actual.unmatched || []).length > 0 && (
               <div style={{ fontSize: 12, color: 'var(--warning)', marginTop: 8 }}>
