@@ -689,17 +689,19 @@ function LeadershipPageInner() {
           </div>
 
           <div style={S.section}>
-            <div style={S.sectionTitle}>Ongoing projects — carry forward every week until marked Done</div>
+            <div style={S.sectionTitle}>Rocks — one per leader, progress reported every week</div>
             <EditRows rows={notes.projects} onChange={v => patchNotes({ projects: v })}
               cols={[
-                { key: 'project', label: 'Project', placeholder: 'Add a project…' },
+                { key: 'project', label: 'Rock', placeholder: 'Add a rock…' },
                 { key: 'owner', label: 'Owner', width: 130 },
-                { key: 'status', label: 'Status', width: 130, options: ['Planning', 'On Track', 'At Risk', 'Stuck', 'Done'] },
-                { key: 'target', label: 'Target', width: 110 },
-                { key: 'notes', label: 'Notes' },
+                { key: 'status', label: 'Status', width: 130, options: ['On Track', 'Off Track', 'Done'] },
+                { key: 'target', label: 'Due', width: 110 },
+                { key: 'notes', label: 'This week\u2019s progress' },
               ]} />
             <div className="no-print" style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 4 }}>
-              Projects marked <b>Done</b> stay on this week's agenda and drop off next week's automatically.
+              EOS-style: each leader owns one rock and reports progress here weekly. A rock is either <b>On Track</b> or
+              <b> Off Track</b> — no in-between. Rocks marked <b>Done</b> stay on this week's agenda and drop off next
+              week's automatically; carry the progress column fresh each week.
             </div>
           </div>
 
