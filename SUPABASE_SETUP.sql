@@ -759,3 +759,14 @@ create table if not exists leadership_reports (
   updated_at timestamptz default now()
 );
 alter table leadership_reports enable row level security;
+
+-- ── Team schedule visibility (Aug 2026) ─────────────────────────────────────
+-- schedules RLS only let reps read their OWN rows (console-era policy), so a
+-- rep's Team Schedule showed teammates blank even though everything was
+-- published. Additive read-all for signed-in users; write policies untouched.
+drop policy if exists "auth read schedules" on schedules;
+create policy "auth read schedules" on schedules
+  for select to authenticated using (true);
+drop policy if exists "auth read schedule_blocks" on schedule_blocks;
+create policy "auth read schedule_blocks" on schedule_blocks
+  for select to authenticated using (true);
