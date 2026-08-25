@@ -8165,39 +8165,54 @@ app.post('/api/board/email/test', async (req, res) => {
 const BOARD_EMAIL_SENT_KEY = 'board_email_last_sent'
 const BOARD_EMAIL_WINDOW_HOURS = 3
 
-async function maybeSendDailyBoardEmail() {
-  if (!BOARD_EMAIL_TO || !RESEND_KEY) return
+// Three sends a day: the morning original plus noon and 3 PM refreshes — the
+// board moves all day, so leadership gets the current picture before the
+// afternoon push. Each slot claims its own app_settings key, replica-safe.
+const BOARD_EMAIL_EXTRA_HOURS = String(process.env.BOARD_EMAIL_EXTRA_HOURS ?? '12,15')
+  .split(',').map(n => parseInt(n)).filter(n => Number.isFinite(n) && n >= 0 && n <= 23)
+
+async function maybeSendBoardEmailSlot(slotHour, key, tag) {
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone: BOARD_EMAIL_TZ, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', hour12: false,
   }).formatToParts(new Date()).reduce((a, p) => (a[p.type] = p.value, a), {})
   const localDate = `${parts.year}-${parts.month}-${parts.day}`
   const localHour = Number(parts.hour === '24' ? 0 : parts.hour)
-  if (localHour < BOARD_EMAIL_HOUR || localHour >= BOARD_EMAIL_HOUR + BOARD_EMAIL_WINDOW_HOURS) return
+  if (localHour < slotHour || localHour >= slotHour + BOARD_EMAIL_WINDOW_HOURS) return
 
   try {
     const { data: row } = await supabase.from('app_settings')
-      .select('value').eq('key', BOARD_EMAIL_SENT_KEY).maybeSingle()
+      .select('value').eq('key', key).maybeSingle()
     const prev = row?.value ?? null
-    if (String(prev).replace(/"/g, '') === localDate) return   // already sent today
+    if (String(prev).replace(/"/g, '') === localDate) return   // this slot already sent today
 
-    // Claim the day. If another replica already moved it, we update 0 rows.
+    // Claim the slot. If another replica already moved it, we update 0 rows.
     if (row) {
       const { data: claimed } = await supabase.from('app_settings')
-        .update({ value: localDate }).eq('key', BOARD_EMAIL_SENT_KEY).eq('value', prev).select()
+        .update({ value: localDate }).eq('key', key).eq('value', prev).select()
       if (!claimed || claimed.length === 0) return
     } else {
       const { error } = await supabase.from('app_settings')
-        .insert({ key: BOARD_EMAIL_SENT_KEY, value: localDate })
+        .insert({ key, value: localDate })
       if (error) return   // lost the insert race to another replica
     }
 
     const { subject, html } = await buildBoardEmail()
-    await sendResend({ to: BOARD_EMAIL_TO, subject, html })
-    console.log(`BOARD EMAIL: daily send to ${BOARD_EMAIL_TO} — ${subject}`)
+    await sendResend({ to: BOARD_EMAIL_TO, subject: tag ? `${subject} — ${tag}` : subject, html })
+    console.log(`BOARD EMAIL: ${tag || 'morning'} send to ${BOARD_EMAIL_TO} — ${subject}`)
   } catch (err) {
     // Leave the claim in place: a failed send is better than a retry loop
-    // emailing leadership repeatedly. The next morning proceeds normally.
-    console.error('BOARD EMAIL: daily send FAILED:', err.message)
+    // emailing leadership repeatedly. The next slot proceeds normally.
+    console.error(`BOARD EMAIL: ${tag || 'morning'} send FAILED:`, err.message)
+  }
+}
+
+async function maybeSendDailyBoardEmail() {
+  if (!BOARD_EMAIL_TO || !RESEND_KEY) return
+  await maybeSendBoardEmailSlot(BOARD_EMAIL_HOUR, BOARD_EMAIL_SENT_KEY)
+  for (const h of BOARD_EMAIL_EXTRA_HOURS) {
+    if (h === BOARD_EMAIL_HOUR) continue
+    const tag = h === 12 ? 'noon update' : h < 12 ? `${h} AM update` : `${h - 12} PM update`
+    await maybeSendBoardEmailSlot(h, `${BOARD_EMAIL_SENT_KEY}_${h}`, tag)
   }
 }
 
