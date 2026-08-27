@@ -10,7 +10,7 @@ import { renderBoardEmail, boardEmailSubject } from './lib/boardEmail.js'
 import { computeBattingOrder, computeZipValue, computeJobTypeOrder, DEFAULT_WEIGHTS, NON_DISPATCH_TEAM } from './lib/dispatchMetrics.js'
 import { driveTimes, straightLine, pairKey, driveTimeEnabled, geocode, suggestAddresses } from './lib/driveTime.js'
 import { buildDailyDigest } from './lib/dailyDigest.js'
-import { buildDepartmentBrief } from './lib/departmentBrief.js'
+import { buildDepartmentBrief, buildTechnicianPerformance, buildOpenEstimates } from './lib/departmentBrief.js'
 import { gatherWeeklyFacts, generateAgendaAI, renderLeadershipHtml, latestCompletedSunday, upcomingSunday } from './lib/leadershipReport.js'
 import { parseAdpUpload, aggregateAdpActuals, REGISTER_BURDEN_DEFAULTS } from './lib/adpInvoice.js'
 
@@ -8344,6 +8344,27 @@ app.get('/api/brief/department', async (req, res) => {
     const dateStr = /^\d{4}-\d{2}-\d{2}$/.test(req.query.date || '') ? req.query.date : digestYesterday()
     const brief = await buildDepartmentBrief(briefDeps(grant.trade, dateStr))
     res.json({ ...brief, for: grant.name || grant.trade })
+  } catch (err) { res.status(500).json({ error: err.message }) }
+})
+
+// Per-tech performance for the leader's trade over ?days=N (default 7, max 45).
+app.get('/api/brief/technicians', async (req, res) => {
+  const grant = await resolveBriefToken(req)
+  if (!grant || !grant.trade) return res.status(401).json({ error: 'Invalid or missing brief token' })
+  try {
+    const out = await buildTechnicianPerformance({ stGet, stPageAll, supabase, tenantId: ST_TENANT_ID, trade: grant.trade, days: req.query.days })
+    res.json({ ...out, for: grant.name || grant.trade })
+  } catch (err) { res.status(500).json({ error: err.message }) }
+})
+
+// Open (unsold) estimates to follow up on, for the leader's trade.
+// ?days=N (default 21, max 45), ?minValue=N to filter small ones.
+app.get('/api/brief/open-estimates', async (req, res) => {
+  const grant = await resolveBriefToken(req)
+  if (!grant || !grant.trade) return res.status(401).json({ error: 'Invalid or missing brief token' })
+  try {
+    const out = await buildOpenEstimates({ stGet, stPageAll, tenantId: ST_TENANT_ID, trade: grant.trade, days: req.query.days, minValue: req.query.minValue })
+    res.json({ ...out, for: grant.name || grant.trade })
   } catch (err) { res.status(500).json({ error: err.message }) }
 })
 
