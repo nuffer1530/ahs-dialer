@@ -10,7 +10,7 @@ import { renderBoardEmail, boardEmailSubject } from './lib/boardEmail.js'
 import { computeBattingOrder, computeZipValue, computeJobTypeOrder, DEFAULT_WEIGHTS, NON_DISPATCH_TEAM } from './lib/dispatchMetrics.js'
 import { driveTimes, straightLine, pairKey, driveTimeEnabled, geocode, suggestAddresses } from './lib/driveTime.js'
 import { buildDailyDigest } from './lib/dailyDigest.js'
-import { buildDepartmentBrief, buildTechnicianPerformance, buildOpenEstimates, buildPeriodSummary, buildTrend, buildLeadSources, buildRecentJobs } from './lib/departmentBrief.js'
+import { buildDepartmentBrief, buildTechnicianPerformance, buildOpenEstimates, buildPeriodSummary, buildTrend, buildLeadSources, buildRecentJobs, buildCompanyOverview, buildReceivables, normalizeDept } from './lib/departmentBrief.js'
 import { gatherWeeklyFacts, generateAgendaAI, renderLeadershipHtml, latestCompletedSunday, upcomingSunday } from './lib/leadershipReport.js'
 import { parseAdpUpload, aggregateAdpActuals, REGISTER_BURDEN_DEFAULTS } from './lib/adpInvoice.js'
 
@@ -8337,23 +8337,34 @@ const briefDeps = (trade, dateStr) => ({
   stGet, stPageAll, supabase, tenantId: ST_TENANT_ID, anthropicKey: ANTHROPIC_KEY, trade, dateStr,
 })
 
+// The trade a request may see: a department leader is LOCKED to their trade
+// (any ?department= is ignored); an owner-scoped token may pass ?department=
+// (HVAC/Plumbing/Electrical/Garage/all), defaulting to the whole company.
+function effectiveTrade(grant, req) {
+  if (!grant) return null
+  if (grant.scope === 'owner') return normalizeDept(req.query.department)
+  return grant.trade || null
+}
+
 app.get('/api/brief/department', async (req, res) => {
   const grant = await resolveBriefToken(req)
-  if (!grant || !grant.trade) return res.status(401).json({ error: 'Invalid or missing brief token' })
+  const trade = effectiveTrade(grant, req)
+  if (!trade) return res.status(401).json({ error: 'Invalid or missing brief token' })
   try {
     const dateStr = /^\d{4}-\d{2}-\d{2}$/.test(req.query.date || '') ? req.query.date : digestYesterday()
-    const brief = await buildDepartmentBrief(briefDeps(grant.trade, dateStr))
-    res.json({ ...brief, for: grant.name || grant.trade })
+    const brief = await buildDepartmentBrief(briefDeps(trade, dateStr))
+    res.json({ ...brief, for: grant.name || trade })
   } catch (err) { res.status(500).json({ error: err.message }) }
 })
 
 // Per-tech performance for the leader's trade over ?days=N (default 7, max 45).
 app.get('/api/brief/technicians', async (req, res) => {
   const grant = await resolveBriefToken(req)
-  if (!grant || !grant.trade) return res.status(401).json({ error: 'Invalid or missing brief token' })
+  const trade = effectiveTrade(grant, req)
+  if (!trade) return res.status(401).json({ error: 'Invalid or missing brief token' })
   try {
-    const out = await buildTechnicianPerformance({ stGet, stPageAll, supabase, tenantId: ST_TENANT_ID, trade: grant.trade, days: req.query.days })
-    res.json({ ...out, for: grant.name || grant.trade })
+    const out = await buildTechnicianPerformance({ stGet, stPageAll, supabase, tenantId: ST_TENANT_ID, trade, days: req.query.days })
+    res.json({ ...out, for: grant.name || trade })
   } catch (err) { res.status(500).json({ error: err.message }) }
 })
 
@@ -8361,50 +8372,76 @@ app.get('/api/brief/technicians', async (req, res) => {
 // ?days=N (default 21, max 45), ?minValue=N to filter small ones.
 app.get('/api/brief/open-estimates', async (req, res) => {
   const grant = await resolveBriefToken(req)
-  if (!grant || !grant.trade) return res.status(401).json({ error: 'Invalid or missing brief token' })
+  const trade = effectiveTrade(grant, req)
+  if (!trade) return res.status(401).json({ error: 'Invalid or missing brief token' })
   try {
-    const out = await buildOpenEstimates({ stGet, stPageAll, tenantId: ST_TENANT_ID, trade: grant.trade, days: req.query.days, minValue: req.query.minValue })
-    res.json({ ...out, for: grant.name || grant.trade })
+    const out = await buildOpenEstimates({ stGet, stPageAll, tenantId: ST_TENANT_ID, trade, days: req.query.days, minValue: req.query.minValue })
+    res.json({ ...out, for: grant.name || trade })
   } catch (err) { res.status(500).json({ error: err.message }) }
 })
 
 // Flexible period summary: ?period=yesterday|today|week|month|<N days> (+WoW).
 app.get('/api/brief/summary', async (req, res) => {
   const grant = await resolveBriefToken(req)
-  if (!grant || !grant.trade) return res.status(401).json({ error: 'Invalid or missing brief token' })
+  const trade = effectiveTrade(grant, req)
+  if (!trade) return res.status(401).json({ error: 'Invalid or missing brief token' })
   try {
-    const out = await buildPeriodSummary({ stGet, stPageAll, supabase, tenantId: ST_TENANT_ID, anthropicKey: ANTHROPIC_KEY, trade: grant.trade, period: req.query.period })
-    res.json({ ...out, for: grant.name || grant.trade })
+    const out = await buildPeriodSummary({ stGet, stPageAll, supabase, tenantId: ST_TENANT_ID, anthropicKey: ANTHROPIC_KEY, trade, period: req.query.period })
+    res.json({ ...out, for: grant.name || trade })
   } catch (err) { res.status(500).json({ error: err.message }) }
 })
 
 // Sales/revenue trend: ?days=N (default 30), ?interval=day|week.
 app.get('/api/brief/trend', async (req, res) => {
   const grant = await resolveBriefToken(req)
-  if (!grant || !grant.trade) return res.status(401).json({ error: 'Invalid or missing brief token' })
+  const trade = effectiveTrade(grant, req)
+  if (!trade) return res.status(401).json({ error: 'Invalid or missing brief token' })
   try {
-    const out = await buildTrend({ stPageAll, tenantId: ST_TENANT_ID, trade: grant.trade, days: req.query.days, interval: req.query.interval })
-    res.json({ ...out, for: grant.name || grant.trade })
+    const out = await buildTrend({ stPageAll, tenantId: ST_TENANT_ID, trade, days: req.query.days, interval: req.query.interval })
+    res.json({ ...out, for: grant.name || trade })
   } catch (err) { res.status(500).json({ error: err.message }) }
 })
 
 // Lead sources for the trade: ?days=N (default 14).
 app.get('/api/brief/leads', async (req, res) => {
   const grant = await resolveBriefToken(req)
-  if (!grant || !grant.trade) return res.status(401).json({ error: 'Invalid or missing brief token' })
+  const trade = effectiveTrade(grant, req)
+  if (!trade) return res.status(401).json({ error: 'Invalid or missing brief token' })
   try {
-    const out = await buildLeadSources({ stPageAll, tenantId: ST_TENANT_ID, trade: grant.trade, days: req.query.days })
-    res.json({ ...out, for: grant.name || grant.trade })
+    const out = await buildLeadSources({ stPageAll, tenantId: ST_TENANT_ID, trade, days: req.query.days })
+    res.json({ ...out, for: grant.name || trade })
   } catch (err) { res.status(500).json({ error: err.message }) }
 })
 
 // Recent jobs / customer lookup: ?days=N (default 14), ?customer=name.
 app.get('/api/brief/jobs', async (req, res) => {
   const grant = await resolveBriefToken(req)
-  if (!grant || !grant.trade) return res.status(401).json({ error: 'Invalid or missing brief token' })
+  const trade = effectiveTrade(grant, req)
+  if (!trade) return res.status(401).json({ error: 'Invalid or missing brief token' })
   try {
-    const out = await buildRecentJobs({ stPageAll, tenantId: ST_TENANT_ID, trade: grant.trade, days: req.query.days, customer: req.query.customer, status: req.query.status })
-    res.json({ ...out, for: grant.name || grant.trade })
+    const out = await buildRecentJobs({ stPageAll, tenantId: ST_TENANT_ID, trade, days: req.query.days, customer: req.query.customer, status: req.query.status })
+    res.json({ ...out, for: grant.name || trade })
+  } catch (err) { res.status(500).json({ error: err.message }) }
+})
+
+// OWNER-ONLY: whole-company overview (every trade broken out) + company KPIs.
+app.get('/api/brief/company', async (req, res) => {
+  const grant = await resolveBriefToken(req)
+  if (grant?.scope !== 'owner') return res.status(403).json({ error: 'Company overview requires an owner token' })
+  try {
+    const out = await buildCompanyOverview({ stGet, stPageAll, supabase, tenantId: ST_TENANT_ID, anthropicKey: ANTHROPIC_KEY, period: req.query.period })
+    res.json({ ...out, for: grant.name || 'Owner' })
+  } catch (err) { res.status(500).json({ error: err.message }) }
+})
+
+// OWNER-ONLY: receivables / AR — unpaid invoices, aged, by department.
+// ?department= to scope to one trade, ?days=N lookback (default 120).
+app.get('/api/brief/receivables', async (req, res) => {
+  const grant = await resolveBriefToken(req)
+  if (grant?.scope !== 'owner') return res.status(403).json({ error: 'Receivables requires an owner token' })
+  try {
+    const out = await buildReceivables({ stPageAll, tenantId: ST_TENANT_ID, trade: normalizeDept(req.query.department), days: req.query.days })
+    res.json({ ...out, for: grant.name || 'Owner' })
   } catch (err) { res.status(500).json({ error: err.message }) }
 })
 
