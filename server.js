@@ -10,6 +10,7 @@ import { renderBoardEmail, boardEmailSubject } from './lib/boardEmail.js'
 import { computeBattingOrder, computeZipValue, computeJobTypeOrder, DEFAULT_WEIGHTS, NON_DISPATCH_TEAM } from './lib/dispatchMetrics.js'
 import { driveTimes, straightLine, pairKey, driveTimeEnabled, geocode, suggestAddresses } from './lib/driveTime.js'
 import { buildDailyDigest } from './lib/dailyDigest.js'
+import { buildDepartmentBrief } from './lib/departmentBrief.js'
 import { gatherWeeklyFacts, generateAgendaAI, renderLeadershipHtml, latestCompletedSunday, upcomingSunday } from './lib/leadershipReport.js'
 import { parseAdpUpload, aggregateAdpActuals, REGISTER_BURDEN_DEFAULTS } from './lib/adpInvoice.js'
 
@@ -8308,6 +8309,41 @@ app.get('/api/admin/daily-digest', async (req, res) => {
     }
     if (req.query.json === '1') return res.json({ subject, facts })
     res.type('html').send(html)
+  } catch (err) { res.status(500).json({ error: err.message }) }
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 🧭 DEPARTMENT DAILY BRIEF — one trade's yesterday, for a department leader's
+// own AI assistant to pull and blend into their personal brief.
+//
+// Auth is a per-leader token (NOT a login) stored in app_settings
+// 'department_brief_tokens' = { "<token>": { name, trade } }. Each token is
+// scoped to ONE trade, read-only, and revocable by deleting its entry — the
+// ST API credentials are never exposed. Accepts the token via
+// `Authorization: Bearer <token>`, `X-Brief-Token`, or `?token=`.
+// ═══════════════════════════════════════════════════════════════════════════
+async function resolveBriefToken(req) {
+  const t = (req.headers.authorization || '').replace(/^Bearer\s+/i, '')
+    || req.headers['x-brief-token'] || req.query.token || ''
+  if (!t) return null
+  try {
+    const { data } = await supabase.from('app_settings').select('value').eq('key', 'department_brief_tokens').maybeSingle()
+    const map = data?.value ? JSON.parse(data.value) : {}
+    return map[String(t).trim()] || null
+  } catch { return null }
+}
+
+const briefDeps = (trade, dateStr) => ({
+  stGet, stPageAll, supabase, tenantId: ST_TENANT_ID, anthropicKey: ANTHROPIC_KEY, trade, dateStr,
+})
+
+app.get('/api/brief/department', async (req, res) => {
+  const grant = await resolveBriefToken(req)
+  if (!grant || !grant.trade) return res.status(401).json({ error: 'Invalid or missing brief token' })
+  try {
+    const dateStr = /^\d{4}-\d{2}-\d{2}$/.test(req.query.date || '') ? req.query.date : digestYesterday()
+    const brief = await buildDepartmentBrief(briefDeps(grant.trade, dateStr))
+    res.json({ ...brief, for: grant.name || grant.trade })
   } catch (err) { res.status(500).json({ error: err.message }) }
 })
 
