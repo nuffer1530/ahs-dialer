@@ -691,6 +691,12 @@ export default function AdminPage() {
   const [opsMsg, setOpsMsg] = useState('')
   const [digestBusy, setDigestBusy] = useState(false)
   const [digestMsg, setDigestMsg] = useState('')
+  const [digestTo, setDigestTo] = useState('')
+  const [digestToSaving, setDigestToSaving] = useState(false)
+  useEffect(() => {
+    sb.from('app_settings').select('value').eq('key', 'daily_digest_to').maybeSingle()
+      .then(({ data }) => setDigestTo(String(data?.value || '').replace(/^"|"$/g, '')))
+  }, [])
   const [opsSaving, setOpsSaving] = useState(false)
   const [opsDirty, setOpsDirty] = useState(false)
   // 🎯 Opportunity Watch Bonus config — read by the server's 10-min sweep.
@@ -1726,7 +1732,22 @@ export default function AdminPage() {
                   <div className="card-title">Morning digest</div>
                   <span style={{ fontSize:11, color:'var(--text-muted)' }}>Yesterday's sales, close rates, techs, call center, and marketing — emailed at 7 AM</span>
                 </div>
-                <div className="card-body" style={{ display:'flex', alignItems:'center', gap:10, flexWrap:'wrap' }}>
+                <div className="card-body" style={{ display:'flex', alignItems:'end', gap:10, flexWrap:'wrap' }}>
+                  <div className="form-field" style={{ flex:1, minWidth:320, margin:0 }}>
+                    <label className="form-label">Recipients (comma-separated)</label>
+                    <input className="form-input" value={digestTo} placeholder="name@awesomeservice.com, other@…"
+                      onChange={e => setDigestTo(e.target.value)} />
+                  </div>
+                  <button className="btn sm" disabled={digestToSaving} onClick={async () => {
+                    setDigestToSaving(true)
+                    const clean = digestTo.split(',').map(x => x.trim()).filter(Boolean).join(', ')
+                    const { error } = await sb.from('app_settings').upsert({ key: 'daily_digest_to', value: clean }, { onConflict: 'key' })
+                    setDigestToSaving(false)
+                    if (error) toast(`Couldn't save: ${error.message}`)
+                    else { setDigestTo(clean); toast(clean ? `Digest now goes to: ${clean}` : 'Digest recipients cleared — no one will receive it') }
+                  }}>{digestToSaving ? 'Saving…' : 'Save recipients'}</button>
+                </div>
+                <div className="card-body" style={{ display:'flex', alignItems:'center', gap:10, flexWrap:'wrap', paddingTop:0 }}>
                   <button className="btn sm primary" disabled={digestBusy} onClick={async () => {
                     setDigestBusy(true); setDigestMsg('')
                     try {
