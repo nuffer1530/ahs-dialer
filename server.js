@@ -10,7 +10,7 @@ import { renderBoardEmail, boardEmailSubject } from './lib/boardEmail.js'
 import { computeBattingOrder, computeZipValue, computeJobTypeOrder, DEFAULT_WEIGHTS, NON_DISPATCH_TEAM } from './lib/dispatchMetrics.js'
 import { driveTimes, straightLine, pairKey, driveTimeEnabled, geocode, suggestAddresses } from './lib/driveTime.js'
 import { buildDailyDigest } from './lib/dailyDigest.js'
-import { buildDepartmentBrief, buildTechnicianPerformance, buildOpenEstimates, buildPeriodSummary, buildTrend, buildLeadSources, buildRecentJobs, buildCompanyOverview, buildReceivables, normalizeDept } from './lib/departmentBrief.js'
+import { buildDepartmentBrief, buildTechnicianPerformance, buildOpenEstimates, buildPeriodSummary, buildTrend, buildLeadSources, buildRecentJobs, buildCompanyOverview, buildReceivables, buildDailyMetrics, normalizeDept } from './lib/departmentBrief.js'
 import { gatherWeeklyFacts, generateAgendaAI, renderLeadershipHtml, latestCompletedSunday, upcomingSunday } from './lib/leadershipReport.js'
 import { parseAdpUpload, aggregateAdpActuals, REGISTER_BURDEN_DEFAULTS } from './lib/adpInvoice.js'
 
@@ -8420,6 +8420,18 @@ app.get('/api/brief/jobs', async (req, res) => {
   if (!trade) return res.status(401).json({ error: 'Invalid or missing brief token' })
   try {
     const out = await buildRecentJobs({ stPageAll, tenantId: ST_TENANT_ID, trade, days: req.query.days, customer: req.query.customer, status: req.query.status })
+    res.json({ ...out, for: grant.name || trade })
+  } catch (err) { res.status(500).json({ error: err.message }) }
+})
+
+// Daily metrics series (sales, calls, sales-per-call, by day) for "X per day,
+// sorted" questions. ?days=N (default 7; per-call metrics up to 31d), ?department=.
+app.get('/api/brief/daily', async (req, res) => {
+  const grant = await resolveBriefToken(req)
+  const trade = effectiveTrade(grant, req)
+  if (!trade) return res.status(401).json({ error: 'Invalid or missing brief token' })
+  try {
+    const out = await buildDailyMetrics({ stPageAll, tenantId: ST_TENANT_ID, trade, days: req.query.days })
     res.json({ ...out, for: grant.name || trade })
   } catch (err) { res.status(500).json({ error: err.message }) }
 })
