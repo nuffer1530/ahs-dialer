@@ -10,7 +10,7 @@ import { renderBoardEmail, boardEmailSubject } from './lib/boardEmail.js'
 import { computeBattingOrder, computeZipValue, computeJobTypeOrder, DEFAULT_WEIGHTS, NON_DISPATCH_TEAM } from './lib/dispatchMetrics.js'
 import { driveTimes, straightLine, pairKey, driveTimeEnabled, geocode, suggestAddresses } from './lib/driveTime.js'
 import { buildDailyDigest } from './lib/dailyDigest.js'
-import { buildDepartmentBrief, buildTechnicianPerformance, buildOpenEstimates } from './lib/departmentBrief.js'
+import { buildDepartmentBrief, buildTechnicianPerformance, buildOpenEstimates, buildPeriodSummary, buildTrend, buildLeadSources, buildRecentJobs } from './lib/departmentBrief.js'
 import { gatherWeeklyFacts, generateAgendaAI, renderLeadershipHtml, latestCompletedSunday, upcomingSunday } from './lib/leadershipReport.js'
 import { parseAdpUpload, aggregateAdpActuals, REGISTER_BURDEN_DEFAULTS } from './lib/adpInvoice.js'
 
@@ -8364,6 +8364,46 @@ app.get('/api/brief/open-estimates', async (req, res) => {
   if (!grant || !grant.trade) return res.status(401).json({ error: 'Invalid or missing brief token' })
   try {
     const out = await buildOpenEstimates({ stGet, stPageAll, tenantId: ST_TENANT_ID, trade: grant.trade, days: req.query.days, minValue: req.query.minValue })
+    res.json({ ...out, for: grant.name || grant.trade })
+  } catch (err) { res.status(500).json({ error: err.message }) }
+})
+
+// Flexible period summary: ?period=yesterday|today|week|month|<N days> (+WoW).
+app.get('/api/brief/summary', async (req, res) => {
+  const grant = await resolveBriefToken(req)
+  if (!grant || !grant.trade) return res.status(401).json({ error: 'Invalid or missing brief token' })
+  try {
+    const out = await buildPeriodSummary({ stGet, stPageAll, supabase, tenantId: ST_TENANT_ID, anthropicKey: ANTHROPIC_KEY, trade: grant.trade, period: req.query.period })
+    res.json({ ...out, for: grant.name || grant.trade })
+  } catch (err) { res.status(500).json({ error: err.message }) }
+})
+
+// Sales/revenue trend: ?days=N (default 30), ?interval=day|week.
+app.get('/api/brief/trend', async (req, res) => {
+  const grant = await resolveBriefToken(req)
+  if (!grant || !grant.trade) return res.status(401).json({ error: 'Invalid or missing brief token' })
+  try {
+    const out = await buildTrend({ stPageAll, tenantId: ST_TENANT_ID, trade: grant.trade, days: req.query.days, interval: req.query.interval })
+    res.json({ ...out, for: grant.name || grant.trade })
+  } catch (err) { res.status(500).json({ error: err.message }) }
+})
+
+// Lead sources for the trade: ?days=N (default 14).
+app.get('/api/brief/leads', async (req, res) => {
+  const grant = await resolveBriefToken(req)
+  if (!grant || !grant.trade) return res.status(401).json({ error: 'Invalid or missing brief token' })
+  try {
+    const out = await buildLeadSources({ stPageAll, tenantId: ST_TENANT_ID, trade: grant.trade, days: req.query.days })
+    res.json({ ...out, for: grant.name || grant.trade })
+  } catch (err) { res.status(500).json({ error: err.message }) }
+})
+
+// Recent jobs / customer lookup: ?days=N (default 14), ?customer=name.
+app.get('/api/brief/jobs', async (req, res) => {
+  const grant = await resolveBriefToken(req)
+  if (!grant || !grant.trade) return res.status(401).json({ error: 'Invalid or missing brief token' })
+  try {
+    const out = await buildRecentJobs({ stPageAll, tenantId: ST_TENANT_ID, trade: grant.trade, days: req.query.days, customer: req.query.customer, status: req.query.status })
     res.json({ ...out, for: grant.name || grant.trade })
   } catch (err) { res.status(500).json({ error: err.message }) }
 })
