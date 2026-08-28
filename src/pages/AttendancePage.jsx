@@ -320,9 +320,12 @@ export default function AttendancePage() {
         applied++
       }
     }
-    await reloadSchedules()
+    // A template gives everyone identical break times — spread them right away
+    // so re-applying a template never re-collides breaks Brittany already fixed.
+    if (applied) await staggerBreaks(dates)
+    else await reloadSchedules()
     setBulkBusy(false)
-    setBulkResult({ ok: `Scheduled ${applied} day${applied === 1 ? '' : 's'}${skipped ? ` · ${skipped} skipped (already scheduled)` : ''}` })
+    setBulkResult({ ok: `Scheduled ${applied} day${applied === 1 ? '' : 's'}${skipped ? ` · ${skipped} skipped (already scheduled)` : ''}${applied ? ' · breaks auto-staggered' : ''}` })
   }
 
   const publishSchedules = async () => {
@@ -425,13 +428,17 @@ export default function AttendancePage() {
   const conflictCount = [...breakConflicts.values()].reduce((a, s) => a + s.size, 0)
 
   const [staggering, setStaggering] = useState(false)
-  const staggerBreaks = async () => {
+  const staggerBreaks = async (datesArg) => {
     if (staggering) return
+    const dates = Array.isArray(datesArg) ? datesArg : weekDates
     setStaggering(true)
     let moved = 0, days = 0
     try {
-      for (const date of weekDates) {
-        const people = schedules.filter(x => x.date === date && breaksOf(x).length)
+      // Fresh rows from the database — after a bulk fill the component state
+      // hasn't caught up yet, and stale reads would re-collide the breaks.
+      const { data: freshRows } = await sb.from('schedules').select('*').in('date', dates)
+      for (const date of dates) {
+        const people = (freshRows || []).filter(x => x.date === date && breaksOf(x).length)
           .sort((a, b) => (toMin(a.shift_start) - toMin(b.shift_start)) || String(a.profile_id).localeCompare(String(b.profile_id)))
         const taken = []
         let dayMoved = 0
@@ -692,7 +699,7 @@ export default function AttendancePage() {
                 onMouseLeave={e => { e.currentTarget.style.background='var(--surface)'; e.currentTarget.style.color='var(--text-secondary)' }}>
                 Copy Week
               </button>
-              <button onClick={staggerBreaks} disabled={staggering}
+              <button onClick={() => staggerBreaks()} disabled={staggering}
                 title={conflictCount ? `${conflictCount} people share a break slot this week — spread them out` : 'Spread overlapping breaks so no two people are off the phones at once'}
                 style={{ padding:'6px 14px', fontSize:12, fontWeight:500, border:`1px solid ${conflictCount ? 'var(--tone-amber-bd)' : 'var(--border)'}`, borderRadius:'var(--radius)', background: conflictCount ? 'var(--tone-amber-bg)' : 'var(--surface)', color: conflictCount ? 'var(--tone-amber-tx)' : 'var(--text-secondary)', cursor:'pointer', display:'flex', alignItems:'center', gap:6 }}>
                 {staggering ? 'Moving…' : 'Stagger breaks'}

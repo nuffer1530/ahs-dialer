@@ -614,9 +614,22 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
                     {(() => {
                       const liveShift = pBlocks.find(b => b.type === 'shift')
                       if (liveShift) {
+                        const planned = [
+                          sched?.break1_start ? `B ${fmtTime(sched.break1_start)}` : null,
+                          sched?.lunch_start ? `L ${fmtTime(sched.lunch_start)}` : null,
+                          sched?.break2_start ? `B ${fmtTime(sched.break2_start)}` : null,
+                        ].filter(Boolean).join(' · ')
                         return (
-                          <div style={{ fontSize:9, color:'var(--text-muted)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
-                            {fmtTime(intervalToTime(liveShift.start))}–{fmtTime(intervalToTime(liveShift.start + liveShift.duration))}
+                          <div>
+                            <div style={{ fontSize:9, color:'var(--text-muted)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
+                              {fmtTime(intervalToTime(liveShift.start))}–{fmtTime(intervalToTime(liveShift.start + liveShift.duration))}
+                            </div>
+                            {planned && (
+                              <div title="Scheduled break and lunch times"
+                                style={{ fontSize:9, color:'var(--text-secondary)', fontWeight:600, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', marginTop:1 }}>
+                                {planned}
+                              </div>
+                            )}
                           </div>
                         )
                       }
