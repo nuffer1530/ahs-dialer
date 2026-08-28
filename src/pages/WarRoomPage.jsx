@@ -311,7 +311,7 @@ export default function WarRoomPage() {
         <Kpi label="Calls Offered" value={inbound.offered} color={C.text} sub={`${inbound.handled} handled`} />
         <Kpi label="Avg Answer" value={fmtSecs(inbound.asa)} color={C.text} sub="speed to answer" />
         <Kpi label="Booked Today" value={outbound.booked} color={C.green} glow={outbound.booked > 0} sub={`${outbound.calls} calls`} />
-        <Kpi label="Agents Ready" value={agentsAvailable} color={agentsAvailable ? C.green : C.red} sub={`of ${profiles.length} on`} />
+        <Kpi label="Agents Ready" value={agentsAvailable} color={agentsAvailable ? C.green : C.red} sub={`of ${floor.length} on`} />
       </div>
 
       {/* 3-Day Call Board — today's calls needed per trade */}
