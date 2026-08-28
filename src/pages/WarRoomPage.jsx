@@ -167,7 +167,11 @@ export default function WarRoomPage() {
   const longestWait = queued.length ? Math.max(...queued.map(t => Math.round((Date.now() - new Date(t.queued_at)) / 1000))) : 0
   const liveInbound = tasks.filter(t => t.state === 'answered' && !t.ended_at).length
   const liveOutbound = liveCalls.filter(c => c.direction === 'outbound' && !c.ended_at && ['in-progress','answered','initiated','ringing'].includes(c.status)).length
-  const agentsAvailable = profiles.filter(p => p.status === 'Available').length
+  // The owner watches this TV; he isn't staffed on it. (Brandyn's profile id —
+  // Brittany and Deanna stay: they take calls.)
+  const HIDE_FROM_TV = new Set(['35d1b28f-e6f4-4e46-b63c-9544ae7af00b'])
+  const floor = profiles.filter(p => !HIDE_FROM_TV.has(p.id))
+  const agentsAvailable = floor.filter(p => p.status === 'Available').length
 
   // Leaderboard — bookings drive the ranking (the live motivational number),
   // then total calls. Rows are keyed by rep and positioned by rank so they
@@ -189,7 +193,7 @@ export default function WarRoomPage() {
   })
   const leaderboard = Object.values(repStats).sort((a, b) => b.booked - a.booked || b.calls - a.calls)
 
-  const agents = [...profiles].sort((a, b) =>
+  const agents = [...floor].sort((a, b) =>
     (STATUS_ORDER[a.status] ?? 6) - (STATUS_ORDER[b.status] ?? 6) || (a.name||'').localeCompare(b.name||''))
 
   // Live feed: bookings pop, everything else scrolls under.

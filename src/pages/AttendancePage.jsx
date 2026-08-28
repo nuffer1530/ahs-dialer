@@ -196,7 +196,7 @@ export default function AttendancePage() {
   useEffect(() => {
     const load = async () => {
       const [{ data: p }, { data: s }, { data: ev }, { data: t }, { data: ap }] = await Promise.all([
-        sb.from('profiles').select('id, name, email, avatar').eq('active', true).order('name'),
+        sb.from('profiles').select('id, name, email, avatar, role').eq('active', true).order('name'),
         // Window must COVER THE VISIBLE WEEK — the old fixed today±30 threw
         // away weeks navigated past it: shifts saved fine, then vanished from
         // the grid, and re-adds died on the invisible row's unique constraint.
@@ -251,7 +251,7 @@ export default function AttendancePage() {
 
   const copyWeek = async () => {
     if (copyBusy) return
-    const targets = copyCfg.all ? profiles.map(p => p.id) : copyCfg.ids
+    const targets = copyCfg.all ? schedProfiles.map(p => p.id) : copyCfg.ids
     if (!targets.length) { setCopyResult({ error: 'Pick at least one person.' }); return }
     setCopyBusy(true); setCopyResult(null)
     const srcDates = weekDates.map(d => {
@@ -290,7 +290,7 @@ export default function AttendancePage() {
     if (bulkBusy) return
     const t = templates.find(x => x.id === bulkCfg.templateId)
     if (!t) { setBulkResult({ error: 'Pick a template.' }); return }
-    const targets = bulkCfg.all ? profiles.map(p => p.id) : bulkCfg.ids
+    const targets = bulkCfg.all ? schedProfiles.map(p => p.id) : bulkCfg.ids
     if (!targets.length) { setBulkResult({ error: 'Pick at least one person.' }); return }
     const dates = weekDates.filter((_, i) => bulkCfg.days.includes(i))
     if (!dates.length) { setBulkResult({ error: 'Pick at least one day.' }); return }
@@ -476,6 +476,11 @@ export default function AttendancePage() {
       toast(moved ? `Moved ${moved} break${moved === 1 ? '' : 's'} across ${days} day${days === 1 ? '' : 's'} — now drafts, publish when ready.` : 'No overlapping breaks this week.')
     } finally { setStaggering(false) }
   }
+
+  // Admins (Brandyn, Brittany, Deanna) run the schedule; they aren't ON it.
+  // Scheduling surfaces — grid, day view, publish/copy/bulk targets — list
+  // only non-admins. Points and reports keep the full roster.
+  const schedProfiles = profiles.filter(p => p.role !== 'admin')
 
   const getSchedule = (profileId, date) => schedules.find(s => s.profile_id === profileId && s.date === date)
   const getEvents = (profileId, date) => statusEvents.filter(e => e.profile_id === profileId && e.started_at.startsWith(date)).sort((a, b) => new Date(a.started_at) - new Date(b.started_at))
@@ -735,7 +740,7 @@ export default function AttendancePage() {
                     <tr style={{ background:'var(--surface-2)' }}>
                       <th style={{ padding:'12px 16px', textAlign:'left', fontSize:11, fontWeight:600, textTransform:'uppercase', letterSpacing:.5, color:'var(--text-muted)', width:180, borderBottom:'1px solid var(--border)' }}>
                         Agent
-                        {(() => { const t = profiles.reduce((a, p) => a + weekHours(p.id), 0); return t > 0 ? <span style={{ textTransform:'none', letterSpacing:0, fontWeight:700, color:'var(--text-secondary)' }}> · {fmtH(t)}h total</span> : null })()}
+                        {(() => { const t = schedProfiles.reduce((a, p) => a + weekHours(p.id), 0); return t > 0 ? <span style={{ textTransform:'none', letterSpacing:0, fontWeight:700, color:'var(--text-secondary)' }}> · {fmtH(t)}h total</span> : null })()}
                       </th>
                       {weekDates.map((date, i) => {
                         const isToday = date === today
@@ -749,7 +754,7 @@ export default function AttendancePage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {profiles.map((p, pi) => (
+                    {schedProfiles.map((p, pi) => (
                       <tr key={p.id} style={{ borderBottom:'1px solid var(--border)' }}>
                         <td style={{ padding:'12px 16px', borderRight:'1px solid var(--border)' }}>
                           <div style={{ display:'flex', alignItems:'center', gap:8 }}>
@@ -827,7 +832,7 @@ export default function AttendancePage() {
 
         {/* ── GRAPHICAL TAB ── */}
         {tab === 'graphical' && (
-          <GraphicalSchedule profiles={profiles} onUpdate={async () => {
+          <GraphicalSchedule profiles={schedProfiles} onUpdate={async () => {
             const from = new Date(); from.setDate(from.getDate() - 30)
             const to = new Date(); to.setDate(to.getDate() + 30)
             const { data: s } = await sb.from('schedules').select('*').gte('date', from.toISOString().split('T')[0]).lte('date', to.toISOString().split('T')[0])
@@ -838,7 +843,7 @@ export default function AttendancePage() {
         {/* ── ADHERENCE TAB ── */}
         {tab === 'adherence' && (
           <div style={{ padding:24, display:'flex', flexDirection:'column', gap:16 }}>
-            {profiles.map(p => {
+            {schedProfiles.map(p => {
               const pScheds = schedules.filter(s => s.profile_id === p.id)
               const pEvents = statusEvents.filter(e => e.profile_id === p.id)
               if (pScheds.length === 0 && pEvents.length === 0) return null
@@ -951,7 +956,7 @@ export default function AttendancePage() {
                 </div>
               </div>
             )}
-            {profiles.map(p => {
+            {schedProfiles.map(p => {
               const pts = attendancePoints.filter(ap => ap.profile_id === p.id)
               const total = pts.reduce((sum, ap) => sum + parseFloat(ap.points), 0)
               const statusColor = total >= attCfg.pointsCritical ? 'var(--danger)' : total >= attCfg.pointsWarn ? '#f59e0b' : 'var(--success)'
@@ -1165,7 +1170,7 @@ export default function AttendancePage() {
               </label>
               {!copyCfg.all && (
                 <div style={{ maxHeight:160, overflowY:'auto', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'4px 8px', display:'flex', flexDirection:'column' }}>
-                  {profiles.map(p => (
+                  {schedProfiles.map(p => (
                     <label key={p.id} style={{ display:'flex', alignItems:'center', gap:8, fontSize:13, cursor:'pointer', padding:'5px 2px' }}>
                       <input type="checkbox" checked={copyCfg.ids.includes(p.id)}
                         onChange={e => setCopyCfg(prev => ({ ...prev, ids: e.target.checked ? [...prev.ids, p.id] : prev.ids.filter(x => x !== p.id) }))} />
@@ -1228,7 +1233,7 @@ export default function AttendancePage() {
               </label>
               {!bulkCfg.all && (
                 <div style={{ maxHeight:150, overflowY:'auto', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'4px 8px', display:'flex', flexDirection:'column' }}>
-                  {profiles.map(p => (
+                  {schedProfiles.map(p => (
                     <label key={p.id} style={{ display:'flex', alignItems:'center', gap:8, fontSize:13, cursor:'pointer', padding:'5px 2px' }}>
                       <input type="checkbox" checked={bulkCfg.ids.includes(p.id)}
                         onChange={e => setBulkCfg(prev => ({ ...prev, ids: e.target.checked ? [...prev.ids, p.id] : prev.ids.filter(x => x !== p.id) }))} />
@@ -1298,7 +1303,7 @@ export default function AttendancePage() {
               </label>
               {!pubSel.all && (
                 <div style={{ maxHeight:180, overflowY:'auto', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'4px 8px', display:'flex', flexDirection:'column' }}>
-                  {profiles.map(p => (
+                  {schedProfiles.map(p => (
                     <label key={p.id} style={{ display:'flex', alignItems:'center', gap:8, fontSize:13, cursor:'pointer', padding:'5px 2px' }}>
                       <input type="checkbox" checked={pubSel.ids.includes(p.id)}
                         onChange={e => setPubSel(prev => ({ ...prev, ids: e.target.checked ? [...prev.ids, p.id] : prev.ids.filter(x => x !== p.id) }))} />
