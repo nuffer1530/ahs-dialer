@@ -1134,7 +1134,7 @@ export default function AttendancePage() {
                 <div className="form-field">
                   <label className="form-label">Color</label>
                   <div style={{ display:'flex', gap:6, alignItems:'center', paddingTop:4 }}>
-                    {['#DBEAFE','var(--tone-green-bg)','#FEF3C7','#FCE7F3','#EDE9FE','#FFEDD5'].map(c => (
+                    {['#3B82F6','#10B981','#F59E0B','#EF4444','#8B5CF6','#EC4899','#14B8A6','#F97316','#6366F1','#84CC16','#A16207','#64748B'].map(c => (
                       <button key={c} type="button" onClick={() => setEditTemplate(t => ({ ...t, color: c }))}
                         style={{ width:22, height:22, borderRadius:6, background:c, cursor:'pointer', border: editTemplate.color === c ? '2px solid var(--accent)' : '1px solid var(--border)' }} />
                     ))}
