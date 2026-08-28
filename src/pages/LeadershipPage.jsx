@@ -9,6 +9,7 @@
 
 import { useState, useEffect, useRef, useCallback, Component } from 'react'
 import { sb } from '../lib/supabase'
+import { confirmDlg } from '../lib/dialogs'
 
 const money = (n) => `$${Math.round(Number(n) || 0).toLocaleString()}`
 const pct = (n) => (n == null ? '—' : `${Math.round(Number(n) * 100)}%`)
@@ -177,6 +178,7 @@ export default function LeadershipPage() {
 }
 
 function LeadershipPageInner() {
+  const [ltab, setLtab] = useState('agenda')
   const [weeks, setWeeks] = useState([])
   const [week, setWeek] = useState(null)
   const [currentWeek, setCurrentWeek] = useState(null)
@@ -334,6 +336,21 @@ function LeadershipPageInner() {
           table.print-only { display: table !important; }
         }
       `}</style>
+
+      <div className="no-print" style={{ display: 'flex', gap: 2, borderBottom: '1px solid var(--border)', marginBottom: 16 }}>
+        {[['agenda', 'Weekly Agenda'], ['brain', 'AI Analyst']].map(([k, l]) => (
+          <button key={k} onClick={() => setLtab(k)}
+            style={{ padding: '9px 18px', fontSize: 13, fontWeight: 600, background: 'transparent', border: 'none', cursor: 'pointer',
+              borderBottom: ltab === k ? '2px solid var(--accent)' : '2px solid transparent',
+              color: ltab === k ? 'var(--accent)' : 'var(--text-muted)', marginBottom: -1 }}>
+            {l}
+          </button>
+        ))}
+      </div>
+
+      {ltab === 'brain' && <BrainChat authHeaders={authHeaders} />}
+
+      <div style={ltab === 'agenda' ? undefined : { display: 'none' }}>
 
       <div className="no-print" style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 4 }}>
         <div style={{ flex: 1 }}>
@@ -759,7 +776,144 @@ function LeadershipPageInner() {
           </div>
         </div>
       )}
+      </div>
     </div>
+    </div>
+  )
+}
+
+// ── AI Analyst: agentic chat over live ST + Andi data, threads per login ────
+function BrainChat({ authHeaders }) {
+  const [threads, setThreads] = useState([])
+  const [activeId, setActiveId] = useState(null)
+  const [msgs, setMsgs] = useState([])
+  const [input, setInput] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const bodyRef = useRef(null)
+
+  const loadThreads = useCallback(async () => {
+    try {
+      const r = await fetch('/api/leadership/chats', { headers: await authHeaders() })
+      const d = await r.json()
+      setThreads(d.chats || [])
+    } catch {}
+  }, [authHeaders])
+  useEffect(() => { loadThreads() }, [loadThreads])
+
+  const openThread = async (id) => {
+    setActiveId(id); setErr('')
+    if (!id) { setMsgs([]); return }
+    try {
+      const r = await fetch(`/api/leadership/chats/${id}`, { headers: await authHeaders() })
+      const d = await r.json()
+      setMsgs(Array.isArray(d.chat?.messages) ? d.chat.messages : [])
+    } catch { setMsgs([]) }
+  }
+
+  const removeThread = async (id) => {
+    if (!(await confirmDlg('Delete this conversation?'))) return
+    try { await fetch(`/api/leadership/chats/${id}`, { method: 'DELETE', headers: await authHeaders() }) } catch {}
+    if (id === activeId) { setActiveId(null); setMsgs([]) }
+    loadThreads()
+  }
+
+  const ask = async () => {
+    const q = input.trim()
+    if (!q || busy) return
+    setBusy(true); setErr(''); setInput('')
+    setMsgs(prev => [...prev, { role: 'user', content: q }])
+    try {
+      const r = await fetch('/api/leadership/chat', {
+        method: 'POST', headers: await authHeaders(),
+        body: JSON.stringify({ chatId: activeId, message: q }),
+      })
+      const d = await r.json()
+      if (!r.ok) throw new Error(d.error || 'The analyst hit an error')
+      setMsgs(prev => [...prev, { role: 'assistant', content: d.reply, toolLog: d.toolLog }])
+      if (d.chatId && d.chatId !== activeId) setActiveId(d.chatId)
+      loadThreads()
+    } catch (e) {
+      setErr(e.message)
+      setMsgs(prev => prev.slice(0, -1))
+      setInput(q)
+    }
+    setBusy(false)
+  }
+
+  useEffect(() => { if (bodyRef.current) bodyRef.current.scrollTop = bodyRef.current.scrollHeight }, [msgs, busy])
+
+  return (
+    <div style={{ display: 'flex', gap: 14, alignItems: 'stretch', minHeight: 560 }}>
+      {/* Threads */}
+      <div style={{ width: 230, flexShrink: 0, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <button className="btn primary" style={{ width: '100%' }} onClick={() => openThread(null)}>+ New conversation</button>
+        <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 2, marginTop: 4 }}>
+          {threads.length === 0 && <div style={{ fontSize: 12, color: 'var(--text-muted)', padding: '8px 6px' }}>No conversations yet.</div>}
+          {threads.map(t => (
+            <div key={t.id} onClick={() => openThread(t.id)}
+              style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 9px', borderRadius: 8, cursor: 'pointer',
+                background: t.id === activeId ? 'var(--accent-bg)' : 'transparent' }}>
+              <div style={{ flex: 1, minWidth: 0, fontSize: 12, fontWeight: t.id === activeId ? 700 : 500,
+                color: t.id === activeId ? 'var(--accent)' : 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {t.title || 'Untitled'}
+              </div>
+              <button onClick={e => { e.stopPropagation(); removeThread(t.id) }} title="Delete"
+                style={{ border: 'none', background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 13, padding: 0 }}>×</button>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Chat */}
+      <div style={{ flex: 1, minWidth: 0, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <div ref={bodyRef} style={{ flex: 1, overflowY: 'auto', padding: 18, display: 'flex', flexDirection: 'column', gap: 14 }}>
+          {msgs.length === 0 && !busy && (
+            <div style={{ margin: 'auto', textAlign: 'center', maxWidth: 460 }}>
+              <div style={{ fontSize: 15, fontWeight: 800, marginBottom: 6 }}>Ask anything about the business.</div>
+              <div style={{ fontSize: 12.5, color: 'var(--text-muted)', lineHeight: 1.6 }}>
+                I answer by querying ServiceTitan and Andi live — techs, CSRs, close rates, labor, marketing, money.
+                Try: “Who were our top 3 techs by sold dollars last week?” · “How is Kayla trending on QA this month?” ·
+                “What did Electrical invoice in July vs August?”
+              </div>
+            </div>
+          )}
+          {msgs.map((m, i) => (
+            <div key={i} style={{ alignSelf: m.role === 'user' ? 'flex-end' : 'flex-start', maxWidth: '82%' }}>
+              <div style={{
+                padding: '10px 14px', borderRadius: 12, fontSize: 13, lineHeight: 1.55, whiteSpace: 'pre-wrap',
+                background: m.role === 'user' ? 'var(--accent)' : 'var(--surface-2)',
+                color: m.role === 'user' ? '#fff' : 'var(--text-primary)',
+                border: m.role === 'user' ? 'none' : '1px solid var(--border)',
+              }}>{m.content}</div>
+              {m.role === 'assistant' && m.toolLog?.length > 0 && (
+                <details style={{ marginTop: 4 }}>
+                  <summary style={{ fontSize: 10.5, color: 'var(--text-muted)', cursor: 'pointer' }}>
+                    {m.toolLog.length} data pull{m.toolLog.length === 1 ? '' : 's'}
+                  </summary>
+                  <div style={{ fontSize: 10.5, color: 'var(--text-muted)', paddingLeft: 10, lineHeight: 1.7 }}>
+                    {m.toolLog.map((t, ti) => <div key={ti}>{t.ok ? '✓' : '✗'} {t.tool === 'st_get' ? 'ServiceTitan' : 'Andi'} · {t.q}</div>)}
+                  </div>
+                </details>
+              )}
+            </div>
+          ))}
+          {busy && (
+            <div style={{ alignSelf: 'flex-start', display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', borderRadius: 12, background: 'var(--surface-2)', border: '1px solid var(--border)', fontSize: 12.5, color: 'var(--text-muted)' }}>
+              <span className="spinner" style={{ width: 14, height: 14 }} />
+              Querying the data — big questions can take up to a minute…
+            </div>
+          )}
+        </div>
+        {err && <div style={{ padding: '6px 18px', fontSize: 12, color: 'var(--danger)' }}>{err}</div>}
+        <div style={{ display: 'flex', gap: 8, padding: 12, borderTop: '1px solid var(--border)' }}>
+          <input className="form-input" style={{ flex: 1 }} value={input} disabled={busy}
+            placeholder="Ask about techs, CSRs, revenue, labor, marketing…"
+            onChange={e => setInput(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); ask() } }} />
+          <button className="btn primary" onClick={ask} disabled={busy || !input.trim()}>{busy ? 'Thinking…' : 'Ask'}</button>
+        </div>
+      </div>
     </div>
   )
 }

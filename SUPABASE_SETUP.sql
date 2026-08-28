@@ -770,3 +770,18 @@ create policy "auth read schedules" on schedules
 drop policy if exists "auth read schedule_blocks" on schedule_blocks;
 create policy "auth read schedule_blocks" on schedule_blocks
   for select to authenticated using (true);
+
+-- ── Leadership AI Analyst chat threads (Aug 2026) ───────────────────────────
+-- Saved per-login conversations for the /leadership AI Analyst tab. All access
+-- goes through the server (requireLeadership + service key), so RLS is on
+-- with NO policies: the anon key can't touch it.
+create table if not exists leadership_chats (
+  id uuid primary key default gen_random_uuid(),
+  profile_id uuid references profiles(id),
+  title text,
+  messages jsonb default '[]'::jsonb,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+create index if not exists leadership_chats_profile_idx on leadership_chats (profile_id, updated_at desc);
+alter table leadership_chats enable row level security;

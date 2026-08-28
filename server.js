@@ -8593,6 +8593,210 @@ function getLeadershipReport(weekEnd, { refresh = false, notes } = {}) {
 }
 
 // List archived weeks (newest first).
+// ── Leadership Brain: agentic chat over live ServiceTitan + Andi data ───────
+// The AI answers with TOOLS, not memory: read-only ST GETs and whitelisted
+// Andi tables, up to 12 queries per question. Money is visible by design
+// (commissions, ADP actuals) — access is requireLeadership-gated, same as
+// the rest of this page. Threads persist per profile in leadership_chats
+// (tolerant: chat still answers before the migration runs).
+const BRAIN_ST_ALLOW = ['sales/v2/', 'jpm/v2/', 'accounting/v2/', 'telecom/v2/', 'dispatch/v2/', 'settings/v2/', 'crm/v2/', 'memberships/v2/', 'marketingreputation/v2/']
+const BRAIN_TABLES = new Set(['call_evaluations', 'call_recordings', 'call_tasks', 'call_logs', 'scorecard_actuals', 'commissions', 'andi_bookings', 'schedules', 'attendance_points', 'profiles', 'dispatch_tech_scores', 'job_type_spiffs', 'membership_type_spiffs', 'csr_st_users', 'app_settings', 'leadership_reports', 'st_leads'])
+const BRAIN_OPS = new Set(['eq', 'neq', 'gt', 'gte', 'lt', 'lte', 'like', 'ilike', 'in', 'is'])
+
+const brainPick = (obj, path) => String(path).split('.').reduce((o, k) => (o == null ? undefined : o[k]), obj)
+const brainCap = (str, cap = 55000) => {
+  if (str.length <= cap) return str
+  return str.slice(0, cap) + `\n…TRUNCATED (${str.length} chars total) — narrow the query with fields/limit/filters.`
+}
+
+async function brainStGet({ path, pageAll, fields, maxRows }) {
+  const clean = String(path || '').replace(/^\//, '')
+  if (!BRAIN_ST_ALLOW.some(pfx => clean.startsWith(pfx))) throw new Error(`path must start with one of: ${BRAIN_ST_ALLOW.join(', ')}`)
+  const full = clean.includes('/tenant/') ? clean : clean.replace(/^([^/]+\/v\d+)\//, `$1/tenant/${ST_TENANT_ID}/`)
+  const cap = Math.min(Number(maxRows) || 500, 3000)
+  if (pageAll) {
+    const sep = full.includes('?') ? '&' : '?'
+    const rows = await stPageAll(pg => `/${full}${sep}pageSize=500&page=${pg}`, cap)
+    const out = fields?.length ? rows.map(r => Object.fromEntries(fields.map(f => [f, brainPick(r, f)]))) : rows
+    return brainCap(JSON.stringify({ count: rows.length, capped: rows.length >= cap, data: out }))
+  }
+  const d = await stGet(`/${full}`)
+  if (d && Array.isArray(d.data)) {
+    const out = fields?.length ? d.data.map(r => Object.fromEntries(fields.map(f => [f, brainPick(r, f)]))) : d.data
+    return brainCap(JSON.stringify({ count: d.data.length, hasMore: d.hasMore, data: out }))
+  }
+  return brainCap(JSON.stringify(d))
+}
+
+async function brainAndiQuery({ table, select, filters, order, ascending, limit }) {
+  if (!BRAIN_TABLES.has(String(table))) throw new Error(`table must be one of: ${[...BRAIN_TABLES].join(', ')}`)
+  let q = supabase.from(table).select(select || '*').limit(Math.min(Number(limit) || 200, 1000))
+  for (const f of (filters || []).slice(0, 8)) {
+    if (!f?.col || !BRAIN_OPS.has(f.op)) throw new Error('each filter needs col + op in ' + [...BRAIN_OPS].join('/'))
+    q = q[f.op](f.col, f.op === 'in' ? String(f.value).split(',').map(x => x.trim()) : f.value)
+  }
+  if (order) q = q.order(order, { ascending: ascending !== false })
+  const { data, error } = await q
+  if (error) throw new Error(error.message)
+  return brainCap(JSON.stringify({ count: (data || []).length, data }))
+}
+
+function brainSystem() {
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Denver' })
+  return `You are the Leadership Brain for Awesome Home Services (HVAC, Plumbing, Electrical, Garage Doors — Colorado Springs). Your reader is the owner/leadership. Today (Denver) is ${today}. You answer questions about analytics, technicians, CSRs, marketing, labor, and money by QUERYING LIVE DATA with your tools — never from memory. Money is fully visible to this audience.
+
+METRIC DEFINITIONS — these are calibrated to the company's leadership sheet; never invent alternatives:
+- Sales = sales/v2 estimates with status.name "Sold", summing subtotal, in a soldAfter/soldBefore window. Trade from businessUnitName (hvac/plumb/electric/garage substrings).
+- Revenue = accounting/v2 invoices summing subTotal (NOT total). Invoice dates are DATE-ONLY: bound them T00:00:00Z→T23:59:59Z on calendar days.
+- Close rate = jobs sold ÷ jobs where an estimate was presented (estimates created in window, grouped by jobId).
+- Booking % = telecom/v2 inbound calls: Booked ÷ (Booked + Unbooked) by callType. NEVER count Excused/NotLead/Abandoned as leads.
+- Booked calls (per person) = jpm/v2 jobs where createdById = their ST user id, createdOn in window. This matches ST's own reports.
+- Memberships = memberships/v2 created in window. 5★ reviews = marketingreputation/v2 reviews rating>=5.
+- A Denver business day is T06:00:00Z → next day T06:00:00Z (MDT).
+
+API TRAPS (violating these silently corrupts answers):
+- Appointments return NEWEST-FIRST: one page is the far-future book. Use pageAll:true whenever completeness matters.
+- appointment-assignments ignores jobIds/technicianIds/date filters; ONLY appointmentIds (batches of ~50) works.
+- Durations are "HH:MM:SS.fffffff" strings. Employees and technicians share ONE id space.
+- ST is slow: prefer fields projection + filters + the smallest window that answers the question.
+
+ANDI TABLES (andi_query): call_evaluations (AI QA per CSR: rep, profile_id, pct, scores.items per-criterion, call_sid 'st-<id>' links to ST calls), call_recordings (every call: rep, direction, duration, st_job_number), call_tasks (Andi inbound queue), scorecard_actuals (monthly KPIs per profile), commissions (CSR payouts incl. memberships), andi_bookings (CSR→job attribution), dispatch_tech_scores (tech batting order: EV/opp, close rate, tier), profiles, csr_st_users (profile↔ST user id map), attendance_points, schedules, app_settings (key/value: 'adp_payroll_actuals' = real weekly payroll by week-ending Sunday with per-trade burdened cost; 'digest_budgets'), leadership_reports (archived weekly facts incl. labor model).
+
+BUDGETS: monthly revenue target $1,375,920. Weekly dept sales budgets: HVAC $210k, Plumbing $110k, Electrical $80k, Garage $30k; weekly revenue targets $195k/$100k/$75k/$25k. KPI goals: booking 80%, close 70%, GM 55%, 15 clubs/wk, 20 five-star/wk. Labor: ~$137.5k/wk all-in actual; 36% of revenue target; labor is only settled for COMPLETED weeks.
+
+STYLE: Lead with the number. Small tables for comparisons. State the window you measured and what you pulled. If the data cannot answer (no per-CSR attribution before Aug 2026, close-rate components missing, etc.), say so plainly instead of approximating. Round dollars. Never claim a write — you are read-only.`
+}
+
+async function runLeadershipBrain(history) {
+  const tools = [
+    {
+      name: 'st_get',
+      description: 'Read-only GET against the ServiceTitan API. Give the path after the host, e.g. "sales/v2/estimates?soldAfter=2026-08-01T06:00:00Z&soldBefore=2026-09-01T06:00:00Z". Tenant is injected automatically. Set pageAll:true to fetch every page (use whenever totals matter). Use fields (dot paths like "businessUnit.name") to project only what you need — results over ~55k chars get truncated.',
+      input_schema: { type: 'object', properties: {
+        path: { type: 'string' }, pageAll: { type: 'boolean' },
+        fields: { type: 'array', items: { type: 'string' } },
+        maxRows: { type: 'integer', description: 'row cap for pageAll, default 500, max 3000' },
+      }, required: ['path'] },
+    },
+    {
+      name: 'andi_query',
+      description: 'Read-only query on Andi (internal) tables. filters is a list of {col, op, value} with op in eq/neq/gt/gte/lt/lte/like/ilike/in/is.',
+      input_schema: { type: 'object', properties: {
+        table: { type: 'string' }, select: { type: 'string' },
+        filters: { type: 'array', items: { type: 'object', properties: { col: { type: 'string' }, op: { type: 'string' }, value: {} }, required: ['col', 'op'] } },
+        order: { type: 'string' }, ascending: { type: 'boolean' }, limit: { type: 'integer' },
+      }, required: ['table'] },
+    },
+  ]
+  const convo = history.map(m => ({ role: m.role, content: m.content }))
+  const toolLog = []
+  for (let round = 0; round < 12; round++) {
+    const r = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'claude-sonnet-5', max_tokens: 3500, system: brainSystem(), tools, messages: convo }),
+    })
+    const body = await r.json()
+    if (!r.ok) throw new Error(`AI ${r.status}: ${(body?.error?.message || '').slice(0, 200)}`)
+    const uses = (body.content || []).filter(c => c.type === 'tool_use')
+    if (!uses.length || body.stop_reason !== 'tool_use') {
+      const text = (body.content || []).filter(c => c.type === 'text').map(c => c.text).join('\n').trim()
+      return { text: text || 'I could not produce an answer — try rephrasing.', toolLog }
+    }
+    convo.push({ role: 'assistant', content: body.content })
+    const results = []
+    for (const tu of uses) {
+      let out
+      const label = tu.name === 'st_get' ? String(tu.input?.path || '').slice(0, 140) : `${tu.input?.table} ${(JSON.stringify(tu.input?.filters || [])).slice(0, 100)}`
+      try {
+        out = tu.name === 'st_get' ? await brainStGet(tu.input)
+          : tu.name === 'andi_query' ? await brainAndiQuery(tu.input)
+          : 'ERROR: unknown tool'
+        toolLog.push({ tool: tu.name, q: label, ok: !String(out).startsWith('ERROR') })
+      } catch (e) {
+        out = `ERROR: ${e.message}`
+        toolLog.push({ tool: tu.name, q: label, ok: false })
+      }
+      results.push({ type: 'tool_result', tool_use_id: tu.id, content: String(out) })
+    }
+    convo.push({ role: 'user', content: results })
+  }
+  return { text: 'I hit my 12-query limit on this one — ask a narrower follow-up and I will keep digging.', toolLog }
+}
+
+app.get('/api/leadership/chats', async (req, res) => {
+  const me = await requireLeadership(req, res)
+  if (!me) return
+  try {
+    const { data, error } = await supabase.from('leadership_chats')
+      .select('id, title, updated_at').eq('profile_id', me.id)
+      .order('updated_at', { ascending: false }).limit(50)
+    if (error) throw error
+    res.json({ chats: data || [] })
+  } catch { res.json({ chats: [], migrationPending: true }) }
+})
+
+app.get('/api/leadership/chats/:id', async (req, res) => {
+  const me = await requireLeadership(req, res)
+  if (!me) return
+  try {
+    const { data, error } = await supabase.from('leadership_chats')
+      .select('*').eq('id', req.params.id).eq('profile_id', me.id).maybeSingle()
+    if (error) throw error
+    res.json({ chat: data })
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
+
+app.delete('/api/leadership/chats/:id', async (req, res) => {
+  const me = await requireLeadership(req, res)
+  if (!me) return
+  try {
+    await supabase.from('leadership_chats').delete().eq('id', req.params.id).eq('profile_id', me.id)
+    res.json({ ok: true })
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
+
+app.post('/api/leadership/chat', async (req, res) => {
+  const me = await requireLeadership(req, res)
+  if (!me) return
+  const message = String(req.body?.message || '').trim().slice(0, 4000)
+  if (!message) return res.status(400).json({ error: 'Ask something' })
+  if (!ANTHROPIC_KEY) return res.status(500).json({ error: 'No AI key configured' })
+  try {
+    let chatId = req.body?.chatId || null
+    let prior = []
+    if (chatId) {
+      try {
+        const { data } = await supabase.from('leadership_chats')
+          .select('messages').eq('id', chatId).eq('profile_id', me.id).maybeSingle()
+        prior = Array.isArray(data?.messages) ? data.messages : []
+      } catch { chatId = null }
+    }
+    const history = [...prior.map(m => ({ role: m.role, content: m.content })), { role: 'user', content: message }]
+    const { text, toolLog } = await runLeadershipBrain(history)
+    const newMessages = [...prior, { role: 'user', content: message, at: new Date().toISOString() },
+      { role: 'assistant', content: text, toolLog, at: new Date().toISOString() }]
+    let saved = false
+    try {
+      if (chatId) {
+        const { error } = await supabase.from('leadership_chats')
+          .update({ messages: newMessages, updated_at: new Date().toISOString() })
+          .eq('id', chatId).eq('profile_id', me.id)
+        saved = !error
+      } else {
+        const { data, error } = await supabase.from('leadership_chats')
+          .insert({ profile_id: me.id, title: message.slice(0, 70), messages: newMessages })
+          .select('id').single()
+        if (!error) { chatId = data.id; saved = true }
+      }
+    } catch {}
+    res.json({ chatId, reply: text, toolLog, saved })
+  } catch (e) {
+    console.error('leadership brain:', e.message)
+    res.status(500).json({ error: e.message })
+  }
+})
+
 app.get('/api/admin/leadership/weeks', async (req, res) => {
   if (!(await requireLeadership(req, res))) return
   try {
