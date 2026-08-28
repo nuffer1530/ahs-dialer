@@ -311,7 +311,19 @@ function LeadershipPageInner() {
 
   return (
     <div style={S.scroll}>
-    <div style={S.page}>
+    {/* Same tab chrome as Dispatch for Profit / My Page: full-width surface
+        bar, accent underline, sticky so it survives the agenda's scroll. */}
+    <div className="no-print" style={{ position: 'sticky', top: 0, zIndex: 30, background: 'var(--surface)', borderBottom: '1px solid var(--border)', padding: '0 24px', display: 'flex', gap: 4 }}>
+      {[['agenda', 'Weekly Agenda'], ['brain', 'AI Analyst']].map(([k, l]) => (
+        <button key={k} onClick={() => setLtab(k)}
+          style={{ padding: '12px 14px', border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 13,
+            fontWeight: ltab === k ? 700 : 500, color: ltab === k ? 'var(--accent)' : 'var(--text-muted)',
+            borderBottom: `2px solid ${ltab === k ? 'var(--accent)' : 'transparent'}`, marginBottom: -1 }}>
+          {l}
+        </button>
+      ))}
+    </div>
+    <div style={ltab === 'brain' ? { ...S.page, maxWidth: 1200, paddingBottom: 0 } : S.page}>
       <style>{`
         @media print {
           /* The app shell is 100vh + overflow:hidden, which clips printing to
@@ -337,16 +349,6 @@ function LeadershipPageInner() {
         }
       `}</style>
 
-      <div className="no-print" style={{ display: 'flex', gap: 2, borderBottom: '1px solid var(--border)', marginBottom: 16 }}>
-        {[['agenda', 'Weekly Agenda'], ['brain', 'AI Analyst']].map(([k, l]) => (
-          <button key={k} onClick={() => setLtab(k)}
-            style={{ padding: '9px 18px', fontSize: 13, fontWeight: 600, background: 'transparent', border: 'none', cursor: 'pointer',
-              borderBottom: ltab === k ? '2px solid var(--accent)' : '2px solid transparent',
-              color: ltab === k ? 'var(--accent)' : 'var(--text-muted)', marginBottom: -1 }}>
-            {l}
-          </button>
-        ))}
-      </div>
 
       {ltab === 'brain' && <BrainChat authHeaders={authHeaders} />}
 
@@ -906,7 +908,7 @@ function BrainChat({ authHeaders }) {
   useEffect(() => { if (bodyRef.current) bodyRef.current.scrollTop = bodyRef.current.scrollHeight }, [msgs, busy])
 
   return (
-    <div style={{ display: 'flex', gap: 0, height: 'calc(100vh - 150px)', minHeight: 480, margin: '0 -8px' }}>
+    <div style={{ display: 'flex', gap: 0, height: 'calc(100vh - 130px)', minHeight: 480, margin: '0 -8px' }}>
 
       {/* Thread rail */}
       <div style={{ width: 250, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 2, padding: '4px 12px 4px 4px', borderRight: '1px solid var(--border)', overflowY: 'auto' }}>
@@ -940,7 +942,7 @@ function BrainChat({ authHeaders }) {
 
             {msgs.length === 0 && !busy && (
               <div style={{ marginTop: '14vh', textAlign: 'center' }}>
-                <span className="pulse-mark" style={{ display: 'inline-flex', width: 54, height: 54, marginBottom: 14 }}>
+                <span style={{ display: 'inline-flex', width: 54, height: 54, marginBottom: 14 }}>
                   <svg viewBox="0 0 64 64" style={{ width: '100%', height: '100%' }}>
                     <rect x="2" y="2" width="60" height="60" rx="14" fill="#111318" />
                     <polyline points="9,32 19,32 25,17 33,47 40,26 45,32 55,32" fill="none" stroke="#ff751f" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
