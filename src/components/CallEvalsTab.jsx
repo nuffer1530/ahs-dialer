@@ -14,6 +14,8 @@ const monthNow = () => {
 export default function CallEvalsTab({ profile, isAdmin }) {
   const [month, setMonth] = useState(monthNow())
   const [repFilter, setRepFilter] = useState('')
+  const [search, setSearch] = useState('')
+  const [sortBy, setSortBy] = useState('newest')   // newest | lowest | highest
   const [profiles, setProfiles] = useState([])
   const [rows, setRows] = useState(null)
   const [open, setOpen] = useState(null)
@@ -46,10 +48,20 @@ export default function CallEvalsTab({ profile, isAdmin }) {
   })
   // Dropdown: every Andi profile, plus any evaluated rep name that isn't
   // linked to a profile yet (so nobody's calls become invisible).
+  const q = search.trim().toLowerCase()
+  const searched = !q ? shown : shown.filter(r =>
+    String(r.contact_name || '').toLowerCase().includes(q) ||
+    String(r.rep || '').toLowerCase().includes(q) ||
+    String(r.phone || '').includes(q.replace(/\D/g, '') || q) ||
+    String(r.summary || '').toLowerCase().includes(q))
+  const sorted = [...searched].sort((a, b) =>
+    sortBy === 'lowest' ? (Number(a.pct) - Number(b.pct)) || (new Date(b.created_at) - new Date(a.created_at))
+    : sortBy === 'highest' ? (Number(b.pct) - Number(a.pct)) || (new Date(b.created_at) - new Date(a.created_at))
+    : new Date(b.created_at) - new Date(a.created_at))
   const linkedIds = new Set(rows.map(r => r.profile_id).filter(Boolean))
   const unlinkedNames = [...new Set(rows.filter(r => !r.profile_id && r.rep).map(r => r.rep))].sort()
   const evalCountFor = (pid) => rows.filter(r => r.profile_id === pid).length
-  const avg = shown.length ? Math.round(shown.reduce((s, r) => s + Number(r.pct || 0), 0) / shown.length) : null
+  const avg = searched.length ? Math.round(searched.reduce((s, r) => s + Number(r.pct || 0), 0) / searched.length) : null
   const avgTone = avg == null ? 'gray' : avg >= 90 ? 'green' : avg >= 75 ? 'amber' : 'red'
 
   return (
@@ -77,24 +89,37 @@ export default function CallEvalsTab({ profile, isAdmin }) {
             </select>
           </div>
         )}
+        <div>
+          <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: .6, color: 'var(--text-muted)', marginBottom: 4 }}>Search</div>
+          <input className="form-input" value={search} onChange={e => setSearch(e.target.value)}
+            placeholder="Caller, rep, phone, or summary…" style={{ minWidth: 200 }} />
+        </div>
+        <div>
+          <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: .6, color: 'var(--text-muted)', marginBottom: 4 }}>Sort</div>
+          <select className="form-input" value={sortBy} onChange={e => setSortBy(e.target.value)} style={{ minWidth: 150 }}>
+            <option value="newest">Newest first</option>
+            <option value="lowest">Lowest score first</option>
+            <option value="highest">Highest score first</option>
+          </select>
+        </div>
         <div style={{ marginLeft: 'auto', textAlign: 'right' }}>
           <div style={{ fontSize: 26, fontWeight: 900, color: `var(--tone-${avgTone}-tx)`, lineHeight: 1 }}>{avg == null ? '—' : `${avg}%`}</div>
           <div style={{ fontSize: 10.5, color: 'var(--text-muted)', marginTop: 3 }}>
-            avg of {shown.length} evaluated call{shown.length === 1 ? '' : 's'} · feeds the Call Quality KPI
+            avg of {searched.length} evaluated call{searched.length === 1 ? '' : 's'} · feeds the Call Quality KPI
           </div>
         </div>
       </div>
 
-      {shown.length === 0 ? (
+      {sorted.length === 0 ? (
         <div style={{ padding: '40px 20px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>
           No evaluated calls this month yet. Inbound calls over a minute are scored automatically a few minutes after they end.
         </div>
       ) : (
         <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden' }}>
-          {shown.map((r, i) => (
+          {sorted.map((r, i) => (
             <div key={r.id} onClick={() => setOpen(r)}
               style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', cursor: 'pointer',
-                borderBottom: i < shown.length - 1 ? '1px solid var(--border)' : 'none' }}
+                borderBottom: i < sorted.length - 1 ? '1px solid var(--border)' : 'none' }}
               onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
               onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
               <ScoreChip pct={r.pct} size="md" />
