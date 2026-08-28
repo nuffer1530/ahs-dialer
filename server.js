@@ -8664,7 +8664,7 @@ ANDI TABLES (andi_query): call_evaluations (AI QA per CSR: rep, profile_id, pct,
 
 BUDGETS: monthly revenue target $1,375,920. Weekly dept sales budgets: HVAC $210k, Plumbing $110k, Electrical $80k, Garage $30k; weekly revenue targets $195k/$100k/$75k/$25k. KPI goals: booking 80%, close 70%, GM 55%, 15 clubs/wk, 20 five-star/wk. Labor: ~$137.5k/wk all-in actual; 36% of revenue target; labor is only settled for COMPLETED weeks.
 
-STYLE: Lead with the number. Small tables for comparisons. State the window you measured and what you pulled. If the data cannot answer (no per-CSR attribution before Aug 2026, close-rate components missing, etc.), say so plainly instead of approximating. Round dollars. Never claim a write — you are read-only.`
+STYLE: Compute aggregates from tool data silently — NEVER enumerate raw rows or think out loud through arithmetic; keep answers under ~350 words plus at most one compact markdown table. Lead with the number. Small tables for comparisons. State the window you measured and what you pulled. If the data cannot answer (no per-CSR attribution before Aug 2026, close-rate components missing, etc.), say so plainly instead of approximating. Round dollars. Never claim a write — you are read-only.`
 }
 
 async function runLeadershipBrain(history) {
@@ -8694,11 +8694,20 @@ async function runLeadershipBrain(history) {
     const r = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-      body: JSON.stringify({ model: 'claude-sonnet-5', max_tokens: 3500, system: brainSystem(), tools, messages: convo }),
+      body: JSON.stringify({ model: 'claude-sonnet-5', max_tokens: 8000, system: brainSystem(), tools, messages: convo }),
     })
     const body = await r.json()
     if (!r.ok) throw new Error(`AI ${r.status}: ${(body?.error?.message || '').slice(0, 200)}`)
     const uses = (body.content || []).filter(c => c.type === 'tool_use')
+    if (body.stop_reason === 'max_tokens' && !uses.length) {
+      // Ran out of output mid-thought (the 4-week-trend failure). Salvage any
+      // text; otherwise force a concise wrap-up from the data already pulled.
+      const partial = (body.content || []).filter(c => c.type === 'text').map(c => c.text).join('\n').trim()
+      if (partial) return { text: partial, toolLog }
+      if (body.content?.length) convo.push({ role: 'assistant', content: body.content })
+      convo.push({ role: 'user', content: 'You ran out of output space. Answer NOW, concisely (a short table + 3 sentences), using only the data you already pulled. Do not call any more tools.' })
+      continue
+    }
     if (!uses.length || body.stop_reason !== 'tool_use') {
       const text = (body.content || []).filter(c => c.type === 'text').map(c => c.text).join('\n').trim()
       return { text: text || 'I could not produce an answer — try rephrasing.', toolLog }

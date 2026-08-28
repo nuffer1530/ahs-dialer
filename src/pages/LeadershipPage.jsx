@@ -783,6 +783,67 @@ function LeadershipPageInner() {
 }
 
 // ── AI Analyst: agentic chat over live ST + Andi data, threads per login ────
+
+// Minimal markdown for analyst answers: ### headers, **bold**, `code`,
+// - bullets, 1. lists, | tables |, --- rules. Anything else renders as text.
+function Md({ text }) {
+  const lines = String(text || '').split('\n')
+  const out = []
+  let i = 0, key = 0
+  const inline = (str) => {
+    const parts = []
+    let rest = String(str), k = 0
+    const rx = /(\*\*[^*]+\*\*|`[^`]+`)/g
+    let last = 0, m
+    while ((m = rx.exec(rest))) {
+      if (m.index > last) parts.push(rest.slice(last, m.index))
+      const tok = m[0]
+      if (tok.startsWith('**')) parts.push(<strong key={k++}>{tok.slice(2, -2)}</strong>)
+      else parts.push(<code key={k++} style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 4, padding: '0 4px', fontSize: '0.92em' }}>{tok.slice(1, -1)}</code>)
+      last = m.index + tok.length
+    }
+    if (last < rest.length) parts.push(rest.slice(last))
+    return parts
+  }
+  while (i < lines.length) {
+    const ln = lines[i]
+    if (/^\s*\|.*\|\s*$/.test(ln)) {
+      const tbl = []
+      while (i < lines.length && /^\s*\|.*\|\s*$/.test(lines[i])) { tbl.push(lines[i]); i++ }
+      const rows = tbl.map(r => r.trim().replace(/^\||\|$/g, '').split('|').map(c => c.trim()))
+        .filter(r => !r.every(c => /^:?-{2,}:?$/.test(c)))
+      if (rows.length) out.push(
+        <div key={key++} style={{ overflowX: 'auto', margin: '10px 0' }}>
+          <table style={{ borderCollapse: 'collapse', fontSize: 13, minWidth: 320 }}>
+            <thead><tr>{rows[0].map((c, ci) => <th key={ci} style={{ textAlign: ci ? 'right' : 'left', padding: '6px 12px', borderBottom: '2px solid var(--border)', fontSize: 11, textTransform: 'uppercase', letterSpacing: .4, color: 'var(--text-muted)' }}>{inline(c)}</th>)}</tr></thead>
+            <tbody>{rows.slice(1).map((r, ri) => <tr key={ri}>{r.map((c, ci) => <td key={ci} style={{ textAlign: ci ? 'right' : 'left', padding: '6px 12px', borderBottom: '1px solid var(--border)', fontWeight: ci ? 400 : 600 }}>{inline(c)}</td>)}</tr>)}</tbody>
+          </table>
+        </div>)
+      continue
+    }
+    if (/^\s*([-*•]|\d+\.)\s+/.test(ln)) {
+      const items = []
+      while (i < lines.length && /^\s*([-*•]|\d+\.)\s+/.test(lines[i])) { items.push(lines[i].replace(/^\s*([-*•]|\d+\.)\s+/, '')); i++ }
+      out.push(<ul key={key++} style={{ margin: '8px 0', paddingLeft: 22, display: 'flex', flexDirection: 'column', gap: 4 }}>{items.map((it, ii) => <li key={ii}>{inline(it)}</li>)}</ul>)
+      continue
+    }
+    if (/^#{1,4}\s+/.test(ln)) { out.push(<div key={key++} style={{ fontWeight: 800, fontSize: 14, margin: '14px 0 4px' }}>{inline(ln.replace(/^#+\s+/, ''))}</div>); i++; continue }
+    if (/^\s*(-{3,}|_{3,})\s*$/.test(ln)) { out.push(<hr key={key++} style={{ border: 'none', borderTop: '1px solid var(--border)', margin: '12px 0' }} />); i++; continue }
+    if (ln.trim() === '') { i++; continue }
+    const para = []
+    while (i < lines.length && lines[i].trim() !== '' && !/^\s*\|.*\|\s*$/.test(lines[i]) && !/^\s*([-*•]|\d+\.)\s+/.test(lines[i]) && !/^#{1,4}\s+/.test(lines[i])) { para.push(lines[i]); i++ }
+    out.push(<p key={key++} style={{ margin: '8px 0', lineHeight: 1.65 }}>{inline(para.join(' '))}</p>)
+  }
+  return <div>{out}</div>
+}
+
+const BRAIN_SUGGESTIONS = [
+  'Who were our top 3 techs by sold dollars last week?',
+  'Sales trend over the last 4 weeks by department',
+  'How is each CSR trending on QA this month?',
+  'Which marketing channels booked best this month?',
+]
+
 function BrainChat({ authHeaders }) {
   const [threads, setThreads] = useState([])
   const [activeId, setActiveId] = useState(null)
@@ -791,6 +852,7 @@ function BrainChat({ authHeaders }) {
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const bodyRef = useRef(null)
+  const inputRef = useRef(null)
 
   const loadThreads = useCallback(async () => {
     try {
@@ -803,7 +865,7 @@ function BrainChat({ authHeaders }) {
 
   const openThread = async (id) => {
     setActiveId(id); setErr('')
-    if (!id) { setMsgs([]); return }
+    if (!id) { setMsgs([]); inputRef.current?.focus(); return }
     try {
       const r = await fetch(`/api/leadership/chats/${id}`, { headers: await authHeaders() })
       const d = await r.json()
@@ -818,8 +880,8 @@ function BrainChat({ authHeaders }) {
     loadThreads()
   }
 
-  const ask = async () => {
-    const q = input.trim()
+  const ask = async (preset) => {
+    const q = (preset ?? input).trim()
     if (!q || busy) return
     setBusy(true); setErr(''); setInput('')
     setMsgs(prev => [...prev, { role: 'user', content: q }])
@@ -844,74 +906,127 @@ function BrainChat({ authHeaders }) {
   useEffect(() => { if (bodyRef.current) bodyRef.current.scrollTop = bodyRef.current.scrollHeight }, [msgs, busy])
 
   return (
-    <div style={{ display: 'flex', gap: 14, alignItems: 'stretch', minHeight: 560 }}>
-      {/* Threads */}
-      <div style={{ width: 230, flexShrink: 0, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
-        <button className="btn primary" style={{ width: '100%' }} onClick={() => openThread(null)}>+ New conversation</button>
-        <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 2, marginTop: 4 }}>
-          {threads.length === 0 && <div style={{ fontSize: 12, color: 'var(--text-muted)', padding: '8px 6px' }}>No conversations yet.</div>}
-          {threads.map(t => (
-            <div key={t.id} onClick={() => openThread(t.id)}
-              style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 9px', borderRadius: 8, cursor: 'pointer',
-                background: t.id === activeId ? 'var(--accent-bg)' : 'transparent' }}>
-              <div style={{ flex: 1, minWidth: 0, fontSize: 12, fontWeight: t.id === activeId ? 700 : 500,
-                color: t.id === activeId ? 'var(--accent)' : 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {t.title || 'Untitled'}
-              </div>
-              <button onClick={e => { e.stopPropagation(); removeThread(t.id) }} title="Delete"
-                style={{ border: 'none', background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 13, padding: 0 }}>×</button>
+    <div style={{ display: 'flex', gap: 0, height: 'calc(100vh - 150px)', minHeight: 480, margin: '0 -8px' }}>
+
+      {/* Thread rail */}
+      <div style={{ width: 250, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 2, padding: '4px 12px 4px 4px', borderRight: '1px solid var(--border)', overflowY: 'auto' }}>
+        <button onClick={() => openThread(null)}
+          style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 12px', marginBottom: 8, borderRadius: 10, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-primary)', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}
+          onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
+          onMouseLeave={e => e.currentTarget.style.background = 'var(--surface)'}>
+          <span style={{ fontSize: 15, lineHeight: 1 }}>+</span> New chat
+        </button>
+        <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: .6, color: 'var(--text-muted)', padding: '4px 12px' }}>Recents</div>
+        {threads.length === 0 && <div style={{ fontSize: 12, color: 'var(--text-muted)', padding: '4px 12px' }}>Nothing yet.</div>}
+        {threads.map(t => (
+          <div key={t.id} onClick={() => openThread(t.id)} className="brain-thread"
+            style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 12px', borderRadius: 10, cursor: 'pointer',
+              background: t.id === activeId ? 'var(--surface-2)' : 'transparent' }}
+            onMouseEnter={e => { if (t.id !== activeId) e.currentTarget.style.background = 'var(--surface)' }}
+            onMouseLeave={e => { if (t.id !== activeId) e.currentTarget.style.background = 'transparent' }}>
+            <div style={{ flex: 1, minWidth: 0, fontSize: 13, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {t.title || 'Untitled'}
             </div>
-          ))}
-        </div>
+            <button onClick={e => { e.stopPropagation(); removeThread(t.id) }} title="Delete"
+              style={{ border: 'none', background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 14, padding: '0 2px', lineHeight: 1 }}>×</button>
+          </div>
+        ))}
       </div>
 
-      {/* Chat */}
-      <div style={{ flex: 1, minWidth: 0, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-        <div ref={bodyRef} style={{ flex: 1, overflowY: 'auto', padding: 18, display: 'flex', flexDirection: 'column', gap: 14 }}>
-          {msgs.length === 0 && !busy && (
-            <div style={{ margin: 'auto', textAlign: 'center', maxWidth: 460 }}>
-              <div style={{ fontSize: 15, fontWeight: 800, marginBottom: 6 }}>Ask anything about the business.</div>
-              <div style={{ fontSize: 12.5, color: 'var(--text-muted)', lineHeight: 1.6 }}>
-                I answer by querying ServiceTitan and Andi live — techs, CSRs, close rates, labor, marketing, money.
-                Try: “Who were our top 3 techs by sold dollars last week?” · “How is Kayla trending on QA this month?” ·
-                “What did Electrical invoice in July vs August?”
+      {/* Conversation */}
+      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+        <div ref={bodyRef} style={{ flex: 1, overflowY: 'auto', padding: '20px 24px 8px' }}>
+          <div style={{ maxWidth: 780, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 20 }}>
+
+            {msgs.length === 0 && !busy && (
+              <div style={{ marginTop: '14vh', textAlign: 'center' }}>
+                <span className="pulse-mark" style={{ display: 'inline-flex', width: 54, height: 54, marginBottom: 14 }}>
+                  <svg viewBox="0 0 64 64" style={{ width: '100%', height: '100%' }}>
+                    <rect x="2" y="2" width="60" height="60" rx="14" fill="#111318" />
+                    <polyline points="9,32 19,32 25,17 33,47 40,26 45,32 55,32" fill="none" stroke="#ff751f" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </span>
+                <div style={{ fontSize: 21, fontWeight: 800, letterSpacing: -.3, marginBottom: 6 }}>What do you want to know?</div>
+                <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 22 }}>
+                  I answer by querying ServiceTitan and Andi live — techs, CSRs, revenue, labor, marketing, money.
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, justifyContent: 'center', maxWidth: 560, margin: '0 auto' }}>
+                  {BRAIN_SUGGESTIONS.map(sug => (
+                    <button key={sug} onClick={() => ask(sug)}
+                      style={{ padding: '8px 14px', borderRadius: 99, fontSize: 12.5, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-secondary)', cursor: 'pointer' }}
+                      onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--accent)'; e.currentTarget.style.color = 'var(--accent)' }}
+                      onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text-secondary)' }}>
+                      {sug}
+                    </button>
+                  ))}
+                </div>
               </div>
-            </div>
-          )}
-          {msgs.map((m, i) => (
-            <div key={i} style={{ alignSelf: m.role === 'user' ? 'flex-end' : 'flex-start', maxWidth: '82%' }}>
-              <div style={{
-                padding: '10px 14px', borderRadius: 12, fontSize: 13, lineHeight: 1.55, whiteSpace: 'pre-wrap',
-                background: m.role === 'user' ? 'var(--accent)' : 'var(--surface-2)',
-                color: m.role === 'user' ? '#fff' : 'var(--text-primary)',
-                border: m.role === 'user' ? 'none' : '1px solid var(--border)',
-              }}>{m.content}</div>
-              {m.role === 'assistant' && m.toolLog?.length > 0 && (
-                <details style={{ marginTop: 4 }}>
-                  <summary style={{ fontSize: 10.5, color: 'var(--text-muted)', cursor: 'pointer' }}>
-                    {m.toolLog.length} data pull{m.toolLog.length === 1 ? '' : 's'}
-                  </summary>
-                  <div style={{ fontSize: 10.5, color: 'var(--text-muted)', paddingLeft: 10, lineHeight: 1.7 }}>
-                    {m.toolLog.map((t, ti) => <div key={ti}>{t.ok ? '✓' : '✗'} {t.tool === 'st_get' ? 'ServiceTitan' : 'Andi'} · {t.q}</div>)}
-                  </div>
-                </details>
-              )}
-            </div>
-          ))}
-          {busy && (
-            <div style={{ alignSelf: 'flex-start', display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', borderRadius: 12, background: 'var(--surface-2)', border: '1px solid var(--border)', fontSize: 12.5, color: 'var(--text-muted)' }}>
-              <span className="spinner" style={{ width: 14, height: 14 }} />
-              Querying the data — big questions can take up to a minute…
-            </div>
-          )}
+            )}
+
+            {msgs.map((m, i) => m.role === 'user' ? (
+              <div key={i} style={{ alignSelf: 'flex-end', maxWidth: '75%', padding: '10px 16px', borderRadius: 16, background: 'var(--surface-2)', border: '1px solid var(--border)', fontSize: 14, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
+                {m.content}
+              </div>
+            ) : (
+              <div key={i} style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+                <span style={{ flexShrink: 0, width: 26, height: 26, marginTop: 2 }}>
+                  <svg viewBox="0 0 64 64" style={{ width: '100%', height: '100%' }}>
+                    <rect x="2" y="2" width="60" height="60" rx="14" fill="#111318" />
+                    <polyline points="9,32 19,32 25,17 33,47 40,26 45,32 55,32" fill="none" stroke="#ff751f" strokeWidth="5" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </span>
+                <div style={{ flex: 1, minWidth: 0, fontSize: 14, color: 'var(--text-primary)' }}>
+                  <Md text={m.content} />
+                  {m.toolLog?.length > 0 && (
+                    <details style={{ marginTop: 6 }}>
+                      <summary style={{ fontSize: 11, color: 'var(--text-muted)', cursor: 'pointer' }}>
+                        {m.toolLog.length} data pull{m.toolLog.length === 1 ? '' : 's'}
+                      </summary>
+                      <div style={{ fontSize: 11, color: 'var(--text-muted)', paddingLeft: 12, lineHeight: 1.8, marginTop: 4 }}>
+                        {m.toolLog.map((t, ti) => <div key={ti} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.ok ? '✓' : '✗'} {t.tool === 'st_get' ? 'ServiceTitan' : 'Andi'} · {t.q}</div>)}
+                      </div>
+                    </details>
+                  )}
+                </div>
+              </div>
+            ))}
+
+            {busy && (
+              <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+                <span className="pulse-mark-fast" style={{ flexShrink: 0, width: 26, height: 26 }}>
+                  <svg viewBox="0 0 64 64" style={{ width: '100%', height: '100%' }}>
+                    <rect x="2" y="2" width="60" height="60" rx="14" fill="#111318" />
+                    <polyline points="9,32 19,32 25,17 33,47 40,26 45,32 55,32" fill="none" stroke="#ff751f" strokeWidth="5" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </span>
+                <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>Querying the data — big questions can take up to a minute…</div>
+              </div>
+            )}
+          </div>
         </div>
-        {err && <div style={{ padding: '6px 18px', fontSize: 12, color: 'var(--danger)' }}>{err}</div>}
-        <div style={{ display: 'flex', gap: 8, padding: 12, borderTop: '1px solid var(--border)' }}>
-          <input className="form-input" style={{ flex: 1 }} value={input} disabled={busy}
-            placeholder="Ask about techs, CSRs, revenue, labor, marketing…"
-            onChange={e => setInput(e.target.value)}
-            onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); ask() } }} />
-          <button className="btn primary" onClick={ask} disabled={busy || !input.trim()}>{busy ? 'Thinking…' : 'Ask'}</button>
+
+        {err && <div style={{ maxWidth: 780, margin: '0 auto', width: '100%', padding: '4px 24px', fontSize: 12.5, color: 'var(--danger)' }}>{err}</div>}
+
+        {/* Composer */}
+        <div style={{ padding: '10px 24px 18px' }}>
+          <div style={{ maxWidth: 780, margin: '0 auto', position: 'relative' }}>
+            <textarea ref={inputRef} rows={1} value={input} disabled={busy}
+              placeholder="Ask about techs, CSRs, revenue, labor, marketing…"
+              onChange={e => { setInput(e.target.value); e.target.style.height = 'auto'; e.target.style.height = Math.min(e.target.scrollHeight, 160) + 'px' }}
+              onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); ask() } }}
+              style={{ width: '100%', resize: 'none', padding: '14px 52px 14px 18px', borderRadius: 16, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-primary)', fontSize: 14, lineHeight: 1.5, outline: 'none', boxShadow: '0 2px 12px rgba(0,0,0,.05)' }}
+              onFocus={e => e.target.style.borderColor = 'var(--accent)'}
+              onBlur={e => e.target.style.borderColor = 'var(--border)'} />
+            <button onClick={() => ask()} disabled={busy || !input.trim()} title="Send"
+              style={{ position: 'absolute', right: 10, bottom: 13, width: 34, height: 34, borderRadius: 10, border: 'none', cursor: busy || !input.trim() ? 'default' : 'pointer',
+                background: busy || !input.trim() ? 'var(--surface-2)' : '#ff751f', color: busy || !input.trim() ? 'var(--text-muted)' : '#fff',
+                fontSize: 16, fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              ↑
+            </button>
+          </div>
+          <div style={{ maxWidth: 780, margin: '6px auto 0', fontSize: 10.5, color: 'var(--text-muted)', textAlign: 'center' }}>
+            Answers come from live ServiceTitan + Andi queries — open “data pulls” under any answer to see the sources.
+          </div>
         </div>
       </div>
     </div>
