@@ -4117,8 +4117,9 @@ async function syncScorecardMonth(monthsBack) {
   // ST telecom is ground truth for booking stats while the team still answers
   // outside Andi: per-agent Booked/(Booked+Unbooked), the leadership-sheet
   // definition. Cached — this runs hourly and a month of telecom is heavy.
-  let stStats = null
+  let stStats = null, stBookedJobs = null
   try { stStats = await stTelecomMonthStats(month, startIso, endIso) } catch (e) { console.warn('scorecard ST stats:', e.message) }
+  try { stBookedJobs = await stBookedJobsMonth(month, startIso, endIso) } catch (e) { console.warn('scorecard ST booked jobs:', e.message) }
 
   const count = (rows, key) => {
     const m = new Map()
@@ -4166,17 +4167,20 @@ async function syncScorecardMonth(monthsBack) {
 
     // ST override: if this profile maps to ST users with lead-call activity,
     // their booking numbers come from ST regardless of Andi usage.
-    let stBooked = 0, stUnbooked = 0
+    let stBooked = 0, stUnbooked = 0, stJobsBooked = 0
     for (const sid of (stIdsOf.get(pid) || [])) {
       const s = stStats?.get(sid)
       if (s) { stBooked += s.booked; stUnbooked += s.unbooked }
+      stJobsBooked += stBookedJobs?.get(sid) || 0
     }
     const stLeads = stBooked + stUnbooked
 
     const qa = qaAvg.get(pid)
-    if (!bookedN && !answeredN && !memsN && !stLeads && qa == null) continue   // no phone activity, nothing to write
+    if (!bookedN && !answeredN && !memsN && !stLeads && !stJobsBooked && qa == null) continue   // no phone activity, nothing to write
     const patch = {
-      booked_calls: stLeads ? stBooked : bookedN,
+      // Booked calls = jobs they CREATED in ST (matches ST's own reports),
+      // not just inbound lead calls typed Booked.
+      booked_calls: stJobsBooked || (stLeads ? stBooked : bookedN),
       memberships: memsN,
       booking_pct: stLeads ? Math.round(stBooked / stLeads * 100)
         : answeredN > 0 ? Math.round(Math.min(inbBookedN, answeredN) / answeredN * 100) : null,
@@ -4210,6 +4214,25 @@ async function stTelecomMonthStats(month, startIso, endIso) {
     stats.set(aid, s)
   }
   _stMonthStats.set(month, { at: Date.now(), stats })
+  return stats
+}
+
+// Jobs CREATED per ST user for the month (createdById = who booked it),
+// cached like the telecom stats. This is the true "booked calls" number —
+// telecom's Booked callType misses outbound bookings and NotLead-typed calls
+// that still booked (Deanna: hand-fixed Alicia to 185, sync reverted to 89).
+const _stBookedJobs = new Map()
+async function stBookedJobsMonth(month, startIso, endIso) {
+  const hit = _stBookedJobs.get(month)
+  if (hit && Date.now() - hit.at < 4 * 3600_000) return hit.stats
+  const jobs = await stPageAll(pg =>
+    `/jpm/v2/tenant/${ST_TENANT_ID}/jobs?createdOnOrAfter=${startIso}&createdBefore=${endIso}&pageSize=500&page=${pg}`, 8000)
+  const stats = new Map()
+  for (const j of (jobs || [])) {
+    const id = String(j.createdById || '')
+    if (id) stats.set(id, (stats.get(id) || 0) + 1)
+  }
+  _stBookedJobs.set(month, { at: Date.now(), stats })
   return stats
 }
 
