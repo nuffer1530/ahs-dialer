@@ -88,6 +88,7 @@ function getWeekDates(baseDate) {
 
 const DAY_TYPE_COLORS = {
   work: null,
+  half: '#d97706',
   pto: '#3b82f6',
   sick: '#f59e0b',
   holiday: '#8b5cf6',
@@ -96,6 +97,7 @@ const DAY_TYPE_COLORS = {
 
 const DAY_TYPE_LABELS = {
   work: 'Work',
+  half: '½ Day',
   pto: 'PTO',
   sick: 'Sick',
   holiday: 'Holiday',
@@ -386,7 +388,7 @@ export default function AttendancePage() {
     let total = 0
     for (const date of weekDates) {
       const sd = schedules.find(s => s.profile_id === pid && s.date === date)
-      if (!sd || (sd.day_type && sd.day_type !== 'work') || !sd.shift_start || !sd.shift_end) continue
+      if (!sd || ['pto','sick','holiday','off'].includes(sd.day_type) || !sd.shift_start || !sd.shift_end) continue
       const [sh, sm] = String(sd.shift_start).split(':').map(Number)
       const [eh, em] = String(sd.shift_end).split(':').map(Number)
       let h = (eh + (em || 0) / 60) - (sh + (sm || 0) / 60); if (h < 0) h += 24
@@ -403,7 +405,7 @@ export default function AttendancePage() {
   const toMin = (t) => { if (!t) return null; const [h, m] = String(t).split(':').map(Number); return h * 60 + (m || 0) }
   const toTime = (m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`
   const breaksOf = (sd) => {
-    if (!sd || (sd.day_type && sd.day_type !== 'work') || !sd.shift_start) return []
+    if (!sd || ['pto','sick','holiday','off'].includes(sd.day_type) || !sd.shift_start) return []
     const out = []
     const add = (kind, start, dur) => { const m = toMin(start); if (m != null) out.push({ kind, start: m, end: m + (Number(dur) || (kind === 'lunch' ? 30 : 15)) }) }
     add('break1', sd.break1_start, sd.break1_duration); add('lunch', sd.lunch_start, sd.lunch_duration); add('break2', sd.break2_start, sd.break2_duration)
@@ -652,6 +654,12 @@ export default function AttendancePage() {
                 onMouseEnter={e => e.currentTarget.style.background='var(--surface)'}
                 onMouseLeave={e => e.currentTarget.style.background='var(--surface-2)'}>‹</button>
               <span style={{ fontSize:13, fontWeight:500, color:'var(--text-primary)', minWidth:200, textAlign:'center' }}>{weekLabel}</span>
+              {!weekDates.includes(today) && (
+                <button onClick={() => setWeekBase(localYMD())}
+                  style={{ padding:'6px 12px', fontSize:12, fontWeight:600, border:'1px solid var(--accent)', borderRadius:'var(--radius)', background:'var(--accent-bg)', color:'var(--accent)', cursor:'pointer' }}>
+                  Today
+                </button>
+              )}
               <button onClick={nextWeek}
                 style={{ width:32, height:32, border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface-2)', cursor:'pointer', fontSize:16, color:'var(--text-secondary)', display:'flex', alignItems:'center', justifyContent:'center' }}
                 onMouseEnter={e => e.currentTarget.style.background='var(--surface)'}
@@ -773,7 +781,7 @@ export default function AttendancePage() {
                         {weekDates.map(date => {
                           const sched = getSchedule(p.id, date)
                           const isToday = date === today
-                          const isOff = sched && sched.day_type !== 'work'
+                          const isOff = sched && ['pto','sick','holiday','off'].includes(sched.day_type)
                           const typeColor = sched ? DAY_TYPE_COLORS[sched.day_type] : null
                           // Draft = saved but not published: reps can't see it
                           // yet, so it wears the When-I-Work hatching here.
@@ -795,6 +803,7 @@ export default function AttendancePage() {
                                   onMouseLeave={e => e.currentTarget.style.opacity='1'}>
                                   <div style={{ fontSize:11, fontWeight:600, color: tc || 'var(--success)' }}>{fmt(sched.shift_start)} – {fmt(sched.shift_end)}</div>
                                   {sched.lunch_start && <div style={{ fontSize:10, color:'var(--text-muted)', marginTop:2 }}>Lunch {fmt(sched.lunch_start)}</div>}
+                                  {sched.day_type === 'half' && <div style={{ fontSize:9, fontWeight:800, letterSpacing:.5, color:'#d97706', marginTop:2 }}>½ DAY — off after</div>}
                                   {breakConflicts.get(date)?.has(p.id) && (
                                     <div title="A break or lunch here overlaps someone else's on the same day — use Stagger breaks"
                                       style={{ fontSize:9.5, fontWeight:700, color:'var(--tone-amber-tx)', marginTop:2 }}>⚠ break overlap</div>

@@ -198,7 +198,7 @@ export default function MyPage() {
   }
   // Shift length minus unpaid lunch; paid breaks count as worked time.
   const schedHours = (sched) => {
-    if (!sched || (sched.day_type && sched.day_type !== 'work') || !sched.shift_start || !sched.shift_end) return 0
+    if (!sched || ['pto','sick','holiday','off'].includes(sched.day_type) || !sched.shift_start || !sched.shift_end) return 0
     const [sh, sm] = sched.shift_start.split(':').map(Number)
     const [eh, em] = sched.shift_end.split(':').map(Number)
     let h = (eh + (em || 0) / 60) - (sh + (sm || 0) / 60)

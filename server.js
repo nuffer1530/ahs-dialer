@@ -8036,7 +8036,7 @@ app.post('/api/schedule/publish', async (req, res) => {
 
     const fmt12 = (t) => { if (!t) return ''; const [h, m] = String(t).split(':').map(Number); return `${h % 12 || 12}:${String(m || 0).padStart(2, '0')} ${h >= 12 ? 'PM' : 'AM'}` }
     const dayLabel = (ds) => new Date(ds + 'T12:00:00Z').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' })
-    const OFF_LABEL = { pto: 'PTO', sick: 'Sick', holiday: 'Holiday', off: 'Off' }
+    const OFF_LABEL = { pto: 'PTO', sick: 'Sick', holiday: 'Holiday', off: 'Off', half: 'Half day' }
     const hoursOf = (sd) => {
       if (!sd?.shift_start || !sd?.shift_end) return 0
       const [sh, sm] = sd.shift_start.split(':').map(Number); const [eh, em] = sd.shift_end.split(':').map(Number)
@@ -8052,7 +8052,7 @@ app.post('/api/schedule/publish', async (req, res) => {
       let total = 0
       const rows = dates.map(ds => {
         const sd = scheds?.find(x => x.profile_id === person.id && x.date === ds)
-        const off = !sd || (sd.day_type && sd.day_type !== 'work') || !sd.shift_start
+        const off = !sd || ['pto','sick','holiday','off'].includes(sd.day_type) || !sd.shift_start
         let cell
         if (off) {
           cell = `<span style="color:#94A3B8">${OFF_LABEL[sd?.day_type] || 'Off'}</span>`

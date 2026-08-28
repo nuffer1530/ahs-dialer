@@ -471,6 +471,7 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
   }
 
   const formatDate = (d) => new Date(d + 'T12:00:00').toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric', year:'numeric' })
+  const goToday = () => setDate(localYMD())
   const prevDay = () => { const d = new Date(date + 'T12:00:00'); d.setDate(d.getDate()-1); setDate(localYMD(d)) }
   const nextDay = () => { const d = new Date(date + 'T12:00:00'); d.setDate(d.getDate()+1); setDate(localYMD(d)) }
 
@@ -499,6 +500,12 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
           <button onClick={nextDay} style={{ width:32, height:32, border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface-2)', cursor:'pointer', fontSize:16, color:'var(--text-secondary)', display:'flex', alignItems:'center', justifyContent:'center' }}
             onMouseEnter={e => e.currentTarget.style.background='var(--border)'}
             onMouseLeave={e => e.currentTarget.style.background='var(--surface-2)'}>›</button>
+          {!isToday && (
+            <button onClick={goToday}
+              style={{ padding:'6px 12px', fontSize:12, fontWeight:600, border:'1px solid var(--accent)', borderRadius:'var(--radius)', background:'var(--accent-bg)', color:'var(--accent)', cursor:'pointer' }}>
+              Today
+            </button>
+          )}
         </div>
 
         {/* Legend + bulk add */}
@@ -982,13 +989,13 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
             </div>
 
             <div style={{ display:'flex', gap:6, marginBottom:16, flexWrap:'wrap' }}>
-              {['work','pto','sick','holiday','off'].map(dt => (
+              {['work','half','pto','sick','holiday','off'].map(dt => (
                 <button key={dt} onClick={() => setShiftForm(p => ({ ...p, day_type: dt }))}
                   style={{ padding:'5px 12px', borderRadius:99, fontSize:11, fontWeight:500, border:'1px solid', cursor:'pointer',
                     borderColor: shiftForm.day_type === dt ? 'var(--accent)' : 'var(--border)',
                     background: shiftForm.day_type === dt ? 'var(--accent)' : 'var(--surface-2)',
                     color: shiftForm.day_type === dt ? '#fff' : 'var(--text-secondary)' }}>
-                  {dt.charAt(0).toUpperCase()+dt.slice(1)}
+                  {dt === 'half' ? '½ Day' : dt.charAt(0).toUpperCase()+dt.slice(1)}
                 </button>
               ))}
             </div>
