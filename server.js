@@ -6767,11 +6767,17 @@ async function computeLiveBoardPayload(dayOffset = 0) {
     // room. Reassignments, swaps, the brief and the payload all read this.
     const techLoad = new Map()
     for (const c of calls) {
-      if (!c.techId || EXCLUDE_CALL.test(c.jobType || '')) continue
+      if (!c.techId || c.status === 'Canceled') continue
       const t = techLoad.get(c.techId) || { calls: 0, allDayInstall: false }
+      // Follow-ups/callbacks COUNT as load — skipping them made Josh
+      // Martinez's 9-hour power-restoration follow-up read as "0 calls on
+      // board, feed him work" (Brittany, Aug 27). They're excluded from
+      // opportunity ranking elsewhere, not from a tech's day.
       t.calls++
       const hrs = (Date.parse(c.windowEnd || '') - Date.parse(c.windowStart || '')) / 36e5
-      if (INSTALL_TYPE.test(c.jobType || '') && hrs >= 7 && c.status !== 'Done' && c.status !== 'Canceled') t.allDayInstall = true
+      // ANY 7h+ appointment blocks the day — install, marathon service, or
+      // an all-day follow-up. The job type doesn't matter to a consumed day.
+      if (hrs >= 7 && c.status !== 'Done') t.allDayInstall = true
       techLoad.set(c.techId, t)
     }
     const consumedByInstall = (techId) => Boolean(techLoad.get(Number(techId))?.allDayInstall)
