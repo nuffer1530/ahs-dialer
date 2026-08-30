@@ -3753,11 +3753,23 @@ app.get('/api/admin/csr-coaching', async (req, res) => {
       } catch {}
     }
 
-    // Aggregate per CSR: per-criterion earned/max/misses across the month.
+    // Aggregate per CSR, grouped by PROFILE where linked — rep name strings
+    // drifted over the month (mapping fixes renamed people), which split one
+    // person into 2-3 cards. Unlinked evals fall back to a normalized name.
+    const { data: profRows } = await supabase.from('profiles').select('id, name, email, active')
+    const profById = new Map((profRows || []).map(x => [x.id, x]))
+    const normKey = (n) => String(n || '').toLowerCase().replace(/[^a-z0-9]/g, '')
+    const profByKey = new Map()
+    for (const x of (profRows || [])) {
+      if (x.name) profByKey.set(normKey(x.name), x)
+      if (x.email) profByKey.set(normKey(x.email.split('@')[0]), x)
+    }
     const perCsr = new Map()
     for (const e of rows) {
-      const name = e.rep || 'Unknown'
-      const cur = perCsr.get(name) || { name, scores: [], crit: new Map() }
+      const prof2 = (e.profile_id && profById.get(e.profile_id)) || profByKey.get(normKey(e.rep)) || null
+      const gkey = prof2 ? `p:${prof2.id}` : `n:${normKey(e.rep || 'unknown')}`
+      const name = prof2 ? `${prof2.name || prof2.email}${prof2.active === false ? ' (departed)' : ''}` : (e.rep || 'Unknown')
+      const cur = perCsr.get(gkey) || { name, profileId: prof2?.id || null, scores: [], crit: new Map() }
       cur.scores.push(Number(e.pct))
       for (const it of ((e.scores || {}).items || [])) {
         if (!it.applicable) continue
@@ -3766,12 +3778,13 @@ app.get('/api/admin/csr-coaching', async (req, res) => {
         if ((Number(it.earned) || 0) < (Number(it.max) || 0)) c.misses++
         cur.crit.set(it.criterion, c)
       }
-      perCsr.set(name, cur)
+      perCsr.set(gkey, cur)
     }
     const aggregates = [...perCsr.values()].map(c => {
       const crits = [...c.crit.values()].filter(x => x.max > 0).map(x => ({ ...x, rate: Math.round(x.earned / x.max * 100) }))
       return {
         name: c.name,
+        profileId: c.profileId,
         qa: Math.round(c.scores.reduce((a, b) => a + b, 0) / c.scores.length),
         evals: c.scores.length,
         weakest: crits.filter(x => x.rate < 100).sort((a, b) => a.rate - b.rate).slice(0, 5)

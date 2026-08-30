@@ -169,7 +169,7 @@ export default function CallEvalsTab({ profile, isAdmin }) {
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
             <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-              {snapBusy ? 'Building snapshots from this month\u2019s evaluations\u2026' : snap ? `${snap.evalCount} evals distilled \u00b7 generated ${new Date(snap.generatedAt).toLocaleString('en-US', { timeZone: 'America/Denver', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}` : ''}
+              {snapBusy ? 'Building snapshots from this month\u2019s evaluations…' : snap ? `${snap.evalCount} evals distilled · generated ${new Date(snap.generatedAt).toLocaleString('en-US', { timeZone: 'America/Denver', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}` : ''}
             </div>
             <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
               <button className="btn sm" disabled={snapBusy} onClick={() => loadSnapshots(true)}>Regenerate</button>
@@ -181,15 +181,23 @@ export default function CallEvalsTab({ profile, isAdmin }) {
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: 12 }}>
             {(snap?.cards || []).map(c => {
               const t = c.qa >= 90 ? 'green' : c.qa >= 75 ? 'amber' : 'red'
+              const drill = () => {
+                setView('list'); setSortBy('lowest')
+                if (c.profileId) { setRepFilter(`id:${c.profileId}`); setSearch('') }
+                else { setRepFilter(''); setSearch(c.name.replace(' (departed)', '')) }
+              }
               return (
-                <div key={c.name} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: '14px 16px' }}>
+                <div key={c.name} onClick={drill} title="Open this CSR's evaluations, lowest scores first"
+                  style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: '14px 16px', cursor: 'pointer' }}
+                  onMouseEnter={e => e.currentTarget.style.borderColor = 'var(--accent)'}
+                  onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--border)'}>
                   <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
                     <div style={{ fontSize: 14.5, fontWeight: 800, flex: 1 }}>{c.name}</div>
                     <span style={{ fontSize: 16, fontWeight: 900, color: `var(--tone-${t}-tx)` }}>{c.qa}%</span>
                   </div>
-                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 8 }}>{c.evals} evaluated call{c.evals === 1 ? '' : 's'}</div>
-                  {(c.working || []).map((w, i) => <div key={i} style={{ fontSize: 12.5, color: 'var(--tone-green-tx)', lineHeight: 1.5, marginBottom: 3 }}>\u2713 {w}</div>)}
-                  {(c.coach || []).map((w, i) => <div key={i} style={{ fontSize: 12.5, color: 'var(--tone-amber-tx)', lineHeight: 1.5, marginBottom: 3 }}>\u2192 {w}</div>)}
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 8 }}>{c.evals} evaluated call{c.evals === 1 ? '' : 's'} · click to open their evals</div>
+                  {(c.working || []).map((w, i) => <div key={i} style={{ fontSize: 12.5, color: 'var(--tone-green-tx)', lineHeight: 1.5, marginBottom: 3 }}>✓ {w}</div>)}
+                  {(c.coach || []).map((w, i) => <div key={i} style={{ fontSize: 12.5, color: 'var(--tone-amber-tx)', lineHeight: 1.5, marginBottom: 3 }}>→ {w}</div>)}
                   {c.drill && (
                     <div style={{ fontSize: 12.5, marginTop: 8, padding: '8px 11px', background: 'var(--surface-2)', borderRadius: 8, lineHeight: 1.5 }}>
                       <b>Drill:</b> {c.drill}
@@ -197,7 +205,7 @@ export default function CallEvalsTab({ profile, isAdmin }) {
                   )}
                   {(c.weakest || []).length > 0 && (
                     <div style={{ fontSize: 10.5, color: 'var(--text-muted)', marginTop: 8, lineHeight: 1.6 }}>
-                      Most missed: {c.weakest.slice(0, 3).map(x => `${x.criterion} (${x.missedOn}/${x.of})`).join(' \u00b7 ')}
+                      Most missed: {c.weakest.slice(0, 3).map(x => `${x.criterion} (${x.missedOn}/${x.of})`).join(' · ')}
                     </div>
                   )}
                 </div>
