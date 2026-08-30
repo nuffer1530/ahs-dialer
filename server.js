@@ -3726,6 +3726,100 @@ async function getEvalCfg() {
   return cfg
 }
 
+// ── CSR coaching snapshots: the month's evals distilled into one card per
+// CSR (Brittany: "summarize... so we can at a glance see what they're
+// missing"). Aggregates per-criterion misses, then one AI pass writes the
+// coaching. Cached per month; regenerates when the eval count changes.
+app.get('/api/admin/csr-coaching', async (req, res) => {
+  const prof = await requireAdmin(req, res)
+  if (!prof) return
+  try {
+    const month = /^\d{4}-\d{2}$/.test(String(req.query.month || '')) ? String(req.query.month) : (() => {
+      const p2 = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: 'America/Denver', year: 'numeric', month: '2-digit' }).formatToParts(new Date()).map(x => [x.type, x.value]))
+      return `${p2.year}-${p2.month}`
+    })()
+    const [y, m] = month.split('-').map(Number)
+    const startIso = new Date(Date.UTC(y, m - 1, 1)).toISOString()
+    const endIso = new Date(Date.UTC(y, m, 1)).toISOString()
+    const { data: evals } = await supabase.from('call_evaluations')
+      .select('rep, profile_id, pct, scores, created_at').gte('created_at', startIso).lt('created_at', endIso).limit(3000)
+    const rows = (evals || []).filter(e => e.pct != null)
+    const cacheKey = `csr_coaching_${month}`
+    if (req.query.refresh !== '1') {
+      try {
+        const { data: c } = await supabase.from('app_settings').select('value').eq('key', cacheKey).maybeSingle()
+        const cached = c?.value ? JSON.parse(c.value) : null
+        if (cached && cached.evalCount === rows.length) return res.json(cached)
+      } catch {}
+    }
+
+    // Aggregate per CSR: per-criterion earned/max/misses across the month.
+    const perCsr = new Map()
+    for (const e of rows) {
+      const name = e.rep || 'Unknown'
+      const cur = perCsr.get(name) || { name, scores: [], crit: new Map() }
+      cur.scores.push(Number(e.pct))
+      for (const it of ((e.scores || {}).items || [])) {
+        if (!it.applicable) continue
+        const c = cur.crit.get(it.criterion) || { criterion: it.criterion, section: it.section, earned: 0, max: 0, misses: 0, n: 0 }
+        c.earned += Number(it.earned) || 0; c.max += Number(it.max) || 0; c.n++
+        if ((Number(it.earned) || 0) < (Number(it.max) || 0)) c.misses++
+        cur.crit.set(it.criterion, c)
+      }
+      perCsr.set(name, cur)
+    }
+    const aggregates = [...perCsr.values()].map(c => {
+      const crits = [...c.crit.values()].filter(x => x.max > 0).map(x => ({ ...x, rate: Math.round(x.earned / x.max * 100) }))
+      return {
+        name: c.name,
+        qa: Math.round(c.scores.reduce((a, b) => a + b, 0) / c.scores.length),
+        evals: c.scores.length,
+        weakest: crits.filter(x => x.rate < 100).sort((a, b) => a.rate - b.rate).slice(0, 5)
+          .map(x => ({ criterion: x.criterion, rate: x.rate, missedOn: x.misses, of: x.n })),
+        strengths: crits.filter(x => x.rate === 100 && x.n >= 3).slice(0, 4).map(x => x.criterion),
+      }
+    }).sort((a, b) => b.qa - a.qa)
+
+    // One AI pass writes every card — grounded in the aggregates only.
+    let coached = new Map()
+    if (ANTHROPIC_KEY && aggregates.length) {
+      try {
+        const r = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: { 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+          body: JSON.stringify({
+            model: 'claude-sonnet-5', max_tokens: 4000,
+            system: 'You write monthly coaching snapshots for inbound CSRs at a home-services company, addressed to the coaches (Brittany and Deanna), grounded ONLY in the per-criterion aggregates provided. For each CSR: 1-2 "working" points naming their strong behaviors, 1-2 "coach" points naming the exact behavior and miss frequency (e.g. "missed email capture on 6 of 9 calls"), and ONE specific drill for the next coaching session. Coach the behavior, never the person. Under 3 evals = say the sample is thin and keep it light.',
+            tools: [{
+              name: 'submit_snapshots',
+              description: 'Submit coaching snapshots',
+              input_schema: { type: 'object', properties: { csrs: { type: 'array', items: { type: 'object', properties: {
+                name: { type: 'string' },
+                working: { type: 'array', items: { type: 'string' } },
+                coach: { type: 'array', items: { type: 'string' } },
+                drill: { type: 'string', description: 'One concrete exercise for the next coaching session' },
+              }, required: ['name', 'working', 'coach', 'drill'] } } }, required: ['csrs'] },
+            }],
+            tool_choice: { type: 'tool', name: 'submit_snapshots' },
+            messages: [{ role: 'user', content: `Month: ${month}. Per-CSR eval aggregates:\n${JSON.stringify(aggregates)}` }],
+          }),
+        })
+        const out = (await r.json())?.content?.find(c => c.type === 'tool_use')?.input
+        for (const c of (out?.csrs || [])) coached.set(c.name, c)
+      } catch (e) { console.warn('csr coaching ai:', e.message) }
+    }
+
+    const payload = {
+      month, evalCount: rows.length, generatedAt: new Date().toISOString(),
+      cards: aggregates.map(a => ({ ...a, ...(coached.get(a.name) || {}) })),
+    }
+    try {
+      await supabase.from('app_settings').upsert({ key: cacheKey, value: JSON.stringify(payload) }, { onConflict: 'key' })
+    } catch {}
+    res.json(payload)
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
+
 app.get('/api/admin/call-eval-config', async (req, res) => {
   if (!(await requireAdmin(req, res))) return
   res.json({ cfg: await getEvalCfg(), defaultSections: DEFAULT_EVAL_SECTIONS })

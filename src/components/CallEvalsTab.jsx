@@ -16,6 +16,47 @@ export default function CallEvalsTab({ profile, isAdmin }) {
   const [repFilter, setRepFilter] = useState('')
   const [search, setSearch] = useState('')
   const [sortBy, setSortBy] = useState('newest')   // newest | lowest | highest
+  const [view, setView] = useState('list')         // list | snapshots
+  const [snap, setSnap] = useState(null)
+  const [snapBusy, setSnapBusy] = useState(false)
+
+  const loadSnapshots = async (refresh) => {
+    setSnapBusy(true)
+    try {
+      const { data: { session } } = await sb.auth.getSession()
+      const r = await fetch(`/api/admin/csr-coaching?month=${month}${refresh ? '&refresh=1' : ''}`,
+        { headers: { Authorization: `Bearer ${session?.access_token}` } })
+      const d = await r.json()
+      if (r.ok) setSnap(d)
+    } catch {}
+    setSnapBusy(false)
+  }
+  useEffect(() => { if (view === 'snapshots') { setSnap(null); loadSnapshots(false) } // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, month])
+
+  const printSnapshots = () => {
+    if (!snap?.cards?.length) return
+    const esc = (t) => String(t || '').replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    const html = `<html><head><title>CSR Coaching — ${snap.month}</title><style>
+      body{font-family:-apple-system,Segoe UI,Arial,sans-serif;color:#111;margin:32px;max-width:720px}
+      h1{font-size:20px;margin:0 0 2px} .sub{color:#666;font-size:12px;margin-bottom:20px}
+      .card{border:1px solid #ccc;border-radius:10px;padding:14px 18px;margin-bottom:14px;page-break-inside:avoid}
+      .nm{font-size:15px;font-weight:800} .qa{float:right;font-size:15px;font-weight:800}
+      .w{color:#15803d;font-size:12.5px;margin:3px 0} .c{color:#b45309;font-size:12.5px;margin:3px 0}
+      .d{font-size:12.5px;margin-top:6px;padding:7px 10px;background:#f5f5f4;border-radius:8px}
+      .mm{font-size:11px;color:#666;margin-top:6px}</style></head><body>
+      <h1>CSR Coaching Snapshots — ${snap.month}</h1>
+      <div class="sub">${snap.evalCount} evaluated calls · generated ${new Date(snap.generatedAt).toLocaleString()}</div>
+      ${snap.cards.map(c => `<div class="card"><span class="qa">${c.qa}%</span><div class="nm">${esc(c.name)}</div>
+        <div class="sub" style="margin-bottom:8px">${c.evals} evaluated call${c.evals === 1 ? '' : 's'}</div>
+        ${(c.working || []).map(w => `<div class="w">✓ ${esc(w)}</div>`).join('')}
+        ${(c.coach || []).map(w => `<div class="c">→ ${esc(w)}</div>`).join('')}
+        ${c.drill ? `<div class="d"><b>Drill:</b> ${esc(c.drill)}</div>` : ''}
+        ${(c.weakest || []).length ? `<div class="mm">Most missed: ${c.weakest.map(x => `${esc(x.criterion)} (${x.missedOn}/${x.of})`).join(' · ')}</div>` : ''}
+      </div>`).join('')}</body></html>`
+    const w = window.open('', '_blank', 'width=800,height=900')
+    w.document.write(html); w.document.close(); w.focus(); setTimeout(() => w.print(), 250)
+  }
   const [profiles, setProfiles] = useState([])
   const [rows, setRows] = useState(null)
   const [open, setOpen] = useState(null)
@@ -73,6 +114,20 @@ export default function CallEvalsTab({ profile, isAdmin }) {
         </div>
         {isAdmin && (
           <div>
+            <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: .6, color: 'var(--text-muted)', marginBottom: 4 }}>View</div>
+            <div style={{ display: 'flex', border: '1px solid var(--border)', borderRadius: 'var(--radius)', overflow: 'hidden' }}>
+              {[['list', 'All evals'], ['snapshots', 'Coaching snapshots']].map(([k, l]) => (
+                <button key={k} onClick={() => setView(k)}
+                  style={{ padding: '8px 13px', fontSize: 12.5, fontWeight: 600, border: 'none', cursor: 'pointer',
+                    background: view === k ? 'var(--accent)' : 'var(--surface)', color: view === k ? '#fff' : 'var(--text-secondary)' }}>
+                  {l}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+        {isAdmin && view === 'list' && (
+          <div>
             <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: .6, color: 'var(--text-muted)', marginBottom: 4 }}>Rep</div>
             <select className="form-input" value={repFilter} onChange={e => setRepFilter(e.target.value)} style={{ minWidth: 160 }}>
               <option value="">Whole team</option>
@@ -110,7 +165,47 @@ export default function CallEvalsTab({ profile, isAdmin }) {
         </div>
       </div>
 
-      {sorted.length === 0 ? (
+      {isAdmin && view === 'snapshots' ? (
+        <div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+              {snapBusy ? 'Building snapshots from this month\u2019s evaluations\u2026' : snap ? `${snap.evalCount} evals distilled \u00b7 generated ${new Date(snap.generatedAt).toLocaleString('en-US', { timeZone: 'America/Denver', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}` : ''}
+            </div>
+            <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+              <button className="btn sm" disabled={snapBusy} onClick={() => loadSnapshots(true)}>Regenerate</button>
+              <button className="btn sm primary" disabled={!snap?.cards?.length} onClick={printSnapshots}>Print</button>
+            </div>
+          </div>
+          {snapBusy && !snap && <div className="spinner lg" style={{ margin: '40px auto' }} />}
+          {snap && snap.cards.length === 0 && <div style={{ padding: 30, textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>No evaluations this month yet.</div>}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: 12 }}>
+            {(snap?.cards || []).map(c => {
+              const t = c.qa >= 90 ? 'green' : c.qa >= 75 ? 'amber' : 'red'
+              return (
+                <div key={c.name} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: '14px 16px' }}>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                    <div style={{ fontSize: 14.5, fontWeight: 800, flex: 1 }}>{c.name}</div>
+                    <span style={{ fontSize: 16, fontWeight: 900, color: `var(--tone-${t}-tx)` }}>{c.qa}%</span>
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 8 }}>{c.evals} evaluated call{c.evals === 1 ? '' : 's'}</div>
+                  {(c.working || []).map((w, i) => <div key={i} style={{ fontSize: 12.5, color: 'var(--tone-green-tx)', lineHeight: 1.5, marginBottom: 3 }}>\u2713 {w}</div>)}
+                  {(c.coach || []).map((w, i) => <div key={i} style={{ fontSize: 12.5, color: 'var(--tone-amber-tx)', lineHeight: 1.5, marginBottom: 3 }}>\u2192 {w}</div>)}
+                  {c.drill && (
+                    <div style={{ fontSize: 12.5, marginTop: 8, padding: '8px 11px', background: 'var(--surface-2)', borderRadius: 8, lineHeight: 1.5 }}>
+                      <b>Drill:</b> {c.drill}
+                    </div>
+                  )}
+                  {(c.weakest || []).length > 0 && (
+                    <div style={{ fontSize: 10.5, color: 'var(--text-muted)', marginTop: 8, lineHeight: 1.6 }}>
+                      Most missed: {c.weakest.slice(0, 3).map(x => `${x.criterion} (${x.missedOn}/${x.of})`).join(' \u00b7 ')}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      ) : sorted.length === 0 ? (
         <div style={{ padding: '40px 20px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>
           No evaluated calls this month yet. Inbound calls over a minute are scored automatically a few minutes after they end.
         </div>

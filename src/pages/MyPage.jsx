@@ -720,21 +720,15 @@ export default function MyPage() {
                               </span>
                             </div>
                             <div style={{ marginTop:8, display:'flex', flexDirection:'column', gap:4 }}>
-                              {sched.break1_start && (
-                                <div style={{ fontSize:10, color:'var(--text-muted)' }}>
-                                  Break {fmt12(sched.break1_start)}
+                              {[
+                                sched.break1_start && { t: sched.break1_start, label: 'Break' },
+                                sched.lunch_start && { t: sched.lunch_start, label: 'Lunch' },
+                                sched.break2_start && { t: sched.break2_start, label: 'Break' },
+                              ].filter(Boolean).sort((a, b) => String(a.t).localeCompare(String(b.t))).map((b, bi) => (
+                                <div key={bi} style={{ fontSize:10, color:'var(--text-muted)' }}>
+                                  {b.label} {fmt12(b.t)}
                                 </div>
-                              )}
-                              {sched.lunch_start && (
-                                <div style={{ fontSize:10, color:'var(--text-muted)' }}>
-                                  Lunch {fmt12(sched.lunch_start)}
-                                </div>
-                              )}
-                              {sched.break2_start && (
-                                <div style={{ fontSize:10, color:'var(--text-muted)' }}>
-                                  Break {fmt12(sched.break2_start)}
-                                </div>
-                              )}
+                              ))}
                             </div>
                           </div>
                         )}
