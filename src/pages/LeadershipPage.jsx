@@ -670,10 +670,11 @@ function LeadershipPageInner() {
               const lowest = scored.length > 3 ? scored[scored.length - 1] : null
               const row = (c, isLow) => [
                 isLow ? <span style={{ color: 'var(--danger)', fontWeight: 700 }}>{c.name}</span> : c.name,
-                String(c.score), String(c.booked), String(c.answered),
-                c.bookRate != null ? pct(c.bookRate) : '—', c.qa != null ? `${c.qa}%` : '—',
+                String(c.score), String(c.booked), String(c.leadCalls),
+                c.bookRate != null ? pct(c.bookRate) : '—', String(c.inbound ?? '—'), String(c.outbound ?? 0),
+                c.qa != null ? `${c.qa}%` : '—',
               ]
-              return <Table headers={['CSR', 'Score', 'Booked', 'Lead calls', 'Book rate', 'QA (Andi)']}
+              return <Table headers={['CSR', 'Score', 'Booked', 'Lead calls', 'Book rate', 'Total inbound', 'Outbound', 'QA (Andi)']}
                 rows={[...top.map(c => row(c, false)), ...(lowest ? [row(lowest, true)] : [])]} />
             })()}
           </div>
