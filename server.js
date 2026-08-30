@@ -3780,7 +3780,15 @@ app.get('/api/admin/csr-coaching', async (req, res) => {
       }
       perCsr.set(gkey, cur)
     }
-    const aggregates = [...perCsr.values()].map(c => {
+    // People who answer a stray call but aren't coached CSRs (Sarah in HR)
+    // stay out of the snapshot. List lives in app_settings so it's editable
+    // without a deploy.
+    let excludeKeys = new Set()
+    try {
+      const { data: ex } = await supabase.from('app_settings').select('value').eq('key', 'csr_coaching_exclude').maybeSingle()
+      excludeKeys = new Set((JSON.parse(ex?.value || '[]') || []).map(normKey))
+    } catch {}
+    const aggregates = [...perCsr.values()].filter(c => !excludeKeys.has(normKey(String(c.name).replace(' (departed)', '')))).map(c => {
       const crits = [...c.crit.values()].filter(x => x.max > 0).map(x => ({ ...x, rate: Math.round(x.earned / x.max * 100) }))
       return {
         name: c.name,
