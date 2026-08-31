@@ -1159,12 +1159,68 @@ async function syncMembershipCommissions() {
 let syncRunning = false
 let lastSync = null
 
+// The commission pipeline's intake was andi_bookings — written only when a
+// CSR books THROUGH Andi. The team books directly in ServiceTitan now (4
+// Andi bookings in August vs 1,283 ST jobs), so job commissions starved
+// while memberships (their own ST watermark) kept paying. This pre-step
+// imports ST-booked jobs by mapped CSRs into andi_bookings, and the
+// existing completion-poll pays them exactly as before.
+async function importStBookedJobs() {
+  const { data: st } = await supabase.from('sync_state').select('*').eq('key', 'st_jobs_import').maybeSingle()
+  const since = st?.last_synced_at || '2026-08-01T00:00:00.000Z'
+  const jobs = await stPageAll(pg =>
+    `/jpm/v2/tenant/${ST_TENANT_ID}/jobs?createdOnOrAfter=${encodeURIComponent(since)}&pageSize=500&page=${pg}`, 4000)
+  if (!jobs.length) return { imported: 0 }
+  const { data: maps } = await supabase.from('csr_st_users').select('profile_id, st_user_id')
+  const { data: profs } = await supabase.from('profiles').select('id, name, email')
+  const profOf = new Map((maps || []).map(m => [String(m.st_user_id), m.profile_id]))
+  const nameOf = new Map((profs || []).map(p => [p.id, p.name || p.email]))
+  const mine = jobs.filter(j => j.createdById && profOf.has(String(j.createdById)))
+  // Customer names for the payouts screen, batched.
+  const custIds = [...new Set(mine.map(j => j.customerId).filter(Boolean))]
+  const custName = new Map()
+  for (let i = 0; i < custIds.length; i += 50) {
+    try {
+      const r = await stGet(`/crm/v2/tenant/${ST_TENANT_ID}/customers?ids=${custIds.slice(i, i + 50).join(',')}&pageSize=50`)
+      for (const c of (r?.data || [])) custName.set(c.id, c.name)
+    } catch {}
+  }
+  let imported = 0
+  for (let i = 0; i < mine.length; i += 200) {
+    const rows = mine.slice(i, i + 200).map(j => {
+      const pid = profOf.get(String(j.createdById))
+      return {
+        st_job_id: j.id, profile_id: pid, csr_name: nameOf.get(pid) || null,
+        customer_name: custName.get(j.customerId) || null,
+        st_job_type_id: j.jobTypeId || null, booked_at: j.createdOn,
+        st_job_number: j.jobNumber ? String(j.jobNumber) : null,
+      }
+    })
+    const { error } = await supabase.from('andi_bookings')
+      .upsert(rows, { onConflict: 'st_job_id', ignoreDuplicates: true })
+    if (error) {
+      // tolerant retry without the newer columns
+      const { error: e2 } = await supabase.from('andi_bookings')
+        .upsert(rows.map(({ st_job_number, ...r }) => r), { onConflict: 'st_job_id', ignoreDuplicates: true })
+      if (e2) { console.warn('st jobs import:', e2.message); break }
+    }
+    imported += rows.length
+  }
+  const maxCreated = jobs.reduce((a, j) => (j.createdOn > a ? j.createdOn : a), since)
+  // 1h overlap so a slow write can't slip past the watermark
+  const wm = new Date(Math.max(Date.parse(since), Date.parse(maxCreated) - 3600_000)).toISOString()
+  await supabase.from('sync_state').upsert({ key: 'st_jobs_import', last_synced_at: wm, updated_at: new Date().toISOString() }, { onConflict: 'key' })
+  return { imported, scanned: jobs.length }
+}
+
 async function syncCommissions() {
   // ST is slow; skip rather than pile up if the previous run is still going.
   if (syncRunning) return { skipped: true }
   syncRunning = true
   const startedAt = new Date().toISOString()
   try {
+    const imported = await importStBookedJobs().catch(e => { console.warn('st jobs import:', e.message); return { imported: 0 } })
+    if (imported.imported) console.log(`Commission sync: imported ${imported.imported} ST-booked job(s) into andi_bookings`)
     const jobs = await syncJobCommissions()
     const memberships = await syncMembershipCommissions()
     lastSync = { at: startedAt, ok: true, jobs, memberships }
