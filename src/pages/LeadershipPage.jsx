@@ -585,17 +585,33 @@ function LeadershipPageInner() {
                   ? <span style={S.good}>✓ on budget</span>
                   : <span style={S.bad}>fix: closing — the calls were there</span>
                 else if (cap == null) verdict = <span style={S.bad}>fix: book more calls</span>
-                else if (d.oppsNeeded <= cap) verdict = <span style={S.bad}>fix: book {Math.min(d.oppsNeeded - d.opps, open)} more — trucks had room</span>
-                else verdict = (
-                  <span style={S.bad}>
-                    fix: capacity — trucks max at {cap}; budget needs {d.oppsNeeded} at this close rate &amp; ticket
-                    {atTarget != null && atTarget <= cap && (
-                      <div style={{ fontSize: 11, fontWeight: 400, color: 'var(--text-muted)', marginTop: 2 }}>
-                        or: at the {Math.round(d.convTarget * 100)}% target close, ~{atTarget} calls would do it — closing is the cheaper fix
-                      </div>
-                    )}
-                  </span>
-                )
+                else {
+                  // Empty slots come FIRST: you can't blame staffing while
+                  // trucks sat unfilled (HVAC ran 36 of 90 — that's a leads
+                  // problem today, whatever the math says about full trucks).
+                  const fillable = Math.max(0, Math.min(d.oppsNeeded, cap) - d.opps)
+                  if (fillable > 0) verdict = (
+                    <span style={S.bad}>
+                      fix: book {fillable} more — trucks had room
+                      {d.oppsNeeded > cap && (
+                        <div style={{ fontSize: 11, fontWeight: 400, color: 'var(--text-muted)', marginTop: 2 }}>
+                          and even full, trucks max at {cap} of {d.oppsNeeded} needed at this close rate
+                          {atTarget != null && atTarget <= cap ? ` — at the ${Math.round(d.convTarget * 100)}% target close, ~${atTarget} calls hits budget` : ''}
+                        </div>
+                      )}
+                    </span>
+                  )
+                  else verdict = (
+                    <span style={S.bad}>
+                      fix: capacity — trucks ran full at {cap}; budget needs {d.oppsNeeded} at this close rate &amp; ticket
+                      {atTarget != null && atTarget <= cap && (
+                        <div style={{ fontSize: 11, fontWeight: 400, color: 'var(--text-muted)', marginTop: 2 }}>
+                          or: at the {Math.round(d.convTarget * 100)}% target close, ~{atTarget} calls would do it — closing is the cheaper fix
+                        </div>
+                      )}
+                    </span>
+                  )
+                }
                 return [
                   d.trade, String(d.opps), d.oppsNeeded != null ? String(d.oppsNeeded) : '—',
                   cap != null ? String(cap) : '—',
