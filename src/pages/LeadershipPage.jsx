@@ -604,7 +604,7 @@ function LeadershipPageInner() {
               <Card label="LW field labor (true)" value={money(f.labor.estFieldBurdened)}
                 sub={f.labor.source === 'adp' ? `${money(f.labor.actual?.totals?.field?.gross)} gross · ${f.labor.actual?.totals?.field?.n ?? '—'} employees` : `${money(f.labor.impliedCommissions)} commissions + pool + burden`} />
               <Card label="LW office labor" value={money(f.labor.officeWeeklyCost)} sub={f.labor.source === 'adp' ? `${f.labor.actual?.totals?.office?.n ?? '—'} employees` : 'burdened weekly baseline'} />
-              <Card label="LW all-in labor %" value={pct(f.labor.laborPctOfRevenue)} sub="of last week\u2019s revenue" tone={f.labor.laborPctOfRevenue <= 0.36 ? 'good' : 'bad'} />
+              <Card label="LW all-in labor %" value={pct(f.labor.laborPctOfRevenue)} sub="of last week's revenue" tone={f.labor.laborPctOfRevenue <= 0.36 ? 'good' : 'bad'} />
               <Card label="LW hidden pool" value={money(f.labor.hiddenPool)} sub={f.labor.source === 'adp' ? 'actual field gross − job commissions' : 'field pay not tied to a job'} />
             </div>
             {f.labor.source === 'adp' && (f.labor.actual.unmatched || []).length > 0 && (
