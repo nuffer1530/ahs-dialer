@@ -587,7 +587,7 @@ export default function MyPage() {
           <>
             {/* MY SCHEDULE */}
             {tab === 'time-off' && <TimeOffTab profile={profile} />}
-            {tab === 'call-evals' && <CallEvalsTab profile={profile} isAdmin={isAdmin} />}
+            {tab === 'call-evals' && <CallEvalsTab profile={profile} isAdmin={false} />}
             {tab === 'my-schedule' && (
               <div>
                 <div style={{ display:'flex', alignItems:'center', marginBottom:10, gap:10, flexWrap:'wrap' }}>

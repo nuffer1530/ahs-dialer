@@ -785,3 +785,8 @@ create table if not exists leadership_chats (
 );
 create index if not exists leadership_chats_profile_idx on leadership_chats (profile_id, updated_at desc);
 alter table leadership_chats enable row level security;
+
+-- ── Team leadership grants (Aug 2026) ───────────────────────────────────────
+-- Which team(s) a profile leads ('call_center' today; trade teams later).
+-- Gates the Team page for non-admins without granting Settings access.
+alter table profiles add column if not exists leads_teams jsonb default '[]'::jsonb;

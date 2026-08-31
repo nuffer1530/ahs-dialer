@@ -11,12 +11,12 @@ const monthNow = () => {
   return `${p.year}-${p.month}`
 }
 
-export default function CallEvalsTab({ profile, isAdmin }) {
+export default function CallEvalsTab({ profile, isAdmin, defaultView }) {
   const [month, setMonth] = useState(monthNow())
   const [repFilter, setRepFilter] = useState('')
   const [search, setSearch] = useState('')
   const [sortBy, setSortBy] = useState('newest')   // newest | lowest | highest
-  const [view, setView] = useState('list')         // list | snapshots
+  const [view, setView] = useState(defaultView || 'list')   // list | snapshots
   const [snap, setSnap] = useState(null)
   const [snapBusy, setSnapBusy] = useState(false)
 

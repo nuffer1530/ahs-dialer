@@ -25,6 +25,7 @@ import AttendancePage from './AttendancePage'
 import RecordingsPage from './RecordingsPage'
 import MyPage from './MyPage'
 import LeadershipPage from './LeadershipPage'
+import TeamPage from './TeamPage'
 import WinCelebration from '../components/WinCelebration'
 import ScheduleAlerts from '../components/ScheduleAlerts'
 import Avatar from '../components/Avatar'
@@ -176,6 +177,7 @@ const NAV_ITEMS = [
   { to:'/analytics', label:'Analytics', iconKey:'analytics' },
   { to:'/recordings', label:'Recordings', iconKey:'recordings' },
   { to:'/attendance', label:'WFM', iconKey:'wfm', adminOnly:true },
+  { to:'/team', label:'Team', iconKey:'wfm', teamLead:true },
   { to:'/leadership', label:'Leadership', iconKey:'leadership', leaderOnly:true },
   { to:'/notes', label:'Notes', iconKey:'notes' },
   { to:'/warroom', label:'Call Center TV', iconKey:'tv' },
@@ -656,7 +658,7 @@ function DialerLayoutInner() {
 
         {/* Nav links */}
         <div style={{ flex:1, overflowY:'auto', padding:'10px 8px', display:'flex', flexDirection:'column' }}>
-          {NAV_ITEMS.filter(n => (!n.adminOnly || isAdmin) && (!n.dispatchOnly || canDispatch) && (!n.leaderOnly || isLeader)).map(({ to, label, iconKey, end }) => (
+          {NAV_ITEMS.filter(n => (!n.adminOnly || isAdmin) && (!n.dispatchOnly || canDispatch) && (!n.leaderOnly || isLeader) && (!n.teamLead || isAdmin || (profile?.leads_teams || []).length > 0)).map(({ to, label, iconKey, end }) => (
             <NavLink key={to} to={to} end={end} style={navLinkStyle} title={navCollapsed ? label : undefined}
               onMouseEnter={e => { const isActive = e.currentTarget.style.fontWeight === '600'; handleNavHover(e, isActive) }}
               onMouseLeave={e => { const isActive = e.currentTarget.style.fontWeight === '600'; handleNavLeave(e, isActive) }}>
@@ -910,6 +912,7 @@ function DialerLayoutInner() {
           <Route path="/analytics" element={<DashboardPage />} />
           <Route path="/recordings" element={<RecordingsPage />} />
           {isAdmin && <Route path="/attendance" element={<AttendancePage />} />}
+          {(isAdmin || (profile?.leads_teams || []).length > 0) && <Route path="/team" element={<TeamPage />} />}
           {isLeader && <Route path="/leadership" element={<LeadershipPage />} />}
           <Route path="/notes" element={<NotesPage />} />
           <Route path="/warroom" element={<WarRoomPage />} />
