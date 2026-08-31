@@ -1172,10 +1172,16 @@ async function importStBookedJobs() {
     `/jpm/v2/tenant/${ST_TENANT_ID}/jobs?createdOnOrAfter=${encodeURIComponent(since)}&pageSize=500&page=${pg}`, 4000)
   if (!jobs.length) return { imported: 0 }
   const { data: maps } = await supabase.from('csr_st_users').select('profile_id, st_user_id')
-  const { data: profs } = await supabase.from('profiles').select('id, name, email')
+  const { data: profs } = await supabase.from('profiles').select('id, name, email, role')
+  // Admins book jobs while managing the floor — that's not commissionable
+  // CSR work (Brandyn, Aug 30: leave admins off job commissions).
+  const admin = new Set((profs || []).filter(p => p.role === 'admin').map(p => p.id))
   const profOf = new Map((maps || []).map(m => [String(m.st_user_id), m.profile_id]))
   const nameOf = new Map((profs || []).map(p => [p.id, p.name || p.email]))
-  const mine = jobs.filter(j => j.createdById && profOf.has(String(j.createdById)))
+  const mine = jobs.filter(j => {
+    const pid = j.createdById && profOf.get(String(j.createdById))
+    return pid && !admin.has(pid)
+  })
   // Customer names for the payouts screen, batched.
   const custIds = [...new Set(mine.map(j => j.customerId).filter(Boolean))]
   const custName = new Map()
