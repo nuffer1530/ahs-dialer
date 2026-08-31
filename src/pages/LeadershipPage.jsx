@@ -547,18 +547,18 @@ function LeadershipPageInner() {
             <div style={S.sectionTitle}>Company KPIs — week over week</div>
             <Table headers={['KPI', 'This Wk', 'Last Wk', 'Δ', 'Goal']}
               rows={f.kpis.map(k => {
-                const fmtV = (v) => v == null ? '—' : (k.fmt === 'pct' ? pct(v) : String(v))
+                const fmtV = (v) => v == null ? '—' : (k.fmt === 'pct' ? pct(v) : k.fmt === 'money' ? money(v) : String(v))
                 const d = (k.thisWk != null && k.lastWk != null) ? k.thisWk - k.lastWk : null
-                // Green = goal hit, yellow = within 90%, red = clearly missed.
-                const tone = (k.goal && k.thisWk != null)
-                  ? (k.thisWk >= k.goal ? S.good : k.thisWk >= k.goal * 0.9 ? S.warn : S.bad)
-                  : null
+                const hit = k.goal != null && k.thisWk != null && (k.lowerIsBetter ? k.thisWk <= k.goal : k.thisWk >= k.goal)
+                const near = k.goal != null && k.thisWk != null && (k.lowerIsBetter ? k.thisWk <= k.goal * 1.1 : k.thisWk >= k.goal * 0.9)
+                const tone = (k.goal != null && k.thisWk != null) ? (hit ? S.good : near ? S.warn : S.bad) : null
+                const dGood = d != null && (k.lowerIsBetter ? d <= 0 : d >= 0)
                 return [
                   k.kpi,
                   tone ? <span style={{ ...tone, fontWeight: 700 }}>{fmtV(k.thisWk)}</span> : fmtV(k.thisWk),
                   fmtV(k.lastWk),
-                  d == null ? '—' : <span style={d >= 0 ? S.good : S.bad}>{d >= 0 ? '+' : ''}{k.fmt === 'pct' ? `${Math.round(d * 100)}pt` : Math.round(d)}</span>,
-                  k.goal == null ? '—' : `${fmtV(k.goal)} ${k.thisWk != null ? (k.thisWk >= k.goal ? '✓' : '✗') : ''}`,
+                  d == null ? '—' : <span style={dGood ? S.good : S.bad}>{d >= 0 ? '+' : ''}{k.fmt === 'pct' ? `${Math.round(d * 100)}pt` : k.fmt === 'money' ? money(d) : Math.round(d)}</span>,
+                  k.goal == null ? '—' : `${k.lowerIsBetter ? '≤' : ''}${fmtV(k.goal)} ${k.thisWk != null ? (hit ? '✓' : '✗') : ''}`,
                 ]
               })}
             />
