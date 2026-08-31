@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, Component } from 'react'
 import { useAuth } from '../lib/AuthContext'
 import CallEvalsTab from '../components/CallEvalsTab'
 import ScorecardsPanel from '../components/ScorecardsPanel'
@@ -9,6 +9,20 @@ import CommissionReport from '../components/CommissionReport'
 // center; technician teams plug into the same tabs later. Access: admins,
 // or a profile whose leads_teams includes a team (migration-tolerant).
 const TEAMS = [{ id: 'call_center', label: 'Call Center' }]
+
+// A crashed tab must say WHAT crashed, not white-screen the page.
+class TabBoundary extends Component {
+  constructor(p) { super(p); this.state = { err: null } }
+  static getDerivedStateFromError(err) { return { err } }
+  render() {
+    if (this.state.err) return (
+      <div style={{ padding: 30, color: 'var(--danger)', fontSize: 13 }}>
+        This tab hit an error: {String(this.state.err?.message || this.state.err)} — tell Brandyn/Claude.
+      </div>
+    )
+    return this.props.children
+  }
+}
 
 export default function TeamPage() {
   const { profile } = useAuth()
@@ -43,9 +57,9 @@ export default function TeamPage() {
         </span>
       </div>
       <div style={{ flex: 1, overflowY: 'auto', padding: 24, background: 'var(--bg)' }}>
-        {tab === 'coaching' && <CallEvalsTab profile={profile} isAdmin={true} defaultView="snapshots" />}
-        {tab === 'scorecards' && <ScorecardsPanel />}
-        {tab === 'commissions' && <CommissionReport />}
+        {tab === 'coaching' && <TabBoundary><CallEvalsTab profile={profile} isAdmin={true} defaultView="snapshots" /></TabBoundary>}
+        {tab === 'scorecards' && <TabBoundary><ScorecardsPanel /></TabBoundary>}
+        {tab === 'commissions' && <TabBoundary><CommissionReport /></TabBoundary>}
       </div>
     </div>
   )

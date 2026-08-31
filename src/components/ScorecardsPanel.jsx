@@ -5,6 +5,8 @@ import Avatar from './Avatar'
 // Per-CSR monthly scorecards — view, thresholds, manual notes. Lives on the
 // Team page (extracted from AdminPage Aug 2026). Weights/thresholds still
 // persist to app_settings, same keys as always.
+const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December']
+
 export default function ScorecardsPanel() {
   const _now = new Date()
   const [profiles, setProfiles] = useState([])
