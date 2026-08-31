@@ -194,6 +194,7 @@ const PAGE_META = {
   '/analytics':   { title: 'Analytics',             subtitle: 'Performance and pipeline' },
   '/recordings':  { title: 'Recordings',            subtitle: 'Call playback and review' },
   '/attendance':  { title: 'Workforce Management',  subtitle: 'Schedule, adherence, and points' },
+  '/team':        { title: 'Team',                  subtitle: 'Coaching, scorecards, and commissions for your team' },
   '/notes':       { title: 'Notes',                 subtitle: 'Shared team notes' },
   '/warroom':     { title: 'Call Center TV',        subtitle: 'Big-screen floor view' },
   '/mypage':      { title: 'My Page',               subtitle: 'Your schedule, commissions, and scorecard' },
