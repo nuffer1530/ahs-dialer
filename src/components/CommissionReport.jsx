@@ -3,6 +3,35 @@ import { sb } from '../lib/supabase'
 
 // Commission payouts view — team money. Lives on the Team page; Settings
 // keeps only configuration. (Extracted from AdminPage Aug 2026.)
+const RANGES = {
+  week:    { label: 'This week',   days: null },
+  month:   { label: 'This month',  days: null },
+  last30:  { label: 'Last 30 days', days: 30 },
+  last90:  { label: 'Last 90 days', days: 90 },
+  all:     { label: 'All time',    days: null },
+}
+
+const ST_JOB_URL = (jobId) => `https://go.servicetitan.com/#/Job/Index/${jobId}`
+
+function rangeBounds(key) {
+  const now = new Date()
+  if (key === 'week') {
+    const d = now.getDay()
+    const monday = new Date(now)
+    monday.setDate(now.getDate() - (d === 0 ? 6 : d - 1))
+    monday.setHours(0, 0, 0, 0)
+    return { start: monday, end: null }
+  }
+  if (key === 'month') return { start: new Date(now.getFullYear(), now.getMonth(), 1), end: null }
+  if (key === 'all') return { start: new Date(0), end: null }
+  const s = new Date(now)
+  s.setDate(s.getDate() - RANGES[key].days)
+  return { start: s, end: null }
+}
+
+// Editor for the Call Center TV ticker — the scrolling messages/alerts on the
+// wallboard. Stored in app_settings.warroom_ticker; the TV polls it.
+
 export default function CommissionReport() {
   const [range, setRange] = useState('week')
   const [rows, setRows] = useState([])
