@@ -18,7 +18,6 @@ import DashboardPage from './DashboardPage'
 import LivePage from './LivePage'
 import CallBoardPage from './CallBoardPage'
 import DispatchPage from './DispatchPage'
-import NotesPage from './NotesPage'
 import AdminPage from './AdminPage'
 import WarRoomPage from './WarRoomPage'
 import AttendancePage from './AttendancePage'
@@ -179,7 +178,6 @@ const NAV_ITEMS = [
   { to:'/attendance', label:'WFM', iconKey:'wfm', adminOnly:true },
   { to:'/team', label:'Team', iconKey:'wfm', teamLead:true },
   { to:'/leadership', label:'Leadership', iconKey:'leadership', leaderOnly:true },
-  { to:'/notes', label:'Notes', iconKey:'notes' },
   { to:'/warroom', label:'Call Center TV', iconKey:'tv' },
 ]
 
@@ -195,7 +193,6 @@ const PAGE_META = {
   '/recordings':  { title: 'Recordings',            subtitle: 'Call playback and review' },
   '/attendance':  { title: 'Workforce Management',  subtitle: 'Schedule, adherence, and points' },
   '/team':        { title: 'Team',                  subtitle: 'Coaching, scorecards, and commissions for your team' },
-  '/notes':       { title: 'Notes',                 subtitle: 'Shared team notes' },
   '/warroom':     { title: 'Call Center TV',        subtitle: 'Big-screen floor view' },
   '/mypage':      { title: 'My Page',               subtitle: 'Your schedule, commissions, and scorecard' },
   '/settings':    { title: 'Settings',              subtitle: 'Your profile and configuration' },
@@ -915,7 +912,6 @@ function DialerLayoutInner() {
           {isAdmin && <Route path="/attendance" element={<AttendancePage />} />}
           {(isAdmin || (profile?.leads_teams || []).length > 0) && <Route path="/team" element={<TeamPage />} />}
           {isLeader && <Route path="/leadership" element={<LeadershipPage />} />}
-          <Route path="/notes" element={<NotesPage />} />
           <Route path="/warroom" element={<WarRoomPage />} />
           <Route path="/mypage" element={<MyPage />} />
           <Route path="/settings" element={<AdminPage />} />
