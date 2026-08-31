@@ -567,22 +567,35 @@ function LeadershipPageInner() {
           <div style={S.section}>
             <div style={S.sectionTitle}>Opportunities — ran vs needed vs capacity</div>
             <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 8 }}>
-              "Needed" = budget ÷ (actual close rate × actual avg sale). "Capacity" = techs on working shifts that week × the
-              board's calls-per-tech. Short of needed AND under capacity = lead-flow (we had empty truck slots); needed beyond
-              capacity = staffing ceiling — marketing can't fix that part.
+              "Needed" = budget ÷ (this week's actual close rate × average sale) — so a soft closing week INFLATES it.
+              A huge Needed number doesn't mean "get that many calls"; it means the close rate is the real fix.
+              "Capacity" = techs on working shifts that week × the board's calls-per-tech.
             </div>
-            <Table headers={['Dept', 'Ran', 'Needed', 'Capacity', 'Open slots', 'Verdict']}
+            <Table headers={['Dept', 'Ran', 'Needed', 'Capacity', 'Empty truck slots', 'Verdict']}
               rows={f.scorecard.map(d => {
                 const cap = d.oppCapacity
                 const open = cap != null ? Math.max(0, cap - d.opps) : null
+                // Calls needed if the dept closed at TARGET rate instead of
+                // this week's actual — the honest reframe of a scary Needed.
+                const atTarget = (d.convTarget && d.avgSale)
+                  ? Math.ceil(d.budget / (d.convTarget * d.avgSale)) : null
                 let verdict
                 if (d.oppsNeeded == null) verdict = '—'
                 else if (d.opps >= d.oppsNeeded) verdict = d.sales >= d.budget
-                  ? <span style={S.good}>hit it</span>
-                  : <span style={S.bad}>had the opps — conversion</span>
-                else if (cap == null) verdict = <span style={S.bad}>lead-flow gap</span>
-                else if (d.oppsNeeded <= cap) verdict = <span style={S.bad}>lead-flow gap — {Math.min(d.oppsNeeded - d.opps, open)} more fit the trucks</span>
-                else verdict = <span style={S.bad}>staffing ceiling — full trucks max {cap} of {d.oppsNeeded} needed</span>
+                  ? <span style={S.good}>✓ on budget</span>
+                  : <span style={S.bad}>fix: closing — the calls were there</span>
+                else if (cap == null) verdict = <span style={S.bad}>fix: book more calls</span>
+                else if (d.oppsNeeded <= cap) verdict = <span style={S.bad}>fix: book {Math.min(d.oppsNeeded - d.opps, open)} more — trucks had room</span>
+                else verdict = (
+                  <span style={S.bad}>
+                    fix: capacity — trucks max at {cap}; budget needs {d.oppsNeeded} at this close rate &amp; ticket
+                    {atTarget != null && atTarget <= cap && (
+                      <div style={{ fontSize: 11, fontWeight: 400, color: 'var(--text-muted)', marginTop: 2 }}>
+                        or: at the {Math.round(d.convTarget * 100)}% target close, ~{atTarget} calls would do it — closing is the cheaper fix
+                      </div>
+                    )}
+                  </span>
+                )
                 return [
                   d.trade, String(d.opps), d.oppsNeeded != null ? String(d.oppsNeeded) : '—',
                   cap != null ? String(cap) : '—',
