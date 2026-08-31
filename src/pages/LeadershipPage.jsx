@@ -694,11 +694,23 @@ function LeadershipPageInner() {
 
           {/* Marketing */}
           <div style={S.section}>
-            <div style={S.sectionTitle}>Marketing channels (lead calls)</div>
-            <Table headers={['Channel', 'Calls', 'Booked', 'Rate', 'vs last wk']}
+            <div style={S.sectionTitle}>Marketing channels — spend vs return</div>
+            <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 8 }}>
+              Spend comes from ServiceTitan campaign costs, prorated to the week. Revenue = this week's invoices
+              attributed to the channel's jobs. ROAS under 1x in red — that channel spent more than it returned this week.
+            </div>
+            <Table headers={['Channel', 'Spend', 'Leads', 'Booked', 'Rate', 'Jobs', 'Revenue', 'CPL', 'ROAS']}
               rows={f.marketing.map(m => [
-                m.name, String(m.calls), String(m.booked), pct(m.rate),
-                m.deltaCalls === 0 ? '—' : <span style={m.deltaCalls > 0 ? S.good : S.bad}>{m.deltaCalls > 0 ? '+' : ''}{m.deltaCalls}</span>,
+                <span>{m.name}{m.junkPct > 0.5 && m.calls + m.junk >= 5 ? <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 700, color: 'var(--warning)' }} title={`${m.junk} of this channel's inbound calls were not leads`}>⚠ junk</span> : null}</span>,
+                m.spend ? money(m.spend) : '—',
+                String(m.calls),
+                String(m.booked),
+                m.rate == null ? '—' : pct(m.rate),
+                String(m.jobs),
+                m.revenue ? money(m.revenue) : '—',
+                m.cpl != null ? money(m.cpl) : '—',
+                m.roas == null ? '—'
+                  : <span style={{ fontWeight: 700, ...(m.roas >= 3 ? S.good : m.roas >= 1 ? S.warn : S.bad) }}>{m.roas}x</span>,
               ])}
             />
           </div>
