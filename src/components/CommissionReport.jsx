@@ -29,9 +29,6 @@ function rangeBounds(key) {
   return { start: s, end: null }
 }
 
-// Editor for the Call Center TV ticker — the scrolling messages/alerts on the
-// wallboard. Stored in app_settings.warroom_ticker; the TV polls it.
-
 export default function CommissionReport() {
   const [range, setRange] = useState('week')
   const [rows, setRows] = useState([])
