@@ -9062,7 +9062,12 @@ app.post('/api/admin/leadership/payroll', async (req, res) => {
       const { data } = await supabase.from('app_settings').select('value').eq('key', 'labor_burden').maybeSingle()
       rates = { ...REGISTER_BURDEN_DEFAULTS, ...JSON.parse(data?.value || '{}') }
     } catch {}
-    const agg = aggregateAdpActuals(parsed, deptMap, rates)
+    let managerOverrides = []
+    try {
+      const { data } = await supabase.from('app_settings').select('value').eq('key', 'adp_manager_overrides').maybeSingle()
+      managerOverrides = JSON.parse(data?.value || '[]')
+    } catch {}
+    const agg = aggregateAdpActuals(parsed, deptMap, rates, managerOverrides)
     // Merge into the actuals ledger, newest 26 weeks kept.
     let all = {}
     try {
