@@ -262,6 +262,15 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
       const row = shiftChanged(existing, payload) ? { ...payload, published_at: null } : payload
       const { error: pubErr } = await sb.from('schedules').upsert(row, { onConflict: 'profile_id,date' })
       if (pubErr) await sb.from('schedules').upsert(payload, { onConflict: 'profile_id,date' })
+      // Keep local state in step with what was just written — any effect
+      // rebuild between now and the next fetch must see the NEW times, or
+      // dragged blocks snap back to the stale row.
+      setSchedules(prev => {
+        const i = prev.findIndex(x => x.profile_id === profileId)
+        if (i < 0) return [...prev, { ...row }]
+        const next = [...prev]; next[i] = { ...next[i], ...row }
+        return next
+      })
     }
     for (const b of pBlocks.filter(b => ['outbound','meeting'].includes(b.type) && b.dbId)) {
       await sb.from('schedule_blocks').update({ start_interval: b.start, duration_intervals: b.duration }).eq('id', b.dbId)

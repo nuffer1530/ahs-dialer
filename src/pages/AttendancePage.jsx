@@ -482,7 +482,10 @@ export default function AttendancePage() {
   // Admins (Brandyn, Brittany, Deanna) run the schedule; they aren't ON it.
   // Scheduling surfaces — grid, day view, publish/copy/bulk targets — list
   // only non-admins. Points and reports keep the full roster.
-  const schedProfiles = profiles.filter(p => p.role !== 'admin')
+  // Memoized: a fresh array identity every render made GraphicalSchedule's
+  // block-rebuild effect refire after each drag-save and snap blocks back to
+  // its stale local data (Deanna: breaks "bounce back").
+  const schedProfiles = useMemo(() => profiles.filter(p => p.role !== 'admin'), [profiles])
 
   const getSchedule = (profileId, date) => schedules.find(s => s.profile_id === profileId && s.date === date)
   const getEvents = (profileId, date) => statusEvents.filter(e => e.profile_id === profileId && e.started_at.startsWith(date)).sort((a, b) => new Date(a.started_at) - new Date(b.started_at))
