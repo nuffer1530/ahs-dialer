@@ -4,17 +4,32 @@ import { sb } from '../lib/supabase'
 // Commission payouts view — team money. Lives on the Team page; Settings
 // keeps only configuration. (Extracted from AdminPage Aug 2026.)
 const RANGES = {
+  payroll: { label: 'Payroll wk',  days: null },   // last completed Mon–Sun (ADP periods end Sunday)
   week:    { label: 'This week',   days: null },
   month:   { label: 'This month',  days: null },
   last30:  { label: 'Last 30 days', days: 30 },
   last90:  { label: 'Last 90 days', days: 90 },
   all:     { label: 'All time',    days: null },
+  custom:  { label: 'Custom…',     days: null },
 }
 
 const ST_JOB_URL = (jobId) => `https://go.servicetitan.com/#/Job/Index/${jobId}`
 
-function rangeBounds(key) {
+function rangeBounds(key, custom) {
   const now = new Date()
+  if (key === 'payroll') {
+    // Most recent COMPLETED Mon–Sun pay period (ADP P/E dates are Sundays).
+    const end = new Date(now); end.setHours(23, 59, 59, 999)
+    const back = end.getDay() === 0 && now.getHours() >= 23 ? 0 : (end.getDay() === 0 ? 7 : end.getDay())
+    end.setDate(end.getDate() - back)
+    const start = new Date(end); start.setDate(end.getDate() - 6); start.setHours(0, 0, 0, 0)
+    return { start, end }
+  }
+  if (key === 'custom') {
+    const start = custom?.from ? new Date(custom.from + 'T00:00:00') : new Date(0)
+    const end = custom?.to ? new Date(custom.to + 'T23:59:59.999') : null
+    return { start, end }
+  }
   if (key === 'week') {
     const d = now.getDay()
     const monday = new Date(now)
@@ -39,12 +54,17 @@ export default function CommissionReport() {
   const [syncMsg, setSyncMsg] = useState('')
   const [repFilter, setRepFilter] = useState('all')
 
+  const [custom, setCustom] = useState({ from: '', to: '' })
+
   const load = useCallback(async () => {
+    if (range === 'custom' && !custom.from) return   // wait for a date
     setLoading(true)
-    const { start } = rangeBounds(range)
+    const { start, end } = rangeBounds(range, custom)
+    let q = sb.from('commissions').select('*, profiles!profile_id(name, email)')
+      .gte('earned_at', start.toISOString()).order('earned_at', { ascending: false }).limit(2000)
+    if (end) q = q.lte('earned_at', end.toISOString())
     const [{ data: comms }, { data: jt }, { data: mt }] = await Promise.all([
-      sb.from('commissions').select('*, profiles!profile_id(name, email)')
-        .gte('earned_at', start.toISOString()).order('earned_at', { ascending: false }).limit(2000),
+      q,
       sb.from('job_type_spiffs').select('st_job_type_id, name'),
       sb.from('membership_type_spiffs').select('st_membership_type_id, name'),
     ])
@@ -54,7 +74,7 @@ export default function CommissionReport() {
     setJobTypes(jtMap); setMembTypes(mtMap)
     setRows(comms || [])
     setLoading(false)
-  }, [range])
+  }, [range, custom])
 
   useEffect(() => { load() }, [load])
 
@@ -114,8 +134,18 @@ export default function CommissionReport() {
 
           <div style={{ display:'flex', gap:8, flexWrap:'wrap', alignItems:'center' }}>
             {Object.entries(RANGES).map(([k, v]) => (
-              <button key={k} className={`btn sm${range === k ? ' primary' : ''}`} onClick={() => setRange(k)}>{v.label}</button>
+              <button key={k} className={`btn sm${range === k ? ' primary' : ''}`} onClick={() => setRange(k)}
+                title={k === 'payroll' ? 'Last completed Mon–Sun pay period (ADP periods end Sunday)' : undefined}>{v.label}</button>
             ))}
+            {range === 'custom' && (
+              <span style={{ display:'inline-flex', gap:6, alignItems:'center' }}>
+                <input type="date" className="form-input" style={{ width:'auto', fontSize:12, padding:'4px 8px' }}
+                  value={custom.from} onChange={e => setCustom(c => ({ ...c, from: e.target.value }))} />
+                <span style={{ fontSize:12, color:'var(--text-muted)' }}>to</span>
+                <input type="date" className="form-input" style={{ width:'auto', fontSize:12, padding:'4px 8px' }}
+                  value={custom.to} onChange={e => setCustom(c => ({ ...c, to: e.target.value }))} />
+              </span>
+            )}
             <select className="form-input" style={{ width:'auto', marginLeft:8, fontSize:12, padding:'4px 8px' }}
               value={repFilter} onChange={e => setRepFilter(e.target.value)}>
               <option value="all">All reps</option>
