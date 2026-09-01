@@ -70,8 +70,8 @@ export default function CallEvalsTab({ profile, isAdmin, defaultView }) {
     const start = new Date(y, m - 1, 1).toISOString()
     const end = new Date(y, m, 1).toISOString()
     sb.from('call_evaluations').select('*')
-      .gte('created_at', start).lt('created_at', end)
-      .order('created_at', { ascending: false }).limit(500)
+      .gte('call_at', start).lt('call_at', end)
+      .order('call_at', { ascending: false }).limit(500)
       .then(({ data }) => setRows(data || []))
   }, [month])
 
@@ -96,9 +96,9 @@ export default function CallEvalsTab({ profile, isAdmin, defaultView }) {
     String(r.phone || '').includes(q.replace(/\D/g, '') || q) ||
     String(r.summary || '').toLowerCase().includes(q))
   const sorted = [...searched].sort((a, b) =>
-    sortBy === 'lowest' ? (Number(a.pct) - Number(b.pct)) || (new Date(b.created_at) - new Date(a.created_at))
-    : sortBy === 'highest' ? (Number(b.pct) - Number(a.pct)) || (new Date(b.created_at) - new Date(a.created_at))
-    : new Date(b.created_at) - new Date(a.created_at))
+    sortBy === 'lowest' ? (Number(a.pct) - Number(b.pct)) || (new Date(b.call_at || b.created_at) - new Date(a.call_at || a.created_at))
+    : sortBy === 'highest' ? (Number(b.pct) - Number(a.pct)) || (new Date(b.call_at || b.created_at) - new Date(a.call_at || a.created_at))
+    : new Date(b.call_at || b.created_at) - new Date(a.call_at || a.created_at))
   const linkedIds = new Set(rows.map(r => r.profile_id).filter(Boolean))
   const unlinkedNames = [...new Set(rows.filter(r => !r.profile_id && r.rep).map(r => r.rep))].sort()
   const evalCountFor = (pid) => rows.filter(r => r.profile_id === pid).length
@@ -238,7 +238,7 @@ export default function CallEvalsTab({ profile, isAdmin, defaultView }) {
                 )}
               </div>
               <div style={{ fontSize: 11, color: 'var(--text-muted)', flexShrink: 0 }}>
-                {new Date(r.created_at).toLocaleString('en-US', { timeZone: 'America/Denver', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                {new Date(r.call_at || r.created_at).toLocaleString('en-US', { timeZone: 'America/Denver', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
               </div>
             </div>
           ))}

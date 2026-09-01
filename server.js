@@ -3828,7 +3828,7 @@ app.get('/api/admin/csr-coaching', async (req, res) => {
     const startIso = new Date(Date.UTC(y, m - 1, 1)).toISOString()
     const endIso = new Date(Date.UTC(y, m, 1)).toISOString()
     const { data: evals } = await supabase.from('call_evaluations')
-      .select('rep, profile_id, pct, scores, created_at').gte('created_at', startIso).lt('created_at', endIso).limit(3000)
+      .select('rep, profile_id, pct, scores, created_at').gte('call_at', startIso).lt('call_at', endIso).limit(3000)
     const rows = (evals || []).filter(e => e.pct != null)
     const cacheKey = `csr_coaching_${month}`
     if (req.query.refresh !== '1') {
@@ -3986,7 +3986,7 @@ async function evaluateCall({ callSid, recordingSid, duration, e }) {
 
 // The scoring core, shared by the live Andi path (labeled browser transcript)
 // and the nightly ServiceTitan sweep (Whisper transcript, speakers unlabeled).
-async function runEvalScoring({ cfg, transcript, rep, profileId, contactName, contactId, phone, callSid, recordingSid }) {
+async function runEvalScoring({ cfg, transcript, rep, profileId, contactName, contactId, phone, callSid, recordingSid, callAt }) {
   if (!ANTHROPIC_KEY) return
   cfg = cfg || await getEvalCfg()
   const r = await fetch('https://api.anthropic.com/v1/messages', {
@@ -4067,6 +4067,9 @@ async function runEvalScoring({ cfg, transcript, rep, profileId, contactName, co
     phone: phone || null, rep, profile_id: profileId,
     scores: { items, sections, coaching_tip: out.coaching_tip || null },
     earned, possible, pct, summary: out.summary || null,
+    // The day the CALL happened — evals graded at 2 AM must count for the
+    // call's month, not the grading run's (Deanna, Sep 1).
+    call_at: callAt || new Date().toISOString(),
   })
   if (error) { console.warn('call eval save:', error.message); return }
   console.log(`Call eval: ${rep || 'unknown'} scored ${pct}% (${earned}/${possible}) on ${callSid}`)
@@ -4229,6 +4232,7 @@ async function sweepStEvals(dateStr, { limit = Number(process.env.ST_EVAL_MAX) |
         // recording_sid 'st-<id>' → served by /api/st/recording/<id>, so the
         // eval modal can play the call exactly like an Andi-native one.
         callSid: sid, recordingSid: sid,
+        callAt: cand.lc.receivedOn || cand.lc.createdOn || null,
       })
       out.evaluated++
     } catch (e) { out.errors.push(`${cand.lc.id}: ${e.message}`) }
@@ -4337,7 +4341,7 @@ async function syncScorecardMonth(monthsBack) {
   const qaAvg = new Map()
   try {
     const { data: evs } = await supabase.from('call_evaluations').select('profile_id, pct')
-      .not('profile_id', 'is', null).gte('created_at', startIso).lt('created_at', endIso).limit(5000)
+      .not('profile_id', 'is', null).gte('call_at', startIso).lt('call_at', endIso).limit(5000)
     const acc = new Map()
     for (const e of (evs || [])) {
       const a = acc.get(String(e.profile_id)) || { s: 0, n: 0 }
@@ -4446,7 +4450,7 @@ async function syncEvalScorecard(profileId) {
   const month = `${p.year}-${p.month}-01`
   const monthStartUtc = new Date(Date.UTC(+p.year, +p.month - 1, 1, 7)).toISOString()
   const { data: rows } = await supabase.from('call_evaluations')
-    .select('pct').eq('profile_id', profileId).gte('created_at', monthStartUtc).limit(1000)
+    .select('pct').eq('profile_id', profileId).gte('call_at', monthStartUtc).limit(1000)
   if (!rows?.length) return
   const avg = Math.round(rows.reduce((s, r) => s + Number(r.pct || 0), 0) / rows.length)
   const { data: existing } = await supabase.from('scorecard_actuals')
