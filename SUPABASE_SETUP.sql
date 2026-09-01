@@ -790,3 +790,11 @@ alter table leadership_chats enable row level security;
 -- Which team(s) a profile leads ('call_center' today; trade teams later).
 -- Gates the Team page for non-admins without granting Settings access.
 alter table profiles add column if not exists leads_teams jsonb default '[]'::jsonb;
+
+-- ── Eval call-day attribution (Sep 2026) — APPLIED via MCP Sep 1 ────────────
+alter table call_evaluations add column if not exists call_at timestamptz;
+update call_evaluations e set call_at = r.call_started_at
+  from call_recordings r where r.call_sid = e.call_sid and e.call_at is null and r.call_started_at is not null;
+update call_evaluations set call_at = created_at where call_at is null;
+alter table call_evaluations alter column call_at set default now();
+create index if not exists call_evaluations_call_at_idx on call_evaluations (call_at);
