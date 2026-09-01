@@ -708,31 +708,6 @@ function LeadershipPageInner() {
             })()}
           </div>
 
-          {/* Marketing */}
-          <div style={S.section}>
-            <div style={S.sectionTitle}>Marketing channels — spend vs return</div>
-            <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 8 }}>
-              Spend = ServiceTitan campaign costs, prorated to the days elapsed this week. "Leads" counts phone calls
-              only — channels that book online (Angi) show Jobs without Leads. Revenue = this week's invoices traced to
-              the channel's jobs, including older jobs invoicing now (why Tradeshow can show revenue with 0 new jobs).
-              ROAS under 1x in red; judge a channel on a month of weeks, not one.
-            </div>
-            <Table headers={['Channel', 'Spend', 'Leads', 'Booked', 'Rate', 'Jobs', 'Revenue', 'CPL', 'ROAS']}
-              rows={f.marketing.map(m => [
-                <span>{m.name}{m.spend > 0 && m.junkPct > 0.5 && m.calls + m.junk >= 5 ? <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 700, color: 'var(--warning)' }} title={`${m.junk} of this channel's inbound calls were not leads`}>⚠ junk</span> : null}</span>,
-                m.spend ? money(m.spend) : '—',
-                String(m.calls),
-                String(m.booked),
-                m.rate == null ? '—' : pct(m.rate),
-                String(m.jobs),
-                m.revenue ? money(m.revenue) : '—',
-                m.cpl != null ? money(m.cpl) : '—',
-                m.roas == null ? '—'
-                  : <span style={{ fontWeight: 700, ...(m.roas >= 3 ? S.good : m.roas >= 1 ? S.warn : S.bad) }}>{m.roas}x</span>,
-              ])}
-            />
-          </div>
-
           {/* 6-week trend */}
           <div style={S.section}>
             <div style={S.sectionTitle}>6-week sales trend</div>
