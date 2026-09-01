@@ -304,7 +304,9 @@ function LeadershipPageInner() {
   const ai = report?.ai
   // The AI occasionally returns a string where an array belongs — never let
   // that reach .map() (it white-screened the page once).
-  const aiHighlights = [ai?.highlights, ai?.summary].map(v => (Array.isArray(v) ? v : [])).find(v => v.length) || []
+  const aiWins = Array.isArray(ai?.wins) ? ai.wins : []
+  const aiChallenges = Array.isArray(ai?.challenges) ? ai.challenges : []
+  const aiHighlights = (aiWins.length || aiChallenges.length) ? [] : ([ai?.highlights, ai?.summary].map(v => (Array.isArray(v) ? v : [])).find(v => v.length) || [])
   const aiActions = Array.isArray(ai?.actionsByDept) ? ai.actionsByDept.filter(d => d && Array.isArray(d.actions)) : []
   const aiItems = Array.isArray(ai?.actionItems) ? ai.actionItems : []
   const weekLabel = f ? `${f.weekStart} → ${f.weekEnd}` : week
@@ -470,6 +472,18 @@ function LeadershipPageInner() {
           {ai && (
             <div style={{ ...S.section, borderLeft: '4px solid var(--accent)' }}>
               {ai.headline && <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--text-primary)', marginBottom: 10 }}>{ai.headline}</div>}
+              {aiWins.length > 0 && <>
+                <div style={{ ...S.sectionTitle, color: 'var(--success)' }}>Wins</div>
+                {aiWins.map((s, i) => (
+                  <div key={i} style={{ fontSize: 13, lineHeight: 1.7, color: 'var(--text-primary)' }}>✓ {String(s)}</div>
+                ))}
+              </>}
+              {aiChallenges.length > 0 && <>
+                <div style={{ ...S.sectionTitle, marginTop: 12, color: 'var(--danger)' }}>Challenges</div>
+                {aiChallenges.map((s, i) => (
+                  <div key={i} style={{ fontSize: 13, lineHeight: 1.7, color: 'var(--text-primary)' }}>• {String(s)}</div>
+                ))}
+              </>}
               {aiHighlights.length > 0 && <>
                 <div style={S.sectionTitle}>Top highlights</div>
                 {aiHighlights.map((s, i) => (
