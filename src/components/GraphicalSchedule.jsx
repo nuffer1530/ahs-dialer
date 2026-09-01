@@ -1025,7 +1025,7 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
               </div>
             )}
 
-            {shiftForm.day_type === 'work' && (
+            {(shiftForm.day_type === 'work' || shiftForm.day_type === 'half') && (
               <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
                 <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
                   {[['Shift start','shift_start'],['Shift end','shift_end'],['Break 1','break1_start'],['Lunch','lunch_start'],['Break 2','break2_start']].map(([label, key]) => (

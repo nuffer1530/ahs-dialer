@@ -957,6 +957,30 @@ async function syncJobCommissions() {
       // Completed. Price from the completed job's category — job.jobTypeId is
       // authoritative, since the type can be changed after booking.
       const category = catByType[String(job.jobTypeId)]
+
+      // Free estimates pay ONLY IF SOLD (Brittany, Sep 2026 — reverses the
+      // Jul pay-on-completion call). An unsold estimate stays UNSETTLED so a
+      // late sale still pays; after 30 days with no sold estimate it settles
+      // at $0 and stops being polled.
+      if (category === 'free_estimate') {
+        let sold = false
+        try {
+          const est = await stGet(`/sales/v2/tenant/${ST_TENANT_ID}/estimates?jobId=${job.id}&pageSize=50`)
+          sold = (est?.data || []).some(x => (x.status || {}).name === 'Sold')
+        } catch (e) { console.warn('estimate-sold check:', job.id, e.message); continue }
+        if (!sold) {
+          const age = Date.now() - Date.parse(job.completedOn || booking.booked_at || 0)
+          if (age > 30 * 86400_000) {
+            await supabase.from('andi_bookings')
+              .update({ job_status: 'Completed', commission_synced_at: new Date().toISOString() })
+              .eq('st_job_id', job.id)
+          } else {
+            await supabase.from('andi_bookings').update({ job_status: 'Completed' }).eq('st_job_id', job.id)
+          }
+          continue
+        }
+      }
+
       const raw = category == null ? null : payouts[category]
       const amount = raw == null || raw === '' ? null : Number(raw)
 

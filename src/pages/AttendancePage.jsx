@@ -1363,7 +1363,7 @@ export default function AttendancePage() {
               </div>
             </div>
 
-            {(!editData.day_type || editData.day_type === 'work') && (
+            {(!editData.day_type || editData.day_type === 'work' || editData.day_type === 'half') && (
               <>
                 {templates.length > 0 && (
                   <div className="form-field">
