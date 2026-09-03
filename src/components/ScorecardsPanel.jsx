@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react'
 import { sb } from '../lib/supabase'
+import { useAuth } from '../lib/AuthContext'
+import { toast } from '../lib/dialogs'
 import Avatar from './Avatar'
 
 // Per-CSR monthly scorecards — view, thresholds, manual notes. Lives on the
@@ -8,6 +10,7 @@ import Avatar from './Avatar'
 const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December']
 
 export default function ScorecardsPanel() {
+  const { profile } = useAuth()
   const _now = new Date()
   const [profiles, setProfiles] = useState([])
   useEffect(() => {
@@ -111,7 +114,7 @@ export default function ScorecardsPanel() {
         memberships: scActuals.memberships !== '' ? parseInt(scActuals.memberships) : null,
         notes: scNotes,
         weights: scWeights,
-        updated_by: profile.id,
+        updated_by: profile?.id || null,
         updated_at: new Date().toISOString(),
       }, { onConflict: 'profile_id,month' }),
       sb.from('app_settings').upsert(
@@ -125,7 +128,7 @@ export default function ScorecardsPanel() {
     ])
     if (saveError) {
       console.error('Scorecard save error:', saveError.message)
-      setMsg('Error saving: ' + saveError.message)
+      toast('Error saving: ' + saveError.message)
       setScSaving(false)
       return
     }
