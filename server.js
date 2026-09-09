@@ -3854,12 +3854,13 @@ async function tvTechMeta() {
     if (!trade) continue
     // Managers' field accounts carry "(FIELD)" in ST (Dale Chason (FIELD) etc.)
     const isMgr = /\(field\)/i.test(t.name || '')
-    // Table roster = the trade's service/maintenance techs; installers and
-    // managers still count in dept totals and the feed, just not the ranking.
-    const roster = !isMgr && !/install/i.test(buName)
-    byId.set(String(t.id), { name: String(t.name || '').replace(/\s*\(field\)\s*/i, ' ').trim(), trade, roster })
+    const install = /install/i.test(buName)
+    // Service roster = the trade's service/maintenance techs; installers and
+    // managers still count in dept totals and the feed, just not that ranking.
+    const roster = !isMgr && !install
+    byId.set(String(t.id), { name: String(t.name || '').replace(/\s*\(field\)\s*/i, ' ').trim(), trade, roster, install: install && !isMgr })
   }
-  for (const e of emps) if (!byId.has(String(e.id))) byId.set(String(e.id), { name: e.name, trade: null, roster: false })
+  for (const e of emps) if (!byId.has(String(e.id))) byId.set(String(e.id), { name: e.name, trade: null, roster: false, install: false })
   _tvTechMeta = { at: Date.now(), byId }
   return byId
 }
@@ -3917,7 +3918,165 @@ async function tvWindow({ fromIso, invFrom, invTo, revFrom, perTech, capMul = 1 
     d.closeRate = act.size ? d.soldJobs.size / act.size : null
     d.presented = act.size; d.soldJobs = d.soldJobs.size; d.revJobs = d.revJobs.size
   }
-  return { dept, techRow, soldRows, reviews, memberships }
+  return { dept, techRow, soldRows, reviews, memberships, invoices }
+}
+
+// ── Installer ranking (month tier): teams (from app_settings.tv_install_teams)
+// or individual Install-BU techs, scored Efficiency 40 / Callback% 30 (lower
+// better) / Revenue 20 / 5★ 10. Efficiency = promised job-type duration ÷
+// actual ELAPSED on-site time (merged crew clock segments from payroll
+// timesheets), per Brandyn's definition. Callbacks are location-linked to the
+// most recent prior completed install within 90 days (recallForId is unused in
+// this tenant — 2 of 5,373 jobs).
+async function tvBuildInstallers(w, meta, monthStart) {
+  const lookback = new Date(Date.parse(`${monthStart}T00:00:00Z`) - 90 * 864e5).toISOString().slice(0, 10)
+  const [jobTypes, jobs90, tsRows, createdMtd, teamsRow] = await Promise.all([
+    stGet(`/jpm/v2/tenant/${ST_TENANT_ID}/job-types?pageSize=500`).then(d => d?.data || []),
+    stPageAll(pg => `/jpm/v2/tenant/${ST_TENANT_ID}/jobs?completedOnOrAfter=${lookback}T00:00:00Z&pageSize=500&page=${pg}`, 15000),
+    stPageAll(pg => `/payroll/v2/tenant/${ST_TENANT_ID}/jobs/timesheets?createdOnOrAfter=${lookback}T00:00:00Z&pageSize=500&page=${pg}`, 25000),
+    stPageAll(pg => `/jpm/v2/tenant/${ST_TENANT_ID}/jobs?createdOnOrAfter=${tvBounds(monthStart)}&pageSize=500&page=${pg}`, 6000),
+    supabase.from('app_settings').select('value').eq('key', 'tv_install_teams').maybeSingle(),
+  ])
+  const jt = new Map(jobTypes.map(t => [t.id, t]))
+  const isInstallType = (id) => /install/i.test(jt.get(id)?.name || '')
+  const isCallbackType = (id) => /callback|warranty|recall|concern/i.test(jt.get(id)?.name || '')
+
+  // Usable clock segments per job — drop fat-finger zero rows and
+  // forgot-to-close overnights (both common in the raw feed).
+  const segsByJob = new Map()
+  for (const t of tsRows) {
+    if (!t.arrivedOn || !t.doneOn) continue
+    const a = Date.parse(t.arrivedOn), z = Date.parse(t.doneOn)
+    const h = (z - a) / 3600e3
+    if (!(h >= 0.1 && h <= 14)) continue
+    if (!segsByJob.has(t.jobId)) segsByJob.set(t.jobId, [])
+    segsByJob.get(t.jobId).push({ a, z, techId: String(t.technicianId) })
+  }
+  const elapsedHours = (segs) => {
+    const iv = segs.map(s => [s.a, s.z]).sort((x, y) => x[0] - y[0])
+    let total = 0, curS = null, curE = null
+    for (const [s, e] of iv) {
+      if (curE != null && s <= curE) curE = Math.max(curE, e)
+      else { if (curE != null) total += curE - curS; curS = s; curE = e }
+    }
+    if (curE != null) total += curE - curS
+    return total / 3600e3
+  }
+
+  // Entities: configured teams first, then any Install-BU tech not on a team.
+  let teamCfg = {}
+  try { teamCfg = JSON.parse(teamsRow?.data?.value || '{}') } catch {}
+  const nameToId = new Map()
+  for (const [id, m] of meta) if (m.trade) nameToId.set(String(m.name || '').toLowerCase(), id)
+  const entityOfTech = new Map()
+  const entities = new Map()
+  for (const [trade, teams] of Object.entries(teamCfg)) {
+    for (const members of (teams || [])) {
+      const ids = members.map(n => nameToId.get(String(n).toLowerCase())).filter(Boolean)
+      if (!ids.length) continue
+      const key = `team:${trade}:${members.join('+')}`
+      entities.set(key, { name: members.join(' & '), trade, members: new Set(ids) })
+      for (const id of ids) entityOfTech.set(id, key)
+    }
+  }
+  for (const [id, m] of meta) {
+    if (!m.trade || !m.install || entityOfTech.has(id)) continue
+    entities.set(`tech:${id}`, { name: m.name, trade: m.trade, members: new Set([id]) })
+    entityOfTech.set(id, `tech:${id}`)
+  }
+
+  const stat = new Map()
+  const S = (k) => { if (!stat.has(k)) stat.set(k, { prom: 0, act: 0, installs: 0, cb: 0, revenue: 0, fiveStar: 0, jobs: new Set() }); return stat.get(k) }
+
+  const monthStartMs = Date.parse(tvBounds(monthStart))
+  const installJobs = jobs90.filter(j => j.jobStatus === 'Completed' && isInstallType(j.jobTypeId))
+  const instByLoc = new Map()
+  for (const j of installJobs) {
+    if (!instByLoc.has(j.locationId)) instByLoc.set(j.locationId, [])
+    instByLoc.get(j.locationId).push(j)
+  }
+  for (const arr of instByLoc.values()) arr.sort((a, b) => Date.parse(a.completedOn) - Date.parse(b.completedOn))
+
+  // Efficiency + install counts over this month's completed installs.
+  for (const j of installJobs) {
+    if (Date.parse(j.completedOn) < monthStartMs) continue
+    const dur = (jt.get(j.jobTypeId)?.duration || 0) / 3600
+    const segs = segsByJob.get(j.id) || []
+    const hours = segs.length ? elapsedHours(segs) : 0
+    const crew = new Set()
+    for (const s of segs) { const k = entityOfTech.get(s.techId); if (k) crew.add(k) }
+    for (const k of crew) {
+      const r = S(k)
+      r.installs += 1
+      r.jobs.add(j.id)
+      if (dur > 0 && hours > 0) { r.prom += dur; r.act += hours }
+    }
+  }
+
+  // Callbacks created this month, blamed on the causing install's crew.
+  for (const c of createdMtd) {
+    if (!isCallbackType(c.jobTypeId) || !c.locationId) continue
+    const created = Date.parse(c.createdOn)
+    const cands = (instByLoc.get(c.locationId) || []).filter(j => {
+      const t = Date.parse(j.completedOn)
+      return t < created && t >= created - 90 * 864e5
+    })
+    const orig = cands[cands.length - 1]
+    if (!orig) continue
+    const seen = new Set()
+    for (const s of (segsByJob.get(orig.id) || [])) {
+      const k = entityOfTech.get(s.techId)
+      if (k && !seen.has(k)) { seen.add(k); S(k).cb += 1 }
+    }
+  }
+
+  // Revenue: this month's invoices on the entity's install jobs.
+  const jobEntity = new Map()
+  for (const [k, r] of stat) for (const jid of r.jobs) {
+    if (!jobEntity.has(jid)) jobEntity.set(jid, [])
+    jobEntity.get(jid).push(k)
+  }
+  for (const i of (w.invoices || [])) {
+    const ks = jobEntity.get((i.job || {}).id)
+    if (!ks) continue
+    for (const k of ks) stat.get(k).revenue += Number(i.subTotal) || 0
+  }
+
+  for (const r of w.reviews) {
+    if (Number(r.rating || r.reviewRating) < 5) continue
+    const k = entityOfTech.get(String(r.technicianId))
+    if (k) S(k).fiveStar += 1
+  }
+
+  const out = {}; for (const t of Object.values(TV_TRADES)) out[t] = []
+  for (const [k, e] of entities) {
+    const r = stat.get(k)
+    if (!r || !r.installs || !out[e.trade]) continue
+    out[e.trade].push({
+      id: k, name: e.name, installs: r.installs,
+      efficiency: r.act > 0 ? r.prom / r.act : null,
+      callbacks: r.cb,
+      callbackPct: r.installs ? r.cb / r.installs : 0,
+      revenue: Math.round(r.revenue),
+      fiveStar: r.fiveStar,
+    })
+  }
+  for (const t of Object.values(TV_TRADES)) {
+    const rows = out[t]
+    const maxEff = Math.max(0.01, ...rows.map(x => x.efficiency || 0))
+    const maxRev = Math.max(1, ...rows.map(x => x.revenue))
+    const maxFive = Math.max(1, ...rows.map(x => x.fiveStar))
+    const maxCb = Math.max(0.0001, ...rows.map(x => x.callbackPct))
+    for (const x of rows) {
+      x.score = Math.round(100 * (
+        0.40 * ((x.efficiency || 0) / maxEff)
+        + 0.30 * (1 - x.callbackPct / maxCb)
+        + 0.20 * (x.revenue / maxRev)
+        + 0.10 * (x.fiveStar / maxFive)))
+    }
+    rows.sort((a, b) => b.score - a.score)
+  }
+  return out
 }
 
 let _tvDay = { at: 0, data: null }, _tvMonth = { at: 0, data: null }, _tvYear = { at: 0, data: null }
@@ -4022,7 +4181,11 @@ async function tvBuildAll() {
         }
         byTrade[t].sort((a, b) => b.score - a.score)
       }
-      _tvMonth = { at: Date.now(), data: { dept: w.dept, techsByTrade: byTrade } }
+      let installersByTrade = {}
+      try {
+        installersByTrade = await tvBuildInstallers(w, meta, monthStart)
+      } catch (e) { console.warn('tv installers:', e.message) }
+      _tvMonth = { at: Date.now(), data: { dept: w.dept, techsByTrade: byTrade, installersByTrade } }
     }
 
     if (Date.now() - _tvYear.at > 6 * 3600_000) {
@@ -4069,6 +4232,7 @@ app.get('/api/tv/department/:trade', async (req, res) => {
       monthly: pick(month?.dept?.[trade]),
       yearly: pick(_tvYear.data?.dept?.[trade]),
       techs,
+      installers: month?.installersByTrade?.[trade] || [],
       feed: _tvDay.data?.feed?.[trade] || [],
     })
   } catch (e) {
