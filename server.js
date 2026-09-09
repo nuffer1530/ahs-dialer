@@ -3816,6 +3816,271 @@ async function getEvalCfg() {
 // CSR (Brittany: "summarize... so we can at a glance see what they're
 // missing"). Aggregates per-criterion misses, then one AI pass writes the
 // coaching. Cached per month; regenerates when the eval count changes.
+// ── Department TV boards: per-trade wall boards for manager offices ─────────
+// Daily/Monthly/Yearly dept strip + monthly tech ranking (composite) + a
+// dept-specific live feed (sales / 5★ / memberships). ST can't stream, so
+// three cache tiers: today 10 min, month 1 h, year 6 h — one sweep serves
+// all four trades.
+const TV_TRADES = { hvac: 'HVAC', plumbing: 'Plumbing', electrical: 'Electrical', garage: 'Garage Doors' }
+const tvTradeOf = (name) => {
+  const n = (name || '').toLowerCase()
+  if (n.includes('hvac')) return 'HVAC'
+  if (n.includes('plumb')) return 'Plumbing'
+  if (n.includes('electric')) return 'Electrical'
+  if (n.includes('garage')) return 'Garage Doors'
+  return null
+}
+const tvDenverDate = (d = new Date()) => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Denver' }).format(d)
+const tvBounds = (fromDateStr) => {
+  const noon = new Date(`${fromDateStr}T18:00:00Z`)
+  const dh = Number(new Intl.DateTimeFormat('en-US', { timeZone: 'America/Denver', hour: '2-digit', hour12: false }).format(noon))
+  const start = new Date(`${fromDateStr}T00:00:00Z`); start.setUTCHours(18 - dh)
+  return start.toISOString()
+}
+
+let _tvTechMeta = { at: 0, byId: new Map() }   // techId -> { name, trade }
+async function tvTechMeta() {
+  if (Date.now() - _tvTechMeta.at < 6 * 3600_000 && _tvTechMeta.byId.size) return _tvTechMeta.byId
+  const [techs, bus, emps] = await Promise.all([
+    stGet(`/settings/v2/tenant/${ST_TENANT_ID}/technicians?active=true&pageSize=500`).then(d => d?.data || []),
+    stGet(`/settings/v2/tenant/${ST_TENANT_ID}/business-units?pageSize=200`).then(d => d?.data || []),
+    stGet(`/settings/v2/tenant/${ST_TENANT_ID}/employees?active=true&pageSize=500`).then(d => d?.data || []).catch(() => []),
+  ])
+  const buTrade = new Map(bus.map(b => [String(b.id), tvTradeOf(b.name)]))
+  // Ops managers stay off their trade's wall board (same call as scorecards).
+  let mgr = []
+  try {
+    const { data } = await supabase.from('app_settings').select('value').eq('key', 'adp_manager_overrides').maybeSingle()
+    mgr = JSON.parse(data?.value || '[]')
+  } catch {}
+  const mgrKeys = new Set(mgr.map(n => String(n).toLowerCase().replace(/[^a-z]/g, '')))
+  const isMgr = (nm) => {
+    const parts = String(nm || '').toLowerCase().replace(/[^a-z ]/g, '').split(/\s+/).filter(Boolean)
+    return mgrKeys.has([...parts].reverse().join('')) || mgrKeys.has(parts.join(''))
+  }
+  const byId = new Map()
+  for (const t of techs) {
+    const trade = buTrade.get(String(t.businessUnitId))
+    if (trade && !isMgr(t.name)) byId.set(String(t.id), { name: t.name, trade })
+  }
+  for (const e of emps) if (!byId.has(String(e.id))) byId.set(String(e.id), { name: e.name, trade: null })
+  _tvTechMeta = { at: Date.now(), byId }
+  return byId
+}
+
+// One window's pulls, aggregated per trade (+ per tech when asked).
+async function tvWindow({ fromIso, invFrom, invTo, revFrom, perTech, capMul = 1 }) {
+  const safe2 = (p) => p.catch(e => { console.warn('tv window:', e.message); return [] })
+  const [sold, created, invoices, reviews, memberships] = await Promise.all([
+    safe2(stPageAll(pg => `/sales/v2/tenant/${ST_TENANT_ID}/estimates?soldAfter=${fromIso}&pageSize=500&page=${pg}`, 8000 * capMul)),
+    safe2(stPageAll(pg => `/sales/v2/tenant/${ST_TENANT_ID}/estimates?createdOnOrAfter=${fromIso}&pageSize=500&page=${pg}`, 8000 * capMul)),
+    safe2(stPageAll(pg => `/accounting/v2/tenant/${ST_TENANT_ID}/invoices?invoicedOnOrAfter=${invFrom}&invoicedOnBefore=${invTo}&pageSize=500&page=${pg}`, 20000 * capMul)),
+    safe2(stPageAll(pg => `/marketingreputation/v2/tenant/${ST_TENANT_ID}/reviews?fromDate=${revFrom}&pageSize=200&page=${pg}`, 6000 * capMul)),
+    safe2(stPageAll(pg => `/memberships/v2/tenant/${ST_TENANT_ID}/memberships?createdOnOrAfter=${fromIso}&pageSize=500&page=${pg}`, 4000 * capMul)),
+  ])
+  const meta = await tvTechMeta()
+  const mk = () => ({ jobsRan: 0, sales: 0, soldCount: 0, revenue: 0, fiveStar: 0, memberships: 0, presented: new Set(), soldJobs: new Set(), revJobs: new Set() })
+  const dept = {}; for (const t of Object.values(TV_TRADES)) dept[t] = mk()
+  const techRow = new Map()
+  const tr = (id) => { const k = String(id); if (!techRow.has(k)) techRow.set(k, { sold: 0, soldCount: 0, fiveStar: 0, memberships: 0, jobs: new Set(), presented: new Set(), soldJobs: new Set() }); return techRow.get(k) }
+  const soldRows = sold.filter(e => (e.status || {}).name === 'Sold')
+  for (const e of soldRows) {
+    const t = tvTradeOf(e.businessUnitName); if (!t) continue
+    const amt = Number(e.subtotal) || 0
+    dept[t].sales += amt; dept[t].soldCount++
+    if (e.jobId) dept[t].soldJobs.add(e.jobId)
+    if (perTech && e.soldBy) { const r = tr(e.soldBy); r.sold += amt; r.soldCount++; if (e.jobId) r.soldJobs.add(e.jobId) }
+  }
+  for (const e of created) {
+    const t = tvTradeOf(e.businessUnitName); if (!t || !e.jobId) continue
+    dept[t].presented.add(e.jobId)
+  }
+  for (const i of invoices) {
+    const t = tvTradeOf((i.businessUnit || {}).name); if (!t) continue
+    dept[t].revenue += Number(i.subTotal) || 0
+    const jid = (i.job || {}).id; if (jid) dept[t].revJobs.add(jid)
+  }
+  for (const r of reviews) {
+    if (Number(r.rating || r.reviewRating) < 5) continue
+    const m = meta.get(String(r.technicianId))
+    if (m?.trade) { dept[m.trade].fiveStar++; if (perTech) tr(r.technicianId).fiveStar++ }
+  }
+  // Memberships attribute by BU; seller's home trade as fallback.
+  try {
+    const bus = await stGet(`/settings/v2/tenant/${ST_TENANT_ID}/business-units?pageSize=200`).then(d => d?.data || [])
+    const buTrade = new Map(bus.map(b => [String(b.id), tvTradeOf(b.name)]))
+    for (const m2 of memberships) {
+      const t = buTrade.get(String(m2.businessUnitId)) || meta.get(String(m2.soldById))?.trade
+      if (t) dept[t].memberships++
+      if (perTech && m2.soldById) tr(m2.soldById).memberships++
+    }
+  } catch {}
+  for (const t of Object.values(TV_TRADES)) {
+    const d = dept[t]
+    const act = new Set([...d.presented, ...d.soldJobs])
+    d.closeRate = act.size ? d.soldJobs.size / act.size : null
+    d.presented = act.size; d.soldJobs = d.soldJobs.size; d.revJobs = d.revJobs.size
+  }
+  return { dept, techRow, soldRows, reviews, memberships }
+}
+
+let _tvDay = { at: 0, data: null }, _tvMonth = { at: 0, data: null }, _tvYear = { at: 0, data: null }
+let _tvBuilding = false
+
+async function tvBuildAll() {
+  if (_tvBuilding) return
+  _tvBuilding = true
+  try {
+    const today = tvDenverDate()
+    const monthStart = today.slice(0, 8) + '01'
+    const yearStart = today.slice(0, 5) + '01-01'
+    const meta = await tvTechMeta()
+
+    if (Date.now() - _tvDay.at > 10 * 60_000) {
+      const w = await tvWindow({ fromIso: tvBounds(today), invFrom: `${today}T00:00:00Z`, invTo: `${today}T23:59:59Z`, revFrom: today, perTech: false })
+      // Jobs ran today = distinct jobs with a non-canceled appointment today,
+      // trade via the assigned tech's home BU (appointments carry no BU).
+      try {
+        const dayStart = tvBounds(today)
+        const dayEnd = Date.parse(dayStart) + 86400_000
+        const appts = await stPageAll(pg => `/jpm/v2/tenant/${ST_TENANT_ID}/appointments?startsOnOrAfter=${dayStart}&pageSize=500&page=${pg}`, 1500)
+        const todays = appts.filter(a => a.status !== 'Canceled' && Date.parse(a.start) < dayEnd)
+        const ids = todays.map(a => a.id)
+        const byTradeJobs = {}; for (const t of Object.values(TV_TRADES)) byTradeJobs[t] = new Set()
+        for (let i = 0; i < ids.length; i += 50) {
+          const r = await stGet(`/dispatch/v2/tenant/${ST_TENANT_ID}/appointment-assignments?appointmentIds=${ids.slice(i, i + 50).join(',')}&pageSize=200`)
+          for (const a of (r?.data || [])) {
+            const m = meta.get(String(a.technicianId))
+            const appt = todays.find(x => x.id === a.appointmentId)
+            if (m?.trade && appt?.jobId) byTradeJobs[m.trade].add(appt.jobId)
+          }
+        }
+        for (const t of Object.values(TV_TRADES)) w.dept[t].jobsRan = byTradeJobs[t].size
+      } catch (e) { console.warn('tv day jobs:', e.message) }
+      // Live feed: today's wins, per trade.
+      const feed = {}; for (const t of Object.values(TV_TRADES)) feed[t] = []
+      for (const e of w.soldRows) {
+        const t = tvTradeOf(e.businessUnitName); if (!t) continue
+        feed[t].push({ kind: 'sale', at: e.soldOn, who: meta.get(String(e.soldBy))?.name || null, amount: Math.round(Number(e.subtotal) || 0) })
+      }
+      for (const r of w.reviews) {
+        if (Number(r.rating || r.reviewRating) < 5) continue
+        const m = meta.get(String(r.technicianId))
+        if (m?.trade) feed[m.trade].push({ kind: 'review', at: r.publishDate || null, who: m.name, text: r.authorName ? `from ${r.authorName}` : '' })
+      }
+      for (const m2 of w.memberships) {
+        const seller = meta.get(String(m2.soldById))
+        const t = seller?.trade
+        if (t) feed[t].push({ kind: 'membership', at: m2.createdOn, who: seller?.name || null })
+      }
+      for (const t of Object.values(TV_TRADES)) feed[t].sort((a, b) => String(b.at || '').localeCompare(String(a.at || ''))).splice(20)
+      _tvDay = { at: Date.now(), data: { dept: w.dept, feed } }
+    }
+
+    if (Date.now() - _tvMonth.at > 60 * 60_000) {
+      const w = await tvWindow({ fromIso: tvBounds(monthStart), invFrom: `${monthStart}T00:00:00Z`, invTo: `${today}T23:59:59Z`, revFrom: monthStart, perTech: true })
+      // Month tech table needs jobs ran + presented per tech → assignments.
+      try {
+        const appts = await stPageAll(pg => `/jpm/v2/tenant/${ST_TENANT_ID}/appointments?startsOnOrAfter=${tvBounds(monthStart)}&pageSize=500&page=${pg}`, 4000)
+        const ran = appts.filter(a => a.status !== 'Canceled' && Date.parse(a.start) < Date.now())
+        const ids = ran.map(a => a.id)
+        const apptJob = new Map(ran.map(a => [a.id, a.jobId]))
+        const jobsByTrade = {}; for (const t of Object.values(TV_TRADES)) jobsByTrade[t] = new Set()
+        for (let i = 0; i < ids.length; i += 50) {
+          const r = await stGet(`/dispatch/v2/tenant/${ST_TENANT_ID}/appointment-assignments?appointmentIds=${ids.slice(i, i + 50).join(',')}&pageSize=200`)
+          for (const a of (r?.data || [])) {
+            const jid = apptJob.get(a.appointmentId); if (!jid) continue
+            const m = meta.get(String(a.technicianId)); if (!m?.trade) continue
+            jobsByTrade[m.trade].add(jid)
+            const k = String(a.technicianId)
+            if (!w.techRow.has(k)) w.techRow.set(k, { sold: 0, soldCount: 0, fiveStar: 0, memberships: 0, jobs: new Set(), presented: new Set(), soldJobs: new Set() })
+            w.techRow.get(k).jobs.add(jid)
+          }
+        }
+        for (const t of Object.values(TV_TRADES)) w.dept[t].jobsRan = jobsByTrade[t].size
+      } catch (e) { console.warn('tv month jobs:', e.message) }
+      const byTrade = {}; for (const t of Object.values(TV_TRADES)) byTrade[t] = []
+      for (const [id, r] of w.techRow) {
+        const m = meta.get(String(id)); if (!m?.trade) continue
+        byTrade[m.trade].push({
+          id, name: m.name,
+          sold: Math.round(r.sold), soldCount: r.soldCount,
+          jobs: r.jobs.size,
+          avgTicket: r.soldCount ? Math.round(r.sold / r.soldCount) : 0,
+          fiveStar: r.fiveStar, memberships: r.memberships,
+          soldJobs: r.soldJobs.size,
+        })
+      }
+      // Per-tech "close" here is jobs-with-a-sale ÷ jobs run (no per-job
+      // estimate join at this tier) — the UI labels it Sold-job rate.
+      for (const t of Object.values(TV_TRADES)) {
+        for (const x of byTrade[t]) x.closeRate = x.jobs ? x.soldJobs / x.jobs : null
+        const maxSold = Math.max(1, ...byTrade[t].map(x => x.sold))
+        const maxClose = Math.max(0.01, ...byTrade[t].map(x => x.closeRate || 0))
+        const maxMem = Math.max(1, ...byTrade[t].map(x => x.memberships))
+        const maxFive = Math.max(1, ...byTrade[t].map(x => x.fiveStar))
+        for (const x of byTrade[t]) {
+          x.score = Math.round(100 * (
+            0.55 * (x.sold / maxSold) + 0.20 * ((x.closeRate || 0) / maxClose)
+            + 0.15 * (x.memberships / maxMem) + 0.10 * (x.fiveStar / maxFive)))
+        }
+        byTrade[t].sort((a, b) => b.score - a.score)
+      }
+      _tvMonth = { at: Date.now(), data: { dept: w.dept, techsByTrade: byTrade } }
+    }
+
+    if (Date.now() - _tvYear.at > 6 * 3600_000) {
+      const w = await tvWindow({ fromIso: tvBounds(yearStart), invFrom: `${yearStart}T00:00:00Z`, invTo: `${today}T23:59:59Z`, revFrom: yearStart, perTech: true, capMul: 5 })
+      const ytdTech = {}
+      for (const [id, r] of w.techRow) {
+        ytdTech[String(id)] = { sold: Math.round(r.sold), fiveStar: r.fiveStar, memberships: r.memberships }
+      }
+      // Yearly jobs ran ≈ distinct jobs invoiced (appointment sweep for a year is not viable)
+      for (const t of Object.values(TV_TRADES)) w.dept[t].jobsRan = w.dept[t].revJobs
+      _tvYear = { at: Date.now(), data: { dept: w.dept, ytdTech } }
+    }
+  } finally { _tvBuilding = false }
+}
+
+// Keep the tiers warm while any board is actually watching, so a wall TV
+// never waits on a cold multi-minute ST sweep.
+let _tvLastReq = 0
+setInterval(() => {
+  if (Date.now() - _tvLastReq < 30 * 60_000) tvBuildAll().catch(e => console.warn('tv warm:', e.message))
+}, 5 * 60_000)
+
+app.get('/api/tv/department/:trade', async (req, res) => {
+  const me = await requireUser(req, res)
+  if (!me) return
+  const trade = TV_TRADES[String(req.params.trade || '').toLowerCase()]
+  if (!trade) return res.status(400).json({ error: 'trade must be hvac|plumbing|electrical|garage' })
+  try {
+    _tvLastReq = Date.now()
+    // Serve whatever tiers exist after ~20s; the rest fills in on the next poll.
+    await Promise.race([tvBuildAll(), new Promise(r => setTimeout(r, 20_000))])
+    const pick = (d) => d ? {
+      jobsRan: d.jobsRan, sales: Math.round(d.sales), soldCount: d.soldCount,
+      revenue: Math.round(d.revenue), closeRate: d.closeRate, fiveStar: d.fiveStar, memberships: d.memberships,
+    } : null
+    const month = _tvMonth.data
+    const techs = (month?.techsByTrade?.[trade] || []).map(x => ({
+      ...x, ytd: _tvYear.data?.ytdTech?.[String(x.id)] || { sold: 0, fiveStar: 0, memberships: 0 },
+    }))
+    res.json({
+      trade,
+      updatedAt: new Date(Math.min(_tvDay.at || Date.now(), _tvMonth.at || Date.now())).toISOString(),
+      daily: pick(_tvDay.data?.dept?.[trade]),
+      monthly: pick(month?.dept?.[trade]),
+      yearly: pick(_tvYear.data?.dept?.[trade]),
+      techs,
+      feed: _tvDay.data?.feed?.[trade] || [],
+    })
+  } catch (e) {
+    console.error('tv board:', e.message)
+    res.status(500).json({ error: e.message })
+  }
+})
+
 app.get('/api/admin/csr-coaching', async (req, res) => {
   const prof = await requireAdmin(req, res)
   if (!prof) return

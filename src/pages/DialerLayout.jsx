@@ -20,6 +20,7 @@ import CallBoardPage from './CallBoardPage'
 import DispatchPage from './DispatchPage'
 import AdminPage from './AdminPage'
 import WarRoomPage from './WarRoomPage'
+import DeptTVPage from './DeptTVPage'
 import AttendancePage from './AttendancePage'
 import RecordingsPage from './RecordingsPage'
 import MyPage from './MyPage'
@@ -179,6 +180,7 @@ const NAV_ITEMS = [
   { to:'/team', label:'Team', iconKey:'wfm', teamLead:true },
   { to:'/leadership', label:'Leadership', iconKey:'leadership', leaderOnly:true },
   { to:'/warroom', label:'Call Center TV', iconKey:'tv' },
+  { to:'/tv/hvac', label:'Department TV', iconKey:'tv', deptTv:true },
 ]
 
 const MY_PAGE_ITEM = { to:'/mypage', label:'My Page', iconKey:'mypage' }
@@ -277,7 +279,7 @@ function OutboundNudge({ agentStatus }) {
   const { profile } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
-  if (location.pathname === '/' || location.pathname === '/warroom') return null
+  if (location.pathname === '/' || location.pathname === '/warroom' || location.pathname.startsWith('/tv/')) return null
   if (incomingCall || callStatus) return null
   if (agentStatus !== 'Available') return null
   if (!(Array.isArray(profile?.active_campaign_ids) && profile.active_campaign_ids.length)) return null
@@ -656,7 +658,7 @@ function DialerLayoutInner() {
 
         {/* Nav links */}
         <div style={{ flex:1, overflowY:'auto', padding:'10px 8px', display:'flex', flexDirection:'column' }}>
-          {NAV_ITEMS.filter(n => (!n.adminOnly || isAdmin) && (!n.dispatchOnly || canDispatch) && (!n.leaderOnly || isLeader) && (!n.teamLead || isAdmin || (profile?.leads_teams || []).length > 0)).map(({ to, label, iconKey, end }) => (
+          {NAV_ITEMS.filter(n => (!n.adminOnly || isAdmin) && (!n.dispatchOnly || canDispatch) && (!n.leaderOnly || isLeader) && (!n.teamLead || isAdmin || (profile?.leads_teams || []).length > 0) && (!n.deptTv || isAdmin || canDispatch || (profile?.leads_teams || []).length > 0)).map(({ to, label, iconKey, end }) => (
             <NavLink key={to} to={to} end={end} style={navLinkStyle} title={navCollapsed ? label : undefined}
               onMouseEnter={e => { const isActive = e.currentTarget.style.fontWeight === '600'; handleNavHover(e, isActive) }}
               onMouseLeave={e => { const isActive = e.currentTarget.style.fontWeight === '600'; handleNavLeave(e, isActive) }}>
@@ -797,9 +799,9 @@ function DialerLayoutInner() {
           </div>
         )}
         {/* Top bar — reserves its own height; hidden on the War Room (full-screen TV) route */}
-        {location.pathname !== '/warroom' && <AskAndi />}
+        {location.pathname !== '/warroom' && !location.pathname.startsWith('/tv/') && <AskAndi />}
         <DialogHost />
-        {location.pathname !== '/warroom' && (
+        {location.pathname !== '/warroom' && !location.pathname.startsWith('/tv/') && (
         <div style={{ height:53, minHeight:53, boxSizing:'border-box', flexShrink:0, borderBottom:'1px solid var(--border)', background:'var(--surface)', display:'flex', alignItems:'center', justifyContent:'space-between', padding:'0 16px', position:'relative', zIndex:100 }}>
           {isMobile && (
             <button onClick={() => setMobileNav(v => !v)} title="Menu"
@@ -913,6 +915,7 @@ function DialerLayoutInner() {
           {(isAdmin || (profile?.leads_teams || []).length > 0) && <Route path="/team" element={<TeamPage />} />}
           {isLeader && <Route path="/leadership" element={<LeadershipPage />} />}
           <Route path="/warroom" element={<WarRoomPage />} />
+          <Route path="/tv/:trade" element={<DeptTVPage />} />
           <Route path="/mypage" element={<MyPage />} />
           <Route path="/settings" element={<AdminPage />} />
         </Routes>
