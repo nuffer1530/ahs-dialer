@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { useAuth } from '../lib/AuthContext'
+import { sb } from '../lib/supabase'
 import { useDailyReload } from '../lib/useDailyReload'
 
 // Department TV board — one per trade, hung in each manager's office.
@@ -72,7 +72,6 @@ const FEED_STYLE = {
 export default function DeptTVPage() {
   const { trade: tradeParam } = useParams()
   const navigate = useNavigate()
-  const { session } = useAuth()
   const trade = TRADES.find(t => t.key === tradeParam) || TRADES[0]
 
   const [data, setData] = useState(null)
@@ -83,15 +82,17 @@ export default function DeptTVPage() {
   useDailyReload()
 
   const load = useCallback(async () => {
-    if (!session?.access_token) return
     try {
+      // useAuth exposes user/profile but not the session — get the token here.
+      const { data: { session } } = await sb.auth.getSession()
+      if (!session?.access_token) throw new Error('no session')
       const r = await fetch(`/api/tv/department/${trade.key}`, { headers: { Authorization: `Bearer ${session.access_token}` } })
       if (!r.ok) throw new Error(`HTTP ${r.status}`)
       const j = await r.json()
       setData(j); setErr(null)
       return j
     } catch (e) { setErr(e.message); return null }
-  }, [trade.key, session?.access_token])
+  }, [trade.key])
 
   useEffect(() => { setData(null); load() }, [load])
   useEffect(() => {
