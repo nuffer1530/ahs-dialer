@@ -123,7 +123,7 @@ export default function DeptTVPage() {
   const techs = data?.techs || []
   // Bold each column's best — "a bold on the numbers who are the highest".
   const maxes = useMemo(() => {
-    const cols = ['score','sold','soldCount','jobs','avgTicket','closeRate','fiveStar','memberships']
+    const cols = ['score','sold','avgTicket','closeRate','fiveStar','memberships']
     const m = {}
     for (const c of cols) m[c] = Math.max(0, ...techs.map(x => Number(x[c]) || 0))
     m.ytdSold = Math.max(0, ...techs.map(x => Number(x.ytd?.sold) || 0))
@@ -208,10 +208,8 @@ export default function DeptTVPage() {
                   {th('Technician', false)}
                   {th('Score')}
                   {th('Sold')}
-                  {th('Sales')}
-                  {th('Jobs')}
                   {th('Avg ticket')}
-                  {th('Sold-job %')}
+                  {th('Close rate')}
                   {th('5★')}
                   {th('Clubs')}
                   {th('YTD sold')}
@@ -226,8 +224,6 @@ export default function DeptTVPage() {
                     <td style={{ padding:'10px 12px', fontWeight:700, fontSize:15, whiteSpace:'nowrap' }}>{x.name}</td>
                     {cell(x.score, x.score === maxes.score && maxes.score > 0, fmtN, trade.color)}
                     {cell(x.sold, x.sold === maxes.sold && maxes.sold > 0, fmtMoney, C.green)}
-                    {cell(x.soldCount, x.soldCount === maxes.soldCount && maxes.soldCount > 0)}
-                    {cell(x.jobs, x.jobs === maxes.jobs && maxes.jobs > 0)}
                     {cell(x.avgTicket, x.avgTicket === maxes.avgTicket && maxes.avgTicket > 0, fmtMoney)}
                     {cell(x.closeRate, x.closeRate === maxes.closeRate && maxes.closeRate > 0, fmtPct, C.amber)}
                     {cell(x.fiveStar, x.fiveStar === maxes.fiveStar && maxes.fiveStar > 0, fmtN, C.amber)}
@@ -238,7 +234,7 @@ export default function DeptTVPage() {
                   </tr>
                 ))}
                 {!techs.length && (
-                  <tr><td colSpan={13} style={{ padding:24, textAlign:'center', color:C.dim, fontSize:13 }}>
+                  <tr><td colSpan={11} style={{ padding:24, textAlign:'center', color:C.dim, fontSize:13 }}>
                     {data ? 'No tech activity yet this month.' : 'Loading the month…'}
                   </td></tr>
                 )}

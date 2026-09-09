@@ -3838,7 +3838,7 @@ const tvBounds = (fromDateStr) => {
   return start.toISOString()
 }
 
-let _tvTechMeta = { at: 0, byId: new Map() }   // techId -> { name, trade }
+let _tvTechMeta = { at: 0, byId: new Map() }   // techId -> { name, trade, roster }
 async function tvTechMeta() {
   if (Date.now() - _tvTechMeta.at < 6 * 3600_000 && _tvTechMeta.byId.size) return _tvTechMeta.byId
   const [techs, bus, emps] = await Promise.all([
@@ -3846,24 +3846,20 @@ async function tvTechMeta() {
     stGet(`/settings/v2/tenant/${ST_TENANT_ID}/business-units?pageSize=200`).then(d => d?.data || []),
     stGet(`/settings/v2/tenant/${ST_TENANT_ID}/employees?active=true&pageSize=500`).then(d => d?.data || []).catch(() => []),
   ])
-  const buTrade = new Map(bus.map(b => [String(b.id), tvTradeOf(b.name)]))
-  // Ops managers stay off their trade's wall board (same call as scorecards).
-  let mgr = []
-  try {
-    const { data } = await supabase.from('app_settings').select('value').eq('key', 'adp_manager_overrides').maybeSingle()
-    mgr = JSON.parse(data?.value || '[]')
-  } catch {}
-  const mgrKeys = new Set(mgr.map(n => String(n).toLowerCase().replace(/[^a-z]/g, '')))
-  const isMgr = (nm) => {
-    const parts = String(nm || '').toLowerCase().replace(/[^a-z ]/g, '').split(/\s+/).filter(Boolean)
-    return mgrKeys.has([...parts].reverse().join('')) || mgrKeys.has(parts.join(''))
-  }
+  const buById = new Map(bus.map(b => [String(b.id), b.name || '']))
   const byId = new Map()
   for (const t of techs) {
-    const trade = buTrade.get(String(t.businessUnitId))
-    if (trade && !isMgr(t.name)) byId.set(String(t.id), { name: t.name, trade })
+    const buName = buById.get(String(t.businessUnitId)) || ''
+    const trade = tvTradeOf(buName)
+    if (!trade) continue
+    // Managers' field accounts carry "(FIELD)" in ST (Dale Chason (FIELD) etc.)
+    const isMgr = /\(field\)/i.test(t.name || '')
+    // Table roster = the trade's service/maintenance techs; installers and
+    // managers still count in dept totals and the feed, just not the ranking.
+    const roster = !isMgr && !/install/i.test(buName)
+    byId.set(String(t.id), { name: String(t.name || '').replace(/\s*\(field\)\s*/i, ' ').trim(), trade, roster })
   }
-  for (const e of emps) if (!byId.has(String(e.id))) byId.set(String(e.id), { name: e.name, trade: null })
+  for (const e of emps) if (!byId.has(String(e.id))) byId.set(String(e.id), { name: e.name, trade: null, roster: false })
   _tvTechMeta = { at: Date.now(), byId }
   return byId
 }
@@ -4001,7 +3997,7 @@ async function tvBuildAll() {
       } catch (e) { console.warn('tv month jobs:', e.message) }
       const byTrade = {}; for (const t of Object.values(TV_TRADES)) byTrade[t] = []
       for (const [id, r] of w.techRow) {
-        const m = meta.get(String(id)); if (!m?.trade) continue
+        const m = meta.get(String(id)); if (!m?.trade || !m.roster) continue
         byTrade[m.trade].push({
           id, name: m.name,
           sold: Math.round(r.sold), soldCount: r.soldCount,
@@ -4011,8 +4007,8 @@ async function tvBuildAll() {
           soldJobs: r.soldJobs.size,
         })
       }
-      // Per-tech "close" here is jobs-with-a-sale ÷ jobs run (no per-job
-      // estimate join at this tier) — the UI labels it Sold-job rate.
+      // Per-tech close rate = jobs-with-a-sale ÷ jobs run (no per-job
+      // estimate join at this tier; Brandyn wants it shown as Close rate).
       for (const t of Object.values(TV_TRADES)) {
         for (const x of byTrade[t]) x.closeRate = x.jobs ? x.soldJobs / x.jobs : null
         const maxSold = Math.max(1, ...byTrade[t].map(x => x.sold))
