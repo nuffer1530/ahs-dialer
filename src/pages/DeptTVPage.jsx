@@ -45,6 +45,19 @@ function Stat({ label, value, color = C.text, big }) {
   )
 }
 
+// Gold / silver / bronze chips for the podium; plain dim number below that.
+const MEDALS = ['#F0B429', '#B8BEC7', '#CD7F32']
+function RankBadge({ i }) {
+  const medal = MEDALS[i]
+  if (!medal) return <span style={{ color:C.dim, fontWeight:800, fontSize:15 }}>{i + 1}</span>
+  return (
+    <span style={{ display:'inline-flex', alignItems:'center', justifyContent:'center', width:26, height:26, borderRadius:'50%',
+      background:`${medal}1F`, border:`1.5px solid ${medal}`, color:medal, fontWeight:800, fontSize:13, boxShadow:`0 0 10px ${medal}33` }}>
+      {i + 1}
+    </span>
+  )
+}
+
 function PeriodPanel({ title, d, accent }) {
   return (
     <div style={{ background:C.panel, border:`1px solid ${C.border}`, borderTop:`3px solid ${accent}`, borderRadius:14, padding:'14px 18px', minWidth:0 }}>
@@ -122,7 +135,11 @@ export default function DeptTVPage() {
     else rootRef.current?.requestFullscreen?.()
   }
 
-  const techs = data?.techs || []
+  // Company board shows the top 10 service techs; trade boards show everyone.
+  const techs = useMemo(() => {
+    const all = data?.techs || []
+    return trade.key === 'company' ? all.slice(0, 10) : all
+  }, [data, trade.key])
   const installers = data?.installers || []
   // Installer bests: highest wins everywhere except callback %, where lowest wins.
   const instBest = useMemo(() => ({
@@ -209,7 +226,9 @@ export default function DeptTVPage() {
         <div style={{ flex:1, minWidth:0, display:'flex', flexDirection:'column', gap:14 }}>
         <div style={{ flex:3, background:C.panel, border:`1px solid ${C.border}`, borderRadius:14, overflow:'hidden', display:'flex', flexDirection:'column', minWidth:0, minHeight:0 }}>
           <div style={{ padding:'13px 18px', borderBottom:`1px solid ${C.border}`, display:'flex', alignItems:'baseline', gap:10, flexShrink:0 }}>
-            <span style={{ fontSize:13, fontWeight:700, letterSpacing:.5 }}>Service ranking — {time.toLocaleDateString([], { month:'long' })}</span>
+            <span style={{ fontSize:13, fontWeight:700, letterSpacing:.5 }}>
+              {trade.key === 'company' ? 'Top 10 service techs' : 'Service ranking'} — {time.toLocaleDateString([], { month:'long' })}
+            </span>
             <span style={{ fontSize:11, color:C.dim }}>ranked by composite score · bold = best in column</span>
           </div>
           <div style={{ flex:1, overflow:'auto' }}>
@@ -232,7 +251,7 @@ export default function DeptTVPage() {
               <tbody>
                 {techs.map((x, i) => (
                   <tr key={x.id} style={{ borderBottom:`1px solid ${C.border}`, background: i === 0 ? `${trade.color}14` : 'transparent' }}>
-                    <td style={{ padding:'10px 12px', color: i === 0 ? trade.color : C.dim, fontWeight:800, fontSize:15 }}>{i + 1}</td>
+                    <td style={{ padding:'8px 12px' }}><RankBadge i={i} /></td>
                     <td style={{ padding:'10px 12px', fontWeight:700, fontSize:15, whiteSpace:'nowrap' }}>
                       {x.name}
                       {x.trade && <span style={{ marginLeft:8, fontSize:10, fontWeight:800, letterSpacing:.8, color:C.dim }}>{TRADE_SHORT[x.trade] || x.trade}</span>}
@@ -281,7 +300,7 @@ export default function DeptTVPage() {
               <tbody>
                 {installers.map((x, i) => (
                   <tr key={x.id} style={{ borderBottom:`1px solid ${C.border}`, background: i === 0 ? `${trade.color}14` : 'transparent' }}>
-                    <td style={{ padding:'10px 12px', color: i === 0 ? trade.color : C.dim, fontWeight:800, fontSize:15 }}>{i + 1}</td>
+                    <td style={{ padding:'8px 12px' }}><RankBadge i={i} /></td>
                     <td style={{ padding:'10px 12px', fontWeight:700, fontSize:15, whiteSpace:'nowrap' }}>
                       {x.name}
                       {x.trade && <span style={{ marginLeft:8, fontSize:10, fontWeight:800, letterSpacing:.8, color:C.dim }}>{TRADE_SHORT[x.trade] || x.trade}</span>}
