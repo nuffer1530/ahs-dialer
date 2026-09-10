@@ -4111,18 +4111,40 @@ async function tvBuildInstallers(w, meta, monthStart) {
 }
 
 let _tvDay = { at: 0, data: null }, _tvMonth = { at: 0, data: null }, _tvYear = { at: 0, data: null }
-let _tvBuilding = false
+let _tvDayBusy = false, _tvSlowBusy = false, _tvPersistLoaded = false
 
-async function tvBuildAll() {
-  if (_tvBuilding) return
-  _tvBuilding = true
+// Month/year tiers survive deploys via app_settings. A restart used to force
+// a full YTD resweep, and the single build lock meant the day tier couldn't
+// refresh until that slow sweep finished — boards read "updated 40 min ago"
+// on a deploy-heavy morning (Brandyn's catch). Now the day tier builds
+// independently and the slow tiers reload from the persisted cache instead
+// of resweeping ST.
+async function tvLoadPersisted() {
+  if (_tvPersistLoaded) return
+  _tvPersistLoaded = true
+  try {
+    const { data } = await supabase.from('app_settings').select('key, value').in('key', ['tv_month_cache', 'tv_year_cache'])
+    for (const row of (data || [])) {
+      const v = JSON.parse(row.value || 'null')
+      if (!v?.at || !v?.data) continue
+      if (row.key === 'tv_month_cache' && Date.now() - v.at < 60 * 60_000 && !_tvMonth.data) _tvMonth = v
+      if (row.key === 'tv_year_cache' && Date.now() - v.at < 6 * 3600_000 && !_tvYear.data) _tvYear = v
+    }
+  } catch (e) { console.warn('tv persist load:', e.message) }
+}
+async function tvPersist(key, tier) {
+  try {
+    await supabase.from('app_settings').upsert({ key, value: JSON.stringify(tier) }, { onConflict: 'key' })
+  } catch (e) { console.warn('tv persist save:', e.message) }
+}
+
+async function tvBuildDay() {
+  if (_tvDayBusy || Date.now() - _tvDay.at <= 10 * 60_000) return
+  _tvDayBusy = true
   try {
     const today = tvDenverDate()
-    const monthStart = today.slice(0, 8) + '01'
-    const yearStart = today.slice(0, 5) + '01-01'
     const meta = await tvTechMeta()
-
-    if (Date.now() - _tvDay.at > 10 * 60_000) {
+    {
       const w = await tvWindow({ fromIso: tvBounds(today), invFrom: `${today}T00:00:00Z`, invTo: `${today}T23:59:59Z`, revFrom: today, perTech: false })
       // Jobs ran today = distinct jobs with a non-canceled appointment today,
       // trade via the assigned tech's home BU (appointments carry no BU).
@@ -4166,6 +4188,17 @@ async function tvBuildAll() {
       for (const t of Object.values(TV_TRADES)) feed[t].sort((a, b) => String(b.at || '').localeCompare(String(a.at || ''))).splice(20)
       _tvDay = { at: Date.now(), data: { dept: w.dept, feed } }
     }
+  } finally { _tvDayBusy = false }
+}
+
+async function tvBuildSlow() {
+  if (_tvSlowBusy) return
+  _tvSlowBusy = true
+  try {
+    const today = tvDenverDate()
+    const monthStart = today.slice(0, 8) + '01'
+    const yearStart = today.slice(0, 5) + '01-01'
+    const meta = await tvTechMeta()
 
     if (Date.now() - _tvMonth.at > 60 * 60_000) {
       const w = await tvWindow({ fromIso: tvBounds(monthStart), invFrom: `${monthStart}T00:00:00Z`, invTo: `${today}T23:59:59Z`, revFrom: monthStart, perTech: true })
@@ -4229,6 +4262,7 @@ async function tvBuildAll() {
         installersByTrade = await tvBuildInstallers(w, meta, monthStart)
       } catch (e) { console.warn('tv installers:', e.message) }
       _tvMonth = { at: Date.now(), data: { dept: w.dept, techsByTrade: byTrade, installersByTrade } }
+      await tvPersist('tv_month_cache', _tvMonth)
     }
 
     if (Date.now() - _tvYear.at > 6 * 3600_000) {
@@ -4240,8 +4274,15 @@ async function tvBuildAll() {
       // Yearly jobs ran ≈ distinct jobs invoiced (appointment sweep for a year is not viable)
       for (const t of Object.values(TV_TRADES)) w.dept[t].jobsRan = w.dept[t].revJobs
       _tvYear = { at: Date.now(), data: { dept: w.dept, ytdTech } }
+      await tvPersist('tv_year_cache', _tvYear)
     }
-  } finally { _tvBuilding = false }
+  } finally { _tvSlowBusy = false }
+}
+
+async function tvBuildAll() {
+  await tvLoadPersisted()
+  // Day tier is what viewers watch — it must never wait on a slow YTD sweep.
+  await Promise.all([tvBuildDay(), tvBuildSlow()])
 }
 
 // Keep the tiers warm while any board is actually watching, so a wall TV
@@ -4317,7 +4358,9 @@ app.get('/api/tv/department/:trade', async (req, res) => {
     }))
     res.json({
       trade: isCompany ? 'Company' : trade,
-      updatedAt: new Date(Math.min(_tvDay.at || Date.now(), _tvMonth.at || Date.now())).toISOString(),
+      // The stamp tracks the DAY tier — that's what a wall viewer means by
+      // "updated". Month/year age on their own schedules (1h / 6h).
+      updatedAt: new Date(_tvDay.at || Date.now()).toISOString(),
       daily: isCompany ? sumDept(_tvDay.data?.dept) : pick(_tvDay.data?.dept?.[trade]),
       monthly: isCompany ? sumDept(month?.dept) : pick(month?.dept?.[trade]),
       yearly: isCompany ? sumDept(_tvYear.data?.dept) : pick(_tvYear.data?.dept?.[trade]),
