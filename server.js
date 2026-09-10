@@ -225,6 +225,30 @@ async function stPatch(path, body, _retry = true) {
   return res.json()
 }
 
+async function stPut(path, body, _retry = true) {
+  const token = await getSTToken()
+  let res
+  try {
+    res = await fetchWithTimeout(`${ST_API_BASE}${path}`, {
+      method: 'PUT',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'ST-App-Key': process.env.ST_APP_KEY,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    })
+  } catch (e) {
+    if (_retry) return stPut(path, body, false)   // PUT is idempotent — retry is safe
+    throw new Error(e.name === 'AbortError' ? `ST PUT ${path} timed out` : `ST PUT ${path} network error: ${e.message}`)
+  }
+  if (!res.ok) {
+    const err = await res.text()
+    throw new Error(`ST PUT ${path} failed: ${err}`)
+  }
+  return res.json()
+}
+
 // ── ST: Add note to customer record (via primary location)
 app.post('/api/st/note', async (req, res) => {
   try {
@@ -4737,6 +4761,165 @@ async function stGetBinary(path) {
   return Buffer.from(await r.arrayBuffer())
 }
 
+// ── ST disposition sweep ────────────────────────────────────────────────────
+// Nightly, Brandyn-approved (Sep 9): listen to every answered Unbooked call
+// from the day and correct the disposition in ServiceTitan — non-leads
+// (solicitors, vendors, wrong numbers, existing-job logistics) flip to
+// Excused; calls where an appointment was actually scheduled flip to Booked;
+// REAL unbooked leads are left alone so booking % stays honest. Every change
+// is logged to st_disposition_log (UNIQUE call_id = a call is judged once,
+// ever) and surfaced in the morning digest for audit.
+async function sweepStDispositions(dateStr, { limit = Number(process.env.ST_DISPO_MAX) || 80 } = {}) {
+  const out = { date: dateStr, candidates: 0, changed: 0, booked: 0, excused: 0, leftAlone: 0, lowConfidence: 0, noAudio: 0, errors: [] }
+  if (!OPENAI_KEY || !ANTHROPIC_KEY) { out.errors.push('missing OPENAI/ANTHROPIC key'); return out }
+
+  const calls = await stPageAll(pg =>
+    `/telecom/v2/tenant/${ST_TENANT_ID}/calls?createdOnOrAfter=${dateStr}T06:00:00Z&createdBefore=${nextDayStr(dateStr)}T06:00:00Z&pageSize=500&page=${pg}`, 3000)
+
+  const cands = []
+  for (const c of (calls || [])) {
+    const lc = c.leadCall || c
+    if ((lc.direction || '') !== 'Inbound') continue
+    if (lc.callType !== 'Unbooked') continue            // Booked calls are never second-guessed
+    if (/dispatch/i.test((lc.campaign || {}).name || '')) continue
+    const dur = stDurSec(lc.duration)
+    if (dur == null || dur < 20) continue               // too short to classify
+    cands.push({ lc, dur })
+  }
+  out.candidates = cands.length
+  if (!cands.length) return out
+
+  // A call is judged once, ever — skip anything already in the log.
+  const ids = cands.map(x => x.lc.id)
+  const judged = new Set()
+  for (let i = 0; i < ids.length; i += 100) {
+    const { data } = await supabase.from('st_disposition_log').select('call_id').in('call_id', ids.slice(i, i + 100))
+    for (const r of (data || [])) judged.add(Number(r.call_id))
+  }
+
+  // Reuse transcripts the eval pipeline already made (registry rows st-<id>).
+  const sids = ids.map(id => `st-${id}`)
+  const transcriptOf = new Map()
+  for (let i = 0; i < sids.length; i += 100) {
+    const { data } = await supabase.from('call_recordings').select('recording_sid, transcript').in('recording_sid', sids.slice(i, i + 100))
+    for (const r of (data || [])) if (r.transcript && r.transcript.length > 80 && !r.transcript.startsWith('[')) transcriptOf.set(r.recording_sid, r.transcript)
+  }
+
+  let judgedCount = 0
+  for (const cand of cands) {
+    const lc = cand.lc
+    if (judged.has(lc.id)) continue
+    if (judgedCount >= limit) { out.errors.push(`daily cap ${limit} reached`); break }
+    try {
+      let text = transcriptOf.get(`st-${lc.id}`)
+      if (!text) {
+        const rec = await stGetBinary(`/telecom/v2/tenant/${ST_TENANT_ID}/calls/${lc.id}/recording`)
+        if (!rec || rec.byteLength < 8000) { out.noAudio++; continue }
+        text = await openaiTranscribe(rec)
+        if (!text || text.length < 80) { out.noAudio++; continue }
+        // Keep the transcript on the registry row so nothing transcribes twice.
+        supabase.from('call_recordings').update({ transcript: text }).eq('recording_sid', `st-${lc.id}`)
+          .then(() => {}, () => {})
+      }
+      judgedCount++
+      const r = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+        body: JSON.stringify({
+          model: 'claude-sonnet-5', max_tokens: 600,
+          system: `You classify inbound phone calls for Awesome Home Services (HVAC/plumbing/electrical/garage doors, Colorado Springs) so their call dispositions are accurate. The call is currently marked "Unbooked". Classify STRICTLY from the transcript:
+- "booked": an appointment or job visit was actually scheduled ON THIS CALL (a day/time window was agreed). A promise to call back later is NOT booked.
+- "not_lead": not a sales opportunity at all — solicitors/marketers/vendors, wrong numbers, job-status or scheduling logistics on an EXISTING job (customer asking where the tech is, tech/vendor coordination, reschedules of already-booked work), recruiting/employment, permit/inspector/supplier calls, obvious spam or robocalls.
+- "unbooked_lead": a genuine potential customer with a service need who did NOT book — price shoppers, "let me talk to my spouse", declined the trip fee, out of service area. When in doubt between not_lead and unbooked_lead, choose unbooked_lead — leaving a real miss visible is safer than excusing it.
+Transcription is imperfect; judge intent. Use confidence "high" only when the category is unmistakable.`,
+          tools: [{
+            name: 'submit_disposition',
+            description: 'Submit the call classification',
+            input_schema: {
+              type: 'object',
+              properties: {
+                result: { type: 'string', enum: ['booked', 'unbooked_lead', 'not_lead'] },
+                confidence: { type: 'string', enum: ['high', 'medium', 'low'] },
+                reason: { type: 'string', description: 'One short sentence a manager can audit at a glance' },
+              },
+              required: ['result', 'confidence', 'reason'],
+            },
+          }],
+          tool_choice: { type: 'tool', name: 'submit_disposition' },
+          messages: [{ role: 'user', content: `CALL TRANSCRIPT (single-channel recording, speaker labels unavailable; the CSR answers the phone):\n${String(text).slice(0, 16000)}` }],
+        }),
+      })
+      const j = await r.json()
+      const verdict = (j.content || []).find(b => b.type === 'tool_use')?.input
+      if (!verdict) { out.errors.push(`${lc.id}: no verdict`); continue }
+      if (verdict.result === 'unbooked_lead') { out.leftAlone++; continue }
+      if (verdict.confidence !== 'high') { out.lowConfidence++; continue }
+      const toType = verdict.result === 'booked' ? 'Booked' : 'Excused'
+      await stPut(`/telecom/v2/tenant/${ST_TENANT_ID}/calls/${lc.id}`, { callType: toType })
+      const { error } = await supabase.from('st_disposition_log').insert({
+        call_id: lc.id, day: dateStr,
+        rep: ((lc.agent || {}).name || (lc.createdBy || {}).name || '').trim() || null,
+        phone: last10(lc.from) || null,
+        customer: (lc.customer || {}).name || null,
+        from_type: 'Unbooked', to_type: toType, reason: String(verdict.reason || '').slice(0, 300),
+      })
+      if (error && !/duplicate/i.test(error.message)) console.warn('dispo log:', error.message)
+      out.changed++
+      if (toType === 'Booked') out.booked++; else out.excused++
+    } catch (e) { out.errors.push(`${lc.id}: ${e.message}`) }
+  }
+  console.log(`ST disposition sweep ${dateStr}: ${out.changed} corrected (${out.booked} to Booked, ${out.excused} to Excused) of ${out.candidates} unbooked; ${out.leftAlone} real leads left alone, ${out.lowConfidence} low-confidence untouched`)
+  return out
+}
+
+const ST_DISPO_SWEEP_KEY = 'st_dispo_sweep_done_on'
+async function maybeRunStDispositionSweep() {
+  if (!OPENAI_KEY || !ANTHROPIC_KEY) return
+  try {
+    const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/Denver', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', hour12: false,
+    }).formatToParts(new Date()).map(x => [x.type, x.value]))
+    if (+p.hour !== 1) return                            // 1 AM Denver, before the 2 AM eval sweep
+    const todayDenver = `${p.year}-${p.month}-${p.day}`
+    const { data: cur } = await supabase.from('app_settings').select('value').eq('key', ST_DISPO_SWEEP_KEY).maybeSingle()
+    if (cur && JSON.parse(cur.value || '""') === todayDenver) return
+    const claim = cur
+      ? await supabase.from('app_settings').update({ value: JSON.stringify(todayDenver) }).eq('key', ST_DISPO_SWEEP_KEY).eq('value', cur.value).select('key')
+      : await supabase.from('app_settings').insert({ key: ST_DISPO_SWEEP_KEY, value: JSON.stringify(todayDenver) }).select('key')
+    if (claim.error || !claim.data?.length) return
+    const y = new Date(todayDenver + 'T12:00:00Z'); y.setUTCDate(y.getUTCDate() - 1)
+    await sweepStDispositions(y.toISOString().slice(0, 10))
+  } catch (e) { console.warn('st dispo sweep tick:', e.message) }
+}
+
+// Intraday evals, Brandyn-approved (Sep 9): every 30 minutes during business
+// hours, score today's new calls so coaching happens same-day — the 2 AM
+// sweep stays as the catch-all for stragglers. sweepStEvals is idempotent
+// (already-scored calls skip on call_sid), so each slot only pays for what's
+// new. Slot-claimed in app_settings so replicas never double-run.
+const ST_EVAL_INTRADAY_KEY = 'st_eval_intraday_slot'
+let _stSweepBusy = false
+async function maybeRunStEvalIntraday() {
+  if (!OPENAI_KEY || _stSweepBusy) return
+  try {
+    const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/Denver', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false,
+    }).formatToParts(new Date()).map(x => [x.type, x.value]))
+    const hour = +p.hour
+    if (hour < 7 || hour >= 21) return                   // business hours, Denver
+    const todayDenver = `${p.year}-${p.month}-${p.day}`
+    const slot = `${todayDenver} ${p.hour}:${+p.minute < 30 ? '00' : '30'}`
+    const { data: cur } = await supabase.from('app_settings').select('value').eq('key', ST_EVAL_INTRADAY_KEY).maybeSingle()
+    if (cur && JSON.parse(cur.value || '""') === slot) return
+    const claim = cur
+      ? await supabase.from('app_settings').update({ value: JSON.stringify(slot) }).eq('key', ST_EVAL_INTRADAY_KEY).eq('value', cur.value).select('key')
+      : await supabase.from('app_settings').insert({ key: ST_EVAL_INTRADAY_KEY, value: JSON.stringify(slot) }).select('key')
+    if (claim.error || !claim.data?.length) return
+    _stSweepBusy = true
+    try { await sweepStEvals(todayDenver) } finally { _stSweepBusy = false }
+  } catch (e) { _stSweepBusy = false; console.warn('st intraday eval tick:', e.message) }
+}
+
 // Replica-safe nightly trigger, same day-claim pattern as the digest: first
 // replica past 2 AM Denver claims the day and sweeps yesterday.
 const ST_EVAL_SWEEP_KEY = 'st_eval_sweep_done_on'
@@ -8991,6 +9174,24 @@ async function maybeSendDailyDigest() {
 // Preview or force-send. ?date=YYYY-MM-DD for a specific day, ?send=1 to email.
 // Run (or re-run) the ST eval sweep on demand: ?date=YYYY-MM-DD (default
 // yesterday), ?limit=N. Already-scored calls are skipped, so re-runs are safe.
+// Manual disposition sweep (defaults to yesterday): ?date=YYYY-MM-DD&limit=N
+app.get('/api/admin/st-dispo-sweep', async (req, res) => {
+  const prof = await requireAdmin(req, res)
+  if (!prof) return
+  try {
+    let date = String(req.query.date || '')
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', {
+        timeZone: 'America/Denver', year: 'numeric', month: '2-digit', day: '2-digit',
+      }).formatToParts(new Date()).map(x => [x.type, x.value]))
+      const y = new Date(`${p.year}-${p.month}-${p.day}T12:00:00Z`); y.setUTCDate(y.getUTCDate() - 1)
+      date = y.toISOString().slice(0, 10)
+    }
+    const limit = Math.min(200, Math.max(1, parseInt(req.query.limit) || 80))
+    res.json(await sweepStDispositions(date, { limit }))
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
+
 app.get('/api/admin/st-eval-sweep', async (req, res) => {
   const prof = await requireAdmin(req, res)
   if (!prof) return
@@ -10362,6 +10563,8 @@ if (BOARD_EMAIL_TO && RESEND_KEY) {
   setInterval(maybeSendDailyBoardEmail, 60_000)   // 1-min tick: a 5-min one made 7:00 land as late as 7:04
   setInterval(maybeSendDailyDigest, 60_000)       // morning digest rides the same tick
   setInterval(maybeRunStEvalSweep, 60_000)        // 2 AM: score yesterday's ST calls
+  setInterval(maybeRunStEvalIntraday, 60_000)     // every 30 min, 7 AM-9 PM: score today's new calls
+  setInterval(maybeRunStDispositionSweep, 60_000) // 1 AM: correct yesterday's ST call dispositions
   setInterval(maybeGenerateLeadershipReport, 5 * 60_000)   // Monday AM: archive last week's agenda
   setTimeout(maybeSendDailyBoardEmail, 20_000)
   console.log(`Board email daily at ${BOARD_EMAIL_HOUR}:00 ${BOARD_EMAIL_TZ} to ${BOARD_EMAIL_TO}`)

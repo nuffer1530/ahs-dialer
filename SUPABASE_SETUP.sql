@@ -798,3 +798,23 @@ update call_evaluations e set call_at = r.call_started_at
 update call_evaluations set call_at = created_at where call_at is null;
 alter table call_evaluations alter column call_at set default now();
 create index if not exists call_evaluations_call_at_idx on call_evaluations (call_at);
+
+-- ── ST disposition log (applied Sep 2026 via MCP) ───────────────────────────
+-- Nightly sweep corrects yesterday's ST call dispositions (Unbooked → Excused
+-- for non-leads, Unbooked → Booked when a booking actually happened); every
+-- change is logged here (UNIQUE call_id = judged once, ever) and shown in the
+-- morning digest. RLS with no policies: server-only via service key.
+CREATE TABLE IF NOT EXISTS st_disposition_log (
+  id bigserial PRIMARY KEY,
+  call_id bigint NOT NULL UNIQUE,
+  day date NOT NULL,
+  rep text,
+  phone text,
+  customer text,
+  from_type text NOT NULL,
+  to_type text NOT NULL,
+  reason text,
+  created_at timestamptz DEFAULT now()
+);
+ALTER TABLE st_disposition_log ENABLE ROW LEVEL SECURITY;
+CREATE INDEX IF NOT EXISTS idx_st_dispo_day ON st_disposition_log (day);
