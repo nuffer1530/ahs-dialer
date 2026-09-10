@@ -7395,11 +7395,19 @@ async function computeLiveBoardPayload(dayOffset = 0) {
     // built purely from assignments, those jobs were invisible to the AI.
     const assignedApptIds = new Set(assignments.map(a => a.appointmentId))
     const unassigned = []
+    // On-hold work is PARKED, not awaiting dispatch — ST keeps it out of the
+    // real unassigned tray, so we do too (Brittany: "showing nothing in the
+    // unassigned tray" while the analyzer listed 5 jobs; all were Hold).
+    const onHold = []
     for (const ap of appts) {
       if (assignedApptIds.has(ap.id)) continue
       if ((ap.status || 'Scheduled') === 'Canceled') continue
       const j = jobById.get(ap.jobId)
       if (!j || j.jobStatus === 'Canceled') continue
+      if (ap.status === 'Hold' || j.jobStatus === 'Hold') {
+        onHold.push({ jobId: j.id, jobNumber: j.jobNumber, jobType: jtName.get(j.jobTypeId) || '' })
+        continue
+      }
       const jt = jtName.get(j.jobTypeId) || ''
       const zip = zipOfLoc.get(j.locationId) || ''
       const isMember = j.customerId ? memberCust.has(j.customerId) : null
@@ -7953,9 +7961,13 @@ async function computeLiveBoardPayload(dayOffset = 0) {
       dayRevenue,
       techsToday,
       calls, swaps, unassigned,
+      // Parked work, listed so the AI can say "6 jobs on hold" instead of
+      // inventing urgent placements for them.
+      onHold,
       counts: {
         total: calls.length,
         unassigned: unassigned.length,
+        onHold: onHold.length,
         flagged: calls.filter(c => c.flags.length).length,
         unrankedTechs: calls.filter(c => c.techTier === 'unranked').length,
       },
@@ -8122,6 +8134,8 @@ async function gatherDispatchFacts({ allCalls = false, day = 0 } = {}) {
       canGoEarly: u.canGoEarly || undefined,
       notes: noteOf(u.jobId),
     })),
+    // Parked in ST's Hold status — deliberately NOT in the unassigned tray.
+    onHold: (board.onHold || []).map(h => ({ job: h.jobNumber, type: h.jobType })),
     rescheduleCandidates: calls.filter(c => c.rescheduleCandidate)
       .map(c => ({ job: c.jobNumber, type: c.jobType, tech: c.techName, canGoEarly: c.canGoEarly || undefined })),
     completedOutcomes: calls.filter(c => c.outcome).map(c => ({
@@ -8201,7 +8215,7 @@ You are analyzing a FUTURE day (see 'analyzing') — this is advance GAME-PLANNI
 
 Every bench tech carries a 'today' field with their REAL availability right now. Treat it as law: never build an action around routing work to (or comparing against) a tech whose 'today' says they are off, have no working time left, or are on an all-day install — those techs cannot take calls no matter how good their numbers are. Recommendations may only name techs whose 'today' shows calls on board or room.
 
-'unassignedTray' lists jobs sitting UNASSIGNED at the bottom of the dispatch board — booked customers with no tech attached yet. When a dispatcher says they "unassigned" jobs or asks what to keep, cut, or redistribute, they mean THESE — work the tray job by job, by opportunity score, and remember every tray job still holds its promised customer window.
+'unassignedTray' lists jobs sitting UNASSIGNED at the bottom of the dispatch board — booked customers with no tech attached yet. When a dispatcher says they "unassigned" jobs or asks what to keep, cut, or redistribute, they mean THESE — work the tray job by job, by opportunity score, and remember every tray job still holds its promised customer window. 'onHold' jobs are PARKED on purpose (ST Hold status) — they are NOT in the tray, need no tech today, and must never be presented as urgent placements; at most note their count in one clause.
 
 Arrival windows are PROMISES to customers — treat them as law too. Trading TECHS between two jobs is always window-safe (appointments stay put). Any move that changes a customer's window or day is only allowed when that job carries canGoEarly=true (the customer said the tech may come earlier) — and even then, say to call the customer first. Never propose shifting a customer's time otherwise; find the move that works within the promised windows instead.
 

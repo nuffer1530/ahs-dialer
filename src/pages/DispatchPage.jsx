@@ -625,6 +625,22 @@ function LiveBoard() {
         </div>
       )}
 
+      {/* On-hold work is parked in ST, not awaiting a tech — shown as a quiet
+          count so nobody mistakes it for the unassigned tray. */}
+      {(data?.onHold || []).length > 0 && (
+        <div className="card" style={{ padding:'9px 15px', marginBottom:12, display:'flex', alignItems:'center', gap:10, flexWrap:'wrap' }}>
+          <span style={{ fontSize:10.5, fontWeight:700, textTransform:'uppercase', letterSpacing:.5, color:'var(--text-muted)' }}>
+            On hold — {data.onHold.length} job{data.onHold.length === 1 ? '' : 's'} parked in ST
+          </span>
+          {data.onHold.map(h => (
+            <a key={h.jobId} href={ST_JOB_URL(h.jobId)} target="_blank" rel="noreferrer"
+              style={{ fontSize:12, color:'var(--text-muted)', textDecoration:'none' }}>
+              #{h.jobNumber} <span style={{ opacity:.8 }}>{h.jobType}</span>
+            </a>
+          ))}
+        </div>
+      )}
+
       {rev && (
         <div className="card" style={{ padding:'13px 16px', marginBottom:14, display:'flex', gap:24, flexWrap:'wrap', alignItems:'center' }}>
           <div onClick={() => (rev.bookedDetail || []).length && setShowRevDetail(true)}
