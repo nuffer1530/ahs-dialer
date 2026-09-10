@@ -3978,6 +3978,29 @@ async function tvJobTypes(jobIds) {
   }
   return out
 }
+// Administrative job types are not truck rolls — they never count as "jobs
+// ran" on the boards (Brandyn: "not phone calls only or truck audits etc.").
+// Warranty/callback/follow-up visits DO count: a truck goes to a customer.
+const TV_EXCLUDE_RAN = /phone call|permitting|vehicle inspection|quality inspection|truck audit/i
+let _tvJtNames = { at: 0, map: new Map() }
+async function tvJobTypeNames() {
+  if (Date.now() - _tvJtNames.at < 6 * 3600_000 && _tvJtNames.map.size) return _tvJtNames.map
+  try {
+    const d = await stGet(`/jpm/v2/tenant/${ST_TENANT_ID}/job-types?pageSize=500`)
+    _tvJtNames = { at: Date.now(), map: new Map((d?.data || []).map(t => [String(t.id), t.name || ''])) }
+  } catch (e) { console.warn('tv jt names:', e.message) }
+  return _tvJtNames.map
+}
+// Drop administrative job ids from each trade's ran set, in place.
+function tvDropAdminRan(byTradeSets, jobTypeOf, jtNames) {
+  for (const set of Object.values(byTradeSets)) {
+    for (const jid of [...set]) {
+      const nm = jtNames.get(jobTypeOf.get(jid) || '') || ''
+      if (TV_EXCLUDE_RAN.test(nm)) set.delete(jid)
+    }
+  }
+}
+
 // ranSet: job ids that ran in the window. Returns ST-style opps/conv/rate.
 function tvStClose(ranSet, jobTypeOf, cats, presented, sold) {
   let opps = 0, conv = 0
@@ -4214,10 +4237,11 @@ async function tvBuildDay() {
             if (m?.trade && appt?.jobId) byTradeJobs[m.trade].add(appt.jobId)
           }
         }
-        for (const t of Object.values(TV_TRADES)) w.dept[t].jobsRan = byTradeJobs[t].size
-        // ST-style close over today's engaged jobs.
+        // ST-style close over today's engaged jobs; admin types out first.
         const cats = await tvCatMap()
         const jobTypeOf = await tvJobTypes(new Set(Object.values(byTradeJobs).flatMap(s => [...s])))
+        tvDropAdminRan(byTradeJobs, jobTypeOf, await tvJobTypeNames())
+        for (const t of Object.values(TV_TRADES)) w.dept[t].jobsRan = byTradeJobs[t].size
         for (const t of Object.values(TV_TRADES)) {
           const c = tvStClose(byTradeJobs[t], jobTypeOf, cats, w.presentedJobs, w.soldJobIds)
           w.dept[t].closeRate = c.rate; w.dept[t].presented = c.opps; w.dept[t].soldJobs = c.conv
@@ -4283,10 +4307,12 @@ async function tvBuildSlow() {
             w.techRow.get(k).jobs.add(jid)
           }
         }
-        for (const t of Object.values(TV_TRADES)) w.dept[t].jobsRan = jobsByTrade[t].size
-        // ST-style close for the month strip — same number ST's dashboard shows.
+        // ST-style close for the month strip — same number ST's dashboard
+        // shows; administrative types (phone-call-only, truck audits…) out.
         mCats = await tvCatMap()
         mJobTypeOf = await tvJobTypes(new Set(Object.values(jobsByTrade).flatMap(s => [...s])))
+        tvDropAdminRan(jobsByTrade, mJobTypeOf, await tvJobTypeNames())
+        for (const t of Object.values(TV_TRADES)) w.dept[t].jobsRan = jobsByTrade[t].size
         for (const t of Object.values(TV_TRADES)) {
           const c = tvStClose(jobsByTrade[t], mJobTypeOf, mCats, w.presentedJobs, w.soldJobIds)
           w.dept[t].closeRate = c.rate; w.dept[t].presented = c.opps; w.dept[t].soldJobs = c.conv
@@ -4333,7 +4359,7 @@ async function tvBuildSlow() {
       for (const [id, r] of w.techRow) {
         ytdTech[String(id)] = { sold: Math.round(r.sold), fiveStar: r.fiveStar, memberships: r.memberships }
       }
-      // Yearly jobs ran ≈ distinct jobs invoiced (appointment sweep for a year is not viable)
+      // Fallback if the jobs pull below fails: distinct invoiced jobs.
       for (const t of Object.values(TV_TRADES)) w.dept[t].jobsRan = w.dept[t].revJobs
       // ST-style YTD close: completed jobs created this year, by BU trade.
       try {
@@ -4351,7 +4377,11 @@ async function tvBuildSlow() {
           const t = buTradeY.get(String(j.businessUnitId))
           if (t) ranByTrade[t].add(j.id)
         }
+        tvDropAdminRan(ranByTrade, jobTypeOf, await tvJobTypeNames())
         for (const t of Object.values(TV_TRADES)) {
+          // Real completed-jobs count beats the invoiced proxy now that the
+          // year's jobs are in hand.
+          w.dept[t].jobsRan = ranByTrade[t].size
           const c = tvStClose(ranByTrade[t], jobTypeOf, cats, w.presentedJobs, w.soldJobIds)
           w.dept[t].closeRate = c.rate; w.dept[t].presented = c.opps; w.dept[t].soldJobs = c.conv
         }
