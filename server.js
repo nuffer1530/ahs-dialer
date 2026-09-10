@@ -4211,8 +4211,10 @@ setInterval(() => {
 app.get('/api/tv/department/:trade', async (req, res) => {
   const me = await requireUser(req, res)
   if (!me) return
-  const trade = TV_TRADES[String(req.params.trade || '').toLowerCase()]
-  if (!trade) return res.status(400).json({ error: 'trade must be hvac|plumbing|electrical|garage' })
+  const key = String(req.params.trade || '').toLowerCase()
+  const isCompany = key === 'company'
+  const trade = TV_TRADES[key]
+  if (!trade && !isCompany) return res.status(400).json({ error: 'trade must be company|hvac|plumbing|electrical|garage' })
   try {
     _tvLastReq = Date.now()
     // Serve whatever tiers exist after ~20s; the rest fills in on the next poll.
@@ -4221,19 +4223,64 @@ app.get('/api/tv/department/:trade', async (req, res) => {
       jobsRan: d.jobsRan, sales: Math.round(d.sales), soldCount: d.soldCount,
       revenue: Math.round(d.revenue), closeRate: d.closeRate, fiveStar: d.fiveStar, memberships: d.memberships,
     } : null
+    // Company = all trades summed; close rate recomputed from the summed
+    // sold/presented job counts, never averaged.
+    const sumDept = (deptMap) => {
+      if (!deptMap) return null
+      const o = { jobsRan: 0, sales: 0, soldCount: 0, revenue: 0, fiveStar: 0, memberships: 0, presented: 0, soldJobs: 0 }
+      for (const t of Object.values(TV_TRADES)) {
+        const d = deptMap[t]; if (!d) continue
+        o.jobsRan += d.jobsRan || 0; o.sales += d.sales || 0; o.soldCount += d.soldCount || 0
+        o.revenue += d.revenue || 0; o.fiveStar += d.fiveStar || 0; o.memberships += d.memberships || 0
+        o.presented += d.presented || 0; o.soldJobs += d.soldJobs || 0
+      }
+      return { jobsRan: o.jobsRan, sales: Math.round(o.sales), soldCount: o.soldCount, revenue: Math.round(o.revenue),
+        closeRate: o.presented ? o.soldJobs / o.presented : null, fiveStar: o.fiveStar, memberships: o.memberships }
+    }
     const month = _tvMonth.data
-    const techs = (month?.techsByTrade?.[trade] || []).map(x => ({
+    let techs, installers, feed
+    if (isCompany) {
+      techs = Object.entries(month?.techsByTrade || {}).flatMap(([t, rows]) => rows.map(x => ({ ...x, trade: t })))
+      // Per-trade scores were normalized within each trade; re-normalize
+      // company-wide with the same weights so the ranking is apples-to-apples.
+      const maxSold = Math.max(1, ...techs.map(x => x.sold))
+      const maxClose = Math.max(0.01, ...techs.map(x => x.closeRate || 0))
+      const maxMem = Math.max(1, ...techs.map(x => x.memberships))
+      const maxFive = Math.max(1, ...techs.map(x => x.fiveStar))
+      for (const x of techs) {
+        x.score = Math.round(100 * (0.55 * (x.sold / maxSold) + 0.20 * ((x.closeRate || 0) / maxClose)
+          + 0.15 * (x.memberships / maxMem) + 0.10 * (x.fiveStar / maxFive)))
+      }
+      techs.sort((a, b) => b.score - a.score)
+      installers = Object.entries(month?.installersByTrade || {}).flatMap(([t, rows]) => rows.map(x => ({ ...x, trade: t })))
+      const maxEff = Math.max(0.01, ...installers.map(x => x.efficiency || 0))
+      const maxRev = Math.max(1, ...installers.map(x => x.revenue))
+      const maxF = Math.max(1, ...installers.map(x => x.fiveStar))
+      const maxCb = Math.max(0.0001, ...installers.map(x => x.callbackPct))
+      for (const x of installers) {
+        x.score = Math.round(100 * (0.40 * ((x.efficiency || 0) / maxEff) + 0.30 * (1 - x.callbackPct / maxCb)
+          + 0.20 * (x.revenue / maxRev) + 0.10 * (x.fiveStar / maxF)))
+      }
+      installers.sort((a, b) => b.score - a.score)
+      feed = Object.values(_tvDay.data?.feed || {}).flat()
+        .sort((a, b) => String(b.at || '').localeCompare(String(a.at || ''))).slice(0, 20)
+    } else {
+      techs = (month?.techsByTrade?.[trade] || [])
+      installers = month?.installersByTrade?.[trade] || []
+      feed = _tvDay.data?.feed?.[trade] || []
+    }
+    techs = techs.map(x => ({
       ...x, ytd: _tvYear.data?.ytdTech?.[String(x.id)] || { sold: 0, fiveStar: 0, memberships: 0 },
     }))
     res.json({
-      trade,
+      trade: isCompany ? 'Company' : trade,
       updatedAt: new Date(Math.min(_tvDay.at || Date.now(), _tvMonth.at || Date.now())).toISOString(),
-      daily: pick(_tvDay.data?.dept?.[trade]),
-      monthly: pick(month?.dept?.[trade]),
-      yearly: pick(_tvYear.data?.dept?.[trade]),
+      daily: isCompany ? sumDept(_tvDay.data?.dept) : pick(_tvDay.data?.dept?.[trade]),
+      monthly: isCompany ? sumDept(month?.dept) : pick(month?.dept?.[trade]),
+      yearly: isCompany ? sumDept(_tvYear.data?.dept) : pick(_tvYear.data?.dept?.[trade]),
       techs,
-      installers: month?.installersByTrade?.[trade] || [],
-      feed: _tvDay.data?.feed?.[trade] || [],
+      installers,
+      feed,
     })
   } catch (e) {
     console.error('tv board:', e.message)

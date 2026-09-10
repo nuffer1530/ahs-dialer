@@ -16,11 +16,13 @@ const C = {
 }
 
 const TRADES = [
+  { key:'company', label:'Company', color:'#FF751F' },
   { key:'hvac', label:'HVAC', color:'#F0883E' },
   { key:'plumbing', label:'Plumbing', color:'#58A6FF' },
   { key:'electrical', label:'Electrical', color:'#D29922' },
   { key:'garage', label:'Garage Doors', color:'#BC8CFF' },
 ]
+const TRADE_SHORT = { 'HVAC':'HVAC', 'Plumbing':'PLB', 'Electrical':'ELE', 'Garage Doors':'GAR' }
 
 const fmtMoney = (n) => n == null ? '—' : '$' + Math.round(n).toLocaleString()
 const fmtPct = (n) => n == null ? '—' : Math.round(n * 100) + '%'
@@ -152,7 +154,7 @@ export default function DeptTVPage() {
   )
 
   return (
-    <div ref={rootRef} style={{ position:'fixed', inset:0, background:C.bg, color:C.text, padding:'16px 20px', display:'flex', flexDirection:'column', gap:14, overflow:'auto', zIndex:50, fontFamily:'inherit' }}>
+    <div ref={rootRef} style={{ height:'100vh', minHeight:'100vh', boxSizing:'border-box', background:C.bg, color:C.text, padding:'16px 20px', display:'flex', flexDirection:'column', gap:14, overflow:'auto', fontFamily:'inherit' }}>
       {/* Header: mark + dept + switcher | updated | fullscreen + clock */}
       <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:16, flexShrink:0, flexWrap:'wrap' }}>
         <div style={{ display:'flex', alignItems:'center', gap:12 }}>
@@ -231,7 +233,10 @@ export default function DeptTVPage() {
                 {techs.map((x, i) => (
                   <tr key={x.id} style={{ borderBottom:`1px solid ${C.border}`, background: i === 0 ? `${trade.color}14` : 'transparent' }}>
                     <td style={{ padding:'10px 12px', color: i === 0 ? trade.color : C.dim, fontWeight:800, fontSize:15 }}>{i + 1}</td>
-                    <td style={{ padding:'10px 12px', fontWeight:700, fontSize:15, whiteSpace:'nowrap' }}>{x.name}</td>
+                    <td style={{ padding:'10px 12px', fontWeight:700, fontSize:15, whiteSpace:'nowrap' }}>
+                      {x.name}
+                      {x.trade && <span style={{ marginLeft:8, fontSize:10, fontWeight:800, letterSpacing:.8, color:C.dim }}>{TRADE_SHORT[x.trade] || x.trade}</span>}
+                    </td>
                     {cell(x.score, x.score === maxes.score && maxes.score > 0, fmtN, trade.color)}
                     {cell(x.sold, x.sold === maxes.sold && maxes.sold > 0, fmtMoney, C.green)}
                     {cell(x.avgTicket, x.avgTicket === maxes.avgTicket && maxes.avgTicket > 0, fmtMoney)}
@@ -277,7 +282,10 @@ export default function DeptTVPage() {
                 {installers.map((x, i) => (
                   <tr key={x.id} style={{ borderBottom:`1px solid ${C.border}`, background: i === 0 ? `${trade.color}14` : 'transparent' }}>
                     <td style={{ padding:'10px 12px', color: i === 0 ? trade.color : C.dim, fontWeight:800, fontSize:15 }}>{i + 1}</td>
-                    <td style={{ padding:'10px 12px', fontWeight:700, fontSize:15, whiteSpace:'nowrap' }}>{x.name}</td>
+                    <td style={{ padding:'10px 12px', fontWeight:700, fontSize:15, whiteSpace:'nowrap' }}>
+                      {x.name}
+                      {x.trade && <span style={{ marginLeft:8, fontSize:10, fontWeight:800, letterSpacing:.8, color:C.dim }}>{TRADE_SHORT[x.trade] || x.trade}</span>}
+                    </td>
                     {cell(x.score, x.score === instBest.score && instBest.score > 0, fmtN, trade.color)}
                     {cell(x.efficiency, x.efficiency === instBest.efficiency && instBest.efficiency > 0, fmtPct, C.green)}
                     {cell(x.callbackPct, x.callbackPct === instBest.callbackPct, fmtPct, C.amber)}
