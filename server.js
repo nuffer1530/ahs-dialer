@@ -3905,7 +3905,11 @@ async function tvWindow({ fromIso, invFrom, invTo, revFrom, perTech, capMul = 1 
   const techRow = new Map()
   const tr = (id) => { const k = String(id); if (!techRow.has(k)) techRow.set(k, { sold: 0, soldCount: 0, fiveStar: 0, memberships: 0, jobs: new Set(), presented: new Set(), soldJobs: new Set() }); return techRow.get(k) }
   const soldRows = sold.filter(e => (e.status || {}).name === 'Sold')
+  // Global job-id sets feed the ST-style close-rate calc (opportunity = ran
+  // job with estimate activity and a sales-shaped job type).
+  const soldJobIds = new Set(), presentedJobs = new Set()
   for (const e of soldRows) {
+    if (e.jobId) soldJobIds.add(e.jobId)
     const t = tvTradeOf(e.businessUnitName); if (!t) continue
     const amt = Number(e.subtotal) || 0
     dept[t].sales += amt; dept[t].soldCount++
@@ -3913,6 +3917,7 @@ async function tvWindow({ fromIso, invFrom, invTo, revFrom, perTech, capMul = 1 
     if (perTech && e.soldBy) { const r = tr(e.soldBy); r.sold += amt; r.soldCount++; if (e.jobId) r.soldJobs.add(e.jobId) }
   }
   for (const e of created) {
+    if (e.jobId) presentedJobs.add(e.jobId)
     const t = tvTradeOf(e.businessUnitName); if (!t || !e.jobId) continue
     dept[t].presented.add(e.jobId)
   }
@@ -3942,7 +3947,49 @@ async function tvWindow({ fromIso, invFrom, invTo, revFrom, perTech, capMul = 1 
     d.closeRate = act.size ? d.soldJobs.size / act.size : null
     d.presented = act.size; d.soldJobs = d.soldJobs.size; d.revJobs = d.revJobs.size
   }
-  return { dept, techRow, soldRows, reviews, memberships, invoices }
+  return { dept, techRow, soldRows, reviews, memberships, invoices, soldJobIds, presentedJobs }
+}
+
+// ── ST-style close rate ─────────────────────────────────────────────────────
+// Matches ServiceTitan's own dashboard number (the leadership-report Logan
+// Frazier calibration): an OPPORTUNITY is a ran job with estimate activity
+// whose job type is sales-shaped (repair/other/free_estimate per
+// job_type_spiffs; unmapped types count — hiding them would flatter).
+// Maintenance tune-ups auto-generate option sheets, which is why the old
+// estimates-only math read low (Preston: 53% here vs 71% in ST).
+const TV_SALES_CATS = new Set(['repair', 'other', 'free_estimate'])
+let _tvCats = { at: 0, map: new Map() }
+async function tvCatMap() {
+  if (Date.now() - _tvCats.at < 6 * 3600_000 && _tvCats.map.size) return _tvCats.map
+  try {
+    const { data } = await supabase.from('job_type_spiffs').select('st_job_type_id, category')
+    _tvCats = { at: Date.now(), map: new Map((data || []).map(r => [String(r.st_job_type_id), r.category])) }
+  } catch (e) { console.warn('tv cats:', e.message) }
+  return _tvCats.map
+}
+async function tvJobTypes(jobIds) {
+  const out = new Map()
+  const ids = [...jobIds]
+  for (let i = 0; i < ids.length; i += 50) {
+    try {
+      const r = await stGet(`/jpm/v2/tenant/${ST_TENANT_ID}/jobs?ids=${ids.slice(i, i + 50).join(',')}&pageSize=50`)
+      for (const j of (r?.data || [])) out.set(j.id, String(j.jobTypeId))
+    } catch (e) { console.warn('tv job types batch:', e.message) }
+  }
+  return out
+}
+// ranSet: job ids that ran in the window. Returns ST-style opps/conv/rate.
+function tvStClose(ranSet, jobTypeOf, cats, presented, sold) {
+  let opps = 0, conv = 0
+  for (const jid of ranSet) {
+    if (!presented.has(jid) && !sold.has(jid)) continue      // no estimate activity
+    const jt = jobTypeOf.get(jid)
+    const cat = jt != null ? cats.get(jt) : undefined
+    if (cat !== undefined && cat !== null && !TV_SALES_CATS.has(cat)) continue
+    opps++
+    if (sold.has(jid)) conv++
+  }
+  return { opps, conv, rate: opps ? conv / opps : null }
 }
 
 // ── Installer ranking (month tier): teams (from app_settings.tv_install_teams)
@@ -4168,6 +4215,13 @@ async function tvBuildDay() {
           }
         }
         for (const t of Object.values(TV_TRADES)) w.dept[t].jobsRan = byTradeJobs[t].size
+        // ST-style close over today's engaged jobs.
+        const cats = await tvCatMap()
+        const jobTypeOf = await tvJobTypes(new Set(Object.values(byTradeJobs).flatMap(s => [...s])))
+        for (const t of Object.values(TV_TRADES)) {
+          const c = tvStClose(byTradeJobs[t], jobTypeOf, cats, w.presentedJobs, w.soldJobIds)
+          w.dept[t].closeRate = c.rate; w.dept[t].presented = c.opps; w.dept[t].soldJobs = c.conv
+        }
       } catch (e) { console.warn('tv day jobs:', e.message) }
       // Live feed: today's wins, per trade.
       const feed = {}; for (const t of Object.values(TV_TRADES)) feed[t] = []
@@ -4202,6 +4256,7 @@ async function tvBuildSlow() {
 
     if (Date.now() - _tvMonth.at > 60 * 60_000) {
       const w = await tvWindow({ fromIso: tvBounds(monthStart), invFrom: `${monthStart}T00:00:00Z`, invTo: `${today}T23:59:59Z`, revFrom: monthStart, perTech: true })
+      let mCats = new Map(), mJobTypeOf = new Map()
       // Month tech table needs jobs ran + presented per tech → assignments.
       try {
         const appts = await stPageAll(pg => `/jpm/v2/tenant/${ST_TENANT_ID}/appointments?startsOnOrAfter=${tvBounds(monthStart)}&pageSize=500&page=${pg}`, 4000)
@@ -4229,10 +4284,20 @@ async function tvBuildSlow() {
           }
         }
         for (const t of Object.values(TV_TRADES)) w.dept[t].jobsRan = jobsByTrade[t].size
+        // ST-style close for the month strip — same number ST's dashboard shows.
+        mCats = await tvCatMap()
+        mJobTypeOf = await tvJobTypes(new Set(Object.values(jobsByTrade).flatMap(s => [...s])))
+        for (const t of Object.values(TV_TRADES)) {
+          const c = tvStClose(jobsByTrade[t], mJobTypeOf, mCats, w.presentedJobs, w.soldJobIds)
+          w.dept[t].closeRate = c.rate; w.dept[t].presented = c.opps; w.dept[t].soldJobs = c.conv
+        }
       } catch (e) { console.warn('tv month jobs:', e.message) }
       const byTrade = {}; for (const t of Object.values(TV_TRADES)) byTrade[t] = []
       for (const [id, r] of w.techRow) {
         const m = meta.get(String(id)); if (!m?.trade || !m.roster) continue
+        // Per-tech close is the same ST opportunity math over the jobs THEY ran
+        // (Preston: 71% in ST vs 53% under the old sold-per-job version).
+        const c = tvStClose(r.jobs, mJobTypeOf, mCats, w.presentedJobs, w.soldJobIds)
         byTrade[m.trade].push({
           id, name: m.name,
           sold: Math.round(r.sold), soldCount: r.soldCount,
@@ -4240,12 +4305,10 @@ async function tvBuildSlow() {
           avgTicket: r.soldCount ? Math.round(r.sold / r.soldCount) : 0,
           fiveStar: r.fiveStar, memberships: r.memberships,
           soldJobs: r.soldJobs.size,
+          closeRate: c.rate, opps: c.opps,
         })
       }
-      // Per-tech close rate = jobs-with-a-sale ÷ jobs run (no per-job
-      // estimate join at this tier; Brandyn wants it shown as Close rate).
       for (const t of Object.values(TV_TRADES)) {
-        for (const x of byTrade[t]) x.closeRate = x.jobs ? x.soldJobs / x.jobs : null
         const maxSold = Math.max(1, ...byTrade[t].map(x => x.sold))
         const maxClose = Math.max(0.01, ...byTrade[t].map(x => x.closeRate || 0))
         const maxMem = Math.max(1, ...byTrade[t].map(x => x.memberships))
@@ -4257,10 +4320,9 @@ async function tvBuildSlow() {
         }
         byTrade[t].sort((a, b) => b.score - a.score)
       }
-      let installersByTrade = {}
-      try {
-        installersByTrade = await tvBuildInstallers(w, meta, monthStart)
-      } catch (e) { console.warn('tv installers:', e.message) }
+      // Installer section pulled from the boards (Brandyn, Sep 10) —
+      // tvBuildInstallers stays for when it comes back.
+      const installersByTrade = {}
       _tvMonth = { at: Date.now(), data: { dept: w.dept, techsByTrade: byTrade, installersByTrade } }
       await tvPersist('tv_month_cache', _tvMonth)
     }
@@ -4273,6 +4335,27 @@ async function tvBuildSlow() {
       }
       // Yearly jobs ran ≈ distinct jobs invoiced (appointment sweep for a year is not viable)
       for (const t of Object.values(TV_TRADES)) w.dept[t].jobsRan = w.dept[t].revJobs
+      // ST-style YTD close: completed jobs created this year, by BU trade.
+      try {
+        const [cats, yearJobs, bus] = await Promise.all([
+          tvCatMap(),
+          stPageAll(pg => `/jpm/v2/tenant/${ST_TENANT_ID}/jobs?createdOnOrAfter=${yearStart}T00:00:00Z&pageSize=500&page=${pg}`, 40000),
+          stGet(`/settings/v2/tenant/${ST_TENANT_ID}/business-units?pageSize=200`).then(d => d?.data || []),
+        ])
+        const buTradeY = new Map(bus.map(b => [String(b.id), tvTradeOf(b.name)]))
+        const ranByTrade = {}; for (const t of Object.values(TV_TRADES)) ranByTrade[t] = new Set()
+        const jobTypeOf = new Map()
+        for (const j of yearJobs) {
+          jobTypeOf.set(j.id, String(j.jobTypeId))
+          if (j.jobStatus !== 'Completed') continue
+          const t = buTradeY.get(String(j.businessUnitId))
+          if (t) ranByTrade[t].add(j.id)
+        }
+        for (const t of Object.values(TV_TRADES)) {
+          const c = tvStClose(ranByTrade[t], jobTypeOf, cats, w.presentedJobs, w.soldJobIds)
+          w.dept[t].closeRate = c.rate; w.dept[t].presented = c.opps; w.dept[t].soldJobs = c.conv
+        }
+      } catch (e) { console.warn('tv year close:', e.message) }
       _tvYear = { at: Date.now(), data: { dept: w.dept, ytdTech } }
       await tvPersist('tv_year_cache', _tvYear)
     }

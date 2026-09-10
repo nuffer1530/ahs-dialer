@@ -140,15 +140,6 @@ export default function DeptTVPage() {
     const all = data?.techs || []
     return trade.key === 'company' ? all.slice(0, 10) : all
   }, [data, trade.key])
-  const installers = data?.installers || []
-  // Installer bests: highest wins everywhere except callback %, where lowest wins.
-  const instBest = useMemo(() => ({
-    score: Math.max(0, ...installers.map(x => x.score || 0)),
-    efficiency: Math.max(0, ...installers.map(x => x.efficiency || 0)),
-    callbackPct: installers.length ? Math.min(...installers.map(x => x.callbackPct || 0)) : 0,
-    revenue: Math.max(0, ...installers.map(x => x.revenue || 0)),
-    fiveStar: Math.max(0, ...installers.map(x => x.fiveStar || 0)),
-  }), [installers])
   // Bold each column's best — "a bold on the numbers who are the highest".
   const maxes = useMemo(() => {
     const cols = ['score','sold','avgTicket','closeRate','fiveStar','memberships']
@@ -277,51 +268,6 @@ export default function DeptTVPage() {
           </div>
         </div>
 
-        {/* Installer ranking — Efficiency 40 / Callback% 30 / Revenue 20 / 5-star 10 */}
-        <div style={{ flex:2, background:C.panel, border:`1px solid ${C.border}`, borderRadius:14, overflow:'hidden', display:'flex', flexDirection:'column', minWidth:0, minHeight:0 }}>
-          <div style={{ padding:'13px 18px', borderBottom:`1px solid ${C.border}`, display:'flex', alignItems:'baseline', gap:10, flexShrink:0 }}>
-            <span style={{ fontSize:13, fontWeight:700, letterSpacing:.5 }}>Install ranking — {time.toLocaleDateString([], { month:'long' })}</span>
-            <span style={{ fontSize:11, color:C.dim }}>efficiency = time given vs time taken · callback % lower is better</span>
-          </div>
-          <div style={{ flex:1, overflow:'auto' }}>
-            <table style={{ width:'100%', borderCollapse:'collapse' }}>
-              <thead>
-                <tr style={{ borderBottom:`1px solid ${C.border}`, position:'sticky', top:0, background:C.panel }}>
-                  {th('#', false)}
-                  {th('Team / Installer', false)}
-                  {th('Score')}
-                  {th('Efficiency')}
-                  {th('Callback %')}
-                  {th('Revenue')}
-                  {th('5★')}
-                  {th('Installs')}
-                </tr>
-              </thead>
-              <tbody>
-                {installers.map((x, i) => (
-                  <tr key={x.id} style={{ borderBottom:`1px solid ${C.border}`, background: i === 0 ? `${trade.color}14` : 'transparent' }}>
-                    <td style={{ padding:'8px 12px' }}><RankBadge i={i} /></td>
-                    <td style={{ padding:'10px 12px', fontWeight:700, fontSize:15, whiteSpace:'nowrap' }}>
-                      {x.name}
-                      {x.trade && <span style={{ marginLeft:8, fontSize:10, fontWeight:800, letterSpacing:.8, color:C.dim }}>{TRADE_SHORT[x.trade] || x.trade}</span>}
-                    </td>
-                    {cell(x.score, x.score === instBest.score && instBest.score > 0, fmtN, trade.color)}
-                    {cell(x.efficiency, x.efficiency === instBest.efficiency && instBest.efficiency > 0, fmtPct, C.green)}
-                    {cell(x.callbackPct, x.callbackPct === instBest.callbackPct, fmtPct, C.amber)}
-                    {cell(x.revenue, x.revenue === instBest.revenue && instBest.revenue > 0, fmtMoney, C.blue)}
-                    {cell(x.fiveStar, x.fiveStar === instBest.fiveStar && instBest.fiveStar > 0, fmtN, C.amber)}
-                    {cell(x.installs, false)}
-                  </tr>
-                ))}
-                {!installers.length && (
-                  <tr><td colSpan={8} style={{ padding:20, textAlign:'center', color:C.dim, fontSize:13 }}>
-                    {data ? 'No completed installs yet this month.' : 'Loading the month…'}
-                  </td></tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
         </div>
 
         {/* Dept live feed */}
