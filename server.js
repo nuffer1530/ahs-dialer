@@ -3930,13 +3930,15 @@ async function tvWindow({ fromIso, invFrom, invTo, revFrom, perTech, capMul = 1 
 // this tenant — 2 of 5,373 jobs).
 async function tvBuildInstallers(w, meta, monthStart) {
   const lookback = new Date(Date.parse(`${monthStart}T00:00:00Z`) - 90 * 864e5).toISOString().slice(0, 10)
-  const [jobTypes, jobs90, tsRows, createdMtd, teamsRow] = await Promise.all([
+  const [jobTypes, jobs90, tsRows, createdMtd, teamsRow, busRows] = await Promise.all([
     stGet(`/jpm/v2/tenant/${ST_TENANT_ID}/job-types?pageSize=500`).then(d => d?.data || []),
     stPageAll(pg => `/jpm/v2/tenant/${ST_TENANT_ID}/jobs?completedOnOrAfter=${lookback}T00:00:00Z&pageSize=500&page=${pg}`, 15000),
     stPageAll(pg => `/payroll/v2/tenant/${ST_TENANT_ID}/jobs/timesheets?createdOnOrAfter=${lookback}T00:00:00Z&pageSize=500&page=${pg}`, 25000),
     stPageAll(pg => `/jpm/v2/tenant/${ST_TENANT_ID}/jobs?createdOnOrAfter=${tvBounds(monthStart)}&pageSize=500&page=${pg}`, 6000),
     supabase.from('app_settings').select('value').eq('key', 'tv_install_teams').maybeSingle(),
+    stGet(`/settings/v2/tenant/${ST_TENANT_ID}/business-units?pageSize=200`).then(d => d?.data || []).catch(() => []),
   ])
+  const buTrade = new Map(busRows.map(b => [String(b.id), tvTradeOf(b.name)]))
   const jt = new Map(jobTypes.map(t => [t.id, t]))
   const isInstallType = (id) => /install/i.test(jt.get(id)?.name || '')
   const isCallbackType = (id) => /callback|warranty|recall|concern/i.test(jt.get(id)?.name || '')
@@ -4013,13 +4015,18 @@ async function tvBuildInstallers(w, meta, monthStart) {
     }
   }
 
-  // Callbacks created this month, blamed on the causing install's crew.
+  // Callbacks created this month, blamed on the causing install's crew — the
+  // install must be the callback's own trade (a plumbing warranty at a home
+  // never blames a more recent HVAC install there).
   for (const c of createdMtd) {
     if (!isCallbackType(c.jobTypeId) || !c.locationId) continue
     const created = Date.parse(c.createdOn)
+    const cbTrade = buTrade.get(String(c.businessUnitId)) || null
     const cands = (instByLoc.get(c.locationId) || []).filter(j => {
       const t = Date.parse(j.completedOn)
-      return t < created && t >= created - 90 * 864e5
+      if (!(t < created && t >= created - 90 * 864e5)) return false
+      const it = buTrade.get(String(j.businessUnitId))
+      return !cbTrade || !it || it === cbTrade
     })
     const orig = cands[cands.length - 1]
     if (!orig) continue
