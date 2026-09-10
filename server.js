@@ -4130,7 +4130,11 @@ async function tvBuildAll() {
         const dayStart = tvBounds(today)
         const dayEnd = Date.parse(dayStart) + 86400_000
         const appts = await stPageAll(pg => `/jpm/v2/tenant/${ST_TENANT_ID}/appointments?startsOnOrAfter=${dayStart}&pageSize=500&page=${pg}`, 1500)
-        const todays = appts.filter(a => a.status !== 'Canceled' && Date.parse(a.start) < dayEnd)
+        // "Jobs ran" today = the tech is actually engaged (rolling, on site,
+        // or done) — NOT everything scheduled on the board. At 8:30 AM the
+        // whole day's schedule showed as "ran 58" (Brandyn's catch); this
+        // counter now climbs through the day as work really happens.
+        const todays = appts.filter(a => ['Dispatched', 'Working', 'Done'].includes(a.status) && Date.parse(a.start) < dayEnd)
         const ids = todays.map(a => a.id)
         const byTradeJobs = {}; for (const t of Object.values(TV_TRADES)) byTradeJobs[t] = new Set()
         for (let i = 0; i < ids.length; i += 50) {
@@ -4168,7 +4172,15 @@ async function tvBuildAll() {
       // Month tech table needs jobs ran + presented per tech → assignments.
       try {
         const appts = await stPageAll(pg => `/jpm/v2/tenant/${ST_TENANT_ID}/appointments?startsOnOrAfter=${tvBounds(monthStart)}&pageSize=500&page=${pg}`, 4000)
-        const ran = appts.filter(a => a.status !== 'Canceled' && Date.parse(a.start) < Date.now())
+        // Prior days: started = ran (the settled convention). Today: only
+        // appointments the tech is actually on (same rule as the day tier).
+        const todayStartMs = Date.parse(tvBounds(today))
+        const ran = appts.filter(a => {
+          if (a.status === 'Canceled' || a.status === 'Hold') return false
+          const s = Date.parse(a.start)
+          if (s < todayStartMs) return s < Date.now()
+          return ['Dispatched', 'Working', 'Done'].includes(a.status)
+        })
         const ids = ran.map(a => a.id)
         const apptJob = new Map(ran.map(a => [a.id, a.jobId]))
         const jobsByTrade = {}; for (const t of Object.values(TV_TRADES)) jobsByTrade[t] = new Set()
