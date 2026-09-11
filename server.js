@@ -9750,7 +9750,7 @@ function brainSystem() {
 METRIC DEFINITIONS — these are calibrated to the company's leadership sheet; never invent alternatives:
 - Sales = sales/v2 estimates with status.name "Sold", summing subtotal, in a soldAfter/soldBefore window. Trade from businessUnitName (hvac/plumb/electric/garage substrings).
 - Revenue = accounting/v2 invoices summing subTotal (NOT total). Invoice dates are DATE-ONLY: bound them T00:00:00Z→T23:59:59Z on calendar days.
-- Close rate = jobs sold ÷ jobs where an estimate was presented (estimates created in window, grouped by jobId).
+- Close rate = jobs sold ÷ jobs where an estimate was presented (estimates created in window, grouped by jobId) — EXCLUDING install-typed jobs entirely (job type name contains "Install"): an install fulfills an estimate already sold on an earlier call and is never an opportunity (owner's rule, Sep 2026). Company dashboards also exclude maintenance/callback job types from opportunities.
 - Booking % = telecom/v2 inbound calls: Booked ÷ (Booked + Unbooked) by callType. NEVER count Excused/NotLead/Abandoned as leads.
 - Booked calls (per person) = jpm/v2 jobs where createdById = their ST user id, createdOn in window. This matches ST's own reports.
 - Memberships = memberships/v2 created in window. 5★ reviews = marketingreputation/v2 reviews rating>=5.
