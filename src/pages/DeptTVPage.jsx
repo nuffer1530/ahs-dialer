@@ -105,6 +105,21 @@ export default function DeptTVPage() {
     window.addEventListener('resize', on)
     return () => window.removeEventListener('resize', on)
   }, [])
+  // Auto-fit on TV screens: if the board overflows the viewport, scale it down
+  // (WarRoom-style zoom, but measured) so strips + full ranking + the Today
+  // strip are ALL visible with no scrolling, whatever the roster size.
+  const [fit, setFit] = useState(1)
+  useEffect(() => { setFit(1) }, [trade.key, narrow])
+  useEffect(() => {
+    if (!narrow) return
+    const el = rootRef.current
+    if (!el) return
+    const t = setTimeout(() => {
+      const need = el.scrollHeight, have = el.clientHeight
+      if (need > have + 4) setFit(f => Math.max(0.65, +((f * have) / need).toFixed(3)))
+    }, 250)
+    return () => clearTimeout(t)
+  }, [narrow, data, fit])
   const rootRef = useRef(null)
   useDailyReload()
 
@@ -175,7 +190,7 @@ export default function DeptTVPage() {
   )
 
   return (
-    <div ref={rootRef} style={{ height:'100vh', minHeight:'100vh', boxSizing:'border-box', background:C.bg, color:C.text, padding: narrow ? '10px 14px' : '16px 20px', display:'flex', flexDirection:'column', gap: narrow ? 10 : 14, overflow:'auto', fontFamily:'inherit' }}>
+    <div ref={rootRef} style={{ height:`calc(100vh / ${fit})`, minHeight:`calc(100vh / ${fit})`, zoom: fit, boxSizing:'border-box', background:C.bg, color:C.text, padding: narrow ? '10px 14px' : '16px 20px', display:'flex', flexDirection:'column', gap: narrow ? 10 : 14, overflow:'auto', fontFamily:'inherit' }}>
       {/* Header: mark + dept + switcher | updated | fullscreen + clock */}
       <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:16, flexShrink:0, flexWrap:'wrap' }}>
         <div style={{ display:'flex', alignItems:'center', gap:12 }}>
