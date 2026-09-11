@@ -110,6 +110,13 @@ export default function DeptTVPage() {
   // (WarRoom-style zoom, but measured) so strips + full ranking + the Today
   // strip are ALL visible with no scrolling, whatever the roster size.
   const [fit, setFit] = useState(1)
+  // TV feed strip rotates through the day's events, 3 at a time.
+  const [feedTick, setFeedTick] = useState(0)
+  useEffect(() => {
+    if (!narrow) return
+    const id = setInterval(() => setFeedTick(t => t + 1), 6000)
+    return () => clearInterval(id)
+  }, [narrow])
   useEffect(() => { setFit(1) }, [trade.key, narrow])
   useEffect(() => {
     if (!narrow) return
@@ -308,7 +315,12 @@ export default function DeptTVPage() {
           <div style={{ flexShrink:0, background:C.panel, border:`1px solid ${C.border}`, borderRadius:14, padding:'7px 14px', display:'flex', alignItems:'center', gap:12, overflow:'hidden', whiteSpace:'nowrap' }}>
             <span style={{ fontSize:11, fontWeight:800, letterSpacing:1, textTransform:'uppercase', color:C.muted, flexShrink:0 }}>Today</span>
             <div style={{ width:7, height:7, borderRadius:'50%', background:C.green, animation:'wr-pulse 1.5s infinite', flexShrink:0 }} />
-            {(data?.feed || []).slice(0, 3).map((f, i) => {
+            {(() => {
+              const fl = data?.feed || []
+              const pages = Math.max(1, Math.ceil(fl.length / 3))
+              const page = feedTick % pages
+              return fl.slice(page * 3, page * 3 + 3)
+            })().map((f, i) => {
               const s = FEED_STYLE[f.kind] || FEED_STYLE.sale
               return (
                 <span key={i} style={{ display:'inline-flex', alignItems:'center', gap:7, minWidth:0 }}>
@@ -324,6 +336,11 @@ export default function DeptTVPage() {
               )
             })}
             {!(data?.feed || []).length && <span style={{ fontSize:12, color:C.dim }}>No wins yet today</span>}
+            {(data?.feed || []).length > 3 && (
+              <span style={{ marginLeft:'auto', fontSize:10, color:C.dim, flexShrink:0 }}>
+                {(feedTick % Math.ceil((data.feed.length) / 3)) + 1}/{Math.ceil(data.feed.length / 3)} · {data.feed.length} today
+              </span>
+            )}
           </div>
         ) : (
         <div style={{ width:'min(330px, 27vw)', flexShrink:0, background:C.panel, border:`1px solid ${C.border}`, borderRadius:14, overflow:'hidden', display:'flex', flexDirection:'column' }}>

@@ -4291,7 +4291,7 @@ async function tvBuildDay() {
         seenInv.add(jid)
         feed[t].push({ kind: 'invoice', at: i2.createdOn || null, who: dayJobTech.get(jid) || null, amount: Math.round(amt) })
       }
-      for (const t of Object.values(TV_TRADES)) feed[t].sort((a, b) => String(b.at || '').localeCompare(String(a.at || ''))).splice(20)
+      for (const t of Object.values(TV_TRADES)) feed[t].sort((a, b) => String(b.at || '').localeCompare(String(a.at || ''))).splice(40)
       _tvDay = { at: Date.now(), data: { dept: w.dept, feed } }
     }
   } finally { _tvDayBusy = false }
