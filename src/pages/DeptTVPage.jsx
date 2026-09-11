@@ -25,6 +25,11 @@ const TRADES = [
 const TRADE_SHORT = { 'HVAC':'HVAC', 'Plumbing':'PLB', 'Electrical':'ELE', 'Garage Doors':'GAR' }
 
 const fmtMoney = (n) => n == null ? '—' : '$' + Math.round(n).toLocaleString()
+// Strip stats on TV browsers (Fire TV Silk ≈ 960px CSS viewport) get tight
+// columns — millions go compact so cells never overflow into each other.
+const fmtMoneyC = (n) => n == null ? '—'
+  : Math.abs(n) >= 1e6 ? '$' + (n / 1e6).toFixed(2) + 'M'
+  : '$' + Math.round(n).toLocaleString()
 const fmtPct = (n) => n == null ? '—' : Math.round(n * 100) + '%'
 const fmtN = (n) => n == null ? '—' : Number(n).toLocaleString()
 const timeAgo = (iso) => {
@@ -39,7 +44,7 @@ const timeAgo = (iso) => {
 function Stat({ label, value, color = C.text, big }) {
   return (
     <div style={{ minWidth:0 }}>
-      <div style={{ fontSize: big ? 30 : 24, fontWeight:800, color, letterSpacing:-1, lineHeight:1.05, fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap' }}>{value}</div>
+      <div style={{ fontSize: big ? 'clamp(18px, 2.3vw, 30px)' : 'clamp(15px, 1.9vw, 24px)', fontWeight:800, color, letterSpacing:-1, lineHeight:1.05, fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap' }}>{value}</div>
       <div style={{ fontSize:10, fontWeight:700, letterSpacing:1, color:C.muted, textTransform:'uppercase', marginTop:4 }}>{label}</div>
     </div>
   )
@@ -63,10 +68,10 @@ function PeriodPanel({ title, d, accent }) {
     <div style={{ background:C.panel, border:`1px solid ${C.border}`, borderTop:`3px solid ${accent}`, borderRadius:14, padding:'14px 18px', minWidth:0 }}>
       <div style={{ fontSize:12, fontWeight:800, letterSpacing:1.4, color:accent, textTransform:'uppercase', marginBottom:12 }}>{title}</div>
       {d ? (
-        <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:'14px 12px' }}>
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:'12px 10px' }}>
           <Stat label="Jobs ran" value={fmtN(d.jobsRan)} />
-          <Stat label="Sales" value={fmtMoney(d.sales)} color={C.green} />
-          <Stat label="Revenue" value={fmtMoney(d.revenue)} color={C.blue} />
+          <Stat label="Sales" value={fmtMoneyC(d.sales)} color={C.green} />
+          <Stat label="Revenue" value={fmtMoneyC(d.revenue)} color={C.blue} />
           <Stat label="Close rate" value={fmtPct(d.closeRate)} color={C.amber} />
           <Stat label="5★ reviews" value={fmtN(d.fiveStar)} color={C.amber} />
           <Stat label="Memberships" value={fmtN(d.memberships)} color={C.purple} />
@@ -93,6 +98,13 @@ export default function DeptTVPage() {
   const [err, setErr] = useState(null)
   const [time, setTime] = useState(new Date())
   const [isFull, setIsFull] = useState(false)
+  // Fire TV Silk reports ~960 CSS px — table + side feed can't share a row.
+  const [narrow, setNarrow] = useState(() => typeof window !== 'undefined' && window.innerWidth < 1150)
+  useEffect(() => {
+    const on = () => setNarrow(window.innerWidth < 1150)
+    window.addEventListener('resize', on)
+    return () => window.removeEventListener('resize', on)
+  }, [])
   const rootRef = useRef(null)
   useDailyReload()
 
@@ -151,14 +163,15 @@ export default function DeptTVPage() {
     return m
   }, [techs])
   const cell = (v, isMax, fmt = fmtN, color) => (
-    <td style={{ padding:'10px 12px', textAlign:'right', fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap',
-      fontWeight: isMax ? 800 : 500, color: isMax ? (color || C.text) : C.muted, fontSize: isMax ? 17 : 15 }}>
+    <td style={{ padding:'10px 9px', textAlign:'right', fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap',
+      fontWeight: isMax ? 800 : 500, color: isMax ? (color || C.text) : C.muted,
+      fontSize: isMax ? 'clamp(13px, 1.5vw, 17px)' : 'clamp(12px, 1.35vw, 15px)' }}>
       {fmt(v)}
     </td>
   )
 
   const th = (label, right = true) => (
-    <th style={{ padding:'9px 12px', textAlign: right ? 'right' : 'left', fontSize:10, fontWeight:700, letterSpacing:1, color:C.dim, textTransform:'uppercase', whiteSpace:'nowrap' }}>{label}</th>
+    <th style={{ padding:'9px 9px', textAlign: right ? 'right' : 'left', fontSize:10, fontWeight:700, letterSpacing:1, color:C.dim, textTransform:'uppercase', whiteSpace:'nowrap' }}>{label}</th>
   )
 
   return (
@@ -197,7 +210,7 @@ export default function DeptTVPage() {
             )}
           </button>
           <div style={{ textAlign:'right' }}>
-            <div style={{ fontSize:30, fontWeight:800, letterSpacing:-1, color:C.blue, fontVariantNumeric:'tabular-nums' }}>
+            <div style={{ fontSize:'clamp(20px, 2.4vw, 30px)', fontWeight:800, letterSpacing:-1, color:C.blue, fontVariantNumeric:'tabular-nums' }}>
               {time.toLocaleTimeString([], { hour:'2-digit', minute:'2-digit', second:'2-digit' })}
             </div>
             <div style={{ fontSize:12, color:C.muted }}>{time.toLocaleDateString([], { weekday:'long', month:'long', day:'numeric' })}</div>
@@ -212,8 +225,8 @@ export default function DeptTVPage() {
         <PeriodPanel title="This year" d={data?.yearly} accent={C.blue} />
       </div>
 
-      {/* Tech ranking + live feed */}
-      <div style={{ display:'flex', gap:14, flex:1, minHeight:0, alignItems:'stretch' }}>
+      {/* Tech ranking + live feed (feed drops below the table on TV browsers) */}
+      <div style={{ display:'flex', flexDirection: narrow ? 'column' : 'row', gap:14, flex:1, minHeight:0, alignItems:'stretch' }}>
         <div style={{ flex:1, minWidth:0, display:'flex', flexDirection:'column', gap:14 }}>
         <div style={{ flex:3, background:C.panel, border:`1px solid ${C.border}`, borderRadius:14, overflow:'hidden', display:'flex', flexDirection:'column', minWidth:0, minHeight:0 }}>
           <div style={{ padding:'13px 18px', borderBottom:`1px solid ${C.border}`, display:'flex', alignItems:'baseline', gap:10, flexShrink:0 }}>
@@ -243,7 +256,7 @@ export default function DeptTVPage() {
                 {techs.map((x, i) => (
                   <tr key={x.id} style={{ borderBottom:`1px solid ${C.border}`, background: i === 0 ? `${trade.color}14` : 'transparent' }}>
                     <td style={{ padding:'8px 12px' }}><RankBadge i={i} /></td>
-                    <td style={{ padding:'10px 12px', fontWeight:700, fontSize:15, whiteSpace:'nowrap' }}>
+                    <td style={{ padding:'10px 9px', fontWeight:700, fontSize:'clamp(13px, 1.5vw, 15px)', whiteSpace:'nowrap' }}>
                       {x.name}
                       {x.trade && <span style={{ marginLeft:8, fontSize:10, fontWeight:800, letterSpacing:.8, color:C.dim }}>{TRADE_SHORT[x.trade] || x.trade}</span>}
                     </td>
@@ -271,7 +284,7 @@ export default function DeptTVPage() {
         </div>
 
         {/* Dept live feed */}
-        <div style={{ width:330, flexShrink:0, background:C.panel, border:`1px solid ${C.border}`, borderRadius:14, overflow:'hidden', display:'flex', flexDirection:'column' }}>
+        <div style={{ width: narrow ? '100%' : 'min(330px, 27vw)', maxHeight: narrow ? 240 : undefined, flexShrink:0, background:C.panel, border:`1px solid ${C.border}`, borderRadius:14, overflow:'hidden', display:'flex', flexDirection:'column' }}>
           <div style={{ padding:'13px 18px', borderBottom:`1px solid ${C.border}`, display:'flex', alignItems:'center', gap:8, flexShrink:0 }}>
             <span style={{ fontSize:13, fontWeight:700, letterSpacing:.5 }}>Today in {trade.label}</span>
             <div style={{ marginLeft:'auto', width:7, height:7, borderRadius:'50%', background:C.green, animation:'wr-pulse 1.5s infinite' }} />
