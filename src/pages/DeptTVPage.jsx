@@ -110,13 +110,20 @@ export default function DeptTVPage() {
   // (WarRoom-style zoom, but measured) so strips + full ranking + the Today
   // strip are ALL visible with no scrolling, whatever the roster size.
   const [fit, setFit] = useState(1)
-  // TV feed strip rotates through the day's events, 3 at a time.
-  const [feedTick, setFeedTick] = useState(0)
+  // TV feed strip: fill the width; when the day's events overflow it, scroll
+  // them continuously like a ticker.
+  const [ticker, setTicker] = useState(false)
+  const tickOuterRef = useRef(null)
+  const tickInnerRef = useRef(null)
   useEffect(() => {
     if (!narrow) return
-    const id = setInterval(() => setFeedTick(t => t + 1), 6000)
-    return () => clearInterval(id)
-  }, [narrow])
+    setTicker(false)
+    const t = setTimeout(() => {
+      const o = tickOuterRef.current, inn = tickInnerRef.current
+      if (o && inn && inn.scrollWidth > o.clientWidth + 8) setTicker(true)
+    }, 200)
+    return () => clearTimeout(t)
+  }, [narrow, data])
   useEffect(() => { setFit(1) }, [trade.key, narrow])
   useEffect(() => {
     if (!narrow) return
@@ -312,35 +319,32 @@ export default function DeptTVPage() {
         {/* Dept live feed — a slim one-line strip on TV screens so the whole
             board fits; the full side panel on desktop. */}
         {narrow ? (
-          <div style={{ flexShrink:0, background:C.panel, border:`1px solid ${C.border}`, borderRadius:14, padding:'7px 14px', display:'flex', alignItems:'center', gap:12, overflow:'hidden', whiteSpace:'nowrap' }}>
-            <span style={{ fontSize:11, fontWeight:800, letterSpacing:1, textTransform:'uppercase', color:C.muted, flexShrink:0 }}>Today</span>
+          <div style={{ flexShrink:0, background:C.panel, border:`1px solid ${C.border}`, borderRadius:14, padding:'7px 14px', display:'flex', alignItems:'center', gap:12, overflow:'hidden' }}>
+            <span style={{ fontSize:11, fontWeight:800, letterSpacing:1, textTransform:'uppercase', color:C.muted, flexShrink:0 }}>
+              Today{(data?.feed || []).length ? ` · ${data.feed.length}` : ''}
+            </span>
             <div style={{ width:7, height:7, borderRadius:'50%', background:C.green, animation:'wr-pulse 1.5s infinite', flexShrink:0 }} />
-            {(() => {
-              const fl = data?.feed || []
-              const pages = Math.max(1, Math.ceil(fl.length / 3))
-              const page = feedTick % pages
-              return fl.slice(page * 3, page * 3 + 3)
-            })().map((f, i) => {
-              const s = FEED_STYLE[f.kind] || FEED_STYLE.sale
-              return (
-                <span key={i} style={{ display:'inline-flex', alignItems:'center', gap:7, minWidth:0 }}>
-                  <span style={{ fontSize:9, fontWeight:800, letterSpacing:.8, color:s.color, background:`${s.color}1A`, border:`1px solid ${s.color}55`, borderRadius:5, padding:'2px 6px', flexShrink:0 }}>{s.tag}</span>
-                  <span style={{ fontSize:12, fontWeight:700, overflow:'hidden', textOverflow:'ellipsis' }}>
-                    {f.kind === 'sale' && `${(f.who || 'The team').split(' ')[0]} sold ${fmtMoney(f.amount)}`}
-                    {f.kind === 'review' && `${(f.who || 'The team').split(' ')[0]} got a 5★`}
-                    {f.kind === 'membership' && `${(f.who || 'The team').split(' ')[0]} sold a club`}
-                    {f.kind === 'invoice' && `${(f.who || 'The team').split(' ')[0]} closed ${fmtMoney(f.amount)}`}
-                  </span>
-                  <span style={{ fontSize:10, color:C.dim, flexShrink:0 }}>{timeAgo(f.at)}</span>
-                </span>
-              )
-            })}
-            {!(data?.feed || []).length && <span style={{ fontSize:12, color:C.dim }}>No wins yet today</span>}
-            {(data?.feed || []).length > 3 && (
-              <span style={{ marginLeft:'auto', fontSize:10, color:C.dim, flexShrink:0 }}>
-                {(feedTick % Math.ceil((data.feed.length) / 3)) + 1}/{Math.ceil(data.feed.length / 3)} · {data.feed.length} today
-              </span>
-            )}
+            <div ref={tickOuterRef} style={{ flex:1, minWidth:0, overflow:'hidden' }}>
+              <div ref={tickInnerRef} style={{ display:'inline-block', whiteSpace:'nowrap',
+                ...(ticker ? { paddingLeft:'100%', animation:`tv-ticker ${Math.max(18, (data?.feed || []).length * 5)}s linear infinite` } : {}) }}>
+                {(data?.feed || []).map((f, i) => {
+                  const s = FEED_STYLE[f.kind] || FEED_STYLE.sale
+                  return (
+                    <span key={i} style={{ display:'inline-flex', alignItems:'center', gap:7, marginRight:26, verticalAlign:'middle' }}>
+                      <span style={{ fontSize:9, fontWeight:800, letterSpacing:.8, color:s.color, background:`${s.color}1A`, border:`1px solid ${s.color}55`, borderRadius:5, padding:'2px 6px' }}>{s.tag}</span>
+                      <span style={{ fontSize:12, fontWeight:700 }}>
+                        {f.kind === 'sale' && `${(f.who || 'The team').split(' ')[0]} sold ${fmtMoney(f.amount)}`}
+                        {f.kind === 'review' && `${(f.who || 'The team').split(' ')[0]} got a 5★`}
+                        {f.kind === 'membership' && `${(f.who || 'The team').split(' ')[0]} sold a club`}
+                        {f.kind === 'invoice' && `${(f.who || 'The team').split(' ')[0]} closed ${fmtMoney(f.amount)}`}
+                      </span>
+                      <span style={{ fontSize:10, color:C.dim }}>{timeAgo(f.at)}</span>
+                    </span>
+                  )
+                })}
+                {!(data?.feed || []).length && <span style={{ fontSize:12, color:C.dim }}>No wins yet today</span>}
+              </div>
+            </div>
           </div>
         ) : (
         <div style={{ width:'min(330px, 27vw)', flexShrink:0, background:C.panel, border:`1px solid ${C.border}`, borderRadius:14, overflow:'hidden', display:'flex', flexDirection:'column' }}>
@@ -373,7 +377,10 @@ export default function DeptTVPage() {
         </div>
         )}
       </div>
-      <style>{`@keyframes wr-pulse { 0%,100%{opacity:1} 50%{opacity:.25} }`}</style>
+      <style>{`
+        @keyframes wr-pulse { 0%,100%{opacity:1} 50%{opacity:.25} }
+        @keyframes tv-ticker { from { transform: translateX(0) } to { transform: translateX(-100%) } }
+      `}</style>
     </div>
   )
 }
