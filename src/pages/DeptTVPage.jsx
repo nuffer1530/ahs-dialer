@@ -63,12 +63,12 @@ function RankBadge({ i }) {
   )
 }
 
-function PeriodPanel({ title, d, accent }) {
+function PeriodPanel({ title, d, accent, compact }) {
   return (
-    <div style={{ background:C.panel, border:`1px solid ${C.border}`, borderTop:`3px solid ${accent}`, borderRadius:14, padding:'14px 18px', minWidth:0 }}>
-      <div style={{ fontSize:12, fontWeight:800, letterSpacing:1.4, color:accent, textTransform:'uppercase', marginBottom:12 }}>{title}</div>
+    <div style={{ background:C.panel, border:`1px solid ${C.border}`, borderTop:`3px solid ${accent}`, borderRadius:14, padding: compact ? '9px 14px' : '14px 18px', minWidth:0 }}>
+      <div style={{ fontSize: compact ? 11 : 12, fontWeight:800, letterSpacing:1.4, color:accent, textTransform:'uppercase', marginBottom: compact ? 7 : 12 }}>{title}</div>
       {d ? (
-        <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:'12px 10px' }}>
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap: compact ? '8px 8px' : '12px 10px' }}>
           <Stat label="Jobs ran" value={fmtN(d.jobsRan)} />
           <Stat label="Sales" value={fmtMoneyC(d.sales)} color={C.green} />
           <Stat label="Revenue" value={fmtMoneyC(d.revenue)} color={C.blue} />
@@ -163,7 +163,7 @@ export default function DeptTVPage() {
     return m
   }, [techs])
   const cell = (v, isMax, fmt = fmtN, color) => (
-    <td style={{ padding:'10px 9px', textAlign:'right', fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap',
+    <td style={{ padding: narrow ? '5px 8px' : '10px 9px', textAlign:'right', fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap',
       fontWeight: isMax ? 800 : 500, color: isMax ? (color || C.text) : C.muted,
       fontSize: isMax ? 'clamp(13px, 1.5vw, 17px)' : 'clamp(12px, 1.35vw, 15px)' }}>
       {fmt(v)}
@@ -171,11 +171,11 @@ export default function DeptTVPage() {
   )
 
   const th = (label, right = true) => (
-    <th style={{ padding:'9px 9px', textAlign: right ? 'right' : 'left', fontSize:10, fontWeight:700, letterSpacing:1, color:C.dim, textTransform:'uppercase', whiteSpace:'nowrap' }}>{label}</th>
+    <th style={{ padding: narrow ? '6px 8px' : '9px 9px', textAlign: right ? 'right' : 'left', fontSize:10, fontWeight:700, letterSpacing:1, color:C.dim, textTransform:'uppercase', whiteSpace:'nowrap' }}>{label}</th>
   )
 
   return (
-    <div ref={rootRef} style={{ height:'100vh', minHeight:'100vh', boxSizing:'border-box', background:C.bg, color:C.text, padding:'16px 20px', display:'flex', flexDirection:'column', gap:14, overflow:'auto', fontFamily:'inherit' }}>
+    <div ref={rootRef} style={{ height:'100vh', minHeight:'100vh', boxSizing:'border-box', background:C.bg, color:C.text, padding: narrow ? '10px 14px' : '16px 20px', display:'flex', flexDirection:'column', gap: narrow ? 10 : 14, overflow:'auto', fontFamily:'inherit' }}>
       {/* Header: mark + dept + switcher | updated | fullscreen + clock */}
       <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:16, flexShrink:0, flexWrap:'wrap' }}>
         <div style={{ display:'flex', alignItems:'center', gap:12 }}>
@@ -186,15 +186,18 @@ export default function DeptTVPage() {
           </span>
           <span style={{ fontSize:21, fontWeight:800, letterSpacing:.3 }}>{trade.label}</span>
           <span style={{ fontSize:12, color:C.muted, letterSpacing:1, textTransform:'uppercase' }}>Department board</span>
-          <div style={{ display:'flex', gap:6, marginLeft:10 }}>
-            {TRADES.map(t => (
-              <button key={t.key} onClick={() => navigate(`/tv/${t.key}`)}
-                style={{ background: t.key === trade.key ? C.panel2 : 'transparent', border:`1px solid ${t.key === trade.key ? t.color : C.border}`,
-                  color: t.key === trade.key ? C.text : C.dim, borderRadius:8, padding:'6px 12px', fontSize:12, fontWeight:700, cursor:'pointer' }}>
-                {t.label}
-              </button>
-            ))}
-          </div>
+          {/* Fullscreen is wall-TV mode: just the department, time, and date. */}
+          {!isFull && (
+            <div style={{ display:'flex', gap:6, marginLeft:10, flexWrap:'wrap' }}>
+              {TRADES.map(t => (
+                <button key={t.key} onClick={() => navigate(`/tv/${t.key}`)}
+                  style={{ background: t.key === trade.key ? C.panel2 : 'transparent', border:`1px solid ${t.key === trade.key ? t.color : C.border}`,
+                    color: t.key === trade.key ? C.text : C.dim, borderRadius:8, padding:'6px 12px', fontSize:12, fontWeight:700, cursor:'pointer' }}>
+                  {t.label}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
         <div style={{ display:'flex', alignItems:'center', gap:16 }}>
           {data?.updatedAt && (
@@ -219,17 +222,17 @@ export default function DeptTVPage() {
       </div>
 
       {/* Daily / Monthly / Yearly strip */}
-      <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:14, flexShrink:0 }}>
-        <PeriodPanel title="Today" d={data?.daily} accent={C.green} />
-        <PeriodPanel title="This month" d={data?.monthly} accent={trade.color} />
-        <PeriodPanel title="This year" d={data?.yearly} accent={C.blue} />
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap: narrow ? 10 : 14, flexShrink:0 }}>
+        <PeriodPanel title="Today" d={data?.daily} accent={C.green} compact={narrow} />
+        <PeriodPanel title="This month" d={data?.monthly} accent={trade.color} compact={narrow} />
+        <PeriodPanel title="This year" d={data?.yearly} accent={C.blue} compact={narrow} />
       </div>
 
       {/* Tech ranking + live feed (feed drops below the table on TV browsers) */}
       <div style={{ display:'flex', flexDirection: narrow ? 'column' : 'row', gap:14, flex:1, minHeight:0, alignItems:'stretch' }}>
         <div style={{ flex:1, minWidth:0, display:'flex', flexDirection:'column', gap:14 }}>
         <div style={{ flex:3, background:C.panel, border:`1px solid ${C.border}`, borderRadius:14, overflow:'hidden', display:'flex', flexDirection:'column', minWidth:0, minHeight:0 }}>
-          <div style={{ padding:'13px 18px', borderBottom:`1px solid ${C.border}`, display:'flex', alignItems:'baseline', gap:10, flexShrink:0 }}>
+          <div style={{ padding: narrow ? '8px 14px' : '13px 18px', borderBottom:`1px solid ${C.border}`, display:'flex', alignItems:'baseline', gap:10, flexShrink:0 }}>
             <span style={{ fontSize:13, fontWeight:700, letterSpacing:.5 }}>
               {trade.key === 'company' ? 'Top 10 service techs' : 'Service ranking'} — {time.toLocaleDateString([], { month:'long' })}
             </span>
@@ -255,8 +258,8 @@ export default function DeptTVPage() {
               <tbody>
                 {techs.map((x, i) => (
                   <tr key={x.id} style={{ borderBottom:`1px solid ${C.border}`, background: i === 0 ? `${trade.color}14` : 'transparent' }}>
-                    <td style={{ padding:'8px 12px' }}><RankBadge i={i} /></td>
-                    <td style={{ padding:'10px 9px', fontWeight:700, fontSize:'clamp(13px, 1.5vw, 15px)', whiteSpace:'nowrap' }}>
+                    <td style={{ padding: narrow ? '4px 10px' : '8px 12px' }}><RankBadge i={i} /></td>
+                    <td style={{ padding: narrow ? '5px 8px' : '10px 9px', fontWeight:700, fontSize:'clamp(13px, 1.5vw, 15px)', whiteSpace:'nowrap' }}>
                       {x.name}
                       {x.trade && <span style={{ marginLeft:8, fontSize:10, fontWeight:800, letterSpacing:.8, color:C.dim }}>{TRADE_SHORT[x.trade] || x.trade}</span>}
                     </td>
@@ -283,8 +286,30 @@ export default function DeptTVPage() {
 
         </div>
 
-        {/* Dept live feed */}
-        <div style={{ width: narrow ? '100%' : 'min(330px, 27vw)', maxHeight: narrow ? 240 : undefined, flexShrink:0, background:C.panel, border:`1px solid ${C.border}`, borderRadius:14, overflow:'hidden', display:'flex', flexDirection:'column' }}>
+        {/* Dept live feed — a slim one-line strip on TV screens so the whole
+            board fits; the full side panel on desktop. */}
+        {narrow ? (
+          <div style={{ flexShrink:0, background:C.panel, border:`1px solid ${C.border}`, borderRadius:14, padding:'7px 14px', display:'flex', alignItems:'center', gap:12, overflow:'hidden', whiteSpace:'nowrap' }}>
+            <span style={{ fontSize:11, fontWeight:800, letterSpacing:1, textTransform:'uppercase', color:C.muted, flexShrink:0 }}>Today</span>
+            <div style={{ width:7, height:7, borderRadius:'50%', background:C.green, animation:'wr-pulse 1.5s infinite', flexShrink:0 }} />
+            {(data?.feed || []).slice(0, 3).map((f, i) => {
+              const s = FEED_STYLE[f.kind] || FEED_STYLE.sale
+              return (
+                <span key={i} style={{ display:'inline-flex', alignItems:'center', gap:7, minWidth:0 }}>
+                  <span style={{ fontSize:9, fontWeight:800, letterSpacing:.8, color:s.color, background:`${s.color}1A`, border:`1px solid ${s.color}55`, borderRadius:5, padding:'2px 6px', flexShrink:0 }}>{s.tag}</span>
+                  <span style={{ fontSize:12, fontWeight:700, overflow:'hidden', textOverflow:'ellipsis' }}>
+                    {f.kind === 'sale' && `${(f.who || 'The team').split(' ')[0]} sold ${fmtMoney(f.amount)}`}
+                    {f.kind === 'review' && `${(f.who || 'The team').split(' ')[0]} got a 5★`}
+                    {f.kind === 'membership' && `${(f.who || 'The team').split(' ')[0]} sold a club`}
+                  </span>
+                  <span style={{ fontSize:10, color:C.dim, flexShrink:0 }}>{timeAgo(f.at)}</span>
+                </span>
+              )
+            })}
+            {!(data?.feed || []).length && <span style={{ fontSize:12, color:C.dim }}>No wins yet today</span>}
+          </div>
+        ) : (
+        <div style={{ width:'min(330px, 27vw)', flexShrink:0, background:C.panel, border:`1px solid ${C.border}`, borderRadius:14, overflow:'hidden', display:'flex', flexDirection:'column' }}>
           <div style={{ padding:'13px 18px', borderBottom:`1px solid ${C.border}`, display:'flex', alignItems:'center', gap:8, flexShrink:0 }}>
             <span style={{ fontSize:13, fontWeight:700, letterSpacing:.5 }}>Today in {trade.label}</span>
             <div style={{ marginLeft:'auto', width:7, height:7, borderRadius:'50%', background:C.green, animation:'wr-pulse 1.5s infinite' }} />
@@ -311,6 +336,7 @@ export default function DeptTVPage() {
             )}
           </div>
         </div>
+        )}
       </div>
       <style>{`@keyframes wr-pulse { 0%,100%{opacity:1} 50%{opacity:.25} }`}</style>
     </div>
