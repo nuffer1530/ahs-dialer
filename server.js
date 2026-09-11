@@ -3972,6 +3972,10 @@ async function tvWindow({ fromIso, invFrom, invTo, revFrom, perTech, capMul = 1 
 // Maintenance tune-ups auto-generate option sheets, which is why the old
 // estimates-only math read low (Preston: 53% here vs 71% in ST).
 const TV_SALES_CATS = new Set(['repair', 'other', 'free_estimate'])
+// ST's configured conversion threshold: a job that invoices >= this converted,
+// Sold estimate or not (techs invoice repairs directly; $89 trip-fee-only
+// visits don't count). Brandyn confirmed $90, Sep 11.
+const TV_CONV_THRESHOLD = 90
 let _tvCats = { at: 0, map: new Map() }
 async function tvCatMap() {
   if (Date.now() - _tvCats.at < 6 * 3600_000 && _tvCats.map.size) return _tvCats.map
@@ -3982,12 +3986,12 @@ async function tvCatMap() {
   return _tvCats.map
 }
 async function tvJobTypes(jobIds) {
-  const out = new Map()
+  const out = new Map()   // jobId -> { t: jobTypeId string, total: job total $ }
   const ids = [...jobIds]
   for (let i = 0; i < ids.length; i += 50) {
     try {
       const r = await stGet(`/jpm/v2/tenant/${ST_TENANT_ID}/jobs?ids=${ids.slice(i, i + 50).join(',')}&pageSize=50`)
-      for (const j of (r?.data || [])) out.set(j.id, String(j.jobTypeId))
+      for (const j of (r?.data || [])) out.set(j.id, { t: String(j.jobTypeId), total: Number(j.total) || 0 })
     } catch (e) { console.warn('tv job types batch:', e.message) }
   }
   return out
@@ -4009,7 +4013,7 @@ async function tvJobTypeNames() {
 function tvDropAdminRan(byTradeSets, jobTypeOf, jtNames) {
   for (const set of Object.values(byTradeSets)) {
     for (const jid of [...set]) {
-      const nm = jtNames.get(jobTypeOf.get(jid) || '') || ''
+      const nm = jtNames.get((jobTypeOf.get(jid) || {}).t) || ''
       if (TV_EXCLUDE_RAN.test(nm)) set.delete(jid)
     }
   }
@@ -4019,15 +4023,18 @@ function tvDropAdminRan(byTradeSets, jobTypeOf, jtNames) {
 function tvStClose(ranSet, jobTypeOf, cats, jtNames, presented, sold) {
   let opps = 0, conv = 0
   for (const jid of ranSet) {
-    if (!presented.has(jid) && !sold.has(jid)) continue      // no estimate activity
-    const jt = jobTypeOf.get(jid)
+    const info = jobTypeOf.get(jid) || {}
+    // ST threshold semantics: invoicing >= $90 converts the job even with no
+    // Sold estimate, and such a job is an opportunity even with no estimate.
+    const revConv = (info.total || 0) >= TV_CONV_THRESHOLD
+    if (!presented.has(jid) && !sold.has(jid) && !revConv) continue
     // Installs fulfill an ALREADY-SOLD estimate — never an opportunity
     // (Brandyn, Sep 11: Stephen's two installs were inflating his denominator).
-    if (/install/i.test(jtNames.get(jt) || '')) continue
-    const cat = jt != null ? cats.get(jt) : undefined
+    if (/install/i.test(jtNames.get(info.t) || '')) continue
+    const cat = info.t != null ? cats.get(info.t) : undefined
     if (cat !== undefined && cat !== null && !TV_SALES_CATS.has(cat)) continue
     opps++
-    if (sold.has(jid)) conv++
+    if (sold.has(jid) || revConv) conv++
   }
   return { opps, conv, rate: opps ? conv / opps : null }
 }
@@ -4405,7 +4412,7 @@ async function tvBuildSlow() {
         const ranByTrade = {}; for (const t of Object.values(TV_TRADES)) ranByTrade[t] = new Set()
         const jobTypeOf = new Map()
         for (const j of yearJobs) {
-          jobTypeOf.set(j.id, String(j.jobTypeId))
+          jobTypeOf.set(j.id, { t: String(j.jobTypeId), total: Number(j.total) || 0 })
           if (j.jobStatus !== 'Completed') continue
           const t = buTradeY.get(String(j.businessUnitId))
           if (t) ranByTrade[t].add(j.id)
@@ -9750,7 +9757,7 @@ function brainSystem() {
 METRIC DEFINITIONS — these are calibrated to the company's leadership sheet; never invent alternatives:
 - Sales = sales/v2 estimates with status.name "Sold", summing subtotal, in a soldAfter/soldBefore window. Trade from businessUnitName (hvac/plumb/electric/garage substrings).
 - Revenue = accounting/v2 invoices summing subTotal (NOT total). Invoice dates are DATE-ONLY: bound them T00:00:00Z→T23:59:59Z on calendar days.
-- Close rate = jobs sold ÷ jobs where an estimate was presented (estimates created in window, grouped by jobId) — EXCLUDING install-typed jobs entirely (job type name contains "Install"): an install fulfills an estimate already sold on an earlier call and is never an opportunity (owner's rule, Sep 2026). Company dashboards also exclude maintenance/callback job types from opportunities.
+- Close rate = converted opportunities ÷ opportunities. Opportunity = a ran job with estimate activity OR job total >= $90 (ST's conversion threshold), EXCLUDING install-typed jobs entirely (an install fulfills an estimate already sold earlier — owner's rule) and maintenance/callback job types. Converted = a Sold estimate on the job OR job total >= $90 (techs invoice repairs directly; $89 trip-fee-only visits never count).
 - Booking % = telecom/v2 inbound calls: Booked ÷ (Booked + Unbooked) by callType. NEVER count Excused/NotLead/Abandoned as leads.
 - Booked calls (per person) = jpm/v2 jobs where createdById = their ST user id, createdOn in window. This matches ST's own reports.
 - Memberships = memberships/v2 created in window. 5★ reviews = marketingreputation/v2 reviews rating>=5.
