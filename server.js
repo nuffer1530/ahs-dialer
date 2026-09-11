@@ -3889,15 +3889,29 @@ async function tvTechMeta() {
   return byId
 }
 
+// Page like stPageAll but KEEP what's already fetched when a page errors — at
+// year scale one flaky page out of 15 was silently zeroing YTD 5★ reviews
+// (Brandyn's catch: plumbing YTD showed 0 while the month showed 4).
+async function tvPageSoft(pathForPage, cap) {
+  const out = []
+  for (let page = 1; page <= 500; page++) {
+    let d
+    try { d = await stGet(pathForPage(page)) }
+    catch (e) { console.warn(`tv page soft (kept ${out.length} rows):`, e.message); break }
+    out.push(...(d?.data || []))
+    if (!d?.hasMore || out.length >= cap) break
+  }
+  return out
+}
+
 // One window's pulls, aggregated per trade (+ per tech when asked).
 async function tvWindow({ fromIso, invFrom, invTo, revFrom, perTech, capMul = 1 }) {
-  const safe2 = (p) => p.catch(e => { console.warn('tv window:', e.message); return [] })
   const [sold, created, invoices, reviews, memberships] = await Promise.all([
-    safe2(stPageAll(pg => `/sales/v2/tenant/${ST_TENANT_ID}/estimates?soldAfter=${fromIso}&pageSize=500&page=${pg}`, 8000 * capMul)),
-    safe2(stPageAll(pg => `/sales/v2/tenant/${ST_TENANT_ID}/estimates?createdOnOrAfter=${fromIso}&pageSize=500&page=${pg}`, 8000 * capMul)),
-    safe2(stPageAll(pg => `/accounting/v2/tenant/${ST_TENANT_ID}/invoices?invoicedOnOrAfter=${invFrom}&invoicedOnBefore=${invTo}&pageSize=500&page=${pg}`, 20000 * capMul)),
-    safe2(stPageAll(pg => `/marketingreputation/v2/tenant/${ST_TENANT_ID}/reviews?fromDate=${revFrom}&pageSize=200&page=${pg}`, 6000 * capMul)),
-    safe2(stPageAll(pg => `/memberships/v2/tenant/${ST_TENANT_ID}/memberships?createdOnOrAfter=${fromIso}&pageSize=500&page=${pg}`, 4000 * capMul)),
+    tvPageSoft(pg => `/sales/v2/tenant/${ST_TENANT_ID}/estimates?soldAfter=${fromIso}&pageSize=500&page=${pg}`, 8000 * capMul),
+    tvPageSoft(pg => `/sales/v2/tenant/${ST_TENANT_ID}/estimates?createdOnOrAfter=${fromIso}&pageSize=500&page=${pg}`, 8000 * capMul),
+    tvPageSoft(pg => `/accounting/v2/tenant/${ST_TENANT_ID}/invoices?invoicedOnOrAfter=${invFrom}&invoicedOnBefore=${invTo}&pageSize=500&page=${pg}`, 20000 * capMul),
+    tvPageSoft(pg => `/marketingreputation/v2/tenant/${ST_TENANT_ID}/reviews?fromDate=${revFrom}&pageSize=200&page=${pg}`, 6000 * capMul),
+    tvPageSoft(pg => `/memberships/v2/tenant/${ST_TENANT_ID}/memberships?createdOnOrAfter=${fromIso}&pageSize=500&page=${pg}`, 4000 * capMul),
   ])
   const meta = await tvTechMeta()
   const mk = () => ({ jobsRan: 0, sales: 0, soldCount: 0, revenue: 0, fiveStar: 0, memberships: 0, presented: new Set(), soldJobs: new Set(), revJobs: new Set() })
@@ -4218,6 +4232,7 @@ async function tvBuildDay() {
       const w = await tvWindow({ fromIso: tvBounds(today), invFrom: `${today}T00:00:00Z`, invTo: `${today}T23:59:59Z`, revFrom: today, perTech: false })
       // Jobs ran today = distinct jobs with a non-canceled appointment today,
       // trade via the assigned tech's home BU (appointments carry no BU).
+      const dayJobTech = new Map()   // jobId -> tech name, for feed attribution
       try {
         const dayStart = tvBounds(today)
         const dayEnd = Date.parse(dayStart) + 86400_000
@@ -4235,6 +4250,7 @@ async function tvBuildDay() {
             const m = meta.get(String(a.technicianId))
             const appt = todays.find(x => x.id === a.appointmentId)
             if (m?.trade && appt?.jobId) byTradeJobs[m.trade].add(appt.jobId)
+            if (m && appt?.jobId && !dayJobTech.has(appt.jobId)) dayJobTech.set(appt.jobId, m.name)
           }
         }
         // ST-style close over today's engaged jobs; admin types out first.
@@ -4262,6 +4278,18 @@ async function tvBuildDay() {
         const seller = meta.get(String(m2.soldById))
         const t = seller?.trade
         if (t) feed[t].push({ kind: 'membership', at: m2.createdOn, who: seller?.name || null })
+      }
+      // Closed-and-invoiced revenue is today's activity too (Brandyn's ask):
+      // one event per job, attributed to the tech who ran it when known.
+      const seenInv = new Set()
+      for (const i2 of (w.invoices || [])) {
+        const jid = (i2.job || {}).id
+        const amt = Number(i2.subTotal) || 0
+        if (!jid || amt <= 0 || seenInv.has(jid)) continue
+        const t = tvTradeOf((i2.businessUnit || {}).name)
+        if (!t) continue
+        seenInv.add(jid)
+        feed[t].push({ kind: 'invoice', at: i2.createdOn || null, who: dayJobTech.get(jid) || null, amount: Math.round(amt) })
       }
       for (const t of Object.values(TV_TRADES)) feed[t].sort((a, b) => String(b.at || '').localeCompare(String(a.at || ''))).splice(20)
       _tvDay = { at: Date.now(), data: { dept: w.dept, feed } }
@@ -4386,6 +4414,7 @@ async function tvBuildSlow() {
           w.dept[t].closeRate = c.rate; w.dept[t].presented = c.opps; w.dept[t].soldJobs = c.conv
         }
       } catch (e) { console.warn('tv year close:', e.message) }
+      console.log(`tv year built: ${w.reviews.length} reviews, ${w.memberships.length} memberships, ${w.soldRows.length} sold estimates`)
       _tvYear = { at: Date.now(), data: { dept: w.dept, ytdTech } }
       await tvPersist('tv_year_cache', _tvYear)
     }
