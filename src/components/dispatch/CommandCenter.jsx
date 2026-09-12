@@ -89,10 +89,11 @@ export default function CommandCenter() {
 
   const load = useCallback(async (force = false) => {
     try {
-      const q = force ? '&force=1' : ''
-      const [b, qq, a] = await Promise.all([
-        authed(`/api/dispatch/live-board?day=${day}${q}`),
-        authed(`/api/dispatch/queue?day=${day}${q}`),
+      // Board first (it fills the 3-min cache), then the queue reads that
+      // cache — running them together recomputed the whole board twice.
+      const b = await authed(`/api/dispatch/live-board?day=${day}${force ? '&force=1' : ''}`)
+      const [qq, a] = await Promise.all([
+        authed(`/api/dispatch/queue?day=${day}`),
         day === 0 ? authed('/api/dispatch/actions') : Promise.resolve([]),
       ])
       setBoard(b); setQueue(qq); setActions(a); setErr('')
@@ -111,7 +112,8 @@ export default function CommandCenter() {
       const r = await authed('/api/dispatch/act', { method: 'POST', body: JSON.stringify({ ...body, cardKey }) })
       toast(r.summary || 'Done', r.status === 'partial' ? 'warn' : 'ok')
       if (r.status === 'partial') toast(r.error || 'Second step failed — check ServiceTitan', 'warn')
-      await load(true); await refreshActions()
+      if (cardKey) setLocal(l => l.filter(c => c.key !== cardKey))
+      await load(false); await refreshActions()
       return r
     } catch (e) { toast(e.message, 'err'); await refreshActions(); return null }
     finally { setBusyKey(null) }
@@ -119,12 +121,12 @@ export default function CommandCenter() {
 
   const dismiss = useCallback(async (key, action, reason, minutes) => {
     try {
-      await authed('/api/dispatch/dismiss', { method: 'POST', body: JSON.stringify({ cardKey: key, action, reason, minutes }) })
+      await authed('/api/dispatch/dismiss', { method: 'POST', body: JSON.stringify({ cardKey: key, action, reason, minutes, day: board?.date }) })
       setQueue(q => q ? { ...q, cards: q.cards.filter(c => c.key !== key) } : q)
       setLocal(l => l.filter(c => c.key !== key))
       toast(action === 'snooze' ? `Snoozed ${minutes} min` : 'Dismissed for today')
     } catch (e) { toast(e.message, 'err') }
-  }, [toast])
+  }, [toast, board?.date])
 
   const calls = board?.calls || []
   const techs = board?.techsToday || []
@@ -224,7 +226,7 @@ export default function CommandCenter() {
           )}
           {cards.map(c => <Card key={c.key} c={c} busy={busyKey === c.key} onAct={act} onDismiss={dismiss} onOpen={() => setDrawer({ jobId: c.jobId, appointmentId: c.appointmentId, techId: c.current?.techId || null, techName: c.current?.techName || null, windowStart: c.windowStart, windowEnd: c.windowEnd, status: c.status })} onCampaign={async () => {
             setBusyKey(c.key)
-            try { const r = await authed('/api/dispatch/campaign-from-gap', { method: 'POST', body: JSON.stringify({ trade: c.trade, date: c.date }) }); toast(r.summary || `Built ${r.created} contacts`); await dismiss(c.key, 'dismiss', 'call list built'); await refreshActions() }
+            try { const r = await authed('/api/dispatch/campaign-from-gap', { method: 'POST', body: JSON.stringify({ trade: c.trade, date: c.date }) }); toast(r.summary || `Built ${r.created} contacts`, r.created || r.existed ? 'ok' : 'warn'); if (r.created || r.existed) await dismiss(c.key, 'dismiss', 'call list built'); await refreshActions() }
             catch (e) { toast(e.message, 'err') } finally { setBusyKey(null) }
           }} />)}
 
@@ -232,7 +234,7 @@ export default function CommandCenter() {
           {day === 0 && (
             <div className="card" style={{ padding: 0 }}>
               <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--border)', display: 'flex', gap: 8, alignItems: 'baseline' }}>
-                <span style={EYEBROW}>Today’s actions</span><span style={MUTED}>{actions.length ? `${actions.length} written to ServiceTitan` : 'nothing yet'}</span>
+                <span style={EYEBROW}>Today’s actions</span><span style={MUTED}>{actions.length ? `${actions.length} today · ✓ applied in ServiceTitan, texts and calls logged` : 'nothing yet'}</span>
               </div>
               <div style={{ maxHeight: 200, overflow: 'auto' }}>
                 {actions.map(a => (
@@ -248,7 +250,7 @@ export default function CommandCenter() {
         </div>
 
         {/* Board lanes */}
-        <Board board={board} onOpen={(c) => setDrawer({ jobId: c.jobId, appointmentId: c.appointmentId, techId: c.techId || null, techName: c.techName || null, windowStart: c.windowStart, windowEnd: c.windowEnd, status: c.status })} onUnhold={(h) => act({ kind: 'unhold', appointmentId: h.appointmentId, jobId: h.jobId, jobNumber: h.jobNumber })} />
+        <Board board={board} busy={!!busyKey} onOpen={(c) => setDrawer({ jobId: c.jobId, appointmentId: c.appointmentId, techId: c.techId || null, techName: c.techName || null, windowStart: c.windowStart, windowEnd: c.windowEnd, status: c.status })} onUnhold={(h) => act({ kind: 'unhold', appointmentId: h.appointmentId, jobId: h.jobId, jobNumber: h.jobNumber })} />
       </div>
 
       {drawer && <Drawer d={drawer} board={board} holdReasons={holdReasons} profile={profile} phone={phone} onClose={() => setDrawer(null)} onAct={act} toast={toast} refreshActions={refreshActions} />}
@@ -294,9 +296,13 @@ function Coverage({ cards }) {
 
 // ── Card ────────────────────────────────────────────────────────────────────
 function Card({ c, busy, onAct, onDismiss, onOpen, onCampaign }) {
-  const [sel, setSel] = useState(() => Math.max(0, (c.alternatives || []).findIndex(a => a.recommended)))
+  // Selection is the tech id (not a row index) so a 3-minute reload can't
+  // silently re-point the primary button at a different tech.
+  const [selId, setSelId] = useState(() => (c.alternatives || []).find(a => a.recommended)?.techId ?? (c.alternatives || [])[0]?.techId ?? null)
   const [dismissing, setDismissing] = useState(false)
-  const alt = (c.alternatives || [])[sel]
+  const sel = selId === 'keep' ? -1 : (c.alternatives || []).findIndex(a => a.techId === selId)
+  const setSel = (i) => setSelId(i === -1 ? 'keep' : (c.alternatives || [])[i]?.techId ?? null)
+  const alt = sel >= 0 ? (c.alternatives || [])[sel] : null
   const rail = c.severity === 'high' ? 'var(--danger)' : c.severity === 'mid' ? 'var(--warning)' : 'var(--accent)'
   const actBy = c.actBy ? `act by ${hr(c.actBy)}` : null
   const primary = c.kind === 'gap' ? 'Build the call list' : c.kind === 'swap' ? 'Swap in ServiceTitan' : c.kind === 'place' ? 'Assign in ServiceTitan' : 'Move in ServiceTitan'
@@ -326,6 +332,9 @@ function Card({ c, busy, onAct, onDismiss, onOpen, onCampaign }) {
 
         {c.alternatives?.length > 0 && (
           <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius)', overflow: 'hidden' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '18px 1fr 110px 90px 70px 90px', gap: 8, padding: '4px 10px', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: .5, color: 'var(--text-muted)', background: 'var(--surface-2)' }}>
+              <span /><span>Technician</span><span>Load today</span><span>Drive</span><span>Close</span><span style={{ textAlign: 'right' }}>$/opp</span>
+            </div>
             {c.alternatives.map((a, i) => (
               <div key={a.techId} onClick={() => setSel(i)} style={{ display: 'grid', gridTemplateColumns: '18px 1fr 110px 90px 70px 90px', gap: 8, alignItems: 'center', padding: '6px 10px', fontSize: 12, cursor: 'pointer',
                 borderTop: i ? '1px solid var(--border)' : 'none', background: i === sel ? 'var(--accent-bg)' : 'transparent', opacity: a.busy ? .6 : 1 }}>
@@ -371,13 +380,14 @@ function Card({ c, busy, onAct, onDismiss, onOpen, onCampaign }) {
 
 // ── Board lanes ─────────────────────────────────────────────────────────────
 const ORDER = ['HVAC', 'Plumbing', 'Electrical', 'Garage Door', 'Other']
-function Board({ board, onOpen, onUnhold }) {
+function Board({ board, onOpen, onUnhold, busy }) {
   const calls = board.calls || [], techs = board.techsToday || []
   const dayStart = new Date(board.dayStart), dayEnd = new Date(board.dayEnd)
   // 7 AM–8 PM Denver-local track — the dispatch day's real span.
   const t0 = new Date(dayStart); t0.setHours(7, 0, 0, 0); const t1 = new Date(dayStart); t1.setHours(20, 0, 0, 0)
   const span = t1 - t0
   const pos = (iso) => Math.max(0, Math.min(1, (new Date(iso) - t0) / span))
+  const nowPos = board.day === 0 ? pos(board.now) : null
   const kindOf = (c) => c.status === 'Hold' ? 'hold' : /install|replacement/i.test(c.jobType) ? 'ins' : c.opportunity >= 3 ? 'hi' : /repair|service|warranty|callback|concern/i.test(c.jobType) ? 'rep' : 'rt'
   const tone = { hi: 'green', rep: 'amber', ins: 'blue', rt: 'gray' }
   const groups = ORDER.map(tr => ({ tr, techs: techs.filter(t => (t.trade || 'Other') === tr && (t.onShift || calls.some(c => c.techId === t.techId))).sort((a, b) => (b.expectedValue || 0) - (a.expectedValue || 0)) })).filter(g => g.techs.length)
@@ -410,6 +420,7 @@ function Board({ board, onOpen, onUnhold }) {
                   <div title={`${TIER[t.tier]?.label || ''} · ${t.status}`} style={{ fontSize: 12, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}><TierDot tier={t.tier} /><span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.name}</span></div>
                   <div style={{ position: 'relative', height: rows * 26, borderRadius: 4, background: 'repeating-linear-gradient(to right, transparent 0 calc(100%/13 - 1px), var(--border) calc(100%/13 - 1px) calc(100%/13))' }}>
                     {shifts.map((s, i) => <div key={i} style={{ position: 'absolute', top: 0, bottom: 0, left: `${pos(s.start) * 100}%`, width: `${(pos(s.end) - pos(s.start)) * 100}%`, background: 'var(--accent-bg)', opacity: .35, borderRadius: 4 }} />)}
+                    {nowPos != null && nowPos > 0 && nowPos < 1 && <div style={{ position: 'absolute', top: -1, bottom: -1, left: `${nowPos * 100}%`, width: 2, background: 'var(--danger)', opacity: .7, zIndex: 1 }} />}
                     {!mine.length && <span style={{ position: 'absolute', left: 8, top: 5, fontSize: 10, color: 'var(--text-muted)' }}>{t.onShift ? (t.allDayInstall ? 'all-day install' : 'open') : 'off today'}</span>}
                     {mine.map(c => {
                       const k = kindOf(c); const tn = tone[k] || 'gray'
@@ -435,7 +446,7 @@ function Board({ board, onOpen, onUnhold }) {
       <div style={{ padding: '8px 14px 10px', borderTop: '1px solid var(--border)', display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', fontSize: 11 }}>
         <span style={{ ...EYEBROW, color: 'var(--tone-amber-tx)' }}>Unassigned tray</span>
         {tray.length ? tray.map(u => <span key={u.appointmentId} onClick={() => onOpen({ jobId: u.jobId, appointmentId: u.appointmentId, techId: null, techName: null, windowStart: u.windowStart, windowEnd: u.windowEnd, status: 'Scheduled' })} style={{ cursor: 'pointer', border: '1px solid var(--tone-amber-bd)', background: 'var(--tone-amber-bg)', color: 'var(--tone-amber-tx)', borderRadius: 99, padding: '2px 8px', fontWeight: 700 }}>#{u.jobNumber} · {u.jobType.replace(/^\w[\w ]*? - /, '')} · {windowLabel(u)}</span>) : <span style={MUTED}>empty</span>}
-        {onHold.length > 0 && <span style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center', color: 'var(--text-muted)' }}>On hold: {onHold.map(h => <span key={h.jobId}>#{h.jobNumber} <button onClick={() => onUnhold(h)} style={{ border: 'none', background: 'transparent', color: 'var(--accent)', cursor: 'pointer', fontSize: 11, fontWeight: 600, padding: 0 }}>release</button></span>)}</span>}
+        {onHold.length > 0 && <span style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center', color: 'var(--text-muted)' }}>On hold: {onHold.map(h => <span key={h.jobId}>#{h.jobNumber} <button disabled={busy} onClick={() => onUnhold(h)} style={{ border: 'none', background: 'transparent', color: 'var(--accent)', cursor: busy ? 'default' : 'pointer', fontSize: 11, fontWeight: 600, padding: 0, opacity: busy ? .5 : 1 }}>release</button></span>)}</span>}
       </div>
     </div>
   )
@@ -458,40 +469,57 @@ function Drawer({ d, board, holdReasons, profile, phone, onClose, onAct, toast, 
   useEffect(() => { setDetail(null); authed(`/api/dispatch/job/${d.jobId}`).then(x => { setDetail(x); setJobTypeId(String(x.job.jobTypeId || '')); setPriority(x.job.priority || '') }).catch(e => setErr(e.message)) }, [d.jobId])
   useEffect(() => { const k = (e) => { if (e.key === 'Escape') onClose() }; document.addEventListener('keydown', k); return () => document.removeEventListener('keydown', k) }, [onClose])
 
-  const cur = techs.find(t => String(t.techId) === techId)
-  const trade = cur?.trade || board.calls?.find(c => c.jobId === d.jobId)?.businessUnit || null
+  // Trade comes from the ORIGINAL tech (or the tray row for unassigned jobs),
+  // never from the dropdown selection — otherwise picking "Unassigned"
+  // collapsed the list and tray jobs offered every trade.
+  const trade = useMemo(() => {
+    const orig = techs.find(t => t.techId === d.techId)
+    if (orig?.trade) return orig.trade
+    const tray = (board.unassigned || []).find(u => u.jobId === d.jobId)
+    return tray?.trade || null
+  }, [techs, board.unassigned, d.techId, d.jobId])
   const ranked = useMemo(() => {
-    const sameTrade = techs.filter(t => t.onShift && (!trade || t.trade === trade || (cur && t.trade === cur.trade))).sort((a, b) => (b.expectedValue || 0) - (a.expectedValue || 0))
+    const sameTrade = techs.filter(t => t.onShift && t.rankable && (!trade || t.trade === trade)).sort((a, b) => (b.expectedValue || 0) - (a.expectedValue || 0))
     const list = [...sameTrade]
-    if (d.techId && !list.some(t => t.techId === d.techId)) list.unshift({ techId: d.techId, name: d.techName || `Tech ${d.techId}`, tier: 'unranked', expectedValue: null })
+    if (d.techId && !list.some(t => t.techId === d.techId)) list.unshift({ techId: d.techId, name: d.techName || `Tech ${d.techId}`, tier: techs.find(t => t.techId === d.techId)?.tier || 'unranked', expectedValue: techs.find(t => t.techId === d.techId)?.expectedValue ?? null })
     return list
-  }, [techs, trade, cur, d.techId, d.techName])
+  }, [techs, trade, d.techId, d.techName])
   const jn = detail?.job?.jobNumber || ''
   const run = async (fn) => { setBusy(true); try { await fn() } finally { setBusy(false) } }
 
   const saveAssign = () => run(async () => {
     if (!d.appointmentId) { toast('This job has no appointment to assign', 'err'); return }
     const to = techs.find(t => String(t.techId) === techId)
-    if (!techId && d.techId) return onAct({ kind: 'unassign', appointmentId: d.appointmentId, jobId: d.jobId, jobNumber: jn, technicianId: d.techId, technicianName: d.techName })
+    if (!techId && d.techId) { const r = await onAct({ kind: 'unassign', appointmentId: d.appointmentId, jobId: d.jobId, jobNumber: jn, technicianId: d.techId, technicianName: d.techName }); if (r && r.status !== 'failed') onClose(); return }
     if (!to || to.techId === d.techId) { toast('Nothing changed'); return }
-    if (d.techId) return onAct({ kind: 'reassign', appointmentId: d.appointmentId, jobId: d.jobId, jobNumber: jn, fromTechnicianId: d.techId, fromTechnicianName: d.techName, toTechnicianId: to.techId, toTechnicianName: to.name })
-    return onAct({ kind: 'assign', appointmentId: d.appointmentId, jobId: d.jobId, jobNumber: jn, technicianId: to.techId, technicianName: to.name })
+    const r = d.techId
+      ? await onAct({ kind: 'reassign', appointmentId: d.appointmentId, jobId: d.jobId, jobNumber: jn, fromTechnicianId: d.techId, fromTechnicianName: d.techName, toTechnicianId: to.techId, toTechnicianName: to.name })
+      : await onAct({ kind: 'assign', appointmentId: d.appointmentId, jobId: d.jobId, jobNumber: jn, technicianId: to.techId, technicianName: to.name })
+    if (r && r.status !== 'failed') onClose()   // the drawer's snapshot is stale after a write
   })
   const saveWindow = () => run(async () => {
     if (!d.appointmentId || !win) return
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) { toast('Pick a date', 'warn'); return }
     const [s, e] = win.split('-').map(Number)
+    const curH = d.windowStart ? new Date(d.windowStart).getHours() : null
+    if (dateStr === board.date && curH === s) { toast('Nothing changed'); return }
     const mk = (h) => { const x = new Date(`${dateStr}T00:00:00`); x.setHours(h, 0, 0, 0); return x.toISOString() }
     const label = `${dateStr === board.date ? '' : dateStr + ' '}${s > 12 ? s - 12 : s}${s >= 12 ? 'PM' : 'AM'}–${e > 12 ? e - 12 : e}${e >= 12 ? 'PM' : 'AM'}`
-    return onAct({ kind: 'reschedule', appointmentId: d.appointmentId, jobId: d.jobId, jobNumber: jn, start: mk(s), end: mk(e), arrivalWindowStart: mk(s), arrivalWindowEnd: mk(e), windowLabel: label, fromWindowLabel: windowLabel(d) })
+    const r = await onAct({ kind: 'reschedule', appointmentId: d.appointmentId, jobId: d.jobId, jobNumber: jn, start: mk(s), end: mk(e), arrivalWindowStart: mk(s), arrivalWindowEnd: mk(e), windowLabel: label, fromWindowLabel: windowLabel(d) })
+    if (r && r.status !== 'failed') onClose()
   })
   const saveHold = () => run(async () => {
     if (!d.appointmentId) return
-    if (d.status === 'Hold') return onAct({ kind: 'unhold', appointmentId: d.appointmentId, jobId: d.jobId, jobNumber: jn })
-    if (!holdReason) { toast('Pick a hold reason', 'warn'); return }
-    const r = holdReasons.find(x => String(x.id) === holdReason)
-    return onAct({ kind: 'hold', appointmentId: d.appointmentId, jobId: d.jobId, jobNumber: jn, reasonId: r.id, reasonName: r.name, memo: holdMemo })
+    let r
+    if (d.status === 'Hold') r = await onAct({ kind: 'unhold', appointmentId: d.appointmentId, jobId: d.jobId, jobNumber: jn })
+    else {
+      if (!holdReason) { toast('Pick a hold reason', 'warn'); return }
+      const hr2 = holdReasons.find(x => String(x.id) === holdReason)
+      r = await onAct({ kind: 'hold', appointmentId: d.appointmentId, jobId: d.jobId, jobNumber: jn, reasonId: hr2.id, reasonName: hr2.name, memo: holdMemo })
+    }
+    if (r && r.status !== 'failed') onClose()
   })
-  const saveNote = () => run(async () => { if (!note.trim()) return; const r = await onAct({ kind: 'note', jobId: d.jobId, jobNumber: jn, text: note.trim() }); if (r) setNote('') })
+  const saveNote = () => { if (busy || !note.trim()) return; run(async () => { const r = await onAct({ kind: 'note', jobId: d.jobId, jobNumber: jn, text: note.trim() }); if (r) setNote('') }) }
   const saveType = () => run(async () => {
     const changes = {}
     if (jobTypeId && Number(jobTypeId) !== detail.job.jobTypeId) { changes.jobTypeId = Number(jobTypeId); changes.jobTypeName = detail.jobTypes.find(t => t.id === Number(jobTypeId))?.name }
@@ -510,7 +538,12 @@ function Drawer({ d, board, holdReasons, profile, phone, onClose, onAct, toast, 
       setSmsBody('')
     } catch (e) { toast(e.message, 'err') }
   })
-  const call = () => { const to = detail?.customer?.phone; if (!to) return; phone?.makeCall?.(to, { contactName: detail.customer.name }); onAct({ kind: 'log', jobId: d.jobId, jobNumber: jn, summary: `Called ${detail.customer.name || 'the customer'} on #${jn} from Andi` }) }
+  const call = () => {
+    const to = detail?.customer?.phone; if (!to) return
+    if (!phone?.makeCall || phone.twilioReady === false) { toast('The Andi phone isn’t ready on this screen — call from the dialer', 'warn'); return }
+    phone.makeCall(to, { contactName: detail.customer.name })
+    onAct({ kind: 'log', jobId: d.jobId, jobNumber: jn, summary: `Placed a call to ${detail.customer.name || 'the customer'} on #${jn} from Andi` })
+  }
 
   const sel = { width: '100%', border: '1px solid var(--border-strong)', borderRadius: 'var(--radius)', padding: '7px 10px', fontSize: 13, background: 'var(--surface)', color: 'var(--text-primary)', fontFamily: 'inherit' }
   const sec = { ...EYEBROW, marginBottom: 6 }

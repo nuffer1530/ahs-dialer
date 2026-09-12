@@ -198,7 +198,10 @@ async function stPost(path, body, _retry = true) {
     const err = await res.text()
     throw new Error(`ST POST ${path} failed: ${err}`)
   }
-  return res.json()
+  // ST action endpoints (assign/unassign/hold/reschedule) may answer 200 with
+  // no body — treating that as a JSON error logged applied writes as failed.
+  const txt = await res.text()
+  try { return txt ? JSON.parse(txt) : null } catch { return null }
 }
 
 async function stPatch(path, body, _retry = true) {
@@ -222,7 +225,10 @@ async function stPatch(path, body, _retry = true) {
     const err = await res.text()
     throw new Error(`ST PATCH ${path} failed: ${err}`)
   }
-  return res.json()
+  // ST action endpoints (assign/unassign/hold/reschedule) may answer 200 with
+  // no body — treating that as a JSON error logged applied writes as failed.
+  const txt = await res.text()
+  try { return txt ? JSON.parse(txt) : null } catch { return null }
 }
 
 async function stPut(path, body, _retry = true) {
@@ -246,7 +252,10 @@ async function stPut(path, body, _retry = true) {
     const err = await res.text()
     throw new Error(`ST PUT ${path} failed: ${err}`)
   }
-  return res.json()
+  // ST action endpoints (assign/unassign/hold/reschedule) may answer 200 with
+  // no body — treating that as a JSON error logged applied writes as failed.
+  const txt = await res.text()
+  try { return txt ? JSON.parse(txt) : null } catch { return null }
 }
 
 async function stDelete(path, _retry = true) {
@@ -8355,6 +8364,7 @@ app.post('/api/dispatch/act', async (req, res) => {
         // never left with nobody), then drop the old one. If the second call
         // fails, both are assigned — say so plainly, don't hide it.
         if (!row.appointment_id || !b.toTechnicianId) return res.status(400).json({ error: 'appointmentId and toTechnicianId required' })
+        if (b.fromTechnicianId && Number(b.fromTechnicianId) === Number(b.toTechnicianId)) return res.status(400).json({ error: 'same tech — nothing to change' })
         await stPost(`/dispatch/v2/tenant/${T}/appointment-assignments/assign-technicians`, { jobAppointmentId: row.appointment_id, technicianIds: [Number(b.toTechnicianId)] }, false)
         if (b.fromTechnicianId) {
           try {
@@ -8400,7 +8410,15 @@ app.post('/api/dispatch/act', async (req, res) => {
       }
       case 'reschedule': {
         if (!row.appointment_id || !b.start || !b.end) return res.status(400).json({ error: 'appointmentId, start, end required (UTC ISO)' })
-        const body = { start: b.start, end: b.end, arrivalWindowStart: b.arrivalWindowStart || b.start, arrivalWindowEnd: b.arrivalWindowEnd || b.end }
+        // Keep the appointment's real duration (a 2h call stays 2h at the new
+        // window start); only the arrival window becomes the 4h block.
+        let start = b.start, end = b.end
+        try {
+          const ap = await stGet(`/jpm/v2/tenant/${T}/appointments/${row.appointment_id}`)
+          const dur = Date.parse(ap?.end || '') - Date.parse(ap?.start || '')
+          if (dur > 0 && dur < 12 * 3600e3) { start = b.arrivalWindowStart || b.start; end = new Date(Date.parse(start) + dur).toISOString() }
+        } catch {}
+        const body = { start, end, arrivalWindowStart: b.arrivalWindowStart || b.start, arrivalWindowEnd: b.arrivalWindowEnd || b.end }
         await stPatch(`/jpm/v2/tenant/${T}/appointments/${row.appointment_id}/reschedule`, body)
         return done(`Moved ${jn} to ${b.windowLabel || `${b.start} – ${b.end}`}`, { window: b.fromWindowLabel || null }, body)
       }
@@ -8445,7 +8463,7 @@ app.post('/api/dispatch/dismiss', async (req, res) => {
   const b = req.body || {}
   if (!b.cardKey || !['dismiss', 'snooze'].includes(b.action)) return res.status(400).json({ error: 'cardKey and action (dismiss|snooze) required' })
   const actor = await actorOf(prof)
-  const day = tvDenverDate()
+  const day = /^\d{4}-\d{2}-\d{2}$/.test(String(b.day || '')) ? String(b.day) : tvDenverDate()
   const until = b.action === 'snooze' ? new Date(Date.now() + Math.max(5, Math.min(480, Number(b.minutes) || 60)) * 60_000).toISOString() : null
   try {
     const { error } = await supabase.from('dispatch_dismissals').insert({ card_key: String(b.cardKey), actor_id: actor.id, actor_name: actor.name, action: b.action, reason: b.reason ? String(b.reason).slice(0, 300) : null, until, day })
@@ -8488,6 +8506,9 @@ async function buildActionQueue(dayOffset) {
     const f = (c.flags || []).find(x => x.alternatives && x.alternatives.length)
     if (!f) continue
     const alts = f.alternatives.map(a => ({ ...a, busy: busyIn(a.techId, c.windowStart, c.windowEnd), status: techById.get(Number(a.techId))?.status || null }))
+    if (alts.some(a => a.recommended && a.busy) && alts.some(a => !a.busy)) {
+      alts.forEach(a => { a.recommended = false }); alts.find(a => !a.busy).recommended = true
+    }
     const best = alts.find(a => a.recommended) || alts[0]
     cards.push({
       key: `reassign:${c.appointmentId}:${c.techId}`, kind: 'reassign', severity: c.techTier === 'red' ? 'high' : 'mid',
@@ -8649,10 +8670,16 @@ app.post('/api/dispatch/campaign-from-gap', async (req, res) => {
     const matched = dedupeByCustomer([...open, ...due.filter(d => !seenCust.has(d.customerId))])
     if (!matched.length) return res.json({ ok: true, created: 0, reason: 'nobody matched' })
     const { rows, truncated } = await enrichAudience(matched)
-    const { data: existing } = await supabase.from('contacts').select('phone, status')
-    const have = new Set((existing || []).map(c => normPhone10(c.phone)).filter(Boolean))
-    const dnc = new Set((existing || []).filter(c => c.status === 'DNC').map(c => normPhone10(c.phone)).filter(Boolean))
+    const existing = []
+    for (let from = 0; ; from += 1000) {
+      const { data } = await supabase.from('contacts').select('phone, status').range(from, from + 999)
+      existing.push(...(data || [])); if (!data || data.length < 1000) break
+    }
+    const have = new Set(existing.map(c => normPhone10(c.phone)).filter(Boolean))
+    const dnc = new Set(existing.filter(c => c.status === 'DNC').map(c => normPhone10(c.phone)).filter(Boolean))
     const name = `${trade} — fill ${date || 'the board'}`
+    const { data: dupCamp } = await supabase.from('campaigns').select('id').eq('name', name).limit(1)
+    if (dupCamp?.length) return res.json({ ok: true, campaignId: dupCamp[0].id, name, created: 0, existed: true, summary: `Call list “${name}” already exists` })
     const { data: camp, error: ce } = await supabase.from('campaigns')
       .insert({ name, description: `Built from the Dispatch Command Center by ${actor.name}: open ${trade.toLowerCase()} estimates (90d) + members due. Goal: fill ${date || 'open slots'}.`, status: 'Active', source_query: { kind: 'dispatch_gap', trade, date } })
       .select('id').single()
