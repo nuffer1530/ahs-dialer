@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { sb } from '../lib/supabase'
+import CommandCenter from '../components/dispatch/CommandCenter'
 
 // Dispatch for Profit — who to send, and whether today's board agrees.
 //
@@ -1277,7 +1278,7 @@ function DecisionMaker() {
 }
 
 export default function DispatchPage() {
-  const [tab, setTab] = useState(() => new URLSearchParams(window.location.search).get('tab') || 'order')
+  const [tab, setTab] = useState(() => new URLSearchParams(window.location.search).get('tab') || 'center')
   // Survive hard refresh: the active tab lives in the URL (?tab=), like MyPage.
   useEffect(() => {
     const u = new URL(window.location)
@@ -1286,7 +1287,7 @@ export default function DispatchPage() {
   return (
     <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden' }}>
       <div style={{ background:'var(--surface)', borderBottom:'1px solid var(--border)', flexShrink:0, padding:'0 24px', display:'flex', gap:4 }}>
-        {[['order','Batting Order'],['jobtype','By Job Type'],['live','Live Board Analyzer'],['decide','Decision Maker'],['techinfo','Tech Info']].map(([id,label]) => (
+        {[['center','Command Center'],['order','Batting Order'],['jobtype','By Job Type'],['live','Live Board Analyzer'],['decide','Decision Maker'],['techinfo','Tech Info']].map(([id,label]) => (
           <button key={id} onClick={() => setTab(id)}
             style={{ padding:'12px 14px', border:'none', background:'transparent', cursor:'pointer', fontSize:13,
               fontWeight: tab===id ? 700 : 500, color: tab===id ? 'var(--accent)' : 'var(--text-muted)',
@@ -1296,7 +1297,7 @@ export default function DispatchPage() {
         ))}
       </div>
       <div style={{ flex:1, overflow:'auto', padding:'20px 24px', background:'var(--bg)' }}>
-        {tab === 'order' ? <BattingOrder /> : tab === 'jobtype' ? <ByJobType /> : tab === 'decide' ? <DecisionMaker /> : tab === 'techinfo' ? <TechInfo /> : <LiveBoard />}
+        {tab === 'center' ? <CommandCenter /> : tab === 'order' ? <BattingOrder /> : tab === 'jobtype' ? <ByJobType /> : tab === 'decide' ? <DecisionMaker /> : tab === 'techinfo' ? <TechInfo /> : <LiveBoard />}
       </div>
     </div>
   )

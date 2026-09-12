@@ -818,3 +818,24 @@ CREATE TABLE IF NOT EXISTS st_disposition_log (
 );
 ALTER TABLE st_disposition_log ENABLE ROW LEVEL SECURITY;
 CREATE INDEX IF NOT EXISTS idx_st_dispo_day ON st_disposition_log (day);
+
+-- ── Dispatch Command Center audit (applied Sep 2026 via MCP) ────────────────
+-- dispatch_actions: every ServiceTitan write made from the Command Center
+-- (assign/reassign/unassign/retype/priority/tags/hold/unhold/reschedule/note/
+-- sms/campaign) with actor, before/after, ST outcome, and a one-line summary.
+-- dispatch_dismissals: dismissed/snoozed queue cards with the human's reason.
+-- Both RLS with no policies: server-only via service key.
+CREATE TABLE IF NOT EXISTS dispatch_actions (
+  id bigserial PRIMARY KEY, actor_id uuid, actor_name text, kind text NOT NULL, card_key text,
+  job_id bigint, job_number text, appointment_id bigint, before jsonb, after jsonb,
+  st_status text NOT NULL DEFAULT 'ok', st_error text, summary text NOT NULL, created_at timestamptz DEFAULT now()
+);
+ALTER TABLE dispatch_actions ENABLE ROW LEVEL SECURITY;
+CREATE INDEX IF NOT EXISTS idx_dispatch_actions_day ON dispatch_actions (created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_dispatch_actions_job ON dispatch_actions (job_id);
+CREATE TABLE IF NOT EXISTS dispatch_dismissals (
+  id bigserial PRIMARY KEY, card_key text NOT NULL, actor_id uuid, actor_name text, action text NOT NULL,
+  reason text, until timestamptz, day date NOT NULL, created_at timestamptz DEFAULT now()
+);
+ALTER TABLE dispatch_dismissals ENABLE ROW LEVEL SECURITY;
+CREATE INDEX IF NOT EXISTS idx_dispatch_dismissals_day ON dispatch_dismissals (day, card_key);

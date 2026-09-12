@@ -249,6 +249,26 @@ async function stPut(path, body, _retry = true) {
   return res.json()
 }
 
+async function stDelete(path, _retry = true) {
+  const token = await getSTToken()
+  let res
+  try {
+    res = await fetchWithTimeout(`${ST_API_BASE}${path}`, {
+      method: 'DELETE',
+      headers: { 'Authorization': `Bearer ${token}`, 'ST-App-Key': process.env.ST_APP_KEY },
+    })
+  } catch (e) {
+    if (_retry) return stDelete(path, false)   // DELETE is idempotent — retry is safe
+    throw new Error(e.name === 'AbortError' ? `ST DELETE ${path} timed out` : `ST DELETE ${path} network error: ${e.message}`)
+  }
+  if (!res.ok) {
+    const err = await res.text()
+    throw new Error(`ST DELETE ${path} failed: ${err}`)
+  }
+  const txt = await res.text()
+  try { return txt ? JSON.parse(txt) : null } catch { return null }
+}
+
 // ── ST: Add note to customer record (via primary location)
 app.post('/api/st/note', async (req, res) => {
   try {
@@ -7615,17 +7635,21 @@ async function computeLiveBoardPayload(dayOffset = 0) {
       const j = jobById.get(ap.jobId)
       if (!j || j.jobStatus === 'Canceled') continue
       if (ap.status === 'Hold' || j.jobStatus === 'Hold') {
-        onHold.push({ jobId: j.id, jobNumber: j.jobNumber, jobType: jtName.get(j.jobTypeId) || '' })
+        onHold.push({ jobId: j.id, jobNumber: j.jobNumber, jobType: jtName.get(j.jobTypeId) || '', appointmentId: ap.id,
+          windowStart: ap.arrivalWindowStart || ap.start || null, windowEnd: ap.arrivalWindowEnd || ap.end || null })
         continue
       }
       const jt = jtName.get(j.jobTypeId) || ''
       const zip = zipOfLoc.get(j.locationId) || ''
       const isMember = j.customerId ? memberCust.has(j.customerId) : null
-      const opp = scoreOpportunity(jt, zipTier.get(zip), isMember,
-        systemAgeFromNotes(j, new Date().getFullYear()), /hvac/i.test(jt), noCollectFromNotes(j))
+      const sysAge = systemAgeFromNotes(j, new Date().getFullYear())
+      const opp = scoreOpportunity(jt, zipTier.get(zip), isMember, sysAge, /hvac/i.test(jt), noCollectFromNotes(j))
       unassigned.push({
         appointmentId: ap.id, jobId: j.id, jobNumber: j.jobNumber,
         jobType: jt, zip, isMember,
+        // Trade + geo let the Command Center place a tray job on a lane and
+        // rank techs for it (the tray has no tech to derive a team from).
+        trade: tradeOfJobType(jt), geo: geoOfLoc.get(j.locationId) || null, systemAge: sysAge,
         windowStart: ap.arrivalWindowStart || ap.start || null,
         windowEnd: ap.arrivalWindowEnd || ap.end || null,
         opportunity: opp.score, opportunityReasons: opp.reasons,
@@ -7903,18 +7927,24 @@ async function computeLiveBoardPayload(dayOffset = 0) {
       const myEV = Number(mine?.expected_value || 0)
 
       // Candidates: same bench, materially stronger than who's on it now.
-      const candidates = (scoresByTeam.get(c.businessUnit) || [])
-        .filter(s => s.tech_id !== c.techId && s.tier !== 'unranked')
-        .filter(s => canWork(s.tech_id, c.windowStart, c.windowEnd))
-        .filter(s => !consumedByInstall(s.tech_id))    // buried on an all-day install
-        .filter(s => allowedByRule(c.jobType, s.tech_name))
-        .filter(s => Number(s.expected_value || 0) > myEV)
-        .map(s => ({ s, t: nearestTravel(s.tech_id, c.geo) }))
-        .filter(x => {
-          if (!x.t) return true                                   // unknown: don't exclude
-          if (x.t.minutes != null) return x.t.minutes <= DETOUR_MIN
-          return x.t.miles == null || x.t.miles <= DETOUR_MILES
-        })
+      // Every drop-out keeps its reason — the Command Center shows "Craig:
+      // off today" instead of silently hiding him (a dispatcher asks why).
+      const rejected = []
+      const tooFar = (t) => t && (t.minutes != null ? t.minutes > DETOUR_MIN : (t.miles != null && t.miles > DETOUR_MILES))
+      const candidates = []
+      for (const s of (scoresByTeam.get(c.businessUnit) || [])) {
+        if (s.tech_id === c.techId) continue
+        let reason = null
+        if (s.tier === 'unranked') reason = 'not ranked yet'
+        else if (!canWork(s.tech_id, c.windowStart, c.windowEnd)) reason = 'off shift for this window'
+        else if (consumedByInstall(s.tech_id)) reason = 'on an all-day install'
+        else if (!allowedByRule(c.jobType, s.tech_name)) reason = 'skill rule excludes this job type'
+        else if (Number(s.expected_value || 0) <= myEV) reason = 'not a stronger earner on this bench'
+        const t = reason ? null : nearestTravel(s.tech_id, c.geo)
+        if (!reason && tooFar(t)) reason = t.minutes != null ? `${t.minutes} min away — too far` : `~${t.miles} mi away — too far`
+        if (reason) rejected.push({ techId: s.tech_id, techName: s.tech_name, tier: s.tier, reason })
+        else candidates.push({ s, t })
+      }
 
       if (!candidates.length) continue
 
@@ -7955,10 +7985,32 @@ async function computeLiveBoardPayload(dayOffset = 0) {
         why.push(`${pick.s.tech_name} has room today (${load} of ${cap.target})`)
       }
 
+      // Structured alternatives for the Command Center: every candidate that
+      // survived the filters, best first, with what a move costs. The prose
+      // flag stays for the Live Board Analyzer and the AI brief.
+      const alternatives = byEarning.map(x => {
+        const ld = loadByTech.get(x.s.tech_id) || 0
+        const bmp = ld >= cap.target ? bumpCandidate(x.s.tech_id, c.jobId) : null
+        return {
+          techId: x.s.tech_id, techName: x.s.tech_name, tier: x.s.tier,
+          expectedValue: Math.round(Number(x.s.expected_value || 0)),
+          closeRate: x.s.close_rate == null ? null : Math.round(Number(x.s.close_rate)),
+          avgSale: Math.round(Number(x.s.avg_sale || 0)),
+          delta: Math.round(Number(x.s.expected_value || 0) - myEV),
+          travel: x.t ? { minutes: x.t.minutes ?? null, miles: x.t.miles ?? null, provider: x.t.provider || null } : null,
+          isNear: Boolean(isNear(x)),
+          load: ld, target: cap.target, stretch: cap.stretch,
+          bump: bmp ? { jobId: bmp.jobId, jobNumber: bmp.jobNumber, jobType: bmp.jobType, opportunity: bmp.opportunity } : null,
+          recommended: x === pick,
+        }
+      })
       c.flags.push({
         level: c.techTier === 'red' ? 'warn' : 'info',
         text: `High-opportunity call on ${c.techTier === 'red' ? 'a red-tier tech' : 'an unranked tech'} — consider ${pick.s.tech_name}`,
         why,
+        current: { techId: c.techId, techName: c.techName, tier: c.techTier, expectedValue: Math.round(myEV) },
+        alternatives,
+        rejected,
       })
     }
 
@@ -8148,24 +8200,50 @@ async function computeLiveBoardPayload(dayOffset = 0) {
     // Sort by window open, then by start within the window.
     const ts = (v) => { const t = Date.parse(v || ''); return Number.isNaN(t) ? Infinity : t }
     calls.sort((a, b) => (ts(a.windowStart) - ts(b.windowStart)) || (ts(a.start) - ts(b.start)))
+    // The day's roster, not just the scored benches: every tech who has a
+    // working shift, has calls, or has a score row — with team, tier, load,
+    // capacity and shift spans, so the Command Center can draw lanes and rank
+    // alternatives without re-deriving any of it.
     const techsToday = []
     const seenTech = new Set()
-    for (const sc of (scores || [])) {
-      const tid = Number(sc.tech_id)
-      if (!tid || seenTech.has(tid)) continue
-      seenTech.add(tid)
+    const pushTech = (tid, name, team) => {
+      if (!tid || seenTech.has(tid)) return
       const load = techLoad.get(tid) || { calls: 0, allDayInstall: false }
+      const shifts = (shiftsByTech && shiftsByTech.get(tid)) || []
+      const working = shifts.some(x => x.type !== 'TimeOff')
+      const onShift = canWork(tid)
+      if (!onShift && !load.calls && !scoreOf.has(`${tid}|${team}`)) return   // nobody today: skip
+      seenTech.add(tid)
+      const sc = scoreOf.get(`${tid}|${team}`) || (scores || []).find(s => Number(s.tech_id) === tid) || null
       let status
-      if (!canWork(tid)) status = 'off today / no working time left'
+      if (!onShift) status = 'off today / no working time left'
       else if (load.allDayInstall) status = 'on an all-day install — cannot take calls'
       else status = `${load.calls} call${load.calls === 1 ? '' : 's'} on board`
-      techsToday.push({ techId: tid, name: sc.tech_name, status })
+      const cap = capacityFor(team)
+      techsToday.push({
+        techId: tid, name, status, team, trade: tradeOfTeam(team),
+        tier: sc?.tier || 'unranked',
+        expectedValue: sc ? Math.round(Number(sc.expected_value || 0)) : null,
+        closeRate: sc?.close_rate == null ? null : Math.round(Number(sc.close_rate)),
+        avgSale: sc ? Math.round(Number(sc.avg_sale || 0)) : null,
+        rankable: !NON_DISPATCH_TEAM.test(team),
+        onShift, hasWorkingShift: working,
+        calls: load.calls, truckRolls: loadByTech.get(tid) || 0,
+        target: cap.target, stretch: cap.stretch, allDayInstall: load.allDayInstall,
+        shifts: shifts.filter(x => !Number.isNaN(x.start) && !Number.isNaN(x.end))
+          .map(x => ({ type: x.type, start: new Date(x.start).toISOString(), end: new Date(x.end).toISOString() })),
+      })
     }
+    for (const t of boardTechs) pushTech(Number(t.id), t.name, teamOf.get(t.id) || 'Unassigned')
+    for (const sc of (scores || [])) pushTech(Number(sc.tech_id), sc.tech_name, sc.business_unit)
+    techsToday.sort((a, b) => (a.trade || '').localeCompare(b.trade || '') || (b.expectedValue || 0) - (a.expectedValue || 0))
 
     const payload = {
       day: dayOffset,
       date: today.date,
       generatedAt: new Date().toISOString(),
+      now: new Date().toISOString(),
+      dayStart: today.startUtc.toISOString(), dayEnd: today.endUtc.toISOString(),
       scoresRefreshedAt: (scores || [])[0]?.refreshed_at || null,
       driveTime: driveTimeEnabled(),
       dayRevenue,
@@ -8185,6 +8263,421 @@ async function computeLiveBoardPayload(dayOffset = 0) {
     _liveBoardCache.set(dayOffset, { data: payload, expires: Date.now() + 3 * 60_000 })
   return payload
 }
+
+// ═══ DISPATCH COMMAND CENTER — the write layer ═══════════════════════════════
+// Every button on the Command Center lands here. Humans decide, Andi executes
+// (Brandyn, Sep 12: no automation — admins/dispatchers click, it happens in
+// ServiceTitan). Each call logs a dispatch_actions row with actor, before/
+// after, and what ST said, and busts the live-board cache so the board
+// re-reads truth. Scopes verified Sep 12: assignments, jobs, appointments
+// (hold/reschedule), notes all return validation errors (not 403) on probes.
+const ST_JOB_URL_SRV = (id) => `https://go.servicetitan.com/#/Job/Index/${id}`
+
+async function actorOf(prof) {
+  try {
+    const { data } = await supabase.from('profiles').select('name, email').eq('id', prof.id).maybeSingle()
+    return { id: prof.id, name: data?.name || data?.email || 'dispatcher' }
+  } catch { return { id: prof.id, name: 'dispatcher' } }
+}
+async function logDispatchAction(row) {
+  try {
+    const { error } = await supabase.from('dispatch_actions').insert(row)
+    if (error) console.warn('dispatch_actions insert:', error.message)
+  } catch (e) { console.warn('dispatch_actions insert:', e.message) }
+}
+function bustBoardCaches() {
+  try { _liveBoardCache.clear() } catch {}
+}
+
+let _holdReasons = { at: 0, list: [] }
+app.get('/api/dispatch/hold-reasons', async (req, res) => {
+  if (!(await requireDispatch(req, res))) return
+  try {
+    if (Date.now() - _holdReasons.at > 6 * 3600_000 || !_holdReasons.list.length) {
+      const rows = await stPageAll(pg => `/jpm/v2/tenant/${ST_TENANT_ID}/job-hold-reasons?pageSize=200&page=${pg}`, 1000)
+      _holdReasons = { at: Date.now(), list: rows.filter(r => r.active !== false).map(r => ({ id: r.id, name: r.name })) }
+    }
+    res.json(_holdReasons.list)
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
+
+let _tagTypes = { at: 0, list: [] }
+async function tagTypesList() {
+  if (Date.now() - _tagTypes.at > 6 * 3600_000 || !_tagTypes.list.length) {
+    const rows = await stPageAll(pg => `/settings/v2/tenant/${ST_TENANT_ID}/tag-types?pageSize=200&page=${pg}`, 2000)
+    _tagTypes = { at: Date.now(), list: rows.filter(r => r.active !== false).map(r => ({ id: r.id, name: r.name, code: r.code || null })) }
+  }
+  return _tagTypes.list
+}
+app.get('/api/dispatch/tag-types', async (req, res) => {
+  if (!(await requireDispatch(req, res))) return
+  try { res.json(await tagTypesList()) } catch (e) { res.status(500).json({ error: e.message }) }
+})
+
+// The one endpoint behind every button. Body: { kind, cardKey?, jobId?,
+// jobNumber?, appointmentId?, ...params }. Returns { ok, status, summary,
+// error? } and ALWAYS logs — a failed write is still a record of intent.
+app.post('/api/dispatch/act', async (req, res) => {
+  const prof = await requireDispatch(req, res)
+  if (!prof) return
+  const b = req.body || {}
+  const kind = String(b.kind || '')
+  const actor = await actorOf(prof)
+  const T = ST_TENANT_ID
+  const row = { actor_id: actor.id, actor_name: actor.name, kind, card_key: b.cardKey || null,
+    job_id: b.jobId ? Number(b.jobId) : null, job_number: b.jobNumber ? String(b.jobNumber) : null,
+    appointment_id: b.appointmentId ? Number(b.appointmentId) : null, before: null, after: null, st_status: 'ok', st_error: null, summary: '' }
+  const jn = row.job_number ? `#${row.job_number}` : (row.job_id ? `job ${row.job_id}` : 'job')
+  const fail = async (status, err, summary) => {
+    row.st_status = status; row.st_error = String(err || '').slice(0, 600); row.summary = summary
+    await logDispatchAction(row); bustBoardCaches()
+    return res.status(status === 'failed' ? 502 : 200).json({ ok: status !== 'failed', status, summary, error: row.st_error })
+  }
+  const done = async (summary, before, after) => {
+    row.summary = summary; row.before = before || null; row.after = after || null
+    await logDispatchAction(row); bustBoardCaches()
+    return res.json({ ok: true, status: 'ok', summary })
+  }
+  try {
+    switch (kind) {
+      case 'assign': {
+        if (!row.appointment_id || !b.technicianId) return res.status(400).json({ error: 'appointmentId and technicianId required' })
+        await stPost(`/dispatch/v2/tenant/${T}/appointment-assignments/assign-technicians`, { jobAppointmentId: row.appointment_id, technicianIds: [Number(b.technicianId)] }, false)
+        return done(`Assigned ${jn} to ${b.technicianName || b.technicianId}`, { tech: null }, { tech: b.technicianName || b.technicianId })
+      }
+      case 'unassign': {
+        if (!row.appointment_id || !b.technicianId) return res.status(400).json({ error: 'appointmentId and technicianId required' })
+        await stPost(`/dispatch/v2/tenant/${T}/appointment-assignments/unassign-technicians`, { jobAppointmentId: row.appointment_id, technicianIds: [Number(b.technicianId)] }, false)
+        return done(`Unassigned ${b.technicianName || b.technicianId} from ${jn}`, { tech: b.technicianName || b.technicianId }, { tech: null })
+      }
+      case 'reassign': {
+        // Two ST calls, not atomic: assign the new tech first (the customer is
+        // never left with nobody), then drop the old one. If the second call
+        // fails, both are assigned — say so plainly, don't hide it.
+        if (!row.appointment_id || !b.toTechnicianId) return res.status(400).json({ error: 'appointmentId and toTechnicianId required' })
+        await stPost(`/dispatch/v2/tenant/${T}/appointment-assignments/assign-technicians`, { jobAppointmentId: row.appointment_id, technicianIds: [Number(b.toTechnicianId)] }, false)
+        if (b.fromTechnicianId) {
+          try {
+            await stPost(`/dispatch/v2/tenant/${T}/appointment-assignments/unassign-technicians`, { jobAppointmentId: row.appointment_id, technicianIds: [Number(b.fromTechnicianId)] }, false)
+          } catch (e) {
+            row.before = { tech: b.fromTechnicianName || b.fromTechnicianId }; row.after = { tech: [b.fromTechnicianName || b.fromTechnicianId, b.toTechnicianName || b.toTechnicianId] }
+            return fail('partial', e.message, `Added ${b.toTechnicianName || b.toTechnicianId} to ${jn}, but ${b.fromTechnicianName || 'the original tech'} is STILL assigned — remove them in ServiceTitan`)
+          }
+        }
+        return done(`Reassigned ${jn}: ${b.fromTechnicianName || b.fromTechnicianId || 'unassigned'} → ${b.toTechnicianName || b.toTechnicianId}`,
+          { tech: b.fromTechnicianName || b.fromTechnicianId || null }, { tech: b.toTechnicianName || b.toTechnicianId })
+      }
+      case 'retype': case 'priority': case 'tags': {
+        if (!row.job_id) return res.status(400).json({ error: 'jobId required' })
+        const cur = await stGet(`/jpm/v2/tenant/${T}/jobs/${row.job_id}`)
+        const patch = {}
+        const before = { jobTypeId: cur?.jobTypeId, priority: cur?.priority, tagTypeIds: cur?.tagTypeIds || [] }
+        if (kind === 'retype' && b.jobTypeId) patch.jobTypeId = Number(b.jobTypeId)
+        if (kind === 'priority' && b.priority) patch.priority = String(b.priority)
+        if ((kind === 'retype' || kind === 'tags') && (b.addTagTypeIds || b.removeTagTypeIds)) {
+          const set = new Set((cur?.tagTypeIds || []).map(Number))
+          for (const id of (b.addTagTypeIds || [])) set.add(Number(id))
+          for (const id of (b.removeTagTypeIds || [])) set.delete(Number(id))
+          patch.tagTypeIds = [...set]
+        }
+        if (!Object.keys(patch).length) return res.status(400).json({ error: 'nothing to change' })
+        await stPatch(`/jpm/v2/tenant/${T}/jobs/${row.job_id}`, patch)
+        const parts = []
+        if (patch.jobTypeId) parts.push(`type → ${b.jobTypeName || patch.jobTypeId}`)
+        if (patch.priority) parts.push(`priority → ${patch.priority}`)
+        if (patch.tagTypeIds) parts.push(`tags ${(b.addTagNames || []).map(n => '+' + n).concat((b.removeTagNames || []).map(n => '−' + n)).join(' ') || 'updated'}`)
+        return done(`Fixed ${jn}: ${parts.join(' · ')}`, before, { ...before, ...patch })
+      }
+      case 'hold': {
+        if (!row.appointment_id || !b.reasonId) return res.status(400).json({ error: 'appointmentId and reasonId required' })
+        await stPut(`/jpm/v2/tenant/${T}/appointments/${row.appointment_id}/hold`, { reasonId: Number(b.reasonId), memo: String(b.memo || 'Placed on hold from Andi') })
+        return done(`Put ${jn} on hold — ${b.reasonName || b.reasonId}${b.memo ? ` (${String(b.memo).slice(0, 80)})` : ''}`, { status: 'Scheduled' }, { status: 'Hold', reasonId: Number(b.reasonId) })
+      }
+      case 'unhold': {
+        if (!row.appointment_id) return res.status(400).json({ error: 'appointmentId required' })
+        await stDelete(`/jpm/v2/tenant/${T}/appointments/${row.appointment_id}/hold`)
+        return done(`Took ${jn} off hold`, { status: 'Hold' }, { status: 'Scheduled' })
+      }
+      case 'reschedule': {
+        if (!row.appointment_id || !b.start || !b.end) return res.status(400).json({ error: 'appointmentId, start, end required (UTC ISO)' })
+        const body = { start: b.start, end: b.end, arrivalWindowStart: b.arrivalWindowStart || b.start, arrivalWindowEnd: b.arrivalWindowEnd || b.end }
+        await stPatch(`/jpm/v2/tenant/${T}/appointments/${row.appointment_id}/reschedule`, body)
+        return done(`Moved ${jn} to ${b.windowLabel || `${b.start} – ${b.end}`}`, { window: b.fromWindowLabel || null }, body)
+      }
+      case 'note': {
+        if (!row.job_id || !String(b.text || '').trim()) return res.status(400).json({ error: 'jobId and text required' })
+        await stPost(`/jpm/v2/tenant/${T}/jobs/${row.job_id}/notes`, { text: `${String(b.text).trim()} — ${actor.name} via Andi`, pinToTop: b.pin !== false }, false)
+        return done(`Note on ${jn}: “${String(b.text).trim().slice(0, 90)}”`, null, { note: String(b.text).trim() })
+      }
+      case 'log': {
+        // Client-side actions (text sent, call placed, campaign built) still
+        // belong in the same audit trail.
+        if (!String(b.summary || '').trim()) return res.status(400).json({ error: 'summary required' })
+        return done(String(b.summary).trim().slice(0, 300), null, b.after || null)
+      }
+      default:
+        return res.status(400).json({ error: `unknown kind ${kind}` })
+    }
+  } catch (e) {
+    console.warn('dispatch act:', kind, e.message)
+    return fail('failed', e.message, `${kind} on ${jn} failed`)
+  }
+})
+
+// Today's audit trail (Denver day), newest first.
+app.get('/api/dispatch/actions', async (req, res) => {
+  if (!(await requireDispatch(req, res))) return
+  try {
+    const day = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.day || '')) ? String(req.query.day) : tvDenverDate()
+    const from = tvBounds(day), to = new Date(Date.parse(from) + 86400_000).toISOString()
+    const { data, error } = await supabase.from('dispatch_actions')
+      .select('id, actor_name, kind, card_key, job_id, job_number, appointment_id, st_status, st_error, summary, created_at')
+      .gte('created_at', from).lt('created_at', to).order('created_at', { ascending: false }).limit(200)
+    if (error) throw error
+    res.json(data || [])
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
+
+// Dismiss for the day / snooze N minutes. The queue builder hides matching cards.
+app.post('/api/dispatch/dismiss', async (req, res) => {
+  const prof = await requireDispatch(req, res)
+  if (!prof) return
+  const b = req.body || {}
+  if (!b.cardKey || !['dismiss', 'snooze'].includes(b.action)) return res.status(400).json({ error: 'cardKey and action (dismiss|snooze) required' })
+  const actor = await actorOf(prof)
+  const day = tvDenverDate()
+  const until = b.action === 'snooze' ? new Date(Date.now() + Math.max(5, Math.min(480, Number(b.minutes) || 60)) * 60_000).toISOString() : null
+  try {
+    const { error } = await supabase.from('dispatch_dismissals').insert({ card_key: String(b.cardKey), actor_id: actor.id, actor_name: actor.name, action: b.action, reason: b.reason ? String(b.reason).slice(0, 300) : null, until, day })
+    if (error) throw error
+    res.json({ ok: true, until })
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
+async function activeDismissals(day) {
+  try {
+    const { data } = await supabase.from('dispatch_dismissals').select('card_key, action, until, reason').eq('day', day)
+    const now = Date.now(); const hidden = new Map()
+    for (const d of (data || [])) {
+      if (d.action === 'dismiss' || (d.until && Date.parse(d.until) > now)) hidden.set(d.card_key, d)
+    }
+    return hidden
+  } catch { return new Map() }
+}
+
+// ── The Action Queue: board facts → typed cards a human can execute ─────────
+// Sorted by when the dispatcher has to act (window start), then by upside.
+// Cards are keyed so dismissals/snoozes stick; every card carries the ids the
+// act endpoint needs, so "click and it happens" is one round trip.
+function windowsOverlap(aS, aE, bS, bE) {
+  const s1 = Date.parse(aS || ''), e1 = Date.parse(aE || ''), s2 = Date.parse(bS || ''), e2 = Date.parse(bE || '')
+  if ([s1, e1, s2, e2].some(Number.isNaN)) return false
+  return s1 < e2 && s2 < e1
+}
+async function buildActionQueue(dayOffset) {
+  const hit = _liveBoardCache.get(dayOffset)
+  const board = (hit && hit.expires > Date.now()) ? hit.data : await computeLiveBoardPayload(dayOffset)
+  const calls = board.calls || [], techs = board.techsToday || []
+  const techById = new Map(techs.map(t => [Number(t.techId), t]))
+  const callsByTech = new Map()
+  for (const c of calls) { if (!callsByTech.has(c.techId)) callsByTech.set(c.techId, []); callsByTech.get(c.techId).push(c) }
+  const busyIn = (techId, ws, we) => (callsByTech.get(techId) || []).some(c => c.status !== 'Done' && windowsOverlap(c.windowStart, c.windowEnd, ws, we))
+  const cards = []
+
+  // A. Reassign — high-opportunity call on a weak bench seat.
+  for (const c of calls) {
+    const f = (c.flags || []).find(x => x.alternatives && x.alternatives.length)
+    if (!f) continue
+    const alts = f.alternatives.map(a => ({ ...a, busy: busyIn(a.techId, c.windowStart, c.windowEnd), status: techById.get(Number(a.techId))?.status || null }))
+    const best = alts.find(a => a.recommended) || alts[0]
+    cards.push({
+      key: `reassign:${c.appointmentId}:${c.techId}`, kind: 'reassign', severity: c.techTier === 'red' ? 'high' : 'mid',
+      actBy: c.windowStart, upside: Math.max(0, ...alts.map(a => a.delta || 0)),
+      jobId: c.jobId, jobNumber: c.jobNumber, appointmentId: c.appointmentId, jobType: c.jobType, zip: c.zip,
+      windowStart: c.windowStart, windowEnd: c.windowEnd, status: c.status, opportunity: c.opportunity,
+      title: `Move #${c.jobNumber} to ${best.techName}`,
+      why: (c.opportunityReasons || []).slice(0, 3).join(' · '),
+      current: { ...f.current, status: c.status, load: (callsByTech.get(c.techId) || []).length },
+      alternatives: alts, rejected: f.rejected || [],
+      action: { kind: 'reassign', appointmentId: c.appointmentId, jobId: c.jobId, jobNumber: c.jobNumber, fromTechnicianId: c.techId, fromTechnicianName: c.techName },
+    })
+  }
+
+  // B. Place — unassigned tray, ranked techs for that trade who are on shift
+  // and free in the window. Same trade only; no phantom "open all day".
+  for (const u of board.unassigned || []) {
+    const pool = techs.filter(t => t.rankable && t.onShift && !t.allDayInstall && (t.trade === u.trade || (u.trade === 'Garage Door' && /garage/i.test(t.trade || ''))))
+    const alts = pool.map(t => ({
+      techId: t.techId, techName: t.name, tier: t.tier, expectedValue: t.expectedValue || 0, closeRate: t.closeRate, avgSale: t.avgSale,
+      delta: t.expectedValue || 0, load: t.truckRolls, target: t.target, stretch: t.stretch,
+      busy: busyIn(t.techId, u.windowStart, u.windowEnd), status: t.status, travel: null, bump: null,
+    })).sort((a, b) => (a.busy - b.busy) || (b.expectedValue - a.expectedValue))
+    alts.forEach((a, i) => { a.recommended = i === 0 })
+    cards.push({
+      key: `place:${u.appointmentId}`, kind: 'place', severity: u.opportunity >= 3 ? 'high' : 'mid',
+      actBy: u.windowStart, upside: 0,
+      jobId: u.jobId, jobNumber: u.jobNumber, appointmentId: u.appointmentId, jobType: u.jobType, zip: u.zip,
+      windowStart: u.windowStart, windowEnd: u.windowEnd, status: 'Scheduled', opportunity: u.opportunity,
+      title: `Place #${u.jobNumber} — ${u.jobType}`,
+      why: (u.opportunityReasons || []).slice(0, 3).join(' · ') || 'no tech attached',
+      current: null, alternatives: alts, rejected: [],
+      action: { kind: 'assign', appointmentId: u.appointmentId, jobId: u.jobId, jobNumber: u.jobNumber },
+    })
+  }
+
+  // C. Swap — trade two jobs inside one team (two reassigns, executed in order).
+  for (const s of board.swaps || []) {
+    const a = calls.find(c => c.jobId === s.from.jobId), b = calls.find(c => c.jobId === s.to.jobId)
+    if (!a || !b) continue
+    cards.push({
+      key: `swap:${a.jobId}:${b.jobId}`, kind: 'swap', severity: 'mid',
+      actBy: a.windowStart < b.windowStart ? a.windowStart : b.windowStart, upside: s.upside || 0,
+      jobId: a.jobId, jobNumber: a.jobNumber, appointmentId: a.appointmentId, jobType: a.jobType, zip: a.zip,
+      windowStart: a.windowStart, windowEnd: a.windowEnd, status: a.status, opportunity: a.opportunity,
+      title: s.text, why: (s.why || []).slice(0, 2).join(' · '),
+      current: null, alternatives: [], rejected: [],
+      steps: [
+        { kind: 'reassign', appointmentId: a.appointmentId, jobId: a.jobId, jobNumber: a.jobNumber, fromTechnicianId: a.techId, fromTechnicianName: a.techName, toTechnicianId: b.techId, toTechnicianName: b.techName },
+        { kind: 'reassign', appointmentId: b.appointmentId, jobId: b.jobId, jobNumber: b.jobNumber, fromTechnicianId: b.techId, fromTechnicianName: b.techName, toTechnicianId: a.techId, toTechnicianName: a.techName },
+      ],
+      travel: { minutes: s.travelMinutes, miles: s.travelMiles }, sameWindow: s.sameWindow,
+    })
+  }
+
+  // D. Book the gap — a day/trade under target on the 3-day board.
+  try {
+    const b3 = await build3DayBoard()
+    for (const row of (b3.board || [])) {
+      row.days.forEach((d, di) => {
+        if (!d || d.status === 'none' || d.status === 'good' || !(d.needed > 0)) return
+        cards.push({
+          key: `gap:${row.trade}:${d.date}`, kind: 'gap', severity: d.status === 'under' ? 'mid' : 'low',
+          actBy: null, upside: 0, trade: row.trade, date: d.date, pct: d.pct, needed: d.needed, capacity: d.capacity, calls: d.calls,
+          title: `${row.trade} is ${d.pct}% booked ${di === 0 ? 'today' : di === 1 ? 'tomorrow' : d.date} — ${d.needed} more call${d.needed === 1 ? '' : 's'} needed`,
+          why: `${d.calls} booked against ${d.capacity} truck slots · target ${b3.target}%`,
+          current: null, alternatives: [], rejected: [],
+          action: { kind: 'campaign', trade: row.trade, date: d.date },
+        })
+      })
+    }
+  } catch (e) { console.warn('queue gaps:', e.message) }
+
+  const hidden = await activeDismissals(board.date)
+  const visible = cards.filter(c => !hidden.has(c.key))
+  const ts = (v) => { const t = Date.parse(v || ''); return Number.isNaN(t) ? Infinity : t }
+  visible.sort((a, b) => (ts(a.actBy) - ts(b.actBy)) || (b.upside - a.upside))
+  return {
+    day: dayOffset, date: board.date, now: new Date().toISOString(), generatedAt: board.generatedAt,
+    cards: visible, hiddenCount: cards.length - visible.length,
+    atStake: visible.reduce((s, c) => s + (c.upside || 0), 0),
+    counts: { reassign: visible.filter(c => c.kind === 'reassign').length, place: visible.filter(c => c.kind === 'place').length,
+      swap: visible.filter(c => c.kind === 'swap').length, gap: visible.filter(c => c.kind === 'gap').length },
+  }
+}
+app.get('/api/dispatch/queue', async (req, res) => {
+  if (!(await requireDispatch(req, res))) return
+  try {
+    const day = Math.min(2, Math.max(0, parseInt(req.query.day) || 0))
+    if (req.query.force === '1') _liveBoardCache.delete(day)
+    res.json(await buildActionQueue(day))
+  } catch (e) { console.error('dispatch queue:', e.message); res.status(500).json({ error: e.message }) }
+})
+
+// Drawer detail for one job: the customer, where they are, what the CSR
+// wrote, what's been quoted. Live from ST — no cache, it's one click.
+app.get('/api/dispatch/job/:jobId', async (req, res) => {
+  if (!(await requireDispatch(req, res))) return
+  const id = parseInt(req.params.jobId)
+  if (!id) return res.status(400).json({ error: 'jobId required' })
+  const T = ST_TENANT_ID
+  const safeGet = (p) => stGet(p).catch(() => null)
+  try {
+    const job = await stGet(`/jpm/v2/tenant/${T}/jobs/${id}`)
+    const [cust, contacts, loc, notes, ests, jt] = await Promise.all([
+      job.customerId ? safeGet(`/crm/v2/tenant/${T}/customers/${job.customerId}`) : null,
+      job.customerId ? safeGet(`/crm/v2/tenant/${T}/customers/${job.customerId}/contacts?pageSize=20`) : null,
+      job.locationId ? safeGet(`/crm/v2/tenant/${T}/locations/${job.locationId}`) : null,
+      safeGet(`/jpm/v2/tenant/${T}/jobs/${id}/notes?pageSize=20`),
+      safeGet(`/sales/v2/tenant/${T}/estimates?jobId=${id}&pageSize=50`),
+      getJobTypeCatalog().catch(() => []),
+    ])
+    const cl = contacts?.data || []
+    const phone = (cl.find(x => x.type === 'MobilePhone') || cl.find(x => /phone/i.test(x.type || '')))?.value || null
+    const email = (cl.find(x => /email/i.test(x.type || '')))?.value || null
+    const a = loc?.address || cust?.address || {}
+    res.json({
+      job: { id: job.id, jobNumber: job.jobNumber, jobTypeId: job.jobTypeId, jobType: (jt || []).find(t => t.id === job.jobTypeId)?.name || '',
+        priority: job.priority || null, status: job.jobStatus, tagTypeIds: job.tagTypeIds || [],
+        summary: stripHtml(String(job.summary || '')).trim().slice(0, 1200), noCharge: !!job.noCharge, appointmentCount: job.appointmentCount || null,
+        firstAppointmentId: job.firstAppointmentId || null, lastAppointmentId: job.lastAppointmentId || null },
+      customer: cust ? { id: cust.id, name: cust.name, phone, email, type: cust.type || null, doNotService: !!cust.doNotService } : null,
+      location: loc ? { id: loc.id, name: loc.name, street: a.street || '', city: a.city || '', state: a.state || '', zip: String(a.zip || '').slice(0, 5) } : null,
+      notes: (notes?.data || []).map(n => ({ text: stripHtml(String(n.text || '')).trim().slice(0, 500), createdOn: n.createdOn || null, isPinned: !!n.isPinned })),
+      estimates: (ests?.data || []).map(e => ({ id: e.id, name: e.name || '', status: (e.status || {}).name || String(e.status || ''), subtotal: Math.round(Number(e.subtotal) || 0), soldOn: e.soldOn || null })),
+      jobTypes: (jt || []).map(t => ({ id: t.id, name: t.name })),
+    })
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
+
+// "Book against the gap": build an Andi outbound campaign for a trade/day
+// from ST — members due for a visit plus open (unsold) estimates from the last
+// 90 days — reusing the audience builder's phone resolution and dedupe.
+app.post('/api/dispatch/campaign-from-gap', async (req, res) => {
+  const prof = await requireDispatch(req, res)
+  if (!prof) return
+  const trade = String(req.body?.trade || ''), date = String(req.body?.date || '')
+  if (!trade) return res.status(400).json({ error: 'trade required' })
+  const actor = await actorOf(prof)
+  const T = ST_TENANT_ID
+  try {
+    const recipeTrade = /garage/i.test(trade) ? 'Garage' : trade
+    const since = new Date(Date.now() - 90 * 864e5).toISOString().slice(0, 10)
+    const [due, ests] = await Promise.all([
+      RECIPES.maintenance_due({ trade: recipeTrade, window_months: 2 }).catch(e => { console.warn('gap recipe maint:', e.message); return [] }),
+      stPageAll(pg => `/sales/v2/tenant/${T}/estimates?createdOnOrAfter=${since}T00:00:00Z&pageSize=500&page=${pg}`, 8000).catch(() => []),
+    ])
+    const tradeRe = new RegExp(trade.replace(/s$/, '').split(' ')[0], 'i')
+    const open = []
+    const seenCust = new Set()
+    for (const e of ests) {
+      const st = (e.status || {}).name || ''
+      if (st === 'Sold' || st === 'Dismissed' || !e.customerId) continue
+      if (!tradeRe.test(e.businessUnitName || '')) continue
+      if (seenCust.has(e.customerId)) continue
+      seenCust.add(e.customerId)
+      open.push({ customerId: e.customerId, reason: `Open estimate $${Math.round(Number(e.subtotal) || 0).toLocaleString()} — ${e.name || 'quoted'} (${String(e.createdOn || '').slice(0, 10)})` })
+    }
+    const matched = dedupeByCustomer([...open, ...due.filter(d => !seenCust.has(d.customerId))])
+    if (!matched.length) return res.json({ ok: true, created: 0, reason: 'nobody matched' })
+    const { rows, truncated } = await enrichAudience(matched)
+    const { data: existing } = await supabase.from('contacts').select('phone, status')
+    const have = new Set((existing || []).map(c => normPhone10(c.phone)).filter(Boolean))
+    const dnc = new Set((existing || []).filter(c => c.status === 'DNC').map(c => normPhone10(c.phone)).filter(Boolean))
+    const name = `${trade} — fill ${date || 'the board'}`
+    const { data: camp, error: ce } = await supabase.from('campaigns')
+      .insert({ name, description: `Built from the Dispatch Command Center by ${actor.name}: open ${trade.toLowerCase()} estimates (90d) + members due. Goal: fill ${date || 'open slots'}.`, status: 'Active', source_query: { kind: 'dispatch_gap', trade, date } })
+      .select('id').single()
+    if (ce) throw ce
+    const contacts = []
+    let noPhone = 0, dncSkipped = 0, dupSkipped = 0
+    for (const r of rows) {
+      const p = normPhone10(r.phone)
+      if (!p) { noPhone++; continue }
+      if (dnc.has(p)) { dncSkipped++; continue }
+      if (have.has(p)) { dupSkipped++; continue }
+      have.add(p)
+      contacts.push({ name: r.name || 'Unknown', phone: r.phone, email: r.email || null, address: r.address || null, city: r.city || null, state: r.state || null, zip: r.zip || null,
+        source: 'Dispatch gap', import_notes: r.reason, external_id: String(r.customerId), status: 'Pending', attempts: 0, campaign_id: camp.id })
+    }
+    for (let i = 0; i < contacts.length; i += 1000) {
+      const { error } = await supabase.from('contacts').insert(contacts.slice(i, i + 1000))
+      if (error) throw error
+    }
+    const summary = `Built call list “${name}”: ${contacts.length} contacts (${open.length} open estimates, ${due.length} members due · ${dupSkipped} already in a queue, ${dncSkipped} DNC, ${noPhone} no phone)`
+    await logDispatchAction({ actor_id: actor.id, actor_name: actor.name, kind: 'campaign', card_key: `gap:${trade}:${date}`, job_id: null, job_number: null, appointment_id: null,
+      before: null, after: { campaignId: camp.id, contacts: contacts.length }, st_status: 'ok', st_error: null, summary })
+    res.json({ ok: true, campaignId: camp.id, name, created: contacts.length, matched: matched.length, truncated, dupSkipped, dncSkipped, noPhone, summary })
+  } catch (e) { console.warn('campaign-from-gap:', e.message); res.status(500).json({ error: e.message }) }
+})
 
 app.get('/api/dispatch/live-board', async (req, res) => {
   if (!(await requireDispatch(req, res))) return
