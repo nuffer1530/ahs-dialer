@@ -230,7 +230,9 @@ export default function DeptTVPage() {
             </div>
           )}
         </div>
-        <div style={{ display:'flex', alignItems:'center', gap:16 }}>
+        {/* Weather · updated · fullscreen · clock always hug the right edge,
+            even when the header wraps to a second line (Call Center TV parity). */}
+        <div style={{ display:'flex', alignItems:'center', gap:16, marginLeft:'auto', justifyContent:'flex-end', flexWrap:'wrap' }}>
           <WeatherStrip dark />
           {data?.updatedAt && (
             <span style={{ fontSize:11, color:C.dim }}>Updated {timeAgo(data.updatedAt)}</span>
