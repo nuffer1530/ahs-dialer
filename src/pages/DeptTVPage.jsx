@@ -210,13 +210,13 @@ export default function DeptTVPage() {
       {/* Header: mark + dept + switcher | updated | fullscreen + clock */}
       <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:16, flexShrink:0, flexWrap:'wrap' }}>
         <div style={{ display:'flex', alignItems:'center', gap:12 }}>
-          <span className="pulse-mark" style={{ width:40, height:40, borderRadius:11, background:'#0b0c0f', display:'flex', alignItems:'center', justifyContent:'center', boxShadow:'0 6px 18px rgba(255,117,31,.15)' }}>
+          <span className="pulse-mark" style={{ width: narrow ? 34 : 40, height: narrow ? 34 : 40, borderRadius:11, background:'#0b0c0f', display:'flex', alignItems:'center', justifyContent:'center', boxShadow:'0 6px 18px rgba(255,117,31,.15)', flexShrink:0 }}>
             <svg width="26" height="26" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
               <polyline points="9,32 19,32 25,17 33,47 40,26 45,32 55,32" fill="none" stroke="#ff751f" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round"/>
             </svg>
           </span>
-          <span style={{ fontSize:21, fontWeight:800, letterSpacing:.3 }}>{trade.label}</span>
-          <span style={{ fontSize:12, color:C.muted, letterSpacing:1, textTransform:'uppercase' }}>Department board</span>
+          <span style={{ fontSize: narrow ? 18 : 21, fontWeight:800, letterSpacing:.3, whiteSpace:'nowrap' }}>{trade.label}</span>
+          {!narrow && <span style={{ fontSize:12, color:C.muted, letterSpacing:1, textTransform:'uppercase' }}>Department board</span>}
           {/* Fullscreen is wall-TV mode: just the department, time, and date. */}
           {!isFull && (
             <div style={{ display:'flex', gap:6, marginLeft:10, flexWrap:'wrap' }}>
@@ -233,9 +233,11 @@ export default function DeptTVPage() {
         {/* Weather · updated · fullscreen · clock always hug the right edge,
             even when the header wraps to a second line (Call Center TV parity). */}
         <div style={{ display:'flex', alignItems:'center', gap:16, marginLeft:'auto', justifyContent:'flex-end', flexWrap:'wrap' }}>
-          <WeatherStrip dark />
+          {/* TV viewports (~960px): scale the weather strip so the whole
+              cluster fits on ONE line regardless of roster size / auto-fit. */}
+          <div style={{ zoom: narrow ? .8 : 1 }}><WeatherStrip dark /></div>
           {data?.updatedAt && (
-            <span style={{ fontSize:11, color:C.dim }}>Updated {timeAgo(data.updatedAt)}</span>
+            <span style={{ fontSize: narrow ? 10 : 11, color:C.dim, whiteSpace:'nowrap' }}>Updated {timeAgo(data.updatedAt)}</span>
           )}
           {err && <span style={{ fontSize:11, color:C.red }}>Refresh failed — retrying</span>}
           <button onClick={toggleFull} title={isFull ? 'Exit fullscreen' : 'Fullscreen'}
@@ -247,7 +249,7 @@ export default function DeptTVPage() {
             )}
           </button>
           <div style={{ textAlign:'right' }}>
-            <div style={{ fontSize:'clamp(20px, 2.4vw, 30px)', fontWeight:800, letterSpacing:-1, color:C.blue, fontVariantNumeric:'tabular-nums' }}>
+            <div style={{ fontSize: narrow ? 19 : 'clamp(20px, 2.4vw, 30px)', fontWeight:800, letterSpacing:-1, color:C.blue, fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap' }}>
               {time.toLocaleTimeString([], { hour:'2-digit', minute:'2-digit', second:'2-digit' })}
             </div>
             <div style={{ fontSize:12, color:C.muted }}>{time.toLocaleDateString([], { weekday:'long', month:'long', day:'numeric' })}</div>
