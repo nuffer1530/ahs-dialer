@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useRef, useState, useCallback } from 'react'
+import { useLocation } from 'react-router-dom'
 import { toast } from './dialogs'
 import { sb } from './supabase'
 import { loadOpsConfig } from './opsConfig'
@@ -19,6 +20,12 @@ const PhoneContext = createContext(null)
 export function PhoneProvider({ children }) {
   const { profile } = useAuth()
   const { contacts, setContacts } = useData()
+  // Wall displays (department TVs, War Room) are logged in but nobody answers
+  // a phone there. Registering a Device grabs the microphone, which the TV
+  // browser shows as a permanent mic indicator, and marks the account's
+  // TaskRouter worker as reachable from a screen no one is sitting at.
+  const { pathname } = useLocation()
+  const isWall = pathname.startsWith('/tv/') || pathname === '/warroom'
 
   const deviceRef = useRef(null)
   const callRef = useRef(null)
@@ -182,7 +189,7 @@ export function PhoneProvider({ children }) {
 
   // Register the Device once per rep, for the whole session.
   useEffect(() => {
-    if (!profile?.id || currentRep === 'Unknown') return
+    if (!profile?.id || currentRep === 'Unknown' || isWall) return
     let device = null
     let cancelled = false
 
@@ -274,7 +281,7 @@ export function PhoneProvider({ children }) {
       cancelAutoWrap()
       setTwilioReady(false)
     }
-  }, [profile?.id, currentRep, stopCallTimer])
+  }, [profile?.id, currentRep, stopCallTimer, isWall])
 
   // Reconcile TaskRouter with reality, on a timer.
   //
