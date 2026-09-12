@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { sb } from '../lib/supabase'
 import { useDailyReload } from '../lib/useDailyReload'
+import WeatherStrip from '../components/WeatherStrip'
 
 // Department TV board — one per trade, hung in each manager's office.
 // Daily / Monthly / Yearly department strip up top, the month's tech ranking
@@ -230,6 +231,7 @@ export default function DeptTVPage() {
           )}
         </div>
         <div style={{ display:'flex', alignItems:'center', gap:16 }}>
+          <WeatherStrip dark />
           {data?.updatedAt && (
             <span style={{ fontSize:11, color:C.dim }}>Updated {timeAgo(data.updatedAt)}</span>
           )}
