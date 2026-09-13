@@ -1645,16 +1645,23 @@ async function requireUser(req, res) {
 
 // Dispatch surfaces admit admins AND the dispatcher role. Everything else
 // admin-gated stays admin-only — dispatcher is "rep plus the Dispatch tab".
+// Memoized per token for a minute: the Command Center makes several calls per
+// interaction and each one was two Supabase round trips before any work began.
+const _dispatchAuth = new Map()   // token -> { prof, expires }
 async function requireDispatch(req, res) {
   const token = (req.headers.authorization || '').replace(/^Bearer\s+/i, '')
   if (!token) { res.status(401).json({ error: 'Not signed in' }); return null }
+  const hit = _dispatchAuth.get(token)
+  if (hit && hit.expires > Date.now()) return hit.prof
   const { data: { user }, error } = await supabase.auth.getUser(token)
   if (error || !user) { res.status(401).json({ error: 'Invalid session' }); return null }
   const { data: prof } = await supabase
-    .from('profiles').select('id, role, active').eq('id', user.id).maybeSingle()
+    .from('profiles').select('id, role, active, name, email').eq('id', user.id).maybeSingle()
   if (!['admin', 'dispatcher'].includes(prof?.role) || prof?.active === false) {
     res.status(403).json({ error: 'Admins or dispatchers only' }); return null
   }
+  if (_dispatchAuth.size > 500) _dispatchAuth.clear()
+  _dispatchAuth.set(token, { prof, expires: Date.now() + 60_000 })
   return prof
 }
 
@@ -2393,7 +2400,87 @@ async function getBoardTechs() {
 
 const chunkIds = (arr, n) => Array.from({ length: Math.ceil(arr.length / n) }, (_, i) => arr.slice(i * n, i * n + n))
 
-async function build3DayBoard() {
+// ── Shared forward-book sweep ───────────────────────────────────────────────
+// The live board (each day), the 3-day capacity board and the install
+// last-day lookup all paged the same appointments list from ST on their own.
+// One sweep from three days back, cached briefly with in-flight dedupe; each
+// consumer slices its own window out of it.
+let _fwdAppts = { at: 0, data: null, inflight: null }
+const FWD_APPTS_TTL = 75_000
+async function getForwardAppointments({ force = false } = {}) {
+  if (_fwdAppts.data && Date.now() - _fwdAppts.at < FWD_APPTS_TTL && !force) return _fwdAppts.data
+  if (_fwdAppts.inflight) return _fwdAppts.inflight
+  const since = new Date(boardDay(0).startUtc.getTime() - 3 * 864e5)
+  _fwdAppts.inflight = stPageAll(p => `/jpm/v2/tenant/${ST_TENANT_ID}/appointments?startsOnOrAfter=${since.toISOString()}&pageSize=500&page=${p}`, 6000)
+    .then(rows => { _fwdAppts = { at: Date.now(), data: rows, inflight: null }; return rows })
+    .catch(e => {
+      _fwdAppts.inflight = null
+      if (_fwdAppts.data) { console.warn('forward appointments sweep failed, serving the last copy:', e.message); return _fwdAppts.data }
+      throw e
+    })
+  return _fwdAppts.inflight
+}
+
+// 3-day board memo. Two wall TVs poll it every 90 s, the Command Center reads
+// it on every load, the brief and the email read it too — one build serves
+// them all. A stale copy is served (and refreshed in the background) for up
+// to ten minutes so a slow ServiceTitan morning never blanks a wall board.
+let _b3Cache = { data: null, at: 0, inflight: null }
+const B3_TTL = 120_000, B3_STALE_MAX = 10 * 60_000
+async function getBoard3Day({ force = false } = {}) {
+  const age = Date.now() - _b3Cache.at
+  const haveStale = _b3Cache.data && age < B3_STALE_MAX && !force
+  if (_b3Cache.data && age < B3_TTL && !force) return _b3Cache.data
+  if (!_b3Cache.inflight) {
+    _b3Cache.inflight = build3DayBoard({ force })
+      .then(async data => {
+        try { await decorateCoverage(data) } catch (e) { console.warn('coverage decorate:', e.message) }
+        _b3Cache = { data, at: Date.now(), inflight: null }
+        return data
+      })
+      .catch(e => { _b3Cache.inflight = null; throw e })
+  }
+  if (haveStale) { _b3Cache.inflight.catch(e => console.warn('3-day refresh:', e.message)); return _b3Cache.data }
+  return _b3Cache.inflight
+}
+
+// Money on an open slot: calls still needed × what a dispatched call is worth
+// on that trade (median over the ranked bench of EV × opportunity rate), and
+// whether a call list already exists for that trade + day.
+let _tradeEV = { at: 0, map: new Map() }
+async function decorateCoverage(b3) {
+  if (!b3?.board) return
+  if (Date.now() - _tradeEV.at > 10 * 60_000) {
+    const { data: scores } = await supabase.from('dispatch_tech_scores').select('business_unit, tier, jobs, opportunities, expected_value')
+    const byTrade = new Map()
+    for (const s of (scores || [])) {
+      if (s.tier === 'unranked' || Number(s.jobs) < 10) continue
+      const trade = tradeOfTeam(s.business_unit); if (!trade) continue
+      const v = Number(s.expected_value || 0) * Math.min(1, Number(s.opportunities || 0) / Number(s.jobs))
+      if (!byTrade.has(trade)) byTrade.set(trade, []); byTrade.get(trade).push(v)
+    }
+    const map = new Map()
+    for (const [t, vs] of byTrade) { vs.sort((a, b) => a - b); map.set(t, vs[Math.floor(vs.length / 2)]) }
+    _tradeEV = { at: Date.now(), map }
+  }
+  const names = []
+  for (const row of b3.board) for (const d of row.days) names.push(`${row.trade} — fill ${d.date}`)
+  let lists = new Map()
+  try {
+    const { data } = await supabase.from('campaigns').select('id, name').in('name', names)
+    lists = new Map((data || []).map(c => [c.name, c]))
+  } catch {}
+  for (const row of b3.board) {
+    const ev = _tradeEV.map.get(row.trade) || null
+    for (const d of row.days) {
+      d.stake = ev && d.needed > 0 ? Math.round((d.needed * ev) / 100) * 100 : null
+      const l = lists.get(`${row.trade} — fill ${d.date}`)
+      d.list = l ? { campaignId: l.id, name: l.name } : null
+    }
+  }
+}
+
+async function build3DayBoard({ force = false } = {}) {
   const days = [0, 1, 2].map(boardDay)
 
   // Defined up here on purpose: the install-consumption lookup below needs it,
@@ -2476,8 +2563,8 @@ async function build3DayBoard() {
   let apptStartByJobDay = null
   try {
     const horizon = days[days.length - 1].endUtc.getTime()
-    const allAppts = (await stPageAll(p => `/jpm/v2/tenant/${ST_TENANT_ID}/appointments?startsOnOrAfter=${days[0].startUtc.toISOString()}&pageSize=500&page=${p}`, 6000))
-      .filter(a => { const t = Date.parse(a.start || ''); return !Number.isNaN(t) && t < horizon })
+    const allAppts = (await getForwardAppointments({ force }))
+      .filter(a => { const t = Date.parse(a.start || ''); return !Number.isNaN(t) && t >= days[0].startUtc.getTime() && t < horizon })
     liveApptJobs = days.map(() => new Set())
     apptStartByJobDay = days.map(() => new Map())
     days.forEach((d, di) => {
@@ -2525,8 +2612,8 @@ async function build3DayBoard() {
     // off the end and consumption silently under-sampled (job 35317's 6h
     // repair never made the page). Page it all; the forward book is only a
     // few hundred rows (verified 601 on Jul 30).
-    const apptRaw = await stPageAll(p => `/jpm/v2/tenant/${ST_TENANT_ID}/appointments?startsOnOrAfter=${apptLookback.toISOString()}&pageSize=500&page=${p}`, 6000)
-    const appts = apptRaw.filter(a => a.start && a.end && a.active !== false && a.status !== 'Canceled')
+    const apptRaw = await getForwardAppointments()   // same three-day lookback as apptLookback
+    const appts = apptRaw.filter(a => a.start && a.end && a.active !== false && a.status !== 'Canceled' && Date.parse(a.start) >= apptLookback.getTime())
 
     // Only appointments that actually overlap a board day are worth resolving.
     const relevant = appts.filter(a => {
@@ -2951,7 +3038,7 @@ app.get('/api/tv/wins-today', async (req, res) => {
 
 app.get('/api/board/3day', async (req, res) => {
   try {
-    res.json(await build3DayBoard())
+    res.json(await getBoard3Day({ force: req.query.force === '1' }))
   } catch (err) {
     console.error('3-day board error:', err.message)
     res.status(500).json({ error: err.message })
@@ -2973,6 +3060,7 @@ app.post('/api/board/config', async (req, res) => {
   const { error } = await supabase.from('app_settings').upsert(
     { key: 'board_calls_per_tech', value: JSON.stringify(clean) }, { onConflict: 'key' })
   if (error) return res.status(500).json({ error: error.message })
+  _b3Cache.at = 0   // capacity changed — the next board read rebuilds
   res.json({ ok: true, callsPerTech: clean })
 })
 
@@ -3629,6 +3717,11 @@ app.get('/api/live-calls/:sid/transcript', async (req, res) => {
     lines: e.parts,
   })
 })
+
+// Which build is running. Wallboards poll this and reload themselves quietly
+// when it changes, instead of showing a "reload" banner nobody can click.
+const BUILD_ID = process.env.RAILWAY_DEPLOYMENT_ID || process.env.RAILWAY_GIT_COMMIT_SHA || new Date().toISOString()
+app.get('/api/build', (req, res) => { res.set('Cache-Control', 'no-store'); res.json({ id: BUILD_ID }) })
 
 app.get('/api/call-notes/health', (req, res) => {
   res.json({
@@ -7240,7 +7333,7 @@ async function checkOppWatchBonus() {
   try { log = JSON.parse(logRow?.value || '{}') } catch {}
   if (log[today]) return   // already unlocked today
 
-  const b3 = await build3DayBoard()
+  const b3 = await getBoard3Day()
   const withCapacity = (b3?.board || []).filter(t => (t.days?.[0]?.capacity || 0) > 0)
   if (!withCapacity.length) return
   if (!withCapacity.every(t => t.days[0].oppWatch)) return
@@ -7505,15 +7598,40 @@ function scoreOpportunity(jobTypeName, zipTier, isMember, systemAge, isHvac, noC
   return { score, reasons }
 }
 
-// The live board costs ~35 ServiceTitan calls to compute. Cache the finished
-// response for 3 minutes so ten open tabs cost one compute, not ten — the UI
-// only auto-refreshes every 15 minutes anyway. The manual Refresh button
-// sends ?force=1 to bypass.
-const _liveBoardCache = new Map()   // dayOffset -> { data, expires }
-async function computeLiveBoardPayload(dayOffset = 0) {
+// The live board costs ~35 ServiceTitan calls to compute, so nobody waits on
+// it twice: the finished payload is cached per day, served stale (marked
+// `stale`) while a single background recompute runs, and kept warm on a timer
+// while the Command Center is being watched. Every act patches the cached
+// copy in place instead of throwing it away. ?force=1 bypasses everything.
+const _liveBoardCache = new Map()   // dayOffset -> { data, at, expires, inflight }
+const LB_FRESH_MS = [90_000, 5 * 60_000, 5 * 60_000]   // today refreshes fastest
+const LB_STALE_MAX = 10 * 60_000
+async function getLiveBoard(dayOffset = 0, { force = false } = {}) {
+  const now = Date.now()
+  let hit = _liveBoardCache.get(dayOffset)
+  // Midnight rollover: an entry computed for yesterday's "day 0" is not today's.
+  if (hit?.data && hit.data.date !== boardDay(dayOffset).date) { _liveBoardCache.delete(dayOffset); hit = null }
+  if (hit?.data && hit.expires > now && !force) return hit.data
+  const canServeStale = Boolean(hit?.data) && (now - hit.at) < LB_STALE_MAX && !force
+  if (!hit?.inflight) {
+    const p = computeLiveBoardPayload(dayOffset, { force })
+      .then(d => { const e = _liveBoardCache.get(dayOffset); if (e) e.inflight = null; return d })
+      .catch(e => { const en = _liveBoardCache.get(dayOffset); if (en) en.inflight = null; throw e })
+    if (hit) hit.inflight = p
+    else { hit = { data: null, at: 0, expires: 0, inflight: p }; _liveBoardCache.set(dayOffset, hit) }
+  }
+  if (canServeStale) { hit.inflight.catch(e => console.warn('live-board refresh:', e.message)); return { ...hit.data, stale: true } }
+  return hit.inflight
+}
+// Bumped by every write that touches the board (act patch, tech-out). A
+// compute that started before the bump read ServiceTitan before the write,
+// so its result must not replace the patched copy.
+let _lbGen = 0
+async function computeLiveBoardPayload(dayOffset = 0, { force = false } = {}) {
+    const gen = _lbGen
     const isToday = dayOffset === 0
     const today = boardDay(dayOffset)   // 'today' = the day being viewed
-    const appts = (await stPageAll(p => `/jpm/v2/tenant/${ST_TENANT_ID}/appointments?startsOnOrAfter=${today.startUtc.toISOString()}&pageSize=500&page=${p}`, 3000))
+    const appts = (await getForwardAppointments({ force }))
       .filter(a => {
         const t = Date.parse(a.start || '')
         return t >= today.startUtc.getTime() && t < today.endUtc.getTime()
@@ -7577,13 +7695,31 @@ async function computeLiveBoardPayload(dayOffset = 0) {
     // Loaded here because BOTH the calls loop and the unassigned tray stamp
     // canGoEarly — declaring it later threw a TDZ error that blanked the tab.
     let canGoEarlyJobs = {}
+    // Techs a dispatcher declared out for this date (Command Center "Report a
+    // change"). They are not candidates for anything, and every call still on
+    // their board becomes a re-place card. ST's own shifts don't know yet.
+    let techOutList = [], techOutIds = new Set()
+    // Smallest per-call gain that earns a reassign card; tunable in app_settings.
+    let minReassignDelta = 300
     try {
-      const { data: geRow } = await supabase.from('app_settings').select('value').eq('key', 'can_go_early_jobs').maybeSingle()
-      canGoEarlyJobs = JSON.parse(geRow?.value || '{}')
+      const { data: rows } = await supabase.from('app_settings').select('key, value')
+        .in('key', ['can_go_early_jobs', 'dispatch_tech_out', 'dispatch_reassign_min_delta'])
+      for (const r of (rows || [])) {
+        try {
+          if (r.key === 'can_go_early_jobs') canGoEarlyJobs = JSON.parse(r.value || '{}')
+          if (r.key === 'dispatch_tech_out') {
+            techOutList = (JSON.parse(r.value || '{}')[today.date] || []).filter(x => x && x.techId)
+            techOutIds = new Set(techOutList.map(x => Number(x.techId)))
+          }
+          if (r.key === 'dispatch_reassign_min_delta') { const n = Number(String(r.value || '').replace(/"/g, '')); if (n > 0) minReassignDelta = n }
+        } catch {}
+      }
     } catch {}
+    const isNewBooking = (iso) => { const t = Date.parse(iso || ''); return !Number.isNaN(t) && Date.now() - t < 60 * 60_000 }
 
     const calls = []
     for (const a of assignments) {
+      if (a.active === false) continue   // unassigned in ST, still returned as history
       const j = jobById.get(a.jobId)
       if (!j) continue
       const bu = teamOf.get(a.technicianId) || 'Unassigned'
@@ -7621,6 +7757,7 @@ async function computeLiveBoardPayload(dayOffset = 0) {
         techCloseRate: techScore?.close_rate ?? null,
         techAvgSale: techScore?.avg_sale ?? null,
         techExpectedValue: techScore?.expected_value ?? null,
+        createdOn: ap.createdOn || null, isNew: isNewBooking(ap.createdOn),
         opportunity: opp.score, opportunityReasons: opp.reasons,
         rankable: !NON_DISPATCH_TEAM.test(bu),
         flags: [],
@@ -7661,6 +7798,7 @@ async function computeLiveBoardPayload(dayOffset = 0) {
         trade: tradeOfJobType(jt), geo: geoOfLoc.get(j.locationId) || null, systemAge: sysAge,
         windowStart: ap.arrivalWindowStart || ap.start || null,
         windowEnd: ap.arrivalWindowEnd || ap.end || null,
+        createdOn: ap.createdOn || null, isNew: isNewBooking(ap.createdOn),
         opportunity: opp.score, opportunityReasons: opp.reasons,
         canGoEarly: Boolean(canGoEarlyJobs[String(j.id)]),
         countsToCapacity: !EXCLUDE_CALL.test(jt),
@@ -7705,6 +7843,8 @@ async function computeLiveBoardPayload(dayOffset = 0) {
       const pool = swapPool.get(c.businessUnit)
       if (!c.actionable) continue                          // can't swap finished work
       if (STICKY_TO_TECH.test(c.jobType || '')) continue   // relationship-bound
+      if (INSTALL_TYPE.test(c.jobType || '')) continue     // sold work, not an opportunity to trade
+      if (techOutIds.has(Number(c.techId))) continue       // an out tech's calls are re-placed, not swapped
       if (c.opportunity >= 3 && c.techTier === 'red') pool.misplaced.push(c)
       else if (c.opportunity <= 0 && c.techTier === 'green') pool.underused.push(c)
     }
@@ -7876,6 +8016,7 @@ async function computeLiveBoardPayload(dayOffset = 0) {
       }
     } catch (e) { console.warn('live-board shifts:', e.message) }
     const canWork = (techId, ws, we) => {
+      if (techOutIds.has(Number(techId))) return false    // declared out in Andi
       if (!shiftsByTech) return true                      // no data — don't block
       const list = shiftsByTech.get(techId) || []
       let s0 = Date.parse(ws || ''), e0 = Date.parse(we || '')
@@ -7923,39 +8064,62 @@ async function computeLiveBoardPayload(dayOffset = 0) {
     }
     const consumedByInstall = (techId) => Boolean(techLoad.get(Number(techId))?.allDayInstall)
 
+    // What a dispatched call is worth on a tech: only ~a third of a sales
+    // tech's visits become an opportunity, so every dollar shown to the
+    // dispatcher is EV × that tech's opportunity rate — the same units as
+    // the Expected revenue tile, never the raw $/opp.
+    const oppRateOf = (s) => (Number(s?.jobs) > 0 ? Math.min(1, Number(s.opportunities || 0) / Number(s.jobs)) : 0)
     for (const c of calls) {
-      if (!c.rankable || c.opportunity < 3) continue
+      // An out tech's calls all need a new home, whatever their value. For
+      // everyone else this is the upgrade pass: an opportunity sitting on a
+      // seat that isn't the bench's best.
+      const forced = techOutIds.has(Number(c.techId))
       if (!c.actionable) continue            // already done, working, or on hold
-      // Follow-ups and financing calls belong to the tech who owns the
-      // relationship — reassigning them by rank would destroy their value.
-      if (STICKY_TO_TECH.test(c.jobType || '')) continue
-      const weak = !c.techTier || c.techTier === 'red' || c.techTier === 'unranked'
-      if (!weak) continue
+      if (!forced) {
+        if (!c.rankable || c.opportunity < 3) continue
+        // Follow-ups and financing calls belong to the tech who owns the
+        // relationship — reassigning them by rank would destroy their value.
+        if (STICKY_TO_TECH.test(c.jobType || '')) continue
+        if (INSTALL_TYPE.test(c.jobType || '')) continue   // sold work — no upside in moving it
+        if (c.techTier === 'green') continue               // already on the bench's best
+      }
 
       const mine = scoreOf.get(`${c.techId}|${c.businessUnit}`)
       const myEV = Number(mine?.expected_value || 0)
 
-      // Candidates: same bench, materially stronger than who's on it now.
-      // Every drop-out keeps its reason — the Command Center shows "Craig:
-      // off today" instead of silently hiding him (a dispatcher asks why).
+      // Candidates: same bench, materially stronger than who's on it now —
+      // per dispatched call, so a big $/opp on a tech who rarely gets an
+      // opportunity doesn't earn a card. Every drop-out keeps its reason —
+      // the Command Center shows "Craig: off today" instead of hiding him.
       const rejected = []
       const tooFar = (t) => t && (t.minutes != null ? t.minutes > DETOUR_MIN : (t.miles != null && t.miles > DETOUR_MILES))
       const candidates = []
-      for (const s of (scoresByTeam.get(c.businessUnit) || [])) {
-        if (s.tech_id === c.techId) continue
+      // An out installer's install has no service-tech answer — the card still
+      // shows (push the window or crew it in ServiceTitan), with nobody offered.
+      const pool = forced
+        ? ((c.rankable && !INSTALL_TYPE.test(c.jobType || ''))
+          ? (scores || []).filter(s => tradeOfTeam(s.business_unit) === tradeOfTeam(c.businessUnit) && !NON_DISPATCH_TEAM.test(s.business_unit || ''))
+          : [])
+        : (scoresByTeam.get(c.businessUnit) || [])
+      for (const s of pool) {
+        if (Number(s.tech_id) === Number(c.techId)) continue
+        const sEV = Number(s.expected_value || 0)
+        const gain = Math.round((sEV - myEV) * oppRateOf(s))
         let reason = null
-        if (s.tier === 'unranked') reason = 'not ranked yet'
-        else if (!canWork(s.tech_id, c.windowStart, c.windowEnd)) reason = 'off shift for this window'
+        if (s.tier === 'unranked' && !forced) reason = 'not ranked yet'
+        else if (!canWork(s.tech_id, c.windowStart, c.windowEnd)) reason = techOutIds.has(Number(s.tech_id)) ? 'out today' : 'off shift for this window'
         else if (consumedByInstall(s.tech_id)) reason = 'on an all-day install'
         else if (!allowedByRule(c.jobType, s.tech_name)) reason = 'skill rule excludes this job type'
-        else if (Number(s.expected_value || 0) <= myEV) reason = 'not a stronger earner on this bench'
+        else if (!forced && sEV <= myEV) reason = 'not a stronger earner on this bench'
+        else if (!forced && Number(s.opportunities || 0) < 8) reason = 'too few opportunities to trust the number'
+        else if (!forced && gain < minReassignDelta) reason = `only +$${gain} a call — under the $${minReassignDelta} bar`
         const t = reason ? null : nearestTravel(s.tech_id, c.geo)
         if (!reason && tooFar(t)) reason = t.minutes != null ? `${t.minutes} min away — too far` : `~${t.miles} mi away — too far`
         if (reason) rejected.push({ techId: s.tech_id, techName: s.tech_name, tier: s.tier, reason })
         else candidates.push({ s, t })
       }
 
-      if (!candidates.length) continue
+      if (!candidates.length && !forced) continue
 
       // KPIs lead: work down the list by earning power, and take the first one
       // already working nearby. Only if nobody strong is in the area do we fall
@@ -7963,35 +8127,37 @@ async function computeLiveBoardPayload(dayOffset = 0) {
       const byEarning = [...candidates].sort((a, b) => Number(b.s.expected_value || 0) - Number(a.s.expected_value || 0))
       const isNear = (x) => x.t && (x.t.minutes != null ? x.t.minutes <= NEARBY_MIN : (x.t.miles != null && x.t.miles <= NEARBY_MILES))
       const nearby = byEarning.find(isNear)
-      const pick = nearby || byEarning[0]
-
-      // Say it in minutes when it's real drive time, miles when it's the
-      // straight-line estimate — never dress an estimate up as a measurement.
-      const t = pick.t
-      const where = !t
-        ? 'no other work scheduled today'
-        : t.minutes != null
-          ? (isNear(pick) ? `already working ${t.minutes} min away` : `${t.minutes} min drive from their nearest job today`)
-          : (isNear(pick) ? `already working ~${t.miles} mi away (straight line)` : `~${t.miles} mi away (straight line)`)
+      const pick = nearby || byEarning[0] || null
 
       const cap = capacityFor(c.businessUnit)
-      const load = loadByTech.get(pick.s.tech_id) || 0
-      const why = [...c.opportunityReasons,
-                   `${pick.s.tech_name}: ${Math.round(Number(pick.s.close_rate || 0))}% close · ${money0(pick.s.avg_sale)} avg sale`,
-                   where]
+      const why = forced ? [`${c.techName} is out today — this call needs a new tech`, ...c.opportunityReasons] : [...c.opportunityReasons]
+      if (pick) {
+        // Say it in minutes when it's real drive time, miles when it's the
+        // straight-line estimate — never dress an estimate up as a measurement.
+        const t = pick.t
+        const where = !t
+          ? 'no other work scheduled today'
+          : t.minutes != null
+            ? (isNear(pick) ? `already working ${t.minutes} min away` : `${t.minutes} min drive from their nearest job today`)
+            : (isNear(pick) ? `already working ~${t.miles} mi away (straight line)` : `~${t.miles} mi away (straight line)`)
+        const load = loadByTech.get(pick.s.tech_id) || 0
+        why.push(`${pick.s.tech_name}: ${Math.round(Number(pick.s.close_rate || 0))}% close · ${money0(pick.s.avg_sale)} avg sale`, where)
 
-      // Never suggest a move without saying what it costs the receiving tech.
-      if (load >= cap.target) {
-        const bump = bumpCandidate(pick.s.tech_id, c.jobId)
-        const atCap = load >= cap.stretch
-        why.push(
-          `${pick.s.tech_name} already has ${load} call${load === 1 ? '' : 's'} (${tradeOfTeam(c.businessUnit)} runs ${cap.target}, ${cap.stretch} if pushed)` +
-          (atCap ? ' — at the stretch limit' : ''))
-        if (bump) {
-          why.push(`Lowest-value call on their plate to move: #${bump.jobNumber} (${bump.jobType}${bump.opportunity <= 0 ? ', routine' : ''})`)
+        // Never suggest a move without saying what it costs the receiving tech.
+        if (load >= cap.target) {
+          const bump = bumpCandidate(pick.s.tech_id, c.jobId)
+          const atCap = load >= cap.stretch
+          why.push(
+            `${pick.s.tech_name} already has ${load} call${load === 1 ? '' : 's'} (${tradeOfTeam(c.businessUnit)} runs ${cap.target}, ${cap.stretch} if pushed)` +
+            (atCap ? ' — at the stretch limit' : ''))
+          if (bump) {
+            why.push(`Lowest-value call on their plate to move: #${bump.jobNumber} (${bump.jobType}${bump.opportunity <= 0 ? ', routine' : ''})`)
+          }
+        } else {
+          why.push(`${pick.s.tech_name} has room today (${load} of ${cap.target})`)
         }
       } else {
-        why.push(`${pick.s.tech_name} has room today (${load} of ${cap.target})`)
+        why.push('Nobody on this trade is free for that window — push it to a later window or call the customer')
       }
 
       // Structured alternatives for the Command Center: every candidate that
@@ -8000,12 +8166,16 @@ async function computeLiveBoardPayload(dayOffset = 0) {
       const alternatives = byEarning.map(x => {
         const ld = loadByTech.get(x.s.tech_id) || 0
         const bmp = ld >= cap.target ? bumpCandidate(x.s.tech_id, c.jobId) : null
+        const ev = Number(x.s.expected_value || 0), rate = oppRateOf(x.s)
+        const raw = forced ? ev : ev - myEV
         return {
           techId: x.s.tech_id, techName: x.s.tech_name, tier: x.s.tier,
-          expectedValue: Math.round(Number(x.s.expected_value || 0)),
+          expectedValue: Math.round(ev),
           closeRate: x.s.close_rate == null ? null : Math.round(Number(x.s.close_rate)),
           avgSale: Math.round(Number(x.s.avg_sale || 0)),
-          delta: Math.round(Number(x.s.expected_value || 0) - myEV),
+          deltaRaw: Math.round(raw),
+          delta: Math.round(raw * rate),
+          oppRate: Math.round(rate * 100) / 100,
           travel: x.t ? { minutes: x.t.minutes ?? null, miles: x.t.miles ?? null, provider: x.t.provider || null } : null,
           isNear: Boolean(isNear(x)),
           load: ld, target: cap.target, stretch: cap.stretch,
@@ -8014,8 +8184,11 @@ async function computeLiveBoardPayload(dayOffset = 0) {
         }
       })
       c.flags.push({
-        level: c.techTier === 'red' ? 'warn' : 'info',
-        text: `High-opportunity call on ${c.techTier === 'red' ? 'a red-tier tech' : 'an unranked tech'} — consider ${pick.s.tech_name}`,
+        level: forced || c.techTier === 'red' ? 'warn' : 'info',
+        kind: forced ? 'techout' : 'upgrade',
+        text: forced
+          ? `${c.techName} is out — re-place this call${pick ? ` (${pick.s.tech_name} suggested)` : ''}`
+          : `High-opportunity call on ${c.techTier === 'red' ? 'a red-tier tech' : c.techTier === 'yellow' ? 'a yellow-tier tech' : 'an unranked tech'} — consider ${pick.s.tech_name}`,
         why,
         current: { techId: c.techId, techName: c.techName, tier: c.techTier, expectedValue: Math.round(myEV) },
         alternatives,
@@ -8071,7 +8244,7 @@ async function computeLiveBoardPayload(dayOffset = 0) {
           : t.minutes != null ? `${t.minutes} min drive between the two jobs`
           : `~${t.miles} mi between the two jobs (straight line)`
 
-        const upside = Math.max(0, Math.round(partner.uEV - mEV))
+        const upside = Math.max(0, Math.round((partner.uEV - mEV) * oppRateOf(scoreOf.get(`${partner.u.techId}|${bu}`))))
         const sameWindow = partner.u.windowStart === m.windowStart && partner.u.windowEnd === m.windowEnd
         const why = [
           sameWindow
@@ -8224,15 +8397,18 @@ async function computeLiveBoardPayload(dayOffset = 0) {
       if (!onShift && !load.calls && !scoreOf.has(`${tid}|${team}`)) return   // nobody today: skip
       seenTech.add(tid)
       const sc = scoreOf.get(`${tid}|${team}`) || (scores || []).find(s => Number(s.tech_id) === tid) || null
+      const out = techOutIds.has(tid)
       let status
-      if (!onShift) status = 'off today / no working time left'
+      if (out) status = 'out today'
+      else if (!onShift) status = 'off today / no working time left'
       else if (load.allDayInstall) status = 'on an all-day install — cannot take calls'
       else status = `${load.calls} call${load.calls === 1 ? '' : 's'} on board`
       const cap = capacityFor(team)
       techsToday.push({
-        techId: tid, name, status, team, trade: tradeOfTeam(team),
+        techId: tid, name, status, team, trade: tradeOfTeam(team), out,
         tier: sc?.tier || 'unranked',
         expectedValue: sc ? Math.round(Number(sc.expected_value || 0)) : null,
+        oppRate: sc ? Math.round(oppRateOf(sc) * 100) / 100 : 0,
         closeRate: sc?.close_rate == null ? null : Math.round(Number(sc.close_rate)),
         avgSale: sc ? Math.round(Number(sc.avg_sale || 0)) : null,
         rankable: !NON_DISPATCH_TEAM.test(team),
@@ -8261,6 +8437,8 @@ async function computeLiveBoardPayload(dayOffset = 0) {
       // Parked work, listed so the AI can say "6 jobs on hold" instead of
       // inventing urgent placements for them.
       onHold,
+      techOut: techOutList,
+      stale: false,
       counts: {
         total: calls.length,
         unassigned: unassigned.length,
@@ -8269,7 +8447,15 @@ async function computeLiveBoardPayload(dayOffset = 0) {
         unrankedTechs: calls.filter(c => c.techTier === 'unranked').length,
       },
     }
-    _liveBoardCache.set(dayOffset, { data: payload, expires: Date.now() + 3 * 60_000 })
+    const existing = _liveBoardCache.get(dayOffset)
+    if (gen !== _lbGen && existing?.data) {
+      // A write landed while this compute was reading ST: what we just built
+      // predates it. Keep the patched copy and let the next read recompute.
+      existing.data.stale = true; existing.expires = Date.now(); existing.inflight = null
+      console.log(`DISPATCH: compute day${dayOffset} raced a write — kept the patched copy`)
+      return existing.data
+    }
+    _liveBoardCache.set(dayOffset, { data: payload, at: Date.now(), expires: Date.now() + (LB_FRESH_MS[dayOffset] || LB_FRESH_MS[2]), inflight: null })
   return payload
 }
 
@@ -8283,6 +8469,7 @@ async function computeLiveBoardPayload(dayOffset = 0) {
 const ST_JOB_URL_SRV = (id) => `https://go.servicetitan.com/#/Job/Index/${id}`
 
 async function actorOf(prof) {
+  if (prof?.name || prof?.email) return { id: prof.id, name: prof.name || prof.email }
   try {
     const { data } = await supabase.from('profiles').select('name, email').eq('id', prof.id).maybeSingle()
     return { id: prof.id, name: data?.name || data?.email || 'dispatcher' }
@@ -8290,24 +8477,120 @@ async function actorOf(prof) {
 }
 async function logDispatchAction(row) {
   try {
-    const { error } = await supabase.from('dispatch_actions').insert(row)
-    if (error) console.warn('dispatch_actions insert:', error.message)
-  } catch (e) { console.warn('dispatch_actions insert:', e.message) }
-}
-function bustBoardCaches() {
-  try { _liveBoardCache.clear() } catch {}
+    const { data, error } = await supabase.from('dispatch_actions').insert(row).select().single()
+    if (error) { console.warn('dispatch_actions insert:', error.message); return null }
+    return data
+  } catch (e) { console.warn('dispatch_actions insert:', e.message); return null }
 }
 
-let _holdReasons = { at: 0, list: [] }
+// After a write, the cached board is corrected in place so the next read is
+// instant and already shows the move; the copy is marked stale and expires in
+// 15 s so the keep-warm timer (or the next read) reconciles against ST.
+// Throwing the cache away here cost every dispatcher a 3.5 s recompute per
+// click — including for notes and logged texts that change nothing on the board.
+let _reconcileTimer = null
+function markBoardStale(delayMs = 15_000) {
+  _lbGen++
+  const days = []
+  for (const [d, e] of _liveBoardCache) {
+    if (!e?.data) continue
+    e.data.stale = true
+    e.expires = Math.min(e.expires, Date.now() + delayMs)
+    days.push(d)
+  }
+  // `stale` promises a recompute is coming: start one a few seconds after the
+  // write (ST has settled by then), not whenever the next poll happens by.
+  clearTimeout(_reconcileTimer)
+  _reconcileTimer = setTimeout(() => {
+    for (const d of days) getLiveBoard(d, { force: true }).catch(e => console.warn('reconcile after write:', e.message))
+  }, Math.min(delayMs, 3000))
+}
+function patchBoardCache(kind, b) {
+  const apptId = Number(b.appointmentId) || null, jobId = Number(b.jobId) || null
+  const patch = { kind, appointmentId: apptId, jobId, day: Number.isInteger(Number(b.day)) && b.day !== null && b.day !== '' ? Number(b.day) : null }
+  const structural = ['assign', 'unassign', 'reassign', 'hold', 'unhold', 'reschedule', 'retype'].includes(kind)
+  if (!structural) return null
+  // Appointment windows and hold state come from the shared sweep — drop it so
+  // the reconcile re-reads ServiceTitan instead of the copy from before the write.
+  if (['reschedule', 'hold', 'unhold'].includes(kind)) _fwdAppts.at = 0
+  const bump = (d, techId, delta) => {
+    const t = (d.techsToday || []).find(x => Number(x.techId) === Number(techId)); if (!t) return
+    t.calls = Math.max(0, (t.calls || 0) + delta); t.truckRolls = Math.max(0, (t.truckRolls || 0) + delta)
+    if (!t.out && t.onShift && !t.allDayInstall) t.status = `${t.calls} call${t.calls === 1 ? '' : 's'} on board`
+  }
+  const techFields = (d, techId, name) => {
+    const t = (d.techsToday || []).find(x => Number(x.techId) === Number(techId))
+    return { techId: Number(techId), techName: t?.name || name || String(techId), techTier: t?.tier || 'unranked',
+      techCloseRate: t?.closeRate ?? null, techAvgSale: t?.avgSale ?? null, techExpectedValue: t?.expectedValue ?? null, businessUnit: t?.team || 'Unassigned', rankable: t ? t.rankable : true }
+  }
+  for (const e of _liveBoardCache.values()) {
+    const d = e?.data; if (!d) continue
+    const calls = d.calls || [], tray = d.unassigned || [], onHold = d.onHold || []
+    const rowsFor = (id) => calls.filter(c => c.appointmentId === id)
+    try {
+      if (kind === 'assign' && apptId) {
+        const i = tray.findIndex(u => u.appointmentId === apptId)
+        if (i >= 0) {
+          const u = tray.splice(i, 1)[0]
+          calls.push({ ...u, ...techFields(d, b.technicianId, b.technicianName), start: u.windowStart, status: 'Scheduled', actionable: true, flags: [],
+            windowPassed: false, sticky: STICKY_TO_TECH.test(u.jobType || ''), bookedRevenue: 0, expectedRevenue: 0, rescheduleCandidate: false })
+          d.counts.unassigned = tray.length; d.counts.total = calls.length
+          bump(d, b.technicianId, +1)
+          Object.assign(patch, { technicianId: Number(b.technicianId), technicianName: b.technicianName || null })
+        }
+      } else if (kind === 'unassign' && apptId) {
+        const i = calls.findIndex(c => c.appointmentId === apptId && Number(c.techId) === Number(b.technicianId))
+        if (i >= 0) {
+          const c = calls.splice(i, 1)[0]
+          if (!rowsFor(apptId).length) tray.push({ appointmentId: c.appointmentId, jobId: c.jobId, jobNumber: c.jobNumber, jobType: c.jobType, zip: c.zip, isMember: c.isMember,
+            trade: tradeOfJobType(c.jobType), geo: c.geo, systemAge: c.systemAge, windowStart: c.windowStart, windowEnd: c.windowEnd, createdOn: c.createdOn || null, isNew: false,
+            opportunity: c.opportunity, opportunityReasons: c.opportunityReasons || [], canGoEarly: !!c.canGoEarly, countsToCapacity: c.countsToCapacity !== false })
+          d.counts.unassigned = tray.length; d.counts.total = calls.length
+          bump(d, b.technicianId, -1)
+          Object.assign(patch, { technicianId: Number(b.technicianId) })
+        }
+      } else if (kind === 'reassign' && apptId) {
+        const c = calls.find(x => x.appointmentId === apptId && (!b.fromTechnicianId || Number(x.techId) === Number(b.fromTechnicianId)))
+        if (c) {
+          const from = c.techId
+          Object.assign(c, techFields(d, b.toTechnicianId, b.toTechnicianName), { flags: [] })
+          bump(d, from, -1); bump(d, b.toTechnicianId, +1)
+          d.swaps = (d.swaps || []).filter(s => s.from?.jobId !== c.jobId && s.to?.jobId !== c.jobId)
+          Object.assign(patch, { fromTechnicianId: Number(from) || null, toTechnicianId: Number(b.toTechnicianId), toTechnicianName: c.techName })
+        }
+      } else if ((kind === 'hold' || kind === 'unhold') && apptId) {
+        const held = kind === 'hold'
+        for (const c of rowsFor(apptId)) { c.status = held ? 'Hold' : 'Scheduled'; c.actionable = !held; if (held) c.flags = [] }
+        if (held) {
+          const i = tray.findIndex(u => u.appointmentId === apptId)
+          if (i >= 0) { const u = tray.splice(i, 1)[0]; onHold.push({ jobId: u.jobId, jobNumber: u.jobNumber, jobType: u.jobType, appointmentId: u.appointmentId, windowStart: u.windowStart, windowEnd: u.windowEnd }) }
+        } else {
+          const i = onHold.findIndex(h => h.appointmentId === apptId)
+          if (i >= 0 && !rowsFor(apptId).length) { const h = onHold.splice(i, 1)[0]; tray.push({ ...h, zip: '', isMember: null, trade: tradeOfJobType(h.jobType), geo: null, systemAge: null, opportunity: 0, opportunityReasons: [], canGoEarly: false, countsToCapacity: !EXCLUDE_CALL.test(h.jobType || '') }) }
+        }
+        d.counts.unassigned = tray.length; d.counts.onHold = onHold.length
+        Object.assign(patch, { status: held ? 'Hold' : 'Scheduled' })
+      } else if (kind === 'reschedule' && apptId) {
+        const ws = b.arrivalWindowStart || b.start, we = b.arrivalWindowEnd || b.end
+        for (const c of [...rowsFor(apptId), ...tray.filter(u => u.appointmentId === apptId)]) { c.start = b.start; c.windowStart = ws; c.windowEnd = we; c.windowPassed = false; c.flags = [] }
+        Object.assign(patch, { windowStart: ws, windowEnd: we })
+      } else if (kind === 'retype' && jobId && b.jobTypeName) {
+        for (const c of [...calls, ...tray].filter(x => x.jobId === jobId)) c.jobType = b.jobTypeName
+        Object.assign(patch, { jobType: b.jobTypeName })
+      }
+      d.dayRevenue.remaining = calls.filter(c => c.actionable).length
+      d.counts.flagged = calls.filter(c => c.flags?.length).length
+    } catch (err) { console.warn('board patch:', kind, err.message) }
+  }
+  markBoardStale(15_000)
+  if (kind !== 'retype') _b3Cache.at = Math.min(_b3Cache.at, Date.now() - B3_TTL + 15_000)
+  console.log(`DISPATCH: patch ${kind} ${apptId || jobId || ''}`)
+  return patch
+}
+
 app.get('/api/dispatch/hold-reasons', async (req, res) => {
   if (!(await requireDispatch(req, res))) return
-  try {
-    if (Date.now() - _holdReasons.at > 6 * 3600_000 || !_holdReasons.list.length) {
-      const rows = await stPageAll(pg => `/jpm/v2/tenant/${ST_TENANT_ID}/job-hold-reasons?pageSize=200&page=${pg}`, 1000)
-      _holdReasons = { at: Date.now(), list: rows.filter(r => r.active !== false).map(r => ({ id: r.id, name: r.name })) }
-    }
-    res.json(_holdReasons.list)
-  } catch (e) { res.status(500).json({ error: e.message }) }
+  try { res.json(await holdReasonsList()) } catch (e) { res.status(500).json({ error: e.message }) }
 })
 
 let _tagTypes = { at: 0, list: [] }
@@ -8337,27 +8620,41 @@ app.post('/api/dispatch/act', async (req, res) => {
     job_id: b.jobId ? Number(b.jobId) : null, job_number: b.jobNumber ? String(b.jobNumber) : null,
     appointment_id: b.appointmentId ? Number(b.appointmentId) : null, before: null, after: null, st_status: 'ok', st_error: null, summary: '' }
   const jn = row.job_number ? `#${row.job_number}` : (row.job_id ? `job ${row.job_id}` : 'job')
+  // What the card promised, kept with the action so the day's moves can be
+  // totalled ("today's moves: +$X expected") and picks reviewed later.
+  const cardMeta = () => (b.cardKey || b.upside != null ? {
+    upside: Math.round(Number(b.upside) || 0), oppRate: b.oppRate == null ? null : Number(b.oppRate),
+    alternativesShown: Array.isArray(b.alternativesShown) ? b.alternativesShown.slice(0, 12) : null,
+    picked: b.picked || null, day: b.day ?? null,
+  } : {})
   const fail = async (status, err, summary) => {
     row.st_status = status; row.st_error = String(err || '').slice(0, 600); row.summary = summary
-    await logDispatchAction(row); bustBoardCaches()
-    return res.status(status === 'failed' ? 502 : 200).json({ ok: status !== 'failed', status, summary, error: row.st_error })
+    row.after = { ...(row.after || {}), ...cardMeta() }
+    const saved = await logDispatchAction(row)
+    // A partial reassign changed ST (both techs are on it now) — the cached
+    // board must be re-read; a failed write changed nothing.
+    if (status === 'partial') markBoardStale(0)
+    return res.status(status === 'failed' ? 502 : 200).json({ ok: status !== 'failed', status, summary, error: row.st_error,
+      action: saved || { ...row, created_at: new Date().toISOString() }, patch: null })
   }
   const done = async (summary, before, after) => {
-    row.summary = summary; row.before = before || null; row.after = after || null
-    await logDispatchAction(row); bustBoardCaches()
-    return res.json({ ok: true, status: 'ok', summary })
+    row.summary = summary; row.before = before || null; row.after = { ...(after || {}), ...cardMeta() }
+    const saved = await logDispatchAction(row)
+    if (row.job_id) _jobDetailMemo.delete(row.job_id)   // the drawer re-reads the job after a write
+    const patch = patchBoardCache(kind, b)
+    return res.json({ ok: true, status: 'ok', summary, action: saved || { ...row, created_at: new Date().toISOString() }, patch })
   }
   try {
     switch (kind) {
       case 'assign': {
         if (!row.appointment_id || !b.technicianId) return res.status(400).json({ error: 'appointmentId and technicianId required' })
         await stPost(`/dispatch/v2/tenant/${T}/appointment-assignments/assign-technicians`, { jobAppointmentId: row.appointment_id, technicianIds: [Number(b.technicianId)] }, false)
-        return done(`Assigned ${jn} to ${b.technicianName || b.technicianId}`, { tech: null }, { tech: b.technicianName || b.technicianId })
+        return done(`Assigned ${jn} to ${b.technicianName || b.technicianId}`, { tech: null }, { tech: b.technicianName || b.technicianId, techId: Number(b.technicianId) })
       }
       case 'unassign': {
         if (!row.appointment_id || !b.technicianId) return res.status(400).json({ error: 'appointmentId and technicianId required' })
         await stPost(`/dispatch/v2/tenant/${T}/appointment-assignments/unassign-technicians`, { jobAppointmentId: row.appointment_id, technicianIds: [Number(b.technicianId)] }, false)
-        return done(`Unassigned ${b.technicianName || b.technicianId} from ${jn}`, { tech: b.technicianName || b.technicianId }, { tech: null })
+        return done(`Unassigned ${b.technicianName || b.technicianId} from ${jn}`, { tech: b.technicianName || b.technicianId, techId: Number(b.technicianId) }, { tech: null })
       }
       case 'reassign': {
         // Two ST calls, not atomic: assign the new tech first (the customer is
@@ -8370,12 +8667,13 @@ app.post('/api/dispatch/act', async (req, res) => {
           try {
             await stPost(`/dispatch/v2/tenant/${T}/appointment-assignments/unassign-technicians`, { jobAppointmentId: row.appointment_id, technicianIds: [Number(b.fromTechnicianId)] }, false)
           } catch (e) {
-            row.before = { tech: b.fromTechnicianName || b.fromTechnicianId }; row.after = { tech: [b.fromTechnicianName || b.fromTechnicianId, b.toTechnicianName || b.toTechnicianId] }
+            row.before = { tech: b.fromTechnicianName || b.fromTechnicianId, techId: Number(b.fromTechnicianId) }
+            row.after = { tech: [b.fromTechnicianName || b.fromTechnicianId, b.toTechnicianName || b.toTechnicianId], techId: Number(b.toTechnicianId) }
             return fail('partial', e.message, `Added ${b.toTechnicianName || b.toTechnicianId} to ${jn}, but ${b.fromTechnicianName || 'the original tech'} is STILL assigned — remove them in ServiceTitan`)
           }
         }
         return done(`Reassigned ${jn}: ${b.fromTechnicianName || b.fromTechnicianId || 'unassigned'} → ${b.toTechnicianName || b.toTechnicianId}`,
-          { tech: b.fromTechnicianName || b.fromTechnicianId || null }, { tech: b.toTechnicianName || b.toTechnicianId })
+          { tech: b.fromTechnicianName || b.fromTechnicianId || null, techId: Number(b.fromTechnicianId) || null }, { tech: b.toTechnicianName || b.toTechnicianId, techId: Number(b.toTechnicianId) })
       }
       case 'retype': case 'priority': case 'tags': {
         if (!row.job_id) return res.status(400).json({ error: 'jobId required' })
@@ -8443,16 +8741,102 @@ app.post('/api/dispatch/act', async (req, res) => {
 })
 
 // Today's audit trail (Denver day), newest first.
+async function actionsForDay(day) {
+  const from = tvBounds(day), to = new Date(Date.parse(from) + 86400_000).toISOString()
+  const { data, error } = await supabase.from('dispatch_actions')
+    .select('id, actor_name, kind, card_key, job_id, job_number, appointment_id, st_status, st_error, summary, before, after, created_at')
+    .gte('created_at', from).lt('created_at', to).order('created_at', { ascending: false }).limit(200)
+  if (error) throw error
+  return data || []
+}
+async function dismissalsForDay(day) {
+  const { data, error } = await supabase.from('dispatch_dismissals')
+    .select('card_key, action, reason, actor_name, until, created_at').eq('day', day).order('created_at', { ascending: false }).limit(200)
+  if (error) throw error
+  return data || []
+}
 app.get('/api/dispatch/actions', async (req, res) => {
   if (!(await requireDispatch(req, res))) return
   try {
     const day = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.day || '')) ? String(req.query.day) : tvDenverDate()
-    const from = tvBounds(day), to = new Date(Date.parse(from) + 86400_000).toISOString()
-    const { data, error } = await supabase.from('dispatch_actions')
-      .select('id, actor_name, kind, card_key, job_id, job_number, appointment_id, st_status, st_error, summary, created_at')
-      .gte('created_at', from).lt('created_at', to).order('created_at', { ascending: false }).limit(200)
-    if (error) throw error
-    res.json(data || [])
+    res.json(await actionsForDay(day))
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
+
+// ── Tech out (Andi-side roster truth) ───────────────────────────────────────
+// ST's shifts don't know a tech called in sick until someone books TimeOff.
+// Dispatch declares it here; the live board treats the tech as off, every
+// call still on their board becomes a re-place card, and the lanes say OUT.
+// app_settings.dispatch_tech_out = { 'YYYY-MM-DD': [{ techId, name, by, at, until }] }
+async function readTechOut() {
+  // A failed read must fail the write: treating it as "nobody is out" and
+  // saving over it would silently put every out tech back on the board.
+  const { data, error } = await supabase.from('app_settings').select('value').eq('key', 'dispatch_tech_out').maybeSingle()
+  if (error) throw new Error(`tech-out read failed: ${error.message}`)
+  let all = {}
+  try { all = JSON.parse(data?.value || '{}') } catch {}
+  return (all && typeof all === 'object' && !Array.isArray(all)) ? all : {}
+}
+async function writeTechOut(all) {
+  const keep = {}
+  const floor = boardDay(-2).date
+  for (const [d, list] of Object.entries(all)) if (d >= floor && Array.isArray(list) && list.length) keep[d] = list
+  await supabase.from('app_settings').upsert({ key: 'dispatch_tech_out', value: JSON.stringify(keep) }, { onConflict: 'key' })
+  return keep
+}
+function forgetBoardDays(dates) {
+  // Not a stale-while-revalidate case: the next read must wait for a fresh
+  // compute, because the old copy has no idea the tech is out.
+  _lbGen++
+  for (const [off, e] of _liveBoardCache) if (e?.data && dates.includes(e.data.date)) { e.data.stale = true; e.expires = 0; e.at = 0 }
+}
+app.post('/api/dispatch/tech-out', async (req, res) => {
+  const prof = await requireDispatch(req, res); if (!prof) return
+  const b = req.body || {}
+  const techId = Number(b.techId)
+  if (!techId) return res.status(400).json({ error: 'techId required' })
+  const day = /^\d{4}-\d{2}-\d{2}$/.test(String(b.day || '')) ? String(b.day) : boardDay(0).date
+  const until = b.until === 'tomorrow' ? 'tomorrow' : 'today'
+  const dates = [day]
+  if (until === 'tomorrow') dates.push(new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Denver', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(Date.parse(day + 'T12:00:00Z') + 864e5)))
+  try {
+    const actor = await actorOf(prof)
+    const all = await readTechOut()
+    for (const d of dates) {
+      const list = (all[d] || []).filter(x => Number(x.techId) !== techId)
+      list.push({ techId, name: b.techName || String(techId), by: actor.name, at: new Date().toISOString(), until, reason: b.reason ? String(b.reason).slice(0, 120) : null })
+      all[d] = list
+    }
+    const saved = await writeTechOut(all)
+    forgetBoardDays(dates)
+    await logDispatchAction({ actor_id: actor.id, actor_name: actor.name, kind: 'techout', card_key: null, job_id: null, job_number: null, appointment_id: null,
+      before: null, after: { techId, techName: b.techName || null, until, dates }, st_status: 'ok', st_error: null,
+      summary: `${b.techName || techId} marked out ${until === 'tomorrow' ? 'through tomorrow' : 'for the rest of today'}${b.reason ? ` — ${String(b.reason).slice(0, 80)}` : ''}` })
+    res.json({ ok: true, techOut: saved[day] || [] })
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
+app.delete('/api/dispatch/tech-out', async (req, res) => {
+  const prof = await requireDispatch(req, res); if (!prof) return
+  const b = req.body || {}
+  const techId = Number(b.techId)
+  if (!techId) return res.status(400).json({ error: 'techId required' })
+  const day = /^\d{4}-\d{2}-\d{2}$/.test(String(b.day || '')) ? String(b.day) : boardDay(0).date
+  try {
+    const actor = await actorOf(prof)
+    const all = await readTechOut()
+    const touched = []
+    let name = null
+    for (const d of Object.keys(all)) {
+      if (d < day) continue
+      const before = all[d] || []
+      const after = before.filter(x => Number(x.techId) !== techId)
+      if (after.length !== before.length) { touched.push(d); name = name || before.find(x => Number(x.techId) === techId)?.name || null; all[d] = after }
+    }
+    const saved = await writeTechOut(all)
+    forgetBoardDays(touched)
+    if (touched.length) await logDispatchAction({ actor_id: actor.id, actor_name: actor.name, kind: 'techback', card_key: null, job_id: null, job_number: null, appointment_id: null,
+      before: { techId, dates: touched }, after: null, st_status: 'ok', st_error: null, summary: `${name || techId} is back on the board` })
+    res.json({ ok: true, techOut: saved[day] || [] })
   } catch (e) { res.status(500).json({ error: e.message }) }
 })
 
@@ -8491,69 +8875,124 @@ function windowsOverlap(aS, aE, bS, bE) {
   if ([s1, e1, s2, e2].some(Number.isNaN)) return false
   return s1 < e2 && s2 < e1
 }
-async function buildActionQueue(dayOffset) {
-  const hit = _liveBoardCache.get(dayOffset)
-  const board = (hit && hit.expires > Date.now()) ? hit.data : await computeLiveBoardPayload(dayOffset)
+// Capacity is deliberately NOT a card: an under-booked day is the coverage
+// strip's job (Brandyn: "just call it out"). Everything here is a call that
+// needs a dispatcher's decision, and reads only the cached board — never ST.
+const SEVERITY_RANK = { high: 0, mid: 1, low: 2 }
+const KIND_RANK = { partial: 0, techout: 1, late: 2, reassign: 3, swap: 3, place: 4 }
+async function buildActionQueue(dayOffset, boardIn = null, { actions = [] } = {}) {
+  const board = boardIn || await getLiveBoard(dayOffset)
   const calls = board.calls || [], techs = board.techsToday || []
   const techById = new Map(techs.map(t => [Number(t.techId), t]))
   const callsByTech = new Map()
   for (const c of calls) { if (!callsByTech.has(c.techId)) callsByTech.set(c.techId, []); callsByTech.get(c.techId).push(c) }
-  const busyIn = (techId, ws, we) => (callsByTech.get(techId) || []).some(c => c.status !== 'Done' && windowsOverlap(c.windowStart, c.windowEnd, ws, we))
+  const busyIn = (techId, ws, we) => (callsByTech.get(techId) || []).some(c => c.status !== 'Done' && c.status !== 'Canceled' && windowsOverlap(c.windowStart, c.windowEnd, ws, we))
+  const nowMs = Date.now()
+  const nowIso = new Date(nowMs).toISOString()
+  const ts = (v) => { const t = Date.parse(v || ''); return Number.isNaN(t) ? Infinity : t }
+  const techGeos = new Map()
+  for (const c of calls) { if (c.techId && c.geo) { if (!techGeos.has(c.techId)) techGeos.set(c.techId, []); techGeos.get(c.techId).push(c.geo) } }
+  const nearest = (techId, geo) => {
+    if (!geo) return null
+    let best = null
+    for (const g of (techGeos.get(techId) || [])) { const t = straightLine(g, geo); if (t && (!best || t.miles < best.miles)) best = t }
+    return best ? { minutes: null, miles: best.miles, provider: 'straight-line' } : null
+  }
+  const sameTradeFree = (trade, ws, we, exceptTechId) => techs
+    .filter(t => t.rankable && t.onShift && !t.out && !t.allDayInstall && Number(t.techId) !== Number(exceptTechId)
+      && (t.trade === trade || (trade === 'Garage Door' && /garage/i.test(t.trade || ''))))
+    .map(t => ({
+      techId: t.techId, techName: t.name, tier: t.tier, expectedValue: t.expectedValue || 0, closeRate: t.closeRate, avgSale: t.avgSale,
+      deltaRaw: t.expectedValue || 0, delta: Math.round((t.expectedValue || 0) * (t.oppRate || 0)), oppRate: t.oppRate || 0,
+      load: t.truckRolls, target: t.target, stretch: t.stretch, busy: busyIn(t.techId, ws, we), status: t.status, travel: null, bump: null,
+    }))
+    .sort((a, b) => (a.busy - b.busy) || (b.expectedValue - a.expectedValue))
+  const base = (c) => ({ jobId: c.jobId, jobNumber: c.jobNumber, appointmentId: c.appointmentId, jobType: c.jobType, zip: c.zip,
+    windowStart: c.windowStart, windowEnd: c.windowEnd, status: c.status, opportunity: c.opportunity, bucket: 0 })
   const cards = []
 
-  // A. Reassign — high-opportunity call on a weak bench seat.
+  // A. Finish the move — ONLY when Andi itself left an appointment half-moved
+  // today (a reassign whose unassign step failed) and the tech it couldn't
+  // remove is still on it. Two techs on one appointment is otherwise normal
+  // ServiceTitan: an install crew, a lead with an apprentice.
+  if (dayOffset === 0) {
+    const byAppt = new Map()
+    for (const c of calls) { if (c.status === 'Done' || c.status === 'Canceled') continue; if (!byAppt.has(c.appointmentId)) byAppt.set(c.appointmentId, []); byAppt.get(c.appointmentId).push(c) }
+    for (const [apptId, rows] of byAppt) {
+      if (rows.length < 2) continue
+      const partial = actions.find(a => a.kind === 'reassign' && a.st_status === 'partial' && Number(a.appointment_id) === Number(apptId) && a.before?.techId)
+      if (!partial) continue
+      const removeId = Number(partial.before.techId)
+      if (!rows.some(r => Number(r.techId) === removeId)) continue   // already cleaned up in ServiceTitan
+      const c = rows.find(r => Number(r.techId) !== removeId) || rows[0]
+      const partialTechs = rows.map(r => ({ techId: r.techId, techName: r.techName, tier: r.techTier, recommended: Number(r.techId) === removeId }))
+      cards.push({
+        ...base(c), key: `partial:${apptId}`, kind: 'partial', severity: 'high', actBy: nowIso, lead: true, upside: 0,
+        title: `#${c.jobNumber} is on both ${rows.map(r => r.techName).join(' and ')} — finish the move`,
+        why: `Andi added ${partial.after?.tech?.[1] || 'the new tech'} but couldn't remove ${partial.before?.tech || 'the old one'} (${String(partial.st_error || '').slice(0, 80)})`,
+        current: null, alternatives: [], rejected: [], partialTechs,
+        action: { kind: 'unassign', appointmentId: apptId, jobId: c.jobId, jobNumber: c.jobNumber },
+      })
+    }
+  }
+
+  // B. Re-place (tech out) and Reassign (opportunity on a weaker seat) — both
+  // come from the board's flag loop, which already did the shift / skill /
+  // travel / bump math. Busy-in-window is re-checked here against the day.
   for (const c of calls) {
-    const f = (c.flags || []).find(x => x.alternatives && x.alternatives.length)
+    const f = (c.flags || []).find(x => Array.isArray(x.alternatives))
     if (!f) continue
     const alts = f.alternatives.map(a => ({ ...a, busy: busyIn(a.techId, c.windowStart, c.windowEnd), status: techById.get(Number(a.techId))?.status || null }))
     if (alts.some(a => a.recommended && a.busy) && alts.some(a => !a.busy)) {
       alts.forEach(a => { a.recommended = false }); alts.find(a => !a.busy).recommended = true
     }
-    const best = alts.find(a => a.recommended) || alts[0]
-    cards.push({
-      key: `reassign:${c.appointmentId}:${c.techId}`, kind: 'reassign', severity: c.techTier === 'red' ? 'high' : 'mid',
-      actBy: c.windowStart, upside: Math.max(0, ...alts.map(a => a.delta || 0)),
-      jobId: c.jobId, jobNumber: c.jobNumber, appointmentId: c.appointmentId, jobType: c.jobType, zip: c.zip,
-      windowStart: c.windowStart, windowEnd: c.windowEnd, status: c.status, opportunity: c.opportunity,
-      title: `Move #${c.jobNumber} to ${best.techName}`,
-      why: (c.opportunityReasons || []).slice(0, 3).join(' · '),
-      current: { ...f.current, status: c.status, load: (callsByTech.get(c.techId) || []).length },
-      alternatives: alts, rejected: f.rejected || [],
-      action: { kind: 'reassign', appointmentId: c.appointmentId, jobId: c.jobId, jobNumber: c.jobNumber, fromTechnicianId: c.techId, fromTechnicianName: c.techName },
-    })
+    const best = alts.find(a => a.recommended) || alts[0] || null
+    const upside = Math.max(0, ...alts.map(a => a.delta || 0))
+    const current = { ...f.current, status: c.status, load: (callsByTech.get(c.techId) || []).length }
+    const action = { kind: 'reassign', appointmentId: c.appointmentId, jobId: c.jobId, jobNumber: c.jobNumber, fromTechnicianId: c.techId, fromTechnicianName: c.techName }
+    if (f.kind === 'techout') {
+      const out = (board.techOut || []).find(x => Number(x.techId) === Number(c.techId))
+      cards.push({
+        ...base(c), key: `techout:${c.appointmentId}:${c.techId}`, kind: 'techout', severity: 'high', actBy: c.windowStart, upside,
+        title: `${c.techName} is out — re-place #${c.jobNumber} (${c.jobType} · ${windowText(c)})`,
+        why: (c.opportunityReasons || []).slice(0, 2).join(' · ') || c.jobType,
+        current, alternatives: alts, rejected: f.rejected || [], action,
+        group: { techId: c.techId, techName: c.techName, until: out?.until || 'today' },
+      })
+    } else if (best) {
+      cards.push({
+        ...base(c), key: `reassign:${c.appointmentId}:${c.techId}`, kind: 'reassign', severity: c.techTier === 'red' || c.techTier === 'unranked' ? 'high' : 'mid',
+        actBy: c.windowStart, upside,
+        title: `Move #${c.jobNumber} to ${best.techName}`,
+        why: (c.opportunityReasons || []).slice(0, 3).join(' · '),
+        current, alternatives: alts, rejected: f.rejected || [], action,
+      })
+    }
   }
 
-  // B. Place — unassigned tray, ranked techs for that trade who are on shift
-  // and free in the window. Same trade only; no phantom "open all day".
+  // C. Place — unassigned tray, ranked same-trade techs on shift.
   for (const u of board.unassigned || []) {
-    const pool = techs.filter(t => t.rankable && t.onShift && !t.allDayInstall && (t.trade === u.trade || (u.trade === 'Garage Door' && /garage/i.test(t.trade || ''))))
-    const alts = pool.map(t => ({
-      techId: t.techId, techName: t.name, tier: t.tier, expectedValue: t.expectedValue || 0, closeRate: t.closeRate, avgSale: t.avgSale,
-      delta: t.expectedValue || 0, load: t.truckRolls, target: t.target, stretch: t.stretch,
-      busy: busyIn(t.techId, u.windowStart, u.windowEnd), status: t.status, travel: null, bump: null,
-    })).sort((a, b) => (a.busy - b.busy) || (b.expectedValue - a.expectedValue))
+    if (ts(u.windowEnd) < nowMs) continue   // the window is gone; it's a reschedule, not a placement
+    const alts = sameTradeFree(u.trade, u.windowStart, u.windowEnd, null).map(a => ({ ...a, travel: nearest(a.techId, u.geo) }))
     alts.forEach((a, i) => { a.recommended = i === 0 })
+    const soon = ts(u.windowStart) - nowMs < 60 * 60_000
     cards.push({
-      key: `place:${u.appointmentId}`, kind: 'place', severity: u.opportunity >= 3 ? 'high' : 'mid',
-      actBy: u.windowStart, upside: 0,
-      jobId: u.jobId, jobNumber: u.jobNumber, appointmentId: u.appointmentId, jobType: u.jobType, zip: u.zip,
-      windowStart: u.windowStart, windowEnd: u.windowEnd, status: 'Scheduled', opportunity: u.opportunity,
+      ...base(u), status: 'Scheduled', key: `place:${u.appointmentId}`, kind: 'place', severity: u.opportunity >= 3 || soon ? 'high' : 'mid',
+      actBy: u.windowStart, upside: alts[0]?.delta || 0,
       title: `Place #${u.jobNumber} — ${u.jobType}`,
       why: (u.opportunityReasons || []).slice(0, 3).join(' · ') || 'no tech attached',
-      current: null, alternatives: alts, rejected: [],
+      current: null, alternatives: alts, rejected: [], isNew: !!u.isNew, createdOn: u.createdOn || null,
       action: { kind: 'assign', appointmentId: u.appointmentId, jobId: u.jobId, jobNumber: u.jobNumber },
     })
   }
 
-  // C. Swap — trade two jobs inside one team (two reassigns, executed in order).
+  // D. Swap — trade two jobs inside one team (two reassigns, executed in order).
   for (const s of board.swaps || []) {
     const a = calls.find(c => c.jobId === s.from.jobId), b = calls.find(c => c.jobId === s.to.jobId)
     if (!a || !b) continue
     cards.push({
-      key: `swap:${a.jobId}:${b.jobId}`, kind: 'swap', severity: 'mid',
+      ...base(a), key: `swap:${a.jobId}:${b.jobId}`, kind: 'swap', severity: 'mid',
       actBy: a.windowStart < b.windowStart ? a.windowStart : b.windowStart, upside: s.upside || 0,
-      jobId: a.jobId, jobNumber: a.jobNumber, appointmentId: a.appointmentId, jobType: a.jobType, zip: a.zip,
-      windowStart: a.windowStart, windowEnd: a.windowEnd, status: a.status, opportunity: a.opportunity,
       title: s.text, why: (s.why || []).slice(0, 2).join(' · '),
       current: null, alternatives: [], rejected: [],
       steps: [
@@ -8561,54 +9000,154 @@ async function buildActionQueue(dayOffset) {
         { kind: 'reassign', appointmentId: b.appointmentId, jobId: b.jobId, jobNumber: b.jobNumber, fromTechnicianId: b.techId, fromTechnicianName: b.techName, toTechnicianId: a.techId, toTechnicianName: a.techName },
       ],
       travel: { minutes: s.travelMinutes, miles: s.travelMiles }, sameWindow: s.sameWindow,
+      appointmentIds: [a.appointmentId, b.appointmentId],
     })
   }
 
-  // D. Book the gap — a day/trade under target on the 3-day board.
-  try {
-    const b3 = await build3DayBoard()
-    for (const row of (b3.board || [])) {
-      row.days.forEach((d, di) => {
-        if (!d || d.status === 'none' || d.status === 'good' || !(d.needed > 0)) return
+  // E. Running late (today only): the tech is still on one call and the next
+  // customer's promised window CLOSES within the hour — or already has.
+  // Windows overlap by two hours, so "the next window has opened" is normal;
+  // the promise is only at risk near its end.
+  if (dayOffset === 0) {
+    for (const [techId, mine] of callsByTech) {
+      const t = techById.get(Number(techId)); if (!t || t.out) continue
+      const ordered = [...mine].sort((x, y) => ts(x.windowStart) - ts(y.windowStart))
+      const onIt = ordered.find(c => c.status === 'Working' || c.status === 'Dispatched')
+      if (!onIt) continue
+      for (const nxt of ordered) {
+        if (nxt === onIt || nxt.status !== 'Scheduled' || !nxt.actionable) continue
+        if (STICKY_TO_TECH.test(nxt.jobType || '') || EXCLUDE_CALL.test(nxt.jobType || '') || INSTALL_TYPE.test(nxt.jobType || '')) continue
+        const closesIn = ts(nxt.windowEnd) - nowMs
+        if (closesIn > 60 * 60_000) continue
+        if (closesIn < -4 * 3600_000) continue   // ancient — not a live problem
+        const mins = Math.round(closesIn / 60_000)
+        const alts = sameTradeFree(t.trade, nxt.windowStart, nxt.windowEnd, techId).map(a => ({ ...a, travel: nearest(a.techId, nxt.geo) }))
+        alts.forEach((a, i) => { a.recommended = i === 0 })
         cards.push({
-          key: `gap:${row.trade}:${d.date}`, kind: 'gap', severity: d.status === 'under' ? 'mid' : 'low',
-          actBy: null, upside: 0, trade: row.trade, date: d.date, pct: d.pct, needed: d.needed, capacity: d.capacity, calls: d.calls,
-          title: `${row.trade} is ${d.pct}% booked ${di === 0 ? 'today' : di === 1 ? 'tomorrow' : d.date} — ${d.needed} more call${d.needed === 1 ? '' : 's'} needed`,
-          why: `${d.calls} booked against ${d.capacity} truck slots · target ${b3.target}%`,
-          current: null, alternatives: [], rejected: [],
-          action: { kind: 'campaign', trade: row.trade, date: d.date },
+          ...base(nxt), key: `late:${nxt.appointmentId}`, kind: 'late', severity: 'high', actBy: nxt.windowStart, upside: alts[0]?.delta || nxt.expectedRevenue || 0,
+          title: mins > 0 ? `#${nxt.jobNumber} ${windowText(nxt)} closes in ${mins} min — ${t.name} is still on #${onIt.jobNumber}`
+                          : `#${nxt.jobNumber} ${windowText(nxt)} closed ${-mins} min ago — ${t.name} is still on #${onIt.jobNumber}`,
+          why: `${onIt.jobType} · ${onIt.status === 'Working' ? 'on site' : 'rolling'} since ${windowText(onIt)}${nxt.opportunityReasons?.length ? ' · ' + nxt.opportunityReasons.slice(0, 2).join(' · ') : ''}`,
+          current: { techId: t.techId, techName: t.name, tier: t.tier, status: onIt.status, load: mine.length },
+          alternatives: alts, rejected: [],
+          action: { kind: 'reassign', appointmentId: nxt.appointmentId, jobId: nxt.jobId, jobNumber: nxt.jobNumber, fromTechnicianId: t.techId, fromTechnicianName: t.name },
         })
-      })
+        break   // one card per tech — the very next call is the decision
+      }
     }
-  } catch (e) { console.warn('queue gaps:', e.message) }
+  }
+
+  // One card per appointment: finish-the-move beats tech-out beats late beats
+  // reassign/swap (higher upside wins between those) beats place.
+  const ranked = [...cards].sort((a, b) => (KIND_RANK[a.kind] - KIND_RANK[b.kind]) || (b.upside - a.upside))
+  const taken = new Set()
+  const deduped = []
+  for (const c of ranked) {
+    const ids = c.appointmentIds || [c.appointmentId]
+    if (ids.some(id => taken.has(id))) continue
+    ids.forEach(id => taken.add(id)); deduped.push(c)
+  }
 
   const hidden = await activeDismissals(board.date)
-  const visible = cards.filter(c => !hidden.has(c.key))
-  const ts = (v) => { const t = Date.parse(v || ''); return Number.isNaN(t) ? Infinity : t }
-  visible.sort((a, b) => (ts(a.actBy) - ts(b.actBy)) || (b.upside - a.upside))
+  const visible = deduped.filter(c => !hidden.has(c.key))
+  visible.sort((a, b) => ((b.lead ? 1 : 0) - (a.lead ? 1 : 0)) || (ts(a.actBy) - ts(b.actBy)) || (SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity]) || (b.upside - a.upside))
+  const count = (k) => visible.filter(c => c.kind === k).length
   return {
-    day: dayOffset, date: board.date, now: new Date().toISOString(), generatedAt: board.generatedAt,
-    cards: visible, hiddenCount: cards.length - visible.length,
+    day: dayOffset, date: board.date, now: nowIso, generatedAt: board.generatedAt,
+    cards: visible, hiddenCount: deduped.length - visible.length,
     atStake: visible.reduce((s, c) => s + (c.upside || 0), 0),
-    counts: { reassign: visible.filter(c => c.kind === 'reassign').length, place: visible.filter(c => c.kind === 'place').length,
-      swap: visible.filter(c => c.kind === 'swap').length, gap: visible.filter(c => c.kind === 'gap').length },
+    counts: { partial: count('partial'), place: count('place'), reassign: count('reassign'), swap: count('swap'), techout: count('techout'), late: count('late'), deduped: cards.length - deduped.length },
   }
+}
+function windowText(c) {
+  const f = (iso) => { if (!iso) return null; const d = new Date(new Date(iso).getTime() - denverOffsetMs()); const h = d.getUTCHours(), m = d.getUTCMinutes(); const h12 = h % 12 || 12; return `${h12}${m ? ':' + String(m).padStart(2, '0') : ''}${h >= 12 ? 'pm' : 'am'}` }
+  const a = f(c.windowStart), b = f(c.windowEnd)
+  return !a ? 'unscheduled' : b ? `${a}–${b}` : a
 }
 app.get('/api/dispatch/queue', async (req, res) => {
   if (!(await requireDispatch(req, res))) return
   try {
     const day = Math.min(2, Math.max(0, parseInt(req.query.day) || 0))
-    if (req.query.force === '1') _liveBoardCache.delete(day)
-    res.json(await buildActionQueue(day))
+    const board = await getLiveBoard(day, { force: req.query.force === '1' })
+    res.json(await buildActionQueue(day, board, { actions: day === 0 ? await actionsForDay(board.date).catch(() => []) : [] }))
   } catch (e) { console.error('dispatch queue:', e.message); res.status(500).json({ error: e.message }) }
 })
 
+let _holdReasons = { at: 0, list: [] }
+async function holdReasonsList() {
+  if (Date.now() - _holdReasons.at > 6 * 3600_000 || !_holdReasons.list.length) {
+    const rows = await stPageAll(pg => `/jpm/v2/tenant/${ST_TENANT_ID}/job-hold-reasons?pageSize=200&page=${pg}`, 1000)
+    _holdReasons = { at: Date.now(), list: rows.filter(r => r.active !== false).map(r => ({ id: r.id, name: r.name })) }
+  }
+  return _holdReasons.list
+}
+
+// ── The Command Center in one request ───────────────────────────────────────
+// Board, queue, coverage, today's actions and dismissals, hold reasons — all
+// from caches. Nothing in this handler may call ServiceTitan on the request
+// path; the keep-warm timer below does that while somebody is watching.
+let _centerLastReq = 0
+app.get('/api/dispatch/center', async (req, res) => {
+  const prof = await requireDispatch(req, res); if (!prof) return
+  try {
+    const day = Math.min(2, Math.max(0, parseInt(req.query.day) || 0))
+    const force = req.query.force === '1'
+    _centerLastReq = Date.now()
+    const board = await getLiveBoard(day, { force })
+    const [coverage, actions, dismissals, holdReasons] = await Promise.all([
+      getBoard3Day({ force }).catch(e => { console.warn('center coverage:', e.message); return null }),
+      day === 0 ? actionsForDay(board.date).catch(() => []) : [],
+      day === 0 ? dismissalsForDay(board.date).catch(() => []) : [],
+      holdReasonsList().catch(() => []),
+    ])
+    const queue = await buildActionQueue(day, board, { actions })
+    res.json({
+      day, date: board.date, generatedAt: board.generatedAt, stale: !!board.stale, now: new Date().toISOString(),
+      board, queue, coverage, actions, dismissals, holdReasons, techOut: board.techOut || [],
+    })
+  } catch (e) { console.error('dispatch center:', e.message); res.status(500).json({ error: e.message }) }
+})
+
+// Keep the board warm while somebody has the Command Center open (last
+// request inside 30 min) during the dispatch day. Today every 90 s, the
+// 3-day board every 2 min, tomorrow/day+2 every 5 min. Backs off five
+// minutes on a ServiceTitan rate limit. Nothing runs on an idle server.
+let _warmBackoffUntil = 0, _warmTick = 0, _warmBusy = false
+function denverHour() { return Number(new Intl.DateTimeFormat('en-US', { timeZone: 'America/Denver', hour: 'numeric', hour12: false }).format(new Date())) % 24 }
+setInterval(async () => {
+  if (_warmBusy) return
+  if (Date.now() - _centerLastReq > 30 * 60_000) return
+  if (Date.now() < _warmBackoffUntil) return
+  const h = denverHour(); if (h < 6 || h >= 20) return
+  _warmTick++
+  const age = (d) => { const e = _liveBoardCache.get(d); return e?.data ? Date.now() - e.at : Infinity }
+  const jobs = []
+  if (age(0) > 90_000 && !_liveBoardCache.get(0)?.inflight) jobs.push(['day0', () => getLiveBoard(0, { force: true })])
+  if (Date.now() - _b3Cache.at > B3_TTL && !_b3Cache.inflight) jobs.push(['3day', () => getBoard3Day({ force: true })])
+  if (_warmTick % 5 === 0) for (const d of [1, 2]) if (age(d) > 5 * 60_000 && !_liveBoardCache.get(d)?.inflight) jobs.push([`day${d}`, () => getLiveBoard(d, { force: true })])
+  if (!jobs.length) return
+  _warmBusy = true
+  try {
+    for (const [label, fn] of jobs) {
+      const t0 = Date.now()
+      try { await fn(); console.log(`DISPATCH: warm ${label} ${Date.now() - t0}ms`) }
+      catch (e) {
+        console.warn(`DISPATCH: warm ${label} failed:`, e.message)
+        if (/429|rate limit|too many/i.test(e.message)) { _warmBackoffUntil = Date.now() + 5 * 60_000; break }
+      }
+    }
+  } finally { _warmBusy = false }
+}, 60_000)
+
 // Drawer detail for one job: the customer, where they are, what the CSR
 // wrote, what's been quoted. Live from ST — no cache, it's one click.
+const _jobDetailMemo = new Map()   // jobId -> { at, data } (60 s: the drawer reopens the same job constantly)
 app.get('/api/dispatch/job/:jobId', async (req, res) => {
   if (!(await requireDispatch(req, res))) return
   const id = parseInt(req.params.jobId)
   if (!id) return res.status(400).json({ error: 'jobId required' })
+  const memo = _jobDetailMemo.get(id)
+  if (memo && Date.now() - memo.at < 60_000 && req.query.force !== '1') return res.json(memo.data)
   const T = ST_TENANT_ID
   const safeGet = (p) => stGet(p).catch(() => null)
   try {
@@ -8625,7 +9164,8 @@ app.get('/api/dispatch/job/:jobId', async (req, res) => {
     const phone = (cl.find(x => x.type === 'MobilePhone') || cl.find(x => /phone/i.test(x.type || '')))?.value || null
     const email = (cl.find(x => /email/i.test(x.type || '')))?.value || null
     const a = loc?.address || cust?.address || {}
-    res.json({
+    const send = (data) => { if (_jobDetailMemo.size > 300) _jobDetailMemo.clear(); _jobDetailMemo.set(id, { at: Date.now(), data }); res.json(data) }
+    send({
       job: { id: job.id, jobNumber: job.jobNumber, jobTypeId: job.jobTypeId, jobType: (jt || []).find(t => t.id === job.jobTypeId)?.name || '',
         priority: job.priority || null, status: job.jobStatus, tagTypeIds: job.tagTypeIds || [],
         summary: stripHtml(String(job.summary || '')).trim().slice(0, 1200), noCharge: !!job.noCharge, appointmentCount: job.appointmentCount || null,
@@ -8711,10 +9251,8 @@ app.get('/api/dispatch/live-board', async (req, res) => {
   try {
     const day = Math.min(2, Math.max(0, parseInt(req.query.day) || 0))
     const hit = _liveBoardCache.get(day)
-    if (req.query.force !== '1' && hit && hit.expires > Date.now()) {
-      return res.json({ ...hit.data, cached: true })
-    }
-    res.json(await computeLiveBoardPayload(day))
+    const cached = Boolean(hit?.data && hit.expires > Date.now() && req.query.force !== '1')
+    res.json({ ...(await getLiveBoard(day, { force: req.query.force === '1' })), cached })
   } catch (err) {
     console.error('live-board error:', err.message)
     res.status(500).json({ error: err.message })
@@ -8788,8 +9326,7 @@ async function computeSalesProjection() {
     soldTotal += amt; soldCount++
     soldByTrade[t] = Math.round((soldByTrade[t] || 0) + amt)
   }
-  const hit = _liveBoardCache.get(0)
-  const board = (hit && hit.expires > Date.now()) ? hit.data : await computeLiveBoardPayload(0)
+  const board = await getLiveBoard(0)
   let remainingExpected = 0, remainingOpps = 0
   for (const c of (board.calls || [])) {
     if (c.outcome) continue                    // already ran and resolved
@@ -8811,12 +9348,11 @@ app.get('/api/board/sales-projection', async (req, res) => {
 })
 
 async function gatherDispatchFacts({ allCalls = false, day = 0 } = {}) {
-  const hit = _liveBoardCache.get(day)
-  const board = (hit && hit.expires > Date.now()) ? hit.data : await computeLiveBoardPayload(day)
+  const board = await getLiveBoard(day)
   const { data: scores } = await supabase.from('dispatch_tech_scores').select('*')
   let capacity = []
   try {
-    const b3 = await build3DayBoard()
+    const b3 = await getBoard3Day()
     capacity = (b3?.board || []).map(r => ({
       trade: r.trade,
       days: (r.days || []).map(d => ({ date: d.date, pct: d.pct, needed: d.needed, status: d.status })),
@@ -9725,7 +10261,7 @@ app.post('/api/schedule/publish', async (req, res) => {
 })
 
 async function buildBoardEmail() {
-  const data = await build3DayBoard()
+  const data = await getBoard3Day()
   return {
     data,
     subject: boardEmailSubject(data),

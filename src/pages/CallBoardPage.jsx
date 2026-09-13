@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { sb } from '../lib/supabase'
 import { useAuth } from '../lib/AuthContext'
-import { useDailyReload } from '../lib/useDailyReload'
+import { useWallboard } from '../lib/useDailyReload'
 
 // 3-Day Call Board — repair/replacement capacity per trade for today + next two
 // days, live from ServiceTitan. Every number is clickable to show what's behind it.
@@ -80,8 +80,6 @@ function Cell({ trade, dayLabel, d, onDrill, tv }) {
 }
 
 export default function CallBoardPage() {
-  // 24/7 wallboard: self-reload nightly for the new day + the latest deploy.
-  useDailyReload()
   const { isAdmin, profile } = useAuth()
   const [data, setData] = useState(null)
   const [error, setError] = useState('')
@@ -116,18 +114,9 @@ export default function CallBoardPage() {
   const [drill, setDrill] = useState(null)
   const [config, setConfig] = useState(null)
   const [showConfig, setShowConfig] = useState(false)
-  // Fullscreen — same browser API the Call Center TV uses.
+  // Wall look survives reloads; the page updates itself when a build lands.
   const rootRef = useRef(null)
-  const [isFull, setIsFull] = useState(false)
-  const toggleFull = () => {
-    if (document.fullscreenElement) document.exitFullscreen?.()
-    else rootRef.current?.requestFullscreen?.()
-  }
-  useEffect(() => {
-    const onFs = () => setIsFull(!!document.fullscreenElement)
-    document.addEventListener('fullscreenchange', onFs)
-    return () => document.removeEventListener('fullscreenchange', onFs)
-  }, [])
+  const { isFull, toggleFull } = useWallboard(rootRef)
 
   const load = useCallback(async () => {
     try {

@@ -12,6 +12,7 @@ import { syncWorkerActivity } from '../lib/utils'
 import { useOpenLeads } from '../lib/useOpenLeads'
 import { usePtoApprovals } from '../lib/usePtoApprovals'
 import { PhoneProvider, usePhone } from '../lib/PhoneContext'
+import { useWallKiosk } from '../lib/useDailyReload'
 import DialerPage from './DialerPage'
 import CampaignsPage from './CampaignsPage'
 import DashboardPage from './DashboardPage'
@@ -342,6 +343,12 @@ function DialerLayoutInner() {
   const { cancelAutoWrap } = usePhone()
   const navigate = useNavigate()
   const location = useLocation()
+  // Wall TVs: no top bar, no banners, and — once the wall look is on for the
+  // device — no sidebar either, so a reload never brings the chrome back.
+  const wallKiosk = useWallKiosk(location.pathname)
+  const onTvRoute = location.pathname === '/warroom' || location.pathname.startsWith('/tv/')
+  const isWall = onTvRoute || (location.pathname === '/callboard' && wallKiosk)
+  const hideSidebar = wallKiosk && (onTvRoute || location.pathname === '/callboard')
   const [agentStatus, setAgentStatus] = useState('Offline')
   const [showStatusMenu, setShowStatusMenu] = useState(false)
   const [showSidebarStatus, setShowSidebarStatus] = useState(false)
@@ -617,7 +624,7 @@ function DialerLayoutInner() {
       )}
 
       {/* ── LEFT SIDEBAR (fixed drawer on mobile) ── */}
-      <aside style={isMobile ? {
+      {!hideSidebar && <aside style={isMobile ? {
         position: 'fixed', top: 0, bottom: 0, left: mobileNav ? 0 : -300,
         width: 280, minWidth: 280,
         background: 'var(--surface)',
@@ -785,11 +792,12 @@ function DialerLayoutInner() {
             {!navCollapsed && <span>{darkMode ? 'Light mode' : 'Dark mode'}</span>}
           </button>
         </div>
-      </aside>
+      </aside>}
 
       {/* ── MAIN CONTENT (with a real top bar so the profile menu never overlaps pages) ── */}
       <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden', minWidth:0 }}>
-        {updateReady && (
+        {/* Wallboards update themselves in the background — never a banner on a TV. */}
+        {updateReady && !isWall && (
           <div style={{ background:'#7C3AED', color:'#fff', padding:'7px 16px', display:'flex', alignItems:'center', justifyContent:'center', gap:12, fontSize:12.5, fontWeight:600, flexShrink:0, zIndex:200 }}>
             <span>Andi was updated — reload to get the latest (finish your call first).</span>
             <button onClick={() => window.location.reload()}
@@ -798,10 +806,10 @@ function DialerLayoutInner() {
             </button>
           </div>
         )}
-        {/* Top bar — reserves its own height; hidden on the War Room (full-screen TV) route */}
-        {location.pathname !== '/warroom' && !location.pathname.startsWith('/tv/') && <AskAndi />}
+        {/* Top bar — reserves its own height; hidden on the wall-TV routes */}
+        {!isWall && <AskAndi />}
         <DialogHost />
-        {location.pathname !== '/warroom' && !location.pathname.startsWith('/tv/') && (
+        {!isWall && (
         <div style={{ height:53, minHeight:53, boxSizing:'border-box', flexShrink:0, borderBottom:'1px solid var(--border)', background:'var(--surface)', display:'flex', alignItems:'center', justifyContent:'space-between', padding:'0 16px', position:'relative', zIndex:100 }}>
           {isMobile && (
             <button onClick={() => setMobileNav(v => !v)} title="Menu"

@@ -5,7 +5,7 @@ import { useData } from '../lib/DataContext'
 import { inboundStats, outboundStats, fmtSecs, SERVICE_LEVEL_SECONDS, SERVICE_LEVEL_TARGET } from '../lib/analytics'
 import { INTERACTION_COLORS } from '../lib/constants'
 import Avatar from '../components/Avatar'
-import { useDailyReload } from '../lib/useDailyReload'
+import { useWallboard } from '../lib/useDailyReload'
 
 // Call-centre wallboard — a modern "Simon board" for the floor TV. Everything
 // real-time: inbound queue health, live calls, the leaderboard (rows slide when
@@ -63,8 +63,6 @@ function Panel({ title, icon, live, children, style }) {
 }
 
 export default function WarRoomPage() {
-  // 24/7 wallboard: self-reload nightly for the new day + the latest deploy.
-  useDailyReload()
   const { contacts } = useData()
   const [logs, setLogs] = useState([])
   const [tasks, setTasks] = useState([])
@@ -75,8 +73,9 @@ export default function WarRoomPage() {
   const [board, setBoard] = useState(null)   // 3-day call board (today column shown)
   const [sales, setSales] = useState([])     // estimates SOLD today (tech wins)
   const [wins, setWins] = useState({ reviews: [], memberships: [], bonus: null })   // 5★ / club sales / 🎯 unlock
-  const [isFull, setIsFull] = useState(false)
   const rootRef = useRef(null)
+  // Wall look survives reloads; the page updates itself when a build lands.
+  const { isFull, toggleFull } = useWallboard(rootRef)
 
   // 3-Day Call Board — show today's "calls needed" per trade on the TV.
   useEffect(() => {
@@ -91,16 +90,6 @@ export default function WarRoomPage() {
     return () => { clearInterval(t); clearInterval(ts); clearInterval(tw) }
   }, [])
 
-  // Fullscreen the wallboard itself (not the whole app) so the nav drops away.
-  const toggleFull = () => {
-    if (document.fullscreenElement) document.exitFullscreen?.()
-    else rootRef.current?.requestFullscreen?.()
-  }
-  useEffect(() => {
-    const onFs = () => setIsFull(!!document.fullscreenElement)
-    document.addEventListener('fullscreenchange', onFs)
-    return () => document.removeEventListener('fullscreenchange', onFs)
-  }, [])
 
   // Floor ticker — admin-editable messages from app_settings. Polled (not
   // realtime-dependent) so an alert posted from Settings shows within ~15s.

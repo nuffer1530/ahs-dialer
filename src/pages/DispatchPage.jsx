@@ -7,8 +7,7 @@ import CommandCenter from '../components/dispatch/CommandCenter'
 // Two tabs:
 //  - Batting Order: cached tech ranking per business unit (the scoring job runs
 //    on a schedule; this only reads it).
-//  - Live Board: today's assignments scored against those ranks. Flags only —
-//    Andi never writes assignments back to ServiceTitan.
+//  - Live Board: today's assignments scored against those ranks.
 
 // Baseball, to match the tab name. 'On the Bench' says where to route without
 // branding anyone a bad tech; 'Rookie' keeps thin data from reading as a grade.
@@ -759,7 +758,7 @@ function LiveBoard() {
                 {(sw.why || []).map((w, k) => <li key={k}>{w}</li>)}
               </ul>
               <div style={{ fontSize:10, color:'var(--text-muted)', marginTop:6 }}>
-                {sw.businessUnit} · suggestion only — make the change in ServiceTitan
+                {sw.businessUnit}
               </div>
             </div>
           ))}
@@ -1084,7 +1083,7 @@ function DecisionMaker() {
       <div style={{ fontSize:12, color:'var(--text-muted)', marginBottom:14 }}>
         A call just came in — where does it go? Enter the job and address; this scores every tech on the
         right bench against the current board (earning power on this work, capacity, drive time) and tells
-        you whether to book it, book-and-bump, or hold for the next open day. It recommends only — you book it in ServiceTitan.
+        you whether to book it, book-and-bump, or hold for the next open day.
       </div>
 
       {/* Not a .card — that has overflow:hidden, which clipped the dropdowns. */}

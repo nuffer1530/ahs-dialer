@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { sb } from '../lib/supabase'
-import { useDailyReload } from '../lib/useDailyReload'
+import { useWallboard } from '../lib/useDailyReload'
 import WeatherStrip from '../components/WeatherStrip'
 
 // Department TV board — one per trade, hung in each manager's office.
@@ -99,7 +99,6 @@ export default function DeptTVPage() {
   const [data, setData] = useState(null)
   const [err, setErr] = useState(null)
   const [time, setTime] = useState(new Date())
-  const [isFull, setIsFull] = useState(false)
   // Fire TV Silk reports ~960 CSS px — table + side feed can't share a row.
   const [narrow, setNarrow] = useState(() => typeof window !== 'undefined' && window.innerWidth < 1150)
   useEffect(() => {
@@ -137,7 +136,8 @@ export default function DeptTVPage() {
     return () => clearTimeout(t)
   }, [narrow, data, fit])
   const rootRef = useRef(null)
-  useDailyReload()
+  // Wall look survives reloads; the page updates itself when a build lands.
+  const { isFull, toggleFull } = useWallboard(rootRef)
 
   const load = useCallback(async () => {
     try {
@@ -168,16 +168,6 @@ export default function DeptTVPage() {
     const id = setInterval(() => setTime(new Date()), 1000)
     return () => clearInterval(id)
   }, [])
-  useEffect(() => {
-    const onFs = () => setIsFull(!!document.fullscreenElement)
-    document.addEventListener('fullscreenchange', onFs)
-    return () => document.removeEventListener('fullscreenchange', onFs)
-  }, [])
-  const toggleFull = () => {
-    if (document.fullscreenElement) document.exitFullscreen?.()
-    else rootRef.current?.requestFullscreen?.()
-  }
-
   // Company board shows the top 10 service techs; trade boards show everyone.
   const techs = useMemo(() => {
     const all = data?.techs || []
