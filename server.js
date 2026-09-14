@@ -8626,6 +8626,9 @@ app.post('/api/dispatch/act', async (req, res) => {
     upside: Math.round(Number(b.upside) || 0), oppRate: b.oppRate == null ? null : Number(b.oppRate),
     alternativesShown: Array.isArray(b.alternativesShown) ? b.alternativesShown.slice(0, 12) : null,
     picked: b.picked || null, day: b.day ?? null,
+    // Second leg of a trade: which call this reassign was returning, so a
+    // failed leg can be turned into a "finish the trade" card.
+    swapOf: b.swapOf && typeof b.swapOf === 'object' ? b.swapOf : null,
   } : {})
   const fail = async (status, err, summary) => {
     row.st_status = status; row.st_error = String(err || '').slice(0, 600); row.summary = summary
@@ -8909,6 +8912,26 @@ async function buildActionQueue(dayOffset, boardIn = null, { actions = [] } = {}
     .sort((a, b) => (a.busy - b.busy) || (b.expectedValue - a.expectedValue))
   const base = (c) => ({ jobId: c.jobId, jobNumber: c.jobNumber, appointmentId: c.appointmentId, jobType: c.jobType, zip: c.zip,
     windowStart: c.windowStart, windowEnd: c.windowEnd, status: c.status, opportunity: c.opportunity, bucket: 0 })
+  // The reverse leg of a trade hands the CURRENT tech a call too, so it gets
+  // the same gates the forward leg had: on shift for that window, no skill
+  // rule against it, not consumed by an install.
+  let typeRules = []
+  try { const { data: rr } = await supabase.from('app_settings').select('value').eq('key', 'dispatch_type_rules').maybeSingle(); typeRules = JSON.parse(rr?.value || '[]') } catch {}
+  const allowedByRule = (jt, techName) => {
+    const r = (typeRules || []).find(x => x?.pattern && String(jt || '').toLowerCase().includes(String(x.pattern).toLowerCase()))
+    return !r || (r.techs || []).some(n => String(n).toLowerCase() === String(techName || '').toLowerCase())
+  }
+  const shiftsKnown = techs.some(t => (t.shifts || []).length)
+  const coversWindow = (t, ws, we) => {
+    if (!t || t.out || t.allDayInstall) return false
+    if (!shiftsKnown) return true                       // no shift data — don't block, same as canWork
+    const s0 = Date.parse(ws || ''), e0 = Date.parse(we || '')
+    if (Number.isNaN(s0) || Number.isNaN(e0)) return true
+    const list = t.shifts || []
+    const on = list.some(s => s.type !== 'TimeOff' && Date.parse(s.start) < e0 && Date.parse(s.end) > s0)
+    const off = list.some(s => s.type === 'TimeOff' && Date.parse(s.start) < e0 && Date.parse(s.end) > s0)
+    return on && !off
+  }
   const cards = []
 
   // A. Finish the move — ONLY when Andi itself left an appointment half-moved
@@ -8916,6 +8939,27 @@ async function buildActionQueue(dayOffset, boardIn = null, { actions = [] } = {}
   // remove is still on it. Two techs on one appointment is otherwise normal
   // ServiceTitan: an install crew, a lead with an apprentice.
   if (dayOffset === 0) {
+    // A trade whose second leg failed: the opportunity moved, the call coming
+    // back didn't. One click finishes it; nothing else touches that call.
+    for (const a of actions) {
+      const s = a.after?.swapOf
+      if (a.kind !== 'reassign' || a.st_status === 'ok' || !s || !a.appointment_id) continue
+      if (actions.some(x => x.kind === 'reassign' && x.st_status === 'ok' && Number(x.appointment_id) === Number(a.appointment_id) && Date.parse(x.created_at) > Date.parse(a.created_at))) continue
+      const p = calls.find(x => Number(x.appointmentId) === Number(a.appointment_id) && Number(x.techId) === Number(s.fromTechnicianId) && x.status !== 'Done' && x.status !== 'Canceled')
+      if (!p) continue
+      const to = techById.get(Number(s.toTechnicianId))
+      if (!to) continue
+      cards.push({
+        ...base(p), key: `finish:${p.appointmentId}`, kind: 'reassign', severity: 'high', actBy: nowIso, lead: true, upside: 0,
+        title: `Finish the trade — #${p.jobNumber} to ${to.name}`,
+        why: `#${s.forJobNumber || '?'} moved to ${p.techName}, but #${p.jobNumber} didn't come back to ${to.name} (${String(a.st_error || '').slice(0, 80)}) — ${p.techName} has both right now`,
+        current: { techId: p.techId, techName: p.techName, tier: p.techTier, status: p.status, load: (callsByTech.get(p.techId) || []).length },
+        alternatives: [{ techId: to.techId, techName: to.name, tier: to.tier, expectedValue: to.expectedValue || 0, closeRate: to.closeRate, avgSale: to.avgSale,
+          deltaRaw: 0, delta: 0, oppRate: to.oppRate || 0, load: to.truckRolls, target: to.target, stretch: to.stretch, busy: busyIn(to.techId, p.windowStart, p.windowEnd), status: to.status, travel: null, bump: null, recommended: true, swapWith: null }],
+        rejected: [],
+        action: { kind: 'reassign', appointmentId: p.appointmentId, jobId: p.jobId, jobNumber: p.jobNumber, fromTechnicianId: p.techId, fromTechnicianName: p.techName },
+      })
+    }
     const byAppt = new Map()
     for (const c of calls) { if (c.status === 'Done' || c.status === 'Canceled') continue; if (!byAppt.has(c.appointmentId)) byAppt.set(c.appointmentId, []); byAppt.get(c.appointmentId).push(c) }
     for (const [apptId, rows] of byAppt) {
@@ -8936,6 +8980,38 @@ async function buildActionQueue(dayOffset, boardIn = null, { actions = [] } = {}
     }
   }
 
+  // When the recommended tech already has a call in that window (or a full
+  // day), the honest move is a TRADE: they take the opportunity, the current
+  // tech takes one of theirs. Appointments stay put, so both customers keep
+  // their promised windows and nobody is double-booked. Prefer the call in
+  // the same window (a clean one-for-one), then the least valuable one.
+  const freeFor = (techId, ws, we, exceptApptId) => !(callsByTech.get(techId) || []).some(x =>
+    x.appointmentId !== exceptApptId && x.status !== 'Done' && x.status !== 'Canceled' && windowsOverlap(x.windowStart, x.windowEnd, ws, we))
+  // A call can be traded away once; two cards must never both hand out the
+  // same partner (the second trade would put it on two techs).
+  const usedAsPartner = new Set()
+  const swapPartnerFor = (c, altTechId) => {
+    const alt = techById.get(Number(altTechId)), cur = techById.get(Number(c.techId))
+    if (!alt || alt.out || !cur || cur.out || cur.allDayInstall) return null
+    const theirs = (callsByTech.get(Number(altTechId)) || []).filter(x => x.actionable && x.status === 'Scheduled' && x.appointmentId !== c.appointmentId
+      && !usedAsPartner.has(x.appointmentId)
+      && !STICKY_TO_TECH.test(x.jobType || '') && !INSTALL_TYPE.test(x.jobType || '') && !EXCLUDE_CALL.test(x.jobType || '')
+      && (x.opportunity || 0) < (c.opportunity || 0)
+      // the current tech can actually take theirs…
+      && freeFor(c.techId, x.windowStart, x.windowEnd, c.appointmentId)
+      && coversWindow(cur, x.windowStart, x.windowEnd)
+      && allowedByRule(x.jobType, c.techName)
+      // …and once theirs leaves, the alt is genuinely clear for this call —
+      // otherwise the trade still double-books them.
+      && freeFor(Number(altTechId), c.windowStart, c.windowEnd, x.appointmentId))
+    if (!theirs.length) return null
+    const same = (x) => (windowsOverlap(x.windowStart, x.windowEnd, c.windowStart, c.windowEnd) ? 0 : 1)
+    theirs.sort((a, b) => (same(a) - same(b)) || ((a.opportunity || 0) - (b.opportunity || 0)) || ((a.expectedRevenue || 0) - (b.expectedRevenue || 0)))
+    const p = theirs[0]
+    return { appointmentId: p.appointmentId, jobId: p.jobId, jobNumber: p.jobNumber, jobType: p.jobType, windowStart: p.windowStart, windowEnd: p.windowEnd,
+      opportunity: p.opportunity, sameWindow: same(p) === 0 }
+  }
+
   // B. Re-place (tech out) and Reassign (opportunity on a weaker seat) — both
   // come from the board's flag loop, which already did the shift / skill /
   // travel / bump math. Busy-in-window is re-checked here against the day.
@@ -8943,10 +9019,18 @@ async function buildActionQueue(dayOffset, boardIn = null, { actions = [] } = {}
     const f = (c.flags || []).find(x => Array.isArray(x.alternatives))
     if (!f) continue
     const alts = f.alternatives.map(a => ({ ...a, busy: busyIn(a.techId, c.windowStart, c.windowEnd), status: techById.get(Number(a.techId))?.status || null }))
-    if (alts.some(a => a.recommended && a.busy) && alts.some(a => !a.busy)) {
-      alts.forEach(a => { a.recommended = false }); alts.find(a => !a.busy).recommended = true
+    if (f.kind !== 'techout') {
+      for (const a of alts) a.swapWith = (a.busy || (a.target != null && a.load >= a.target)) ? swapPartnerFor(c, a.techId) : null
+    }
+    // A busy tech with a swap partner is still a fine pick; only a busy tech
+    // with nothing to trade gets passed over for someone free.
+    const blocked = (a) => a.busy && !a.swapWith
+    if (alts.some(a => a.recommended && blocked(a))) {
+      alts.forEach(a => { a.recommended = false })
+      const free = alts.find(a => !blocked(a)); if (free) free.recommended = true   // nobody free → no pick at all
     }
     const best = alts.find(a => a.recommended) || alts[0] || null
+    if (best?.swapWith) usedAsPartner.add(best.swapWith.appointmentId)
     const upside = Math.max(0, ...alts.map(a => a.delta || 0))
     const current = { ...f.current, status: c.status, load: (callsByTech.get(c.techId) || []).length }
     const action = { kind: 'reassign', appointmentId: c.appointmentId, jobId: c.jobId, jobNumber: c.jobNumber, fromTechnicianId: c.techId, fromTechnicianName: c.techName }
@@ -8963,9 +9047,10 @@ async function buildActionQueue(dayOffset, boardIn = null, { actions = [] } = {}
       cards.push({
         ...base(c), key: `reassign:${c.appointmentId}:${c.techId}`, kind: 'reassign', severity: c.techTier === 'red' || c.techTier === 'unranked' ? 'high' : 'mid',
         actBy: c.windowStart, upside,
-        title: `Move #${c.jobNumber} to ${best.techName}`,
+        title: best.swapWith ? `Swap #${c.jobNumber} to ${best.techName}, #${best.swapWith.jobNumber} to ${c.techName}` : `Move #${c.jobNumber} to ${best.techName}`,
         why: (c.opportunityReasons || []).slice(0, 3).join(' · '),
         current, alternatives: alts, rejected: f.rejected || [], action,
+        appointmentIds: best.swapWith ? [c.appointmentId, best.swapWith.appointmentId] : undefined,
       })
     }
   }

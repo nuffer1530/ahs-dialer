@@ -94,7 +94,25 @@ function primaryBody(c, pickId) {
   // reschedule the dispatcher didn't choose.
   if (!alt) { if ((c.alternatives || []).length) return null; const nb = nextWindowBody(c); return nb ? { body: nb, meta: metaOf(c, null), fallback: true } : null }
   if (c.kind === 'place') return { body: { ...c.action, technicianId: alt.techId, technicianName: alt.techName }, meta: metaOf(c, alt) }
-  return { body: { ...c.action, toTechnicianId: alt.techId, toTechnicianName: alt.techName }, meta: metaOf(c, alt) }
+  const move = { ...c.action, toTechnicianId: alt.techId, toTechnicianName: alt.techName }
+  // A trade: they take this call, the current tech takes theirs. Two ordered
+  // reassigns; the second only runs if the first landed.
+  if (alt.swapWith && c.current?.techId) {
+    const p = alt.swapWith
+    const back = { kind: 'reassign', appointmentId: p.appointmentId, jobId: p.jobId, jobNumber: p.jobNumber,
+      fromTechnicianId: alt.techId, fromTechnicianName: alt.techName, toTechnicianId: c.current.techId, toTechnicianName: c.current.techName,
+      // Lets the server turn a failed return leg into a "finish the trade" card.
+      swapOf: { appointmentId: c.appointmentId, forJobNumber: c.jobNumber, fromTechnicianId: alt.techId, toTechnicianId: c.current.techId } }
+    const stepMeta = [
+      { keepCard: true },
+      { keepCard: false, upside: 0,
+        // The partner must still be on the recommended tech when the return leg runs.
+        requireOnBoard: { appointmentId: p.appointmentId, techId: alt.techId },
+        failNote: `#${c.jobNumber} is now on ${alt.techName}, but #${p.jobNumber} did NOT move to ${c.current.techName} — ${alt.techName} has both this window. A "finish the trade" card will follow.` },
+    ]
+    return { body: move, steps: [move, back], stepMeta, meta: metaOf(c, alt), swap: p }
+  }
+  return { body: move, meta: metaOf(c, alt) }
 }
 const callOfCard = (c) => ({ jobId: c.jobId, jobNumber: c.jobNumber, appointmentId: c.appointmentId, jobType: c.jobType, zip: c.zip,
   windowStart: c.windowStart, windowEnd: c.windowEnd, status: c.status, techId: c.current?.techId || null, techName: c.current?.techName || null })
@@ -350,35 +368,59 @@ export default function CommandCenter() {
   // One promise chain: two clicks never race the board. Only the acted card
   // shows pending; nothing else is disabled.
   const act = useCallback((body, cardKey, meta = {}) => {
-    const { keepCard, ...sendMeta } = meta
+    const { keepCard, requireOnBoard, failNote, ...sendMeta } = meta
     const d = sendMeta.day ?? dayRef.current
     const key = cardKey || `${body.kind}:${body.appointmentId || body.jobId || ''}`
     // Pending from the moment of the click, not when the chain reaches it —
     // otherwise a second card looks clickable while the first is still writing.
     setPendingKeys(s => new Set(s).add(key))
+    const noteErr = (msg) => (failNote ? `${failNote} (${msg})` : msg)
     const run = async () => {
       try {
+        // A return leg only runs if the call it returns is still where the
+        // card said it was — another dispatcher may have moved it since.
+        if (requireOnBoard) {
+          const b = dayCacheRef.current.get(d)?.payload?.board
+          const still = (b?.calls || []).some(x => Number(x.appointmentId) === Number(requireOnBoard.appointmentId) && Number(x.techId) === Number(requireOnBoard.techId))
+          if (!still) {
+            const msg = `#${body.jobNumber} is no longer on ${body.fromTechnicianName || 'that tech'} — nothing sent for this leg`
+            if (cardKey) setStErrors(e => ({ ...e, [cardKey]: noteErr(msg) }))
+            toast(msg, 'warn'); dropBeforeRef.current = seqRef.current; scheduleReload(d, 1500)
+            return { status: 'skipped', error: msg }
+          }
+        }
         const r = await authedAct({ ...body, cardKey: cardKey || undefined, ...sendMeta, day: d })
         if (r.status === 'ok') {
           const patch = patchFor(r, body)
           const pd = patch?.day ?? d
           editCache(dayCacheRef.current, pd, p => ({ ...p, stale: true, board: patch ? applyPatch(p.board, patch) : p.board }))
-          if (!keepCard) dropCards(d, c => c.key === cardKey || (body.appointmentId && Number(c.appointmentId) === Number(body.appointmentId)), false)
+          const id = Number(body.appointmentId) || null
+          // Any card built on this appointment — its own, a swap's second half,
+          // or a trade partner in an alternative — is stale now; the re-read rebuilds it.
+          if (!keepCard) dropCards(d, c => c.key === cardKey || (id && (Number(c.appointmentId) === id
+            || (c.appointmentIds || []).some(x => Number(x) === id) || (c.alternatives || []).some(a => Number(a.swapWith?.appointmentId) === id))), false)
+          else if (id) dropCards(d, c => c.key !== cardKey && (Number(c.appointmentId) === id || (c.appointmentIds || []).some(x => Number(x) === id) || (c.alternatives || []).some(a => Number(a.swapWith?.appointmentId) === id)), false)
           prependAction(d, r.action)
           dropBeforeRef.current = seqRef.current
           if (cardKey) setStErrors(e => { if (!(cardKey in e)) return e; const n = { ...e }; delete n[cardKey]; return n })
           toast(r.summary || 'Done')
           scheduleReload(d)
         } else {
-          if (cardKey) setStErrors(e => ({ ...e, [cardKey]: r.error || 'ServiceTitan did not finish that' }))
+          if (cardKey) setStErrors(e => ({ ...e, [cardKey]: noteErr(r.error || 'ServiceTitan did not finish that') }))
           prependAction(d, r.action)
-          toast(r.summary || r.error || 'ServiceTitan did not finish that', 'warn')
+          toast(failNote || r.summary || r.error || 'ServiceTitan did not finish that', 'warn')
           // A partial write changed ServiceTitan — re-read so the board and the
-          // "finish the move" card reflect it.
-          if (r.status === 'partial') { dropBeforeRef.current = seqRef.current; scheduleReload(d, 4000) }
+          // "finish the move" card reflect it. A failed return leg gets its
+          // "finish the trade" card the same way.
+          if (r.status === 'partial' || failNote) { dropBeforeRef.current = seqRef.current; scheduleReload(d, 4000) }
         }
         return r
-      } catch (e) { toast(e.message, 'err'); return null }
+      } catch (e) {
+        if (cardKey) setStErrors(x => ({ ...x, [cardKey]: noteErr(e.message) }))
+        toast(failNote || e.message, 'err')
+        if (failNote) { dropBeforeRef.current = seqRef.current; scheduleReload(d, 4000) }
+        return null
+      }
       finally { setPendingKeys(s => { const n = new Set(s); n.delete(key); return n }) }
     }
     const p = actChainRef.current.then(run, run)
@@ -496,8 +538,12 @@ export default function CommandCenter() {
     for (const c of groupCards) {
       const pb = primaryBody(c, picks[c.key])
       if (!pb || pb.fallback) { skipped.push(c.jobNumber); continue }
-      const r = await act(pb.body, c.key, { ...pb.meta, day })
-      if (!r || r.status !== 'ok') { toast(`Stopped at #${c.jobNumber} — sort that one out first`, 'warn'); return }
+      let ok = true
+      for (const [i, step] of (pb.steps || [pb.body]).entries()) {
+        const r = await act(step, c.key, { ...pb.meta, upside: i === 0 ? c.upside : 0, day, keepCard: pb.steps ? i < pb.steps.length - 1 : false, ...(pb.stepMeta?.[i] || {}) })
+        if (!r || r.status !== 'ok') { ok = false; break }
+      }
+      if (!ok) { toast(`Stopped at #${c.jobNumber} — sort that one out first`, 'warn'); return }
       n++
     }
     const tail = skipped.length ? ` · ${skipped.length} need a window — do those by hand (#${skipped.join(', #')})` : ''
@@ -812,11 +858,15 @@ const Card = memo(function Card({ c, day, isNext, flash, pending, stError, pick,
   const noAlts = !isPartial && c.kind !== 'swap' && !alts.length
   const push = noAlts ? nextWindowBody(c) : null
   const canKeep = (c.kind === 'reassign' || c.kind === 'late') && c.current
-  const primary = pending ? 'Writing to ServiceTitan…' : isPartial ? 'Finish in ServiceTitan' : c.kind === 'swap' ? 'Swap in ServiceTitan'
+  const trade = !keep && alt?.swapWith && c.current?.techId ? alt.swapWith : null
+  // A busy tech with nothing to trade would simply be double-booked — that
+  // move is never one click away.
+  const doubles = !keep && !!alt?.busy && !trade
+  const primary = pending ? 'Writing to ServiceTitan…' : isPartial ? 'Finish in ServiceTitan' : c.kind === 'swap' || trade ? 'Swap in ServiceTitan'
     : keep ? `Keep it with ${c.current?.techName}` : noAlts ? (push ? `Push to ${push.windowLabel}` : 'No later window today') : c.kind === 'place' ? 'Assign in ServiceTitan' : 'Move in ServiceTitan'
   // After ServiceTitan refused or half-finished a write, the primary stays off
   // until the board re-reads — a second click is how a call ends up on three techs.
-  const disabled = pending || !!stError || (c.kind === 'swap' ? !c.steps?.length : isPartial ? !pt : keep ? false : noAlts ? !push : !alt)
+  const disabled = pending || !!stError || doubles || (c.kind === 'swap' ? !c.steps?.length : isPartial ? !pt : keep ? false : noAlts ? !push : !alt)
   const snoozeMin = c.kind === 'late' ? 15 : 60
   const run = async () => {
     if (pending) return
@@ -834,7 +884,15 @@ const Card = memo(function Card({ c, day, isNext, flash, pending, stError, pick,
       return
     }
     const pb = primaryBody(c, selId)
-    if (pb) return onAct(pb.body, c.key, { ...pb.meta, day })
+    if (!pb) return
+    if (pb.steps) {
+      for (let i = 0; i < pb.steps.length; i++) {
+        const r = await onAct(pb.steps[i], c.key, { ...pb.meta, upside: i === 0 ? c.upside : 0, day, keepCard: i < pb.steps.length - 1, ...(pb.stepMeta?.[i] || {}) })
+        if (!r || r.status !== 'ok') break
+      }
+      return
+    }
+    return onAct(pb.body, c.key, { ...pb.meta, day })
   }
   const radio = (on) => <span style={{ width: 13, height: 13, borderRadius: '50%', flexShrink: 0, border: `1.5px solid ${on ? 'var(--accent)' : 'var(--border-strong)'}`, background: on ? 'radial-gradient(circle, var(--accent) 45%, transparent 50%)' : 'transparent' }} />
   return (
@@ -881,7 +939,7 @@ const Card = memo(function Card({ c, day, isNext, flash, pending, stError, pick,
                   borderTop: i ? '1px solid var(--border)' : 'none', background: on ? 'var(--accent-bg)' : 'transparent', opacity: a.busy ? .6 : 1 }}>
                   {radio(on)}
                   <span style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}><TierDot tier={a.tier} /><span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.techName}</span>{a.recommended && <span style={{ fontSize: 9, fontWeight: 800, color: 'var(--tone-green-tx)' }}>PICK</span>}</span>
-                  <span style={{ color: a.busy ? 'var(--tone-amber-tx)' : 'var(--text-secondary)' }}>{a.busy ? 'has a call this window' : a.load != null ? `${a.load} of ${a.target} calls` : ''}</span>
+                  <span style={{ color: a.swapWith ? 'var(--tone-green-tx)' : a.busy ? 'var(--tone-amber-tx)' : 'var(--text-secondary)' }}>{a.swapWith ? `swap · takes #${a.swapWith.jobNumber}` : a.busy ? 'has a call this window' : a.load != null ? `${a.load} of ${a.target} calls` : ''}</span>
                   <span style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--text-secondary)' }}>{a.travel?.minutes != null ? `${a.travel.minutes} min` : a.travel?.miles != null ? `~${a.travel.miles} mi` : ''}</span>
                   <span style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--text-secondary)' }}>{a.closeRate != null ? `${a.closeRate}%` : ''}</span>
                   <span style={{ textAlign: 'right', fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: a.deltaRaw > 0 ? 'var(--tone-green-tx)' : 'var(--text-muted)' }}>{a.deltaRaw > 0 ? `+${money(a.deltaRaw)}` : money(a.expectedValue)}<span style={{ fontWeight: 500, color: 'var(--text-muted)' }}>/opp</span></span>
@@ -893,7 +951,9 @@ const Card = memo(function Card({ c, day, isNext, flash, pending, stError, pick,
                 {radio(keep)}Keep it with {c.current.techName}
               </div>
             )}
-            {alt?.bump && <div style={{ ...MUTED, fontSize: 11, padding: '4px 10px 6px', borderTop: '1px solid var(--border)' }}>{alt.techName} is at capacity — this bumps #{alt.bump.jobNumber} ({alt.bump.jobType}); move that one from the drawer after.</div>}
+            {trade && <div style={{ fontSize: 11, padding: '4px 10px 6px', borderTop: '1px solid var(--border)', color: 'var(--tone-green-tx)' }}>Trade: {c.current.techName} takes #{trade.jobNumber} ({trade.jobType} · {windowLabel(trade)}){trade.sameWindow ? ' — same window, both customers keep their times.' : ' — appointments stay put, both customers keep their times.'}</div>}
+            {!trade && alt?.busy && <div style={{ ...MUTED, fontSize: 11, padding: '4px 10px 6px', borderTop: '1px solid var(--border)' }}>{alt.techName} already has a call in this window and nothing {c.current?.techName || 'the current tech'} can take in return — this would double them up.</div>}
+            {!trade && !alt?.busy && alt?.bump && <div style={{ ...MUTED, fontSize: 11, padding: '4px 10px 6px', borderTop: '1px solid var(--border)' }}>{alt.techName} is at capacity — this bumps #{alt.bump.jobNumber} ({alt.bump.jobType}); move that one from the drawer after.</div>}
             {c.rejected?.length > 0 && <div style={{ ...MUTED, fontSize: 11, padding: '4px 10px 6px', borderTop: '1px solid var(--border)' }}>Not offered: {c.rejected.slice(0, 4).map(r => `${r.techName} (${r.reason})`).join(' · ')}{c.rejected.length > 4 ? ` · +${c.rejected.length - 4}` : ''}</div>}
           </div>
         )}
