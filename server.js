@@ -2991,8 +2991,9 @@ let _tvWinsCache = null
 // composite, medals. Booking % from ST telecom (Booked ÷ Booked+Unbooked by
 // agent), clubs from ST memberships (soldById → CSR), call QA from Andi's
 // evals. Admins and the shared "Awesome Account" login are excluded.
-// Composite = 0.45 booking % + 0.25 clubs (vs. best) + 0.30 QA; ranked only
-// with 10+ lead calls so a two-call morning can't top the board.
+// Composite = 0.50 booking % + 0.20 clubs (vs. best) + 0.30 QA (Brandyn,
+// Sep 14 — "may change"); ranked only with 10+ lead calls so a two-call
+// morning can't top the board.
 let _tvCsrMonth = null
 async function buildCsrMonth() {
   const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: 'America/Denver', year: 'numeric', month: '2-digit' }).formatToParts(new Date()).map(x => [x.type, x.value]))
@@ -3050,7 +3051,7 @@ async function buildCsrMonth() {
   const maxClubs = Math.max(1, ...ranked.map(r => r.clubs))
   for (const r of list) {
     r.rankable = r.leadCalls >= 10
-    r.score = r.rankable ? Math.round(100 * (0.45 * (r.bookingPct || 0) / 100 + 0.25 * r.clubs / maxClubs + 0.30 * (r.qa ?? 70) / 100)) : null
+    r.score = r.rankable ? Math.round(100 * (0.50 * (r.bookingPct || 0) / 100 + 0.20 * r.clubs / maxClubs + 0.30 * (r.qa ?? 70) / 100)) : null
   }
   list.sort((a, b) => (b.score ?? -1) - (a.score ?? -1) || b.booked - a.booked)
   return { month: `${p.year}-${p.month}`, generatedAt: new Date().toISOString(), csrs: list.map(({ key, ...r }) => r) }
