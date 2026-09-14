@@ -4675,7 +4675,9 @@ app.get('/api/admin/csr-coaching', async (req, res) => {
     const endIso = new Date(Date.UTC(y, m, 1)).toISOString()
     const { data: evals } = await supabase.from('call_evaluations')
       .select('rep, profile_id, pct, scores, created_at').gte('call_at', startIso).lt('call_at', endIso).limit(3000)
-    const rows = (evals || []).filter(e => e.pct != null)
+    // Admins and the shared "Awesome Account" login aren't coached CSRs.
+    const admins = await loadAdminAgents(supabase)
+    const rows = (evals || []).filter(e => e.pct != null && !admins.isAdminProfile(e.profile_id) && !admins.isAdminName(e.rep))
     const cacheKey = `csr_coaching_${month}`
     if (req.query.refresh !== '1') {
       try {
