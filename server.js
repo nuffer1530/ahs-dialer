@@ -2986,6 +2986,88 @@ app.get('/api/tv/sales-today', async (req, res) => {
 // TV extras: today's 5★ reviews, membership sales, and the Opportunity Watch
 // Bonus unlock — one cached call so the wallboard stays cheap.
 let _tvWinsCache = null
+// ── Monthly CSR leaderboard for the Call Center TV ──────────────────────────
+// Same idea as the department boards' tech ranking: month-to-date, one
+// composite, medals. Booking % from ST telecom (Booked ÷ Booked+Unbooked by
+// agent), clubs from ST memberships (soldById → CSR), call QA from Andi's
+// evals. Admins and the shared "Awesome Account" login are excluded.
+// Composite = 0.45 booking % + 0.25 clubs (vs. best) + 0.30 QA; ranked only
+// with 10+ lead calls so a two-call morning can't top the board.
+let _tvCsrMonth = null
+async function buildCsrMonth() {
+  const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: 'America/Denver', year: 'numeric', month: '2-digit' }).formatToParts(new Date()).map(x => [x.type, x.value]))
+  const monthStart = new Date(Date.parse(`${p.year}-${p.month}-01T00:00:00Z`) + denverOffsetMs()).toISOString()
+  const [calls, membs, csrRows, profRows, admins] = await Promise.all([
+    stPageAll(pg => `/telecom/v2/tenant/${ST_TENANT_ID}/calls?createdOnOrAfter=${monthStart}&pageSize=500&page=${pg}`, 20000).catch(() => []),
+    stPageAll(pg => `/memberships/v2/tenant/${ST_TENANT_ID}/memberships?createdOnOrAfter=${monthStart}&pageSize=500&page=${pg}`, 3000).catch(() => []),
+    supabase.from('csr_st_users').select('st_user_id, profile_id').then(r => r.data || []),
+    supabase.from('profiles').select('id, name, email, active').then(r => r.data || []),
+    loadAdminAgents(supabase),
+  ])
+  const profById = new Map(profRows.map(x => [x.id, x]))
+  const profOfSt = new Map(csrRows.map(c => [String(c.st_user_id), c.profile_id]))
+  const norm = (n) => String(n || '').trim().toLowerCase()
+  const rows = new Map()   // key -> row
+  const rowFor = (stId, stName) => {
+    const pid = profOfSt.get(String(stId))
+    const prof = pid ? profById.get(pid) : null
+    const key = prof ? `p:${prof.id}` : `n:${norm(stName)}`
+    if (!rows.has(key)) rows.set(key, { key, profileId: prof?.id || null, name: prof?.name || prof?.email || stName || 'Unknown', leadCalls: 0, booked: 0, clubs: 0, qa: null, evals: 0 })
+    return rows.get(key)
+  }
+  for (const c of calls) {
+    const lc = c.leadCall || c
+    if ((lc.direction || '') !== 'Inbound' || !['Booked', 'Unbooked'].includes(lc.callType)) continue
+    if (admins.isAdminCall(lc)) continue
+    const ag = lc.agent || {}
+    if (!ag.id && !ag.name) continue
+    if (/revin/i.test(ag.name || '')) continue
+    const r = rowFor(ag.id, ag.name)
+    r.leadCalls++; if (lc.callType === 'Booked') r.booked++
+  }
+  for (const m of membs) {
+    const pid = profOfSt.get(String(m.soldById))
+    if (!pid) continue                        // techs sell too; only CSR logins count here
+    const key = `p:${pid}`
+    if (rows.has(key)) rows.get(key).clubs++
+  }
+  try {
+    const { data: evals } = await supabase.from('call_evaluations').select('rep, profile_id, pct').gte('call_at', monthStart).limit(5000)
+    const byKey = new Map()
+    for (const e of (evals || [])) {
+      if (e.pct == null || admins.isAdminProfile(e.profile_id) || admins.isAdminName(e.rep)) continue
+      const key = e.profile_id ? `p:${e.profile_id}` : `n:${norm(e.rep)}`
+      if (!byKey.has(key)) byKey.set(key, []); byKey.get(key).push(Number(e.pct))
+    }
+    for (const [key, list] of byKey) {
+      const r = rows.get(key)
+      if (r) { r.qa = Math.round(list.reduce((a, b) => a + b, 0) / list.length); r.evals = list.length }
+    }
+  } catch (e) { console.warn('csr month evals:', e.message) }
+  const list = [...rows.values()].filter(r => r.leadCalls > 0)
+  for (const r of list) r.bookingPct = r.leadCalls ? Math.round(100 * r.booked / r.leadCalls) : null
+  const ranked = list.filter(r => r.leadCalls >= 10)
+  const maxClubs = Math.max(1, ...ranked.map(r => r.clubs))
+  for (const r of list) {
+    r.rankable = r.leadCalls >= 10
+    r.score = r.rankable ? Math.round(100 * (0.45 * (r.bookingPct || 0) / 100 + 0.25 * r.clubs / maxClubs + 0.30 * (r.qa ?? 70) / 100)) : null
+  }
+  list.sort((a, b) => (b.score ?? -1) - (a.score ?? -1) || b.booked - a.booked)
+  return { month: `${p.year}-${p.month}`, generatedAt: new Date().toISOString(), csrs: list.map(({ key, ...r }) => r) }
+}
+app.get('/api/tv/csr-month', async (req, res) => {
+  try {
+    if (_tvCsrMonth && _tvCsrMonth.expires > Date.now()) return res.json(_tvCsrMonth.data)
+    const data = await buildCsrMonth()
+    _tvCsrMonth = { data, expires: Date.now() + 15 * 60_000 }
+    res.json(data)
+  } catch (err) {
+    console.error('tv csr month:', err.message)
+    if (_tvCsrMonth) return res.json(_tvCsrMonth.data)
+    res.status(500).json({ error: err.message })
+  }
+})
+
 app.get('/api/tv/wins-today', async (req, res) => {
   try {
     if (_tvWinsCache && _tvWinsCache.expires > Date.now()) return res.json(_tvWinsCache.data)

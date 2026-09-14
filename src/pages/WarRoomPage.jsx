@@ -72,6 +72,7 @@ export default function WarRoomPage() {
   const [ticker, setTicker] = useState({ enabled: false, messages: [] })
   const [board, setBoard] = useState(null)   // 3-day call board (today column shown)
   const [sales, setSales] = useState([])     // estimates SOLD today (tech wins)
+  const [csrMonth, setCsrMonth] = useState(null)   // month-to-date CSR ranking (booking % · clubs · QA)
   const [wins, setWins] = useState({ reviews: [], memberships: [], bonus: null })   // 5★ / club sales / 🎯 unlock
   const rootRef = useRef(null)
   // Wall look survives reloads; the page updates itself when a build lands.
@@ -82,12 +83,14 @@ export default function WarRoomPage() {
     const load = () => fetch('/api/board/3day').then(r => r.json()).then(setBoard).catch(() => {})
     const loadSales = () => fetch('/api/tv/sales-today').then(r => r.json()).then(d => setSales(d.sales || [])).catch(() => {})
     const loadWins = () => fetch('/api/tv/wins-today').then(r => r.json()).then(d => setWins({ reviews: d.reviews || [], memberships: d.memberships || [], bonus: d.bonus || null })).catch(() => {})
-    loadSales(); loadWins()
+    const loadMonth = () => fetch('/api/tv/csr-month').then(r => r.json()).then(d => setCsrMonth(d)).catch(() => {})
+    loadSales(); loadWins(); loadMonth()
+    const tm = setInterval(loadMonth, 5 * 60_000)
     const ts = setInterval(loadSales, 2 * 60_000)
     const tw = setInterval(loadWins, 5 * 60_000)
     load()
     const t = setInterval(load, 90_000)
-    return () => { clearInterval(t); clearInterval(ts); clearInterval(tw) }
+    return () => { clearInterval(t); clearInterval(ts); clearInterval(tw); clearInterval(tm) }
   }, [])
 
 
@@ -181,6 +184,8 @@ export default function WarRoomPage() {
     r.inbound = (r.inbound || 0) + 1
   })
   const leaderboard = Object.values(repStats).sort((a, b) => b.booked - a.booked || b.calls - a.calls)
+  const monthly = (csrMonth?.csrs || []).slice(0, 10)
+  const monthName = new Date().toLocaleDateString('en-US', { month: 'long' })
 
   const agents = [...floor].sort((a, b) =>
     (STATUS_ORDER[a.status] ?? 6) - (STATUS_ORDER[b.status] ?? 6) || (a.name||'').localeCompare(b.name||''))
@@ -343,21 +348,22 @@ export default function WarRoomPage() {
       {/* Main grid */}
       <div style={{ display:'grid', gridTemplateColumns:'1.25fr 1fr 1fr', gap:14, flex:1, minHeight:0 }}>
 
-        {/* Leaderboard — animated */}
-        <Panel title="TODAY'S LEADERBOARD" icon="🏆">
-          <div style={{ position:'relative', height: Math.max(leaderboard.length * ROW_H, 40), padding:'6px 0' }}>
-            {leaderboard.length === 0 && (
-              <div style={{ padding:'30px 20px', color:C.muted, fontSize:14, textAlign:'center' }}>No calls logged yet today</div>
+        {/* Monthly leaderboard — same idea as the department TVs' tech ranking:
+            booking % · clubs · call QA into one score, month to date, medals. */}
+        <Panel title={`${monthName.toUpperCase()} LEADERBOARD`} icon="🏆">
+          <div style={{ position:'relative', height: Math.max(monthly.length * ROW_H, 40), padding:'6px 0' }}>
+            {!csrMonth && <div style={{ padding:'30px 20px', color:C.muted, fontSize:14, textAlign:'center' }}>Loading the month…</div>}
+            {csrMonth && monthly.length === 0 && (
+              <div style={{ padding:'30px 20px', color:C.muted, fontSize:14, textAlign:'center' }}>No lead calls yet this month</div>
             )}
-            {leaderboard.map((d, i) => {
-              const conv = d.calls ? Math.round((d.booked / d.calls) * 100) : 0
-              const active = d.lastCall && (Date.now() - new Date(d.lastCall)) < 15 * 60 * 1000
-              const p = byName[d.rep]
-              const isLeader = i === 0 && d.booked > 0
-              const medal = ['🥇','🥈','🥉'][i]
+            {monthly.map((d, i) => {
+              const p = byName[d.name]
+              const isLeader = i === 0 && d.rankable
+              const medal = d.rankable ? ['🥇','🥈','🥉'][i] : null
+              const pctColor = d.bookingPct == null ? C.muted : d.bookingPct >= 80 ? C.green : d.bookingPct >= 65 ? C.amber : C.red
               return (
-                <div key={d.rep} style={{ position:'absolute', left:0, right:0, top:i * ROW_H + 6, height:ROW_H - 8,
-                  transition:'top .6s cubic-bezier(.22,1,.36,1)', padding:'0 16px', display:'flex', alignItems:'center', gap:12 }}>
+                <div key={d.profileId || d.name} style={{ position:'absolute', left:0, right:0, top:i * ROW_H + 6, height:ROW_H - 8,
+                  transition:'top .6s cubic-bezier(.22,1,.36,1)', padding:'0 16px', display:'flex', alignItems:'center', gap:12, opacity: d.rankable ? 1 : .6 }}>
                   <div style={{ width:34, textAlign:'center', fontSize:medal ? 24 : 16, fontWeight:800, color: medal ? undefined : C.dim, flexShrink:0 }}>
                     {medal || `#${i+1}`}
                   </div>
@@ -366,22 +372,20 @@ export default function WarRoomPage() {
                     border:`2px solid ${isLeader ? C.amber : C.border}`, color: isLeader ? '#000' : C.text,
                     display:'flex', alignItems:'center', justifyContent:'center', fontSize: p?.avatar ? 22 : 14, fontWeight:800,
                     boxShadow: isLeader ? `0 0 18px ${C.amber}66` : 'none' }}>
-                    <Avatar avatar={p?.avatar} name={d.rep} />
+                    <Avatar avatar={p?.avatar} name={d.name} />
                   </div>
                   <div style={{ flex:1, minWidth:0 }}>
-                    <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-                      <span style={{ fontSize:16, fontWeight:700, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{d.rep}</span>
-                      {active && <div style={{ width:7, height:7, borderRadius:'50%', background:C.green, animation:'wr-pulse 1.5s infinite', flexShrink:0 }} />}
-                    </div>
-                    <div style={{ display:'flex', gap:12, marginTop:3, fontSize:12, color:C.muted }}>
-                      <span>{d.calls} calls</span>
-                      {d.inbound ? <span>{d.inbound} inbound</span> : null}
-                      <span style={{ color: conv >= 15 ? C.green : C.muted }}>{conv}% conv</span>
+                    <div style={{ fontSize:16, fontWeight:700, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{d.name}</div>
+                    <div style={{ display:'flex', gap:12, marginTop:3, fontSize:12, color:C.muted, whiteSpace:'nowrap' }}>
+                      <span>{d.booked}/{d.leadCalls} booked</span>
+                      <span style={{ color: d.clubs ? C.purple : C.muted }}>{d.clubs} club{d.clubs === 1 ? '' : 's'}</span>
+                      <span style={{ color: d.qa == null ? C.muted : d.qa >= 85 ? C.green : d.qa >= 75 ? C.amber : C.red }}>{d.qa == null ? 'QA —' : `QA ${d.qa}%`}</span>
+                      {!d.rankable && <span>{10 - d.leadCalls} more lead calls to rank</span>}
                     </div>
                   </div>
                   <div style={{ textAlign:'right', flexShrink:0 }}>
-                    <div style={{ fontSize:30, fontWeight:800, color:C.green, lineHeight:1, fontVariantNumeric:'tabular-nums' }}>{d.booked}</div>
-                    <div style={{ fontSize:10, color:C.muted, textTransform:'uppercase', letterSpacing:.5 }}>Booked</div>
+                    <div style={{ fontSize:30, fontWeight:800, color:pctColor, lineHeight:1, fontVariantNumeric:'tabular-nums' }}>{d.bookingPct == null ? '—' : `${d.bookingPct}%`}</div>
+                    <div style={{ fontSize:10, color:C.muted, textTransform:'uppercase', letterSpacing:.5 }}>Booking{d.score != null ? ` · score ${d.score}` : ''}</div>
                   </div>
                 </div>
               )
