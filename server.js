@@ -4735,38 +4735,59 @@ app.get('/api/admin/csr-coaching', async (req, res) => {
       }
     }).sort((a, b) => b.qa - a.qa)
 
-    // One AI pass writes every card — grounded in the aggregates only.
+    // One AI pass writes every card — grounded in the aggregates only. A
+    // hiccup here used to save and cache BARE cards (September read as a
+    // different page from August): now it retries, matches names loosely,
+    // and falls back to the last good text for anyone it can't write.
     let coached = new Map()
     if (ANTHROPIC_KEY && aggregates.length) {
-      try {
-        const r = await fetch('https://api.anthropic.com/v1/messages', {
-          method: 'POST',
-          headers: { 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-          body: JSON.stringify({
-            model: 'claude-sonnet-5', max_tokens: 4000,
-            system: 'You write monthly coaching snapshots for inbound CSRs at a home-services company, addressed to the coaches (Brittany and Deanna), grounded ONLY in the per-criterion aggregates provided. For each CSR: 1-2 "working" points naming their strong behaviors, 1-2 "coach" points naming the exact behavior and miss frequency (e.g. "missed email capture on 6 of 9 calls"), and ONE specific drill for the next coaching session. Coach the behavior, never the person. Under 3 evals = say the sample is thin and keep it light.',
-            tools: [{
-              name: 'submit_snapshots',
-              description: 'Submit coaching snapshots',
-              input_schema: { type: 'object', properties: { csrs: { type: 'array', items: { type: 'object', properties: {
-                name: { type: 'string' },
-                working: { type: 'array', items: { type: 'string' } },
-                coach: { type: 'array', items: { type: 'string' } },
-                drill: { type: 'string', description: 'One concrete exercise for the next coaching session' },
-              }, required: ['name', 'working', 'coach', 'drill'] } } }, required: ['csrs'] },
-            }],
-            tool_choice: { type: 'tool', name: 'submit_snapshots' },
-            messages: [{ role: 'user', content: `Month: ${month}. Per-CSR eval aggregates:\n${JSON.stringify(aggregates)}` }],
-          }),
-        })
-        const out = (await r.json())?.content?.find(c => c.type === 'tool_use')?.input
-        for (const c of (out?.csrs || [])) coached.set(c.name, c)
-      } catch (e) { console.warn('csr coaching ai:', e.message) }
+      for (let attempt = 0; attempt < 2 && !coached.size; attempt++) {
+        try {
+          if (attempt) await new Promise(r => setTimeout(r, 2500))
+          const r = await fetch('https://api.anthropic.com/v1/messages', {
+            method: 'POST',
+            headers: { 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+            body: JSON.stringify({
+              model: 'claude-sonnet-5', max_tokens: 6000,
+              system: 'You write monthly coaching snapshots for inbound CSRs at a home-services company, addressed to the coaches (Brittany and Deanna), grounded ONLY in the per-criterion aggregates provided. For EVERY CSR in the list, using their name EXACTLY as given: 1-2 "working" points naming their strong behaviors, 1-2 "coach" points naming the exact behavior and miss frequency (e.g. "missed email capture on 6 of 9 calls"), and ONE specific drill for the next coaching session. Coach the behavior, never the person. Under 3 evals = say the sample is thin and keep it light.',
+              tools: [{
+                name: 'submit_snapshots',
+                description: 'Submit coaching snapshots',
+                input_schema: { type: 'object', properties: { csrs: { type: 'array', items: { type: 'object', properties: {
+                  name: { type: 'string' },
+                  working: { type: 'array', items: { type: 'string' } },
+                  coach: { type: 'array', items: { type: 'string' } },
+                  drill: { type: 'string', description: 'One concrete exercise for the next coaching session' },
+                }, required: ['name', 'working', 'coach', 'drill'] } } }, required: ['csrs'] },
+              }],
+              tool_choice: { type: 'tool', name: 'submit_snapshots' },
+              messages: [{ role: 'user', content: `Month: ${month}. Per-CSR eval aggregates:\n${JSON.stringify(aggregates)}` }],
+            }),
+          })
+          const body = await r.json()
+          if (!r.ok) throw new Error(`${r.status} ${JSON.stringify(body?.error || body).slice(0, 200)}`)
+          const out = body?.content?.find(c => c.type === 'tool_use')?.input
+          for (const c of (out?.csrs || [])) if (c?.name) coached.set(normKey(c.name), c)
+          if (!coached.size) throw new Error('no snapshots in the response')
+        } catch (e) { console.warn(`csr coaching ai (attempt ${attempt + 1}):`, e.message) }
+      }
+    }
+    // Last good text per CSR, so a bad AI minute never blanks a card.
+    let prevText = new Map()
+    try {
+      const { data: c } = await supabase.from('app_settings').select('value').eq('key', cacheKey).maybeSingle()
+      for (const card of (c?.value ? JSON.parse(c.value)?.cards || [] : [])) if (card.drill) prevText.set(normKey(String(card.name).replace(' (departed)', '')), { working: card.working, coach: card.coach, drill: card.drill })
+    } catch {}
+    const textFor = (a) => {
+      const k = normKey(String(a.name).replace(' (departed)', ''))
+      const c = coached.get(k) || coached.get(normKey(a.name))
+      if (c) return { working: c.working || [], coach: c.coach || [], drill: c.drill || '' }
+      return prevText.get(k) || {}
     }
 
     const payload = {
       month, evalCount: rows.length, generatedAt: new Date().toISOString(),
-      cards: aggregates.map(a => ({ ...a, ...(coached.get(a.name) || {}) })),
+      cards: aggregates.map(a => ({ ...a, ...textFor(a) })),
     }
     try {
       await supabase.from('app_settings').upsert({ key: cacheKey, value: JSON.stringify(payload) }, { onConflict: 'key' })
