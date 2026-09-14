@@ -4634,16 +4634,26 @@ app.get('/api/tv/department/:trade', async (req, res) => {
     techs = techs.map(x => ({
       ...x, ytd: _tvYear.data?.ytdTech?.[String(x.id)] || { sold: 0, fiveStar: 0, memberships: 0 },
     }))
+    // A refund posted before the day's work invoices reads as negative
+    // revenue on a wall TV (−$500 HVAC at 7 AM, Sep 14). Brandyn: floor at
+    // zero, never show less. The refund still nets against the day's total.
+    const floor0 = (o) => {
+      if (!o || typeof o !== 'object') return o
+      const r = { ...o }
+      for (const k of ['revenue', 'sales', 'sold']) if (typeof r[k] === 'number' && r[k] < 0) r[k] = 0
+      if (r.ytd && typeof r.ytd === 'object') r.ytd = floor0(r.ytd)
+      return r
+    }
     res.json({
       trade: isCompany ? 'Company' : trade,
       // The stamp tracks the DAY tier — that's what a wall viewer means by
       // "updated". Month/year age on their own schedules (1h / 6h).
       updatedAt: new Date(_tvDay.at || Date.now()).toISOString(),
-      daily: isCompany ? sumDept(_tvDay.data?.dept) : pick(_tvDay.data?.dept?.[trade]),
-      monthly: isCompany ? sumDept(month?.dept) : pick(month?.dept?.[trade]),
-      yearly: isCompany ? sumDept(_tvYear.data?.dept) : pick(_tvYear.data?.dept?.[trade]),
-      techs,
-      installers,
+      daily: floor0(isCompany ? sumDept(_tvDay.data?.dept) : pick(_tvDay.data?.dept?.[trade])),
+      monthly: floor0(isCompany ? sumDept(month?.dept) : pick(month?.dept?.[trade])),
+      yearly: floor0(isCompany ? sumDept(_tvYear.data?.dept) : pick(_tvYear.data?.dept?.[trade])),
+      techs: techs.map(floor0),
+      installers: installers.map(floor0),
       feed,
     })
   } catch (e) {
