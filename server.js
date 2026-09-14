@@ -10,6 +10,7 @@ import { renderBoardEmail, boardEmailSubject } from './lib/boardEmail.js'
 import { computeBattingOrder, computeZipValue, computeJobTypeOrder, DEFAULT_WEIGHTS, NON_DISPATCH_TEAM } from './lib/dispatchMetrics.js'
 import { driveTimes, straightLine, pairKey, driveTimeEnabled, geocode, suggestAddresses } from './lib/driveTime.js'
 import { buildDailyDigest } from './lib/dailyDigest.js'
+import { loadAdminAgents } from './lib/adminAgents.js'
 import { buildDepartmentBrief, buildTechnicianPerformance, buildOpenEstimates, buildPeriodSummary, buildTrend, buildLeadSources, buildRecentJobs, buildCompanyOverview, buildReceivables, buildDailyMetrics, normalizeDept } from './lib/departmentBrief.js'
 import { gatherWeeklyFacts, generateAgendaAI, renderLeadershipHtml, latestCompletedSunday, upcomingSunday } from './lib/leadershipReport.js'
 import { parseAdpUpload, aggregateAdpActuals, REGISTER_BURDEN_DEFAULTS } from './lib/adpInvoice.js'
@@ -4800,6 +4801,9 @@ async function evaluateCall({ callSid, recordingSid, duration, e }) {
       .select('agent_name, agent_profile_id').eq('call_sid', callSid).maybeSingle()
     if (ct) { rep = ct.agent_name || rep; profileId = ct.agent_profile_id || null }
   } catch {}
+  // Admins' calls are test calls and phone cover — never graded.
+  const admins = await loadAdminAgents(supabase)
+  if (admins.isAdminProfile(profileId) || admins.isAdminName(rep)) return
 
   // Who called — inbound callers usually aren't in Andi's contacts (that's
   // the outbound list), but ServiceTitan knows them. Same lookup the
@@ -4992,6 +4996,9 @@ async function sweepStEvals(dateStr, { limit = Number(process.env.ST_EVAL_MAX) |
     out.registered = regRows.length
   } catch (e) { console.warn('st recordings register:', e.message) }
 
+  // Admins (Brandyn, Deanna, Brittany) make test calls and cover phones —
+  // not CSR performance, never graded (Brandyn, Sep 14).
+  const admins = await loadAdminAgents(supabase)
   const cands = []
   for (const c of (calls || [])) {
     const lc = c.leadCall || c
@@ -5002,6 +5009,7 @@ async function sweepStEvals(dateStr, { limit = Number(process.env.ST_EVAL_MAX) |
     if (/dispatch/i.test((lc.campaign || {}).name || '')) continue
     const agent = (lc.agent || {}).name || ''
     if (!agent || /revin/i.test(agent)) continue   // no agent / AI receptionist
+    if (admins.isAdminCall(lc)) continue
     const dur = stDurSec(lc.duration)
     if (dur == null || dur < (cfg.minSeconds || 60)) continue
     cands.push({ lc, dur, agent: agent.trim(), agentId: (lc.agent || {}).id })
@@ -10687,7 +10695,7 @@ app.get('/api/brief/leads', async (req, res) => {
   const trade = effectiveTrade(grant, req)
   if (!trade) return res.status(401).json({ error: 'Invalid or missing brief token' })
   try {
-    const out = await buildLeadSources({ stPageAll, tenantId: ST_TENANT_ID, trade, days: req.query.days })
+    const out = await buildLeadSources({ stPageAll, supabase, tenantId: ST_TENANT_ID, trade, days: req.query.days })
     res.json({ ...out, for: grant.name || trade })
   } catch (err) { res.status(500).json({ error: err.message }) }
 })
@@ -10710,7 +10718,7 @@ app.get('/api/brief/daily', async (req, res) => {
   const trade = effectiveTrade(grant, req)
   if (!trade) return res.status(401).json({ error: 'Invalid or missing brief token' })
   try {
-    const out = await buildDailyMetrics({ stPageAll, tenantId: ST_TENANT_ID, trade, days: req.query.days })
+    const out = await buildDailyMetrics({ stPageAll, supabase, tenantId: ST_TENANT_ID, trade, days: req.query.days })
     res.json({ ...out, for: grant.name || trade })
   } catch (err) { res.status(500).json({ error: err.message }) }
 })
@@ -10899,7 +10907,7 @@ METRIC DEFINITIONS — these are calibrated to the company's leadership sheet; n
 - Sales = sales/v2 estimates with status.name "Sold", summing subtotal, in a soldAfter/soldBefore window. Trade from businessUnitName (hvac/plumb/electric/garage substrings).
 - Revenue = accounting/v2 invoices summing subTotal (NOT total). Invoice dates are DATE-ONLY: bound them T00:00:00Z→T23:59:59Z on calendar days.
 - Close rate = converted opportunities ÷ opportunities. Opportunity = a ran job with estimate activity OR job total >= $90 (ST's conversion threshold), EXCLUDING install-typed jobs entirely (an install fulfills an estimate already sold earlier — owner's rule) and maintenance/callback job types. Converted = a Sold estimate on the job OR job total >= $90 (techs invoice repairs directly; $89 trip-fee-only visits never count).
-- Booking % = telecom/v2 inbound calls: Booked ÷ (Booked + Unbooked) by callType. NEVER count Excused/NotLead/Abandoned as leads.
+- Booking % = telecom/v2 inbound calls: Booked ÷ (Booked + Unbooked) by callType. NEVER count Excused/NotLead/Abandoned as leads. Calls taken by admin-role users (owners/managers: test calls, phone cover) are excluded from booking % and call QA.
 - Booked calls (per person) = jpm/v2 jobs where createdById = their ST user id, createdOn in window. This matches ST's own reports.
 - Memberships = memberships/v2 created in window. 5★ reviews = marketingreputation/v2 reviews rating>=5.
 - A Denver business day is T06:00:00Z → next day T06:00:00Z (MDT).
