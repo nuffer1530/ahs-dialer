@@ -212,7 +212,10 @@ textarea.form-input { resize: vertical; min-height: 72px; }
   [style*="grid-template-columns"]:not(.mgrid) { grid-template-columns: minmax(0, 1fr) !important; }
   [style*="position: sticky"] { position: static !important; }
   [style*="min-width"]:not(.mkeep):not(input):not(select):not(button):not(table):not(td):not(th) { min-width: 0 !important; }
-  aside[style*="position: fixed"] { width: 100vw !important; min-width: 0 !important; }
+  /* The app shell is 100vh; on iOS that is taller than what is visible under
+     Safari's toolbar, which hid the bottom tab bar. dvh is the visible height. */
+  .app-shell { height: 100dvh !important; }
+  .app-shell.has-tabbar { --tabbar-h: calc(52px + env(safe-area-inset-bottom)); }
   .mgrid { overflow-x: auto; }
   html { -webkit-text-size-adjust: 100%; }
   input, select, textarea { font-size: 16px !important; }   /* iOS zooms the page on smaller inputs */

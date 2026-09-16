@@ -110,7 +110,7 @@ export default function AskAndi() {
       {!open && (
         <button onClick={() => setOpen(true)} title="Ask Andi — policies, objections, how-tos"
           className="pulse-mark"
-          style={{ position: 'fixed', bottom: 22, right: 22, zIndex: 1500, width: 52, height: 52, borderRadius: 16,
+          style={{ position: 'fixed', bottom: 'calc(22px + var(--tabbar-h, 0px))', right: 22, zIndex: 1500, width: 52, height: 52, borderRadius: 16,
             border: '1px solid rgba(255,117,31,.25)', background: '#111318', cursor: 'pointer',
             boxShadow: '0 10px 30px rgba(255,117,31,.35), 0 4px 14px rgba(0,0,0,.35)',
             display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -121,7 +121,7 @@ export default function AskAndi() {
       )}
 
       {open && (
-        <div style={{ position: 'fixed', bottom: 22, right: 22, zIndex: 1500, width: 390, maxWidth: 'calc(100vw - 44px)',
+        <div style={{ position: 'fixed', bottom: 'calc(22px + var(--tabbar-h, 0px))', right: 22, zIndex: 1500, width: 390, maxWidth: 'calc(100vw - 44px)',
           height: 540, maxHeight: 'calc(100vh - 100px)', background: 'var(--surface)', borderRadius: 16,
           border: '1px solid var(--border)', boxShadow: '0 16px 48px rgba(0,0,0,.35)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
 

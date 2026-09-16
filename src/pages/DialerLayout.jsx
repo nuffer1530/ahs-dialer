@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { Routes, Route, NavLink, useNavigate, useLocation } from 'react-router-dom'
+import { Routes, Route, NavLink, Navigate, useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../lib/AuthContext'
 import WeatherStrip from '../components/WeatherStrip'
 import AskAndi from '../components/AskAndi'
@@ -387,6 +387,9 @@ function DialerLayoutInner() {
   const [showStatusMenu, setShowStatusMenu] = useState(false)
   const [showSidebarStatus, setShowSidebarStatus] = useState(false)
   const isMobile = useIsMobile()
+  // Touch device at phone width — decided once so a narrow desktop window never loses the dialer.
+  const [isHandheld] = useState(() => typeof window !== 'undefined' && !!window.matchMedia
+    && window.matchMedia('(max-width: 768px) and (pointer: coarse)').matches)
   const [mobileNav, setMobileNav] = useState(false)
   const [statusDuration, setStatusDuration] = useState(0)
   const statusTimerRef = useRef(null)
@@ -649,7 +652,7 @@ function DialerLayoutInner() {
   useEffect(() => { setMobileNav(false) }, [location.pathname])
 
   return (
-    <div style={{ display:'flex', height:'100vh', overflow:'hidden' }}>
+    <div className={`app-shell${isMobile && !isWall ? ' has-tabbar' : ''}`} style={{ display:'flex', height:'100vh', overflow:'hidden' }}>
       <WinCelebration />
 
       {isMobile && mobileNav && (
@@ -948,7 +951,8 @@ function DialerLayoutInner() {
         <ScheduleAlerts />
         <div style={isMobile && !isWall ? { flex:1, minHeight:0, display:'flex', flexDirection:'column', overflow:'hidden' } : { display:'contents' }}>
         <Routes>
-          <Route path="/" element={<DialerPage />} />
+          {/* A phone is for looking, not dialing — the dialer is desktop-only. */}
+          <Route path="/" element={isHandheld ? <Navigate to="/analytics" replace /> : <DialerPage />} />
           <Route path="/live" element={<LivePage />} />
           <Route path="/callboard" element={<CallBoardPage />} />
           {canDispatch && <Route path="/dispatch" element={<DispatchPage />} />}
