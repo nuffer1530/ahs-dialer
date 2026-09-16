@@ -972,14 +972,14 @@ export default function AttendancePage() {
                       <button className="btn sm primary" onClick={saveWfmCfg}>Save</button>
                     </div>
                   </div>
-                  <div className={isMobile ? 'mgrid' : undefined} style={{ display:'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : 'repeat(auto-fit, minmax(150px, 1fr))', gap:12 }}>
+                  <div className={isMobile ? 'mgrid' : undefined} style={{ display:'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : 'repeat(auto-fit, minmax(150px, 1fr))', gap:12, alignItems:'end' }}>
                     {[
                       ['late', 'Late arrival (pts)'],
                       ['absence', 'Unexcused absence (pts)'],
                       ['early_departure', 'Early departure (pts)'],
                       ['no_call', 'No call / no show (pts)'],
                     ].map(([k, label]) => (
-                      <div key={k} className="form-field">
+                      <div key={k} className="form-field" style={{ marginBottom:0 }}>
                         <label className="form-label" style={{ fontSize:11 }}>{label}</label>
                         <input className="form-input" type="number" step="0.5" min="0" value={wfmCfg.points[k]}
                           onChange={e => setWfmCfg(f => ({ ...f, points: { ...f.points, [k]: Number(e.target.value) } }))} />
@@ -991,7 +991,7 @@ export default function AttendancePage() {
                       ['adherenceGood', 'Adherence green ≥ (%)'],
                       ['adherenceWarn', 'Adherence amber ≥ (%)'],
                     ].map(([k, label]) => (
-                      <div key={k} className="form-field">
+                      <div key={k} className="form-field" style={{ marginBottom:0 }}>
                         <label className="form-label" style={{ fontSize:11 }}>{label}</label>
                         <input className="form-input" type="number" min="0" value={wfmCfg[k]}
                           onChange={e => setWfmCfg(f => ({ ...f, [k]: Number(e.target.value) }))} />
@@ -1034,12 +1034,12 @@ export default function AttendancePage() {
                         <tbody>
                           {pts.map(pt => (
                             <tr key={pt.id}>
-                              <td style={{ padding:'8px 12px', fontSize:12 }}>{pt.date}</td>
+                              <td style={{ padding:'8px 12px', fontSize:12, whiteSpace:'nowrap' }}>{new Date(pt.date + 'T12:00:00').toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' })}</td>
                               <td style={{ padding:'8px 12px', fontSize:12 }}>{POINT_REASONS.find(r => r.value === pt.reason)?.label || pt.reason}</td>
                               <td style={{ padding:'8px 12px', fontSize:13, fontWeight:700, textAlign:'center', color: parseFloat(pt.points) >= 1 ? 'var(--danger)' : '#f59e0b' }}>{parseFloat(pt.points).toFixed(1)}</td>
                               <td style={{ padding:'8px 12px', fontSize:11, color:'var(--text-muted)' }}>{pt.notes || '—'}</td>
                               {isAdmin && (
-                                <td style={{ padding:'8px 12px', whiteSpace:'nowrap' }}>
+                                <td style={{ padding:'8px 12px', whiteSpace:'nowrap', textAlign:'right' }}>
                                   <button className="btn sm" style={{ marginRight:6 }} onClick={() => editPoint(pt)}>Edit</button>
                                   <button className="btn sm danger" onClick={() => deletePoint(pt.id)}>Remove</button>
                                 </td>
