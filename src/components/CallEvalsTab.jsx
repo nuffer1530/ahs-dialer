@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { sb } from '../lib/supabase'
+import { useIsMobile } from '../lib/useIsMobile'
 import EvalModal, { ScoreChip } from './EvalModal'
 
 // My Page → Call Evals. Reps see their own scored inbound calls; admins see
@@ -19,6 +20,10 @@ export default function CallEvalsTab({ profile, isAdmin, defaultView }) {
   const [view, setView] = useState(defaultView || 'list')   // list | snapshots
   const [snap, setSnap] = useState(null)
   const [snapBusy, setSnapBusy] = useState(false)
+  // Phone layout (≤768px): filters pair up across rows, list rows stack the
+  // summary under the name, and controls clear 40px for a thumb.
+  const isMobile = useIsMobile()
+  const tap = isMobile ? { minHeight: 40 } : undefined
 
   const loadSnapshots = async (refresh) => {
     setSnapBusy(true)
@@ -107,18 +112,20 @@ export default function CallEvalsTab({ profile, isAdmin, defaultView }) {
 
   return (
     <div>
+      {/* Filter bar — on a phone: month + view share the first row, the rest
+          pair up two to a row, and the average gets a row of its own. */}
       <div style={{ display: 'flex', alignItems: 'flex-end', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
-        <div>
+        <div style={isMobile ? { flex: '1 1 30%' } : undefined}>
           <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: .6, color: 'var(--text-muted)', marginBottom: 4 }}>Month</div>
-          <input type="month" className="form-input" value={month} onChange={e => e.target.value && setMonth(e.target.value)} />
+          <input type="month" className="form-input" value={month} onChange={e => e.target.value && setMonth(e.target.value)} style={tap} />
         </div>
         {isAdmin && (
-          <div>
+          <div style={isMobile ? { flex: '1 1 60%' } : undefined}>
             <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: .6, color: 'var(--text-muted)', marginBottom: 4 }}>View</div>
             <div style={{ display: 'flex', border: '1px solid var(--border)', borderRadius: 'var(--radius)', overflow: 'hidden' }}>
               {[['list', 'All evals'], ['snapshots', 'Coaching snapshots']].map(([k, l]) => (
                 <button key={k} onClick={() => setView(k)}
-                  style={{ padding: '8px 13px', fontSize: 12.5, fontWeight: 600, border: 'none', cursor: 'pointer',
+                  style={{ padding: '8px 13px', fontSize: 12.5, fontWeight: 600, border: 'none', cursor: 'pointer', flex: isMobile ? 1 : undefined, ...tap,
                     background: view === k ? 'var(--accent)' : 'var(--surface)', color: view === k ? '#fff' : 'var(--text-secondary)' }}>
                   {l}
                 </button>
@@ -127,9 +134,9 @@ export default function CallEvalsTab({ profile, isAdmin, defaultView }) {
           </div>
         )}
         {isAdmin && view === 'list' && (
-          <div>
+          <div style={isMobile ? { flex: '1 1 45%' } : undefined}>
             <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: .6, color: 'var(--text-muted)', marginBottom: 4 }}>Rep</div>
-            <select className="form-input" value={repFilter} onChange={e => setRepFilter(e.target.value)} style={{ minWidth: 160 }}>
+            <select className="form-input" value={repFilter} onChange={e => setRepFilter(e.target.value)} style={{ minWidth: isMobile ? 0 : 160, ...tap }}>
               <option value="">Whole team</option>
               {profiles.map(p => (
                 <option key={p.id} value={`id:${p.id}`}>
@@ -144,20 +151,20 @@ export default function CallEvalsTab({ profile, isAdmin, defaultView }) {
             </select>
           </div>
         )}
-        <div>
+        <div style={isMobile ? { flex: '1 1 45%' } : undefined}>
           <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: .6, color: 'var(--text-muted)', marginBottom: 4 }}>Search</div>
           <input className="form-input" value={search} onChange={e => setSearch(e.target.value)}
-            placeholder="Caller, rep, phone, or summary…" style={{ minWidth: 200 }} />
+            placeholder="Caller, rep, phone, or summary…" style={{ minWidth: isMobile ? 0 : 200, ...tap }} />
         </div>
-        <div>
+        <div style={isMobile ? { flex: '1 1 45%' } : undefined}>
           <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: .6, color: 'var(--text-muted)', marginBottom: 4 }}>Sort</div>
-          <select className="form-input" value={sortBy} onChange={e => setSortBy(e.target.value)} style={{ minWidth: 150 }}>
+          <select className="form-input" value={sortBy} onChange={e => setSortBy(e.target.value)} style={{ minWidth: isMobile ? 0 : 150, ...tap }}>
             <option value="newest">Newest first</option>
             <option value="lowest">Lowest score first</option>
             <option value="highest">Highest score first</option>
           </select>
         </div>
-        <div style={{ marginLeft: 'auto', textAlign: 'right' }}>
+        <div style={isMobile ? { flex: '1 1 100%', display: 'flex', alignItems: 'baseline', gap: 8 } : { marginLeft: 'auto', textAlign: 'right' }}>
           <div style={{ fontSize: 26, fontWeight: 900, color: `var(--tone-${avgTone}-tx)`, lineHeight: 1 }}>{avg == null ? '—' : `${avg}%`}</div>
           <div style={{ fontSize: 10.5, color: 'var(--text-muted)', marginTop: 3 }}>
             avg of {searched.length} evaluated call{searched.length === 1 ? '' : 's'} · feeds the Call Quality KPI
@@ -167,13 +174,13 @@ export default function CallEvalsTab({ profile, isAdmin, defaultView }) {
 
       {isAdmin && view === 'snapshots' ? (
         <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, flexWrap: isMobile ? 'wrap' : undefined }}>
             <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
               {snapBusy ? 'Building snapshots from this month\u2019s evaluations…' : snap ? `${snap.evalCount} evals distilled · generated ${new Date(snap.generatedAt).toLocaleString('en-US', { timeZone: 'America/Denver', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}` : ''}
             </div>
             <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
-              <button className="btn sm" disabled={snapBusy} onClick={() => loadSnapshots(true)}>Regenerate</button>
-              <button className="btn sm primary" disabled={!snap?.cards?.length} onClick={printSnapshots}>Print</button>
+              <button className="btn sm" disabled={snapBusy} onClick={() => loadSnapshots(true)} style={tap}>Regenerate</button>
+              <button className="btn sm primary" disabled={!snap?.cards?.length} onClick={printSnapshots} style={tap}>Print</button>
             </div>
           </div>
           {snapBusy && !snap && <div className="spinner lg" style={{ margin: '40px auto' }} />}
@@ -219,9 +226,19 @@ export default function CallEvalsTab({ profile, isAdmin, defaultView }) {
         </div>
       ) : (
         <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden' }}>
-          {sorted.map((r, i) => (
+          {sorted.map((r, i) => {
+            // The summary shares the name column on desktop (one line, clipped);
+            // on a phone it takes its own full-width line under score, name and
+            // time, allowed two lines before it's clipped.
+            const summary = r.summary && (
+              <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: isMobile ? 'normal' : 'nowrap',
+                ...(isMobile ? { flex: '1 1 100%', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' } : {}) }}>
+                {r.summary}
+              </div>
+            )
+            return (
             <div key={r.id} onClick={() => setOpen(r)}
-              style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', cursor: 'pointer',
+              style={{ display: 'flex', alignItems: 'center', gap: isMobile ? '4px 12px' : 12, padding: '10px 14px', cursor: 'pointer', flexWrap: isMobile ? 'wrap' : undefined,
                 borderBottom: i < sorted.length - 1 ? '1px solid var(--border)' : 'none' }}
               onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
               onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
@@ -231,17 +248,15 @@ export default function CallEvalsTab({ profile, isAdmin, defaultView }) {
                   {r.contact_name || (r.phone ? `(${String(r.phone).slice(0,3)}) ${String(r.phone).slice(3,6)}-${String(r.phone).slice(6)}` : 'Unknown caller')}
                   {isAdmin && <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}> · {r.rep || '—'}</span>}
                 </div>
-                {r.summary && (
-                  <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {r.summary}
-                  </div>
-                )}
+                {!isMobile && summary}
               </div>
               <div style={{ fontSize: 11, color: 'var(--text-muted)', flexShrink: 0 }}>
                 {new Date(r.call_at || r.created_at).toLocaleString('en-US', { timeZone: 'America/Denver', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
               </div>
+              {isMobile && summary}
             </div>
-          ))}
+            )
+          })}
         </div>
       )}
 

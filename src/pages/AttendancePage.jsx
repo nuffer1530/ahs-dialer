@@ -3,6 +3,7 @@ import { localYMD, shiftChanged } from '../lib/utils'
 import { sb } from '../lib/supabase'
 import { confirmDlg, toast } from '../lib/dialogs'
 import { useAuth } from '../lib/AuthContext'
+import { useIsMobile } from '../lib/useIsMobile'
 import { ATTENDANCE_DEFAULTS, invalidateOpsConfig, loadOpsConfig } from '../lib/opsConfig'
 import Modal from '../components/Modal'
 import GraphicalSchedule from '../components/GraphicalSchedule'
@@ -114,6 +115,11 @@ const POINT_REASONS = [
 
 export default function AttendancePage() {
   const { profile, isAdmin } = useAuth()
+  // Phone layout: below 768px the tabs scroll, toolbars wrap, and wide tables
+  // scroll inside their card instead of stretching the page. Desktop untouched.
+  const isMobile = useIsMobile()
+  const scrollX = (node) => isMobile ? <div style={{ overflowX:'auto' }}>{node}</div> : node
+  const mBtn = isMobile ? { minHeight:40, flex:'1 1 auto', justifyContent:'center' } : {}
   // Admin-tunable WFM numbers (Settings live in app_settings.attendance_config)
   const [attCfg, setAttCfg] = useState(ATTENDANCE_DEFAULTS)
   const [wfmCfg, setWfmCfg] = useState(null)     // edit buffer for the admin card
@@ -649,7 +655,7 @@ export default function AttendancePage() {
       {/* ── HEADER BAR ── */}
       <div style={{ background:'var(--surface)', borderBottom:'1px solid var(--border)', flexShrink:0 }}>
         {/* Title + week nav row */}
-        <div style={{ padding:'16px 24px 0', display:'flex', alignItems:'flex-start', justifyContent:'flex-end', gap:16 }}>
+        <div style={{ padding: isMobile ? '12px 12px 0' : '16px 24px 0', display:'flex', alignItems:'flex-start', justifyContent: isMobile ? 'center' : 'flex-end', gap:16 }}>
           {(tab === 'schedule' || tab === 'adherence') && (
             <div style={{ display:'flex', alignItems:'center', gap:10, marginTop:2 }}>
               <button onClick={prevWeek}
@@ -672,8 +678,9 @@ export default function AttendancePage() {
         </div>
 
         {/* Tab bar + schedule actions */}
-        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'0 24px', marginTop:10 }}>
-          <div style={{ display:'flex', gap:0 }}>
+        {/* Phone: tabs scroll sideways; the schedule actions drop to their own wrapping row. */}
+        <div style={{ display:'flex', alignItems: isMobile ? 'stretch' : 'center', justifyContent:'space-between', padding: isMobile ? '0 12px' : '0 24px', marginTop:10, flexDirection: isMobile ? 'column' : 'row' }}>
+          <div style={{ display:'flex', gap:0, overflowX: isMobile ? 'auto' : undefined }}>
             {TABS.map(t => {
               const isActive = tab === t.id
               const isHovered = hoveredTab === t.id && !isActive
@@ -687,7 +694,8 @@ export default function AttendancePage() {
                     background: isHovered ? 'var(--surface-2)' : 'transparent',
                     color: isActive ? 'var(--accent)' : isHovered ? 'var(--text-primary)' : 'var(--text-muted)',
                     borderBottom: isActive ? '2px solid var(--accent)' : '2px solid transparent',
-                    transition:'color .1s, background .1s' }}>
+                    transition:'color .1s, background .1s',
+                    whiteSpace: isMobile ? 'nowrap' : undefined, flexShrink: isMobile ? 0 : undefined }}>
                   {t.label}
                 </button>
               )
@@ -696,33 +704,33 @@ export default function AttendancePage() {
 
           {/* Action buttons — only on schedule tab */}
           {tab === 'schedule' && isAdmin && (
-            <div style={{ display:'flex', gap:8, alignItems:'center' }}>
+            <div style={{ display:'flex', gap:8, alignItems:'center', flexWrap: isMobile ? 'wrap' : undefined, padding: isMobile ? '8px 0 12px' : undefined }}>
               <button onClick={() => setBulkModal(true)}
-                style={{ padding:'6px 14px', fontSize:12, fontWeight:500, border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface)', color:'var(--text-secondary)', cursor:'pointer', transition:'all .1s' }}
+                style={{ ...mBtn, padding:'6px 14px', fontSize:12, fontWeight:500, border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface)', color:'var(--text-secondary)', cursor:'pointer', transition:'all .1s' }}
                 onMouseEnter={e => { e.currentTarget.style.background='var(--surface-2)'; e.currentTarget.style.color='var(--text-primary)' }}
                 onMouseLeave={e => { e.currentTarget.style.background='var(--surface)'; e.currentTarget.style.color='var(--text-secondary)' }}>
                 Bulk Schedule
               </button>
               <button onClick={() => setTemplateModal(true)}
-                style={{ padding:'6px 14px', fontSize:12, fontWeight:500, border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface)', color:'var(--text-secondary)', cursor:'pointer', transition:'all .1s' }}
+                style={{ ...mBtn, padding:'6px 14px', fontSize:12, fontWeight:500, border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface)', color:'var(--text-secondary)', cursor:'pointer', transition:'all .1s' }}
                 onMouseEnter={e => { e.currentTarget.style.background='var(--surface-2)'; e.currentTarget.style.color='var(--text-primary)' }}
                 onMouseLeave={e => { e.currentTarget.style.background='var(--surface)'; e.currentTarget.style.color='var(--text-secondary)' }}>
                 Templates
               </button>
               <button onClick={() => setCopyModal(true)}
-                style={{ padding:'6px 14px', fontSize:12, fontWeight:500, border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface)', color:'var(--text-secondary)', cursor:'pointer', transition:'all .1s' }}
+                style={{ ...mBtn, padding:'6px 14px', fontSize:12, fontWeight:500, border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface)', color:'var(--text-secondary)', cursor:'pointer', transition:'all .1s' }}
                 onMouseEnter={e => { e.currentTarget.style.background='var(--surface-2)'; e.currentTarget.style.color='var(--text-primary)' }}
                 onMouseLeave={e => { e.currentTarget.style.background='var(--surface)'; e.currentTarget.style.color='var(--text-secondary)' }}>
                 Copy Week
               </button>
               <button onClick={() => staggerBreaks()} disabled={staggering}
                 title={conflictCount ? `${conflictCount} people share a break slot this week — spread them out` : 'Spread overlapping breaks so no two people are off the phones at once'}
-                style={{ padding:'6px 14px', fontSize:12, fontWeight:500, border:`1px solid ${conflictCount ? 'var(--tone-amber-bd)' : 'var(--border)'}`, borderRadius:'var(--radius)', background: conflictCount ? 'var(--tone-amber-bg)' : 'var(--surface)', color: conflictCount ? 'var(--tone-amber-tx)' : 'var(--text-secondary)', cursor:'pointer', display:'flex', alignItems:'center', gap:6 }}>
+                style={{ ...mBtn, padding:'6px 14px', fontSize:12, fontWeight:500, border:`1px solid ${conflictCount ? 'var(--tone-amber-bd)' : 'var(--border)'}`, borderRadius:'var(--radius)', background: conflictCount ? 'var(--tone-amber-bg)' : 'var(--surface)', color: conflictCount ? 'var(--tone-amber-tx)' : 'var(--text-secondary)', cursor:'pointer', display:'flex', alignItems:'center', gap:6 }}>
                 {staggering ? 'Moving…' : 'Stagger breaks'}
                 {conflictCount > 0 && <span style={{ background:'var(--tone-amber-tx)', color:'#fff', borderRadius:99, padding:'0 7px', fontSize:10.5, fontWeight:800 }}>{conflictCount}</span>}
               </button>
               <button onClick={() => setPublishModal(true)}
-                style={{ padding:'6px 16px', fontSize:12, fontWeight:600, border:'none', borderRadius:'var(--radius)', background:'var(--accent)', color:'#fff', cursor:'pointer', transition:'opacity .1s', display:'flex', alignItems:'center', gap:7 }}
+                style={{ ...mBtn, padding:'6px 16px', fontSize:12, fontWeight:600, border:'none', borderRadius:'var(--radius)', background:'var(--accent)', color:'#fff', cursor:'pointer', transition:'opacity .1s', display:'flex', alignItems:'center', gap:7 }}
                 onMouseEnter={e => e.currentTarget.style.opacity='.9'}
                 onMouseLeave={e => e.currentTarget.style.opacity='1'}>
                 Publish + Email
@@ -743,7 +751,29 @@ export default function AttendancePage() {
 
         {/* ── SCHEDULE TAB ── */}
         {tab === 'schedule' && (
-          <div style={{ padding:24 }}>
+          <div style={{ padding: isMobile ? 12 : 24 }}>
+            {/* Phone: today's shifts first, one line per person, so nobody has to
+                scroll the week grid sideways just to see who's on right now. */}
+            {isMobile && weekDates.includes(today) && (
+              <div style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius-lg)', padding:'12px 14px', marginBottom:12 }}>
+                <div style={{ fontSize:11, fontWeight:600, textTransform:'uppercase', letterSpacing:.5, color:'var(--text-muted)', marginBottom:4 }}>Today · {fmtDate(today)}</div>
+                {schedProfiles.map(p => {
+                  const sched = getSchedule(p.id, today)
+                  const isOff = sched && ['pto','sick','holiday','off'].includes(sched.day_type)
+                  const tc = sched && !isOff ? sched.template_color : null
+                  return (
+                    <div key={p.id} onClick={() => isAdmin && openEdit(p.id, today)}
+                      style={{ display:'flex', alignItems:'center', gap:8, padding:'8px 0', borderTop:'1px solid var(--border)', cursor: isAdmin ? 'pointer' : 'default' }}>
+                      <span style={{ flex:1, fontSize:13, fontWeight:500, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{p.name || p.email}</span>
+                      <span style={{ fontSize:10, color:'var(--text-muted)', flexShrink:0 }}>{yearPoints(p.id).toFixed(1)} pts</span>
+                      {!sched ? <span style={{ fontSize:11, color:'var(--text-muted)', flexShrink:0 }}>Not scheduled</span>
+                        : isOff ? <span style={{ fontSize:11, fontWeight:600, color: DAY_TYPE_COLORS[sched.day_type], flexShrink:0 }}>{DAY_TYPE_LABELS[sched.day_type]}</span>
+                        : <span style={{ fontSize:11, fontWeight:600, color: tc || 'var(--success)', flexShrink:0 }}>{fmt(sched.shift_start)} – {fmt(sched.shift_end)}</span>}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
             <div style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius-lg)', overflow:'hidden' }}>
               <div style={{ overflowX:'auto' }}>
                 <table style={{ width:'100%', borderCollapse:'collapse', minWidth:900 }}>
@@ -854,7 +884,7 @@ export default function AttendancePage() {
 
         {/* ── ADHERENCE TAB ── */}
         {tab === 'adherence' && (
-          <div style={{ padding:24, display:'flex', flexDirection:'column', gap:16 }}>
+          <div style={{ padding: isMobile ? 12 : 24, display:'flex', flexDirection:'column', gap:16 }}>
             {schedProfiles.map(p => {
               const pScheds = schedules.filter(s => s.profile_id === p.id)
               const pEvents = statusEvents.filter(e => e.profile_id === p.id)
@@ -877,7 +907,7 @@ export default function AttendancePage() {
                     </div>
                     {avgAdh != null && (
                       <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-                        <div style={{ width:120, height:6, background:'var(--border)', borderRadius:99, overflow:'hidden' }}>
+                        <div style={{ width: isMobile ? 64 : 120, height:6, background:'var(--border)', borderRadius:99, overflow:'hidden' }}>
                           <div style={{ height:'100%', width:`${avgAdh}%`, background: avgAdh >= attCfg.adherenceGood ? 'var(--success)' : avgAdh >= attCfg.adherenceWarn ? '#f59e0b' : 'var(--danger)', borderRadius:99 }} />
                         </div>
                         <span style={{ fontSize:14, fontWeight:700, color: avgAdh >= attCfg.adherenceGood ? 'var(--success)' : avgAdh >= attCfg.adherenceWarn ? '#f59e0b' : 'var(--danger)' }}>{avgAdh}%</span>
@@ -922,113 +952,117 @@ export default function AttendancePage() {
 
         {/* ── POINTS TAB ── */}
         {tab === 'points' && (
-          <div style={{ padding:24, display:'flex', flexDirection:'column', gap:16 }}>
-            <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+          <div style={{ padding: isMobile ? 12 : 24, display:'flex', flexDirection:'column', gap:16 }}>
+            <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', flexWrap: isMobile ? 'wrap' : undefined, gap: isMobile ? 6 : undefined }}>
               <span style={{ fontSize:12, color:'var(--text-muted)' }}>Calendar year {new Date().getFullYear()} · Points reset Jan 1</span>
-              <div style={{ display:'flex', gap:10, fontSize:11, color:'var(--text-muted)' }}>
+              <div style={{ display:'flex', gap:10, fontSize:11, color:'var(--text-muted)', flexWrap: isMobile ? 'wrap' : undefined }}>
                 <span style={{ display:'flex', alignItems:'center', gap:4 }}><span style={{ width:10, height:10, borderRadius:'50%', background:'var(--success)', display:'inline-block' }}></span> {`0–${(attCfg.pointsWarn - 0.1).toFixed(1)} Good`}</span>
                 <span style={{ display:'flex', alignItems:'center', gap:4 }}><span style={{ width:10, height:10, borderRadius:'50%', background:'#f59e0b', display:'inline-block' }}></span> {`${attCfg.pointsWarn}–${(attCfg.pointsCritical - 0.1).toFixed(1)} Warning`}</span>
                 <span style={{ display:'flex', alignItems:'center', gap:4 }}><span style={{ width:10, height:10, borderRadius:'50%', background:'var(--danger)', display:'inline-block' }}></span> {`${attCfg.pointsCritical}+ Critical`}</span>
               </div>
             </div>
-            {isAdmin && wfmCfg && (
-              <div style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius-lg)', padding:16 }}>
-                <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:12 }}>
-                  <span style={{ fontSize:13, fontWeight:700 }}>WFM settings</span>
-                  <div style={{ display:'flex', alignItems:'center', gap:10 }}>
-                    {wfmMsg && <span style={{ fontSize:12, color: wfmMsg.startsWith('Error') ? 'var(--danger)' : 'var(--success)' }}>{wfmMsg}</span>}
-                    <button className="btn sm primary" onClick={saveWfmCfg}>Save</button>
-                  </div>
-                </div>
-                <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(150px, 1fr))', gap:12 }}>
-                  {[
-                    ['late', 'Late arrival (pts)'],
-                    ['absence', 'Unexcused absence (pts)'],
-                    ['early_departure', 'Early departure (pts)'],
-                    ['no_call', 'No call / no show (pts)'],
-                  ].map(([k, label]) => (
-                    <div key={k} className="form-field">
-                      <label className="form-label" style={{ fontSize:11 }}>{label}</label>
-                      <input className="form-input" type="number" step="0.5" min="0" value={wfmCfg.points[k]}
-                        onChange={e => setWfmCfg(f => ({ ...f, points: { ...f.points, [k]: Number(e.target.value) } }))} />
-                    </div>
-                  ))}
-                  {[
-                    ['pointsWarn', 'Points → Warning at'],
-                    ['pointsCritical', 'Points → Critical at'],
-                    ['adherenceGood', 'Adherence green ≥ (%)'],
-                    ['adherenceWarn', 'Adherence amber ≥ (%)'],
-                  ].map(([k, label]) => (
-                    <div key={k} className="form-field">
-                      <label className="form-label" style={{ fontSize:11 }}>{label}</label>
-                      <input className="form-input" type="number" min="0" value={wfmCfg[k]}
-                        onChange={e => setWfmCfg(f => ({ ...f, [k]: Number(e.target.value) }))} />
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-            {schedProfiles.map(p => {
-              const pts = attendancePoints.filter(ap => ap.profile_id === p.id)
-              const total = pts.reduce((sum, ap) => sum + parseFloat(ap.points), 0)
-              const statusColor = total >= attCfg.pointsCritical ? 'var(--danger)' : total >= attCfg.pointsWarn ? '#f59e0b' : 'var(--success)'
-              return (
-                <div key={p.id} style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius-lg)', overflow:'hidden' }}>
-                  <div style={{ padding:'14px 18px', borderBottom: pts.length > 0 ? '1px solid var(--border)' : 'none', display:'flex', alignItems:'center', justifyContent:'space-between', background:'var(--surface-2)' }}>
+            {(() => {
+              // Phone: people and their points come first; the settings card drops to the bottom.
+              const wfmCard = isAdmin && wfmCfg && (
+                <div style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius-lg)', padding:16 }}>
+                  <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:12 }}>
+                    <span style={{ fontSize:13, fontWeight:700 }}>WFM settings</span>
                     <div style={{ display:'flex', alignItems:'center', gap:10 }}>
-                      <div style={{ width:32, height:32, borderRadius:'50%', background:'var(--accent-bg)', display:'flex', alignItems:'center', justifyContent:'center', fontSize: p.avatar ? 20 : 12, fontWeight:600 }}>
-                        <Avatar avatar={p.avatar} name={p.name || p.email} />
-                      </div>
-                      <span style={{ fontSize:14, fontWeight:600 }}>{p.name || p.email}</span>
-                    </div>
-                    <div style={{ display:'flex', alignItems:'center', gap:12 }}>
-                      <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-                        <div style={{ width:80, height:6, background:'var(--border)', borderRadius:99, overflow:'hidden' }}>
-                          <div style={{ height:'100%', width:`${Math.min((total/8)*100, 100)}%`, background:statusColor, borderRadius:99 }} />
-                        </div>
-                        <span style={{ fontSize:16, fontWeight:800, color:statusColor }}>{total.toFixed(1)}</span>
-                        <span style={{ fontSize:11, color:'var(--text-muted)' }}>/ 8 pts</span>
-                      </div>
-                      {isAdmin && (
-                        <button className="btn sm primary" onClick={() => { setPointModal(p); setPointData({ reason:'late', points:0.5, notes:'', date:today }) }}>
-                          + Add Point
-                        </button>
-                      )}
+                      {wfmMsg && <span style={{ fontSize:12, color: wfmMsg.startsWith('Error') ? 'var(--danger)' : 'var(--success)' }}>{wfmMsg}</span>}
+                      <button className="btn sm primary" onClick={saveWfmCfg}>Save</button>
                     </div>
                   </div>
-                  {pts.length > 0 && (
-                    <table className="data-table">
-                      <thead><tr><th>Date</th><th>Reason</th><th style={{textAlign:'center'}}>Points</th><th>Notes</th>{isAdmin && <th></th>}</tr></thead>
-                      <tbody>
-                        {pts.map(pt => (
-                          <tr key={pt.id}>
-                            <td style={{ padding:'8px 12px', fontSize:12 }}>{pt.date}</td>
-                            <td style={{ padding:'8px 12px', fontSize:12 }}>{POINT_REASONS.find(r => r.value === pt.reason)?.label || pt.reason}</td>
-                            <td style={{ padding:'8px 12px', fontSize:13, fontWeight:700, textAlign:'center', color: parseFloat(pt.points) >= 1 ? 'var(--danger)' : '#f59e0b' }}>{parseFloat(pt.points).toFixed(1)}</td>
-                            <td style={{ padding:'8px 12px', fontSize:11, color:'var(--text-muted)' }}>{pt.notes || '—'}</td>
-                            {isAdmin && (
-                              <td style={{ padding:'8px 12px', whiteSpace:'nowrap' }}>
-                                <button className="btn sm" style={{ marginRight:6 }} onClick={() => editPoint(pt)}>Edit</button>
-                                <button className="btn sm danger" onClick={() => deletePoint(pt.id)}>Remove</button>
-                              </td>
-                            )}
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  )}
+                  <div className={isMobile ? 'mgrid' : undefined} style={{ display:'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : 'repeat(auto-fit, minmax(150px, 1fr))', gap:12 }}>
+                    {[
+                      ['late', 'Late arrival (pts)'],
+                      ['absence', 'Unexcused absence (pts)'],
+                      ['early_departure', 'Early departure (pts)'],
+                      ['no_call', 'No call / no show (pts)'],
+                    ].map(([k, label]) => (
+                      <div key={k} className="form-field">
+                        <label className="form-label" style={{ fontSize:11 }}>{label}</label>
+                        <input className="form-input" type="number" step="0.5" min="0" value={wfmCfg.points[k]}
+                          onChange={e => setWfmCfg(f => ({ ...f, points: { ...f.points, [k]: Number(e.target.value) } }))} />
+                      </div>
+                    ))}
+                    {[
+                      ['pointsWarn', 'Points → Warning at'],
+                      ['pointsCritical', 'Points → Critical at'],
+                      ['adherenceGood', 'Adherence green ≥ (%)'],
+                      ['adherenceWarn', 'Adherence amber ≥ (%)'],
+                    ].map(([k, label]) => (
+                      <div key={k} className="form-field">
+                        <label className="form-label" style={{ fontSize:11 }}>{label}</label>
+                        <input className="form-input" type="number" min="0" value={wfmCfg[k]}
+                          onChange={e => setWfmCfg(f => ({ ...f, [k]: Number(e.target.value) }))} />
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )
-            })}
+              const people = schedProfiles.map(p => {
+                const pts = attendancePoints.filter(ap => ap.profile_id === p.id)
+                const total = pts.reduce((sum, ap) => sum + parseFloat(ap.points), 0)
+                const statusColor = total >= attCfg.pointsCritical ? 'var(--danger)' : total >= attCfg.pointsWarn ? '#f59e0b' : 'var(--success)'
+                return (
+                  <div key={p.id} style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius-lg)', overflow:'hidden' }}>
+                    <div style={{ padding: isMobile ? '12px 14px' : '14px 18px', borderBottom: pts.length > 0 ? '1px solid var(--border)' : 'none', display:'flex', alignItems:'center', justifyContent:'space-between', background:'var(--surface-2)', flexWrap: isMobile ? 'wrap' : undefined, gap: isMobile ? 8 : undefined }}>
+                      <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+                        <div style={{ width:32, height:32, borderRadius:'50%', background:'var(--accent-bg)', display:'flex', alignItems:'center', justifyContent:'center', fontSize: p.avatar ? 20 : 12, fontWeight:600 }}>
+                          <Avatar avatar={p.avatar} name={p.name || p.email} />
+                        </div>
+                        <span style={{ fontSize:14, fontWeight:600 }}>{p.name || p.email}</span>
+                      </div>
+                      <div style={{ display:'flex', alignItems:'center', gap:12, flex: isMobile ? '1 1 100%' : undefined, justifyContent: isMobile ? 'space-between' : undefined }}>
+                        <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                          <div style={{ width:80, height:6, background:'var(--border)', borderRadius:99, overflow:'hidden' }}>
+                            <div style={{ height:'100%', width:`${Math.min((total/8)*100, 100)}%`, background:statusColor, borderRadius:99 }} />
+                          </div>
+                          <span style={{ fontSize:16, fontWeight:800, color:statusColor }}>{total.toFixed(1)}</span>
+                          <span style={{ fontSize:11, color:'var(--text-muted)' }}>/ 8 pts</span>
+                        </div>
+                        {isAdmin && (
+                          <button className="btn sm primary" onClick={() => { setPointModal(p); setPointData({ reason:'late', points:0.5, notes:'', date:today }) }}>
+                            + Add Point
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    {pts.length > 0 && scrollX(
+                      <table className="data-table">
+                        <thead><tr><th>Date</th><th>Reason</th><th style={{textAlign:'center'}}>Points</th><th>Notes</th>{isAdmin && <th></th>}</tr></thead>
+                        <tbody>
+                          {pts.map(pt => (
+                            <tr key={pt.id}>
+                              <td style={{ padding:'8px 12px', fontSize:12 }}>{pt.date}</td>
+                              <td style={{ padding:'8px 12px', fontSize:12 }}>{POINT_REASONS.find(r => r.value === pt.reason)?.label || pt.reason}</td>
+                              <td style={{ padding:'8px 12px', fontSize:13, fontWeight:700, textAlign:'center', color: parseFloat(pt.points) >= 1 ? 'var(--danger)' : '#f59e0b' }}>{parseFloat(pt.points).toFixed(1)}</td>
+                              <td style={{ padding:'8px 12px', fontSize:11, color:'var(--text-muted)' }}>{pt.notes || '—'}</td>
+                              {isAdmin && (
+                                <td style={{ padding:'8px 12px', whiteSpace:'nowrap' }}>
+                                  <button className="btn sm" style={{ marginRight:6 }} onClick={() => editPoint(pt)}>Edit</button>
+                                  <button className="btn sm danger" onClick={() => deletePoint(pt.id)}>Remove</button>
+                                </td>
+                              )}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
+                  </div>
+                )
+              })
+              return isMobile ? <>{people}{wfmCard}</> : <>{wfmCard}{people}</>
+            })()}
           </div>
         )}
 
         {/* ── REPORTS TAB ── */}
         {tab === 'reports' && (
-          <div style={{ padding:24, display:'flex', flexDirection:'column', gap:16 }}>
+          <div style={{ padding: isMobile ? 12 : 24, display:'flex', flexDirection:'column', gap:16 }}>
             <div style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius-lg)', padding:20 }}>
               <div style={{ fontSize:11, fontWeight:600, textTransform:'uppercase', letterSpacing:.5, color:'var(--text-muted)', marginBottom:14 }}>Generate Report</div>
-              <div style={{ display:'flex', gap:12, alignItems:'flex-end', flexWrap:'wrap' }}>
+              <div style={{ display:'flex', gap:12, alignItems: isMobile ? 'stretch' : 'flex-end', flexWrap:'wrap', flexDirection: isMobile ? 'column' : undefined }}>
                 <div className="form-field" style={{ margin:0 }}>
                   <label className="form-label">Start date</label>
                   <input type="date" className="form-input" value={reportRange.start} onChange={e => setReportRange(p => ({ ...p, start: e.target.value }))} />
@@ -1037,8 +1071,8 @@ export default function AttendancePage() {
                   <label className="form-label">End date</label>
                   <input type="date" className="form-input" value={reportRange.end} onChange={e => setReportRange(p => ({ ...p, end: e.target.value }))} />
                 </div>
-                <button className="btn primary" onClick={runReport} disabled={!reportRange.start || !reportRange.end}>Run report</button>
-                {reportData && <button className="btn" onClick={exportReport}>Export CSV</button>}
+                <button className="btn primary" onClick={runReport} disabled={!reportRange.start || !reportRange.end} style={{ minHeight: isMobile ? 40 : undefined }}>Run report</button>
+                {reportData && <button className="btn" onClick={exportReport} style={{ minHeight: isMobile ? 40 : undefined }}>Export CSV</button>}
               </div>
             </div>
 
@@ -1049,6 +1083,7 @@ export default function AttendancePage() {
                     Summary — {reportRange.start} to {reportRange.end}
                   </div>
                 </div>
+                {scrollX(
                 <table className="data-table">
                   <thead>
                     <tr>
@@ -1084,6 +1119,7 @@ export default function AttendancePage() {
                     ))}
                   </tbody>
                 </table>
+                )}
               </div>
             )}
           </div>
@@ -1145,7 +1181,7 @@ export default function AttendancePage() {
                 </div>
                 <div className="form-field">
                   <label className="form-label">Color</label>
-                  <div style={{ display:'flex', gap:6, alignItems:'center', paddingTop:4 }}>
+                  <div style={{ display:'flex', gap:6, alignItems:'center', paddingTop:4, flexWrap: isMobile ? 'wrap' : undefined }}>
                     {['#3B82F6','#10B981','#F59E0B','#EF4444','#8B5CF6','#EC4899','#14B8A6','#F97316','#6366F1','#84CC16','#A16207','#64748B'].map(c => (
                       <button key={c} type="button" onClick={() => setEditTemplate(t => ({ ...t, color: c }))}
                         style={{ width:22, height:22, borderRadius:6, background:c, cursor:'pointer', border: editTemplate.color === c ? '2px solid var(--accent)' : '1px solid var(--border)' }} />
@@ -1228,7 +1264,7 @@ export default function AttendancePage() {
                   return (
                     <button key={d} type="button"
                       onClick={() => setBulkCfg(c => ({ ...c, days: on ? c.days.filter(x => x !== i) : [...c.days, i] }))}
-                      style={{ flex:1, padding:'6px 0', fontSize:11.5, fontWeight:600, borderRadius:'var(--radius)', cursor:'pointer',
+                      style={{ flex:1, minHeight: isMobile ? 40 : undefined, padding:'6px 0', fontSize:11.5, fontWeight:600, borderRadius:'var(--radius)', cursor:'pointer',
                         border: on ? '1px solid var(--accent)' : '1px solid var(--border)',
                         background: on ? 'var(--accent)' : 'var(--surface-2)', color: on ? '#fff' : 'var(--text-secondary)' }}>
                       {['Mon','Tue','Wed','Thu','Fri','Sat','Sun'][i]}
@@ -1281,7 +1317,7 @@ export default function AttendancePage() {
               each person their own schedule — shift, breaks, lunch, and total hours. Widen the range to publish several
               weeks at once.
             </div>
-            <div style={{ display:'flex', gap:10, alignItems:'end' }}>
+            <div style={{ display:'flex', gap:10, alignItems: isMobile ? 'stretch' : 'end', flexDirection: isMobile ? 'column' : undefined }}>
               <div className="form-field" style={{ flex:1, margin:0 }}>
                 <label className="form-label">From</label>
                 <input type="date" className="form-input" value={pubRange.from}
@@ -1353,10 +1389,10 @@ export default function AttendancePage() {
           <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
             <div className="form-field">
               <label className="form-label">Day Type</label>
-              <div style={{ display:'flex', gap:6 }}>
+              <div style={{ display:'flex', gap:6, flexWrap: isMobile ? 'wrap' : undefined }}>
                 {Object.entries(DAY_TYPE_LABELS).map(([val, label]) => (
                   <button key={val} onClick={() => setEditData(p => ({ ...p, day_type: val }))}
-                    style={{ flex:1, padding:'7px 4px', borderRadius:'var(--radius)', fontSize:11, fontWeight:500, border:'1px solid', cursor:'pointer',
+                    style={{ flex: isMobile ? '1 1 30%' : 1, minHeight: isMobile ? 40 : undefined, padding:'7px 4px', borderRadius:'var(--radius)', fontSize:11, fontWeight:500, border:'1px solid', cursor:'pointer',
                       borderColor: editData.day_type === val ? (DAY_TYPE_COLORS[val] || 'var(--accent)') : 'var(--border)',
                       background: editData.day_type === val ? (DAY_TYPE_COLORS[val] || 'var(--accent)') + '20' : 'var(--surface-2)',
                       color: editData.day_type === val ? (DAY_TYPE_COLORS[val] || 'var(--accent)') : 'var(--text-muted)' }}>

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, Fragment } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { sb } from '../lib/supabase'
 import TimeOffTab from '../components/TimeOffTab'
@@ -389,6 +389,9 @@ export default function MyPage() {
     { id: 'call-evals',    label: 'Call Evals' },
     { id: 'time-off',      label: 'Time Off' },
   ]
+  // Phone: what a rep checks on the go comes first — today's shift, then money, then the scorecard.
+  const MOBILE_TAB_ORDER = ['my-schedule', 'commissions', 'scorecard', 'team-schedule', 'stats', 'call-evals', 'time-off']
+  const shownTabs = isMobile ? MOBILE_TAB_ORDER.map(id => TABS.find(t => t.id === id)).filter(Boolean) : TABS
 
   return (
     <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden' }}>
@@ -396,7 +399,7 @@ export default function MyPage() {
       {/* -- HEADER BAR -- */}
       <div style={{ background:'var(--surface)', borderBottom:'1px solid var(--border)', flexShrink:0 }}>
         {/* Title row */}
-        <div style={{ padding:'16px 24px 0', display:'flex', alignItems:'flex-start', justifyContent:'space-between', gap:16 }}>
+        <div style={{ padding: isMobile ? '12px 12px 0' : '16px 24px 0', display:'flex', alignItems:'flex-start', justifyContent:'space-between', gap: isMobile ? 8 : 16, flexWrap: isMobile ? 'wrap' : undefined }}>
           <div style={{ display:'flex', alignItems:'center', gap:10 }}>
             <div style={{ width:32, height:32, borderRadius:'50%', background:'var(--accent-bg)', color:'var(--accent)', display:'flex', alignItems:'center', justifyContent:'center', fontSize: profile?.avatar ? 16 : 12, fontWeight:700, flexShrink:0 }}>
               <Avatar avatar={profile?.avatar} name={profile?.name || profile?.email} />
@@ -469,7 +472,7 @@ export default function MyPage() {
                   </div>
                   <div className="form-field">
                     <label className="form-label">When</label>
-                    <div style={{ display:'flex', gap:8, alignItems:'center' }}>
+                    <div style={{ display:'flex', gap:8, alignItems:'center', flexWrap: isMobile ? 'wrap' : undefined }}>
                       <input className="form-input" type="datetime-local" value={announce.sendAt}
                         min={new Date(Date.now() + 2 * 60_000).toISOString().slice(0, 16)}
                         onChange={e => setAnnounce(a => ({ ...a, sendAt: e.target.value }))} style={{ flex:1 }} />
@@ -516,7 +519,7 @@ export default function MyPage() {
               onSubmitted={() => { setPtoToast('Request sent — your manager has been notified. Track it in the Time Off tab.'); setTimeout(() => setPtoToast(''), 6000) }} />
           )}
           {ptoToast && (
-            <div style={{ position:'fixed', bottom:20, right:20, zIndex:900, background:'var(--surface)', border:'1px solid var(--success)', color:'var(--success)', borderRadius:10, padding:'10px 16px', fontSize:12.5, fontWeight:600, boxShadow:'0 8px 24px rgba(0,0,0,.15)' }}>
+            <div style={{ position:'fixed', bottom:20, right:20, left: isMobile ? 20 : undefined, zIndex:900, background:'var(--surface)', border:'1px solid var(--success)', color:'var(--success)', borderRadius:10, padding:'10px 16px', fontSize:12.5, fontWeight:600, boxShadow:'0 8px 24px rgba(0,0,0,.15)' }}>
               ✓ {ptoToast}
             </div>
           )}
@@ -542,9 +545,9 @@ export default function MyPage() {
         </div>
 
         {/* Tab bar */}
-        <div style={{ display:'flex', alignItems:'center', padding:'0 24px', marginTop:10 }}>
+        <div style={{ display:'flex', alignItems:'center', padding: isMobile ? '0 12px' : '0 24px', marginTop:10 }}>
           <div style={{ display:'flex', gap:0, flex:1, overflowX:'auto' }}>
-            {TABS.map(t => {
+            {shownTabs.map(t => {
               const isActive = tab === t.id
               const isHov = hoveredTab === t.id && !isActive
               return (
@@ -560,6 +563,7 @@ export default function MyPage() {
                     color: isActive ? 'var(--accent)' : isHov ? 'var(--text-primary)' : 'var(--text-muted)',
                     borderBottom: isActive ? '2px solid var(--accent)' : '2px solid transparent',
                     transition:'color .1s, background .1s',
+                    whiteSpace: isMobile ? 'nowrap' : undefined, flexShrink: isMobile ? 0 : undefined,
                   }}>
                   {t.label}
                 </button>
@@ -569,8 +573,8 @@ export default function MyPage() {
           {isAdmin && (
             <button onClick={() => { setAnnounceMsg(''); setAnnounceOpen(true); loadAnnScheduled() }}
               title="Send or schedule a pop-up alert to the floor or selected people"
-              style={{ marginLeft:'auto', padding:'9px 22px', fontSize:13, fontWeight:700, border:'none', borderRadius:'var(--radius)',
-                background:'var(--accent)', color:'#fff', cursor:'pointer' }}>
+              style={{ marginLeft:'auto', padding: isMobile ? '9px 14px' : '9px 22px', fontSize:13, fontWeight:700, border:'none', borderRadius:'var(--radius)',
+                background:'var(--accent)', color:'#fff', cursor:'pointer', flexShrink: isMobile ? 0 : undefined, whiteSpace: isMobile ? 'nowrap' : undefined }}>
               Notify team
             </button>
           )}
@@ -578,7 +582,7 @@ export default function MyPage() {
       </div>
 
       {/* Content */}
-      <div style={{ flex:1, overflow:'auto', padding:24, background:'var(--bg)' }}>
+      <div style={{ flex:1, overflow:'auto', padding: isMobile ? 12 : 24, background:'var(--bg)' }}>
         {loading ? (
           <div style={{ display:'flex', alignItems:'center', justifyContent:'center', height:200 }}>
             <div className="spinner" />
@@ -630,12 +634,12 @@ export default function MyPage() {
                   const schedOf = (d) => monthScheds.find(sd => sd.date === toYMD(new Date(schedMonth.y, schedMonth.m, d)))
                   return (
                     <div>
-                      <div style={{ display:'grid', gridTemplateColumns:'repeat(7, 1fr)', gap:6, marginBottom:6 }}>
+                      <div className="mgrid" style={{ display:'grid', gridTemplateColumns:'repeat(7, 1fr)', gap: isMobile ? 4 : 6, marginBottom:6 }}>
                         {DAYS.map(d => (
                           <div key={d} style={{ textAlign:'center', fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:.5, color:'var(--text-muted)' }}>{d}</div>
                         ))}
                       </div>
-                      <div style={{ display:'grid', gridTemplateColumns:'repeat(7, 1fr)', gap:6 }}>
+                      <div className="mgrid" style={{ display:'grid', gridTemplateColumns:'repeat(7, 1fr)', gap: isMobile ? 4 : 6 }}>
                         {cells.map((d, i) => {
                           if (!d) return <div key={`e${i}`} />
                           const dateStr = toYMD(new Date(schedMonth.y, schedMonth.m, d))
@@ -650,7 +654,7 @@ export default function MyPage() {
                               title={requestable ? 'Click to request time off for this day' : undefined}
                               style={{ background: isToday ? 'var(--accent-bg)' : 'var(--surface)',
                                 border:`1px solid ${isToday ? 'var(--accent)' : 'var(--border)'}`,
-                                borderRadius:8, padding:'8px 9px', minHeight:64,
+                                borderRadius:8, padding: isMobile ? '6px 4px' : '8px 9px', minHeight: isMobile ? 56 : 64,
                                 cursor: requestable ? 'pointer' : 'default', opacity: dateStr < today ? .55 : 1 }}>
                               <div style={{ fontSize:11, fontWeight: isToday ? 800 : 600, color: isToday ? 'var(--accent)' : 'var(--text-secondary)' }}>{d}</div>
                               {sched && dt && dt !== 'work' && (
@@ -672,16 +676,24 @@ export default function MyPage() {
                     </div>
                   )
                 })()}
-                {schedView === 'week' && (
+                {schedView === 'week' && (() => {
+                  // Phone: today's card leads; days already gone drop below a divider.
+                  const ti = isMobile ? weekDates.indexOf(today) : -1
+                  const ordered = ti > 0 ? [...weekDates.slice(ti), ...weekDates.slice(0, ti)] : weekDates
+                  return (
                 <div style={{ display:'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(7, 1fr)', gap:8 }}>
-                  {weekDates.map(date => {
+                  {ordered.map(date => {
                     const sched = getSched(profile?.id, date)
                     const isToday = date === today
                     const dt = sched?.day_type
                     const style = DAY_TYPE_STYLES[dt] || DAY_TYPE_STYLES.work
                     const requestable = date >= today
                     return (
-                      <div key={date}
+                      <Fragment key={date}>
+                      {ti > 0 && date === weekDates[0] && (
+                        <div style={{ fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color:'var(--text-muted)', marginTop:6 }}>Earlier this week</div>
+                      )}
+                      <div
                         onClick={() => requestable && setPtoDay(date)}
                         title={requestable ? 'Click to request time off for this day' : undefined}
                         style={{
@@ -733,10 +745,12 @@ export default function MyPage() {
                           </div>
                         )}
                       </div>
+                      </Fragment>
                     )
                   })}
                 </div>
-                )}
+                  )
+                })()}
               </div>
             )}
 
@@ -744,7 +758,7 @@ export default function MyPage() {
             {tab === 'team-schedule' && (
               <div>
                 <SwapRequests profile={profile} profiles={profiles} />
-                <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:10 }}>
+                <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:10, flexWrap: isMobile ? 'wrap' : undefined }}>
                   <div style={{ fontSize:11.5, color:'var(--text-muted)' }}>
                     Click one of <b>your</b> shifts to request a swap — your co-worker accepts, then management signs off.
                   </div>
@@ -820,7 +834,7 @@ export default function MyPage() {
               <div>
                 <div style={{ fontSize:11, color:'var(--text-muted)', marginBottom:20 }}>Month to date . {new Date().toLocaleDateString('en-US', { month:'long', year:'numeric' })}</div>
 
-                <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(180px,1fr))', gap:12, marginBottom:32 }}>
+                <div className={isMobile ? 'mgrid' : undefined} style={{ display:'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : 'repeat(auto-fill, minmax(180px,1fr))', gap:12, marginBottom:32 }}>
                   <StatCard label="Inbound Handled" value={myInbound.handled} sub="Calls you answered" />
                   <StatCard label="Talk Time" value={fmtSecs(myInbound.att)} sub="Avg time on the call" />
                   <StatCard label="After-Call Work" value={fmtSecs(myAcw.avg)} sub="Avg wrap-up per call" />
@@ -870,10 +884,10 @@ export default function MyPage() {
                 ) : (
                   <>
                     {/* Summary cards */}
-                    <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:12, marginBottom:24 }}>
-                      <StatCard label="Today" value={`$${commToday.toFixed(2)}`} sub="Resets at midnight" valueColor={commToday > 0 ? 'var(--success)' : 'var(--text-primary)'} />
-                      <StatCard label="This Week" value={`$${commTotal.toFixed(2)}`} sub={commWeekLabel} valueColor={commTotal > 0 ? 'var(--accent)' : 'var(--text-primary)'} />
-                      <StatCard label="Transactions" value={commissions.length} sub="This week" />
+                    <div className={isMobile ? 'mgrid' : undefined} style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap: isMobile ? 8 : 12, marginBottom:24 }}>
+                      <StatCard compact={isMobile} label="Today" value={`$${commToday.toFixed(2)}`} sub="Resets at midnight" valueColor={commToday > 0 ? 'var(--success)' : 'var(--text-primary)'} />
+                      <StatCard compact={isMobile} label="This Week" value={`$${commTotal.toFixed(2)}`} sub={commWeekLabel} valueColor={commTotal > 0 ? 'var(--accent)' : 'var(--text-primary)'} />
+                      <StatCard compact={isMobile} label="Transactions" value={commissions.length} sub="This week" />
                     </div>
 
                     {/* Daily breakdown */}
@@ -993,9 +1007,9 @@ export default function MyPage() {
                   {scorecardLabel} . scores entered by your manager
                 </div>
 
-                <div style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius-lg)', overflow:'hidden' }}>
+                <div style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius-lg)', overflow: isMobile ? 'auto' : 'hidden' }}>
                   {/* Header row */}
-                  <div style={{ display:'grid', gridTemplateColumns:'1fr 80px 110px 1fr 1fr 1fr 1fr', background:'var(--surface-2)', borderBottom:'2px solid var(--border)' }}>
+                  <div className={isMobile ? 'mgrid mkeep' : undefined} style={{ display:'grid', gridTemplateColumns:'1fr 80px 110px 1fr 1fr 1fr 1fr', minWidth: isMobile ? 720 : undefined, background:'var(--surface-2)', borderBottom:'2px solid var(--border)' }}>
                     {['KPI','Weight','Actual','Exceeds (4)','Meets (3)','Needs Improvement (2)','Poor Performance (1)'].map((h,i) => (
                       <div key={h} style={{ padding:'10px 14px', fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color:'var(--text-muted)', textAlign: i === 0 ? 'left' : 'center' }}>{h}</div>
                     ))}
@@ -1033,7 +1047,7 @@ export default function MyPage() {
                     }
 
                     return (
-                      <div key={kpi.id} style={{ display:'grid', gridTemplateColumns:'1fr 80px 110px 1fr 1fr 1fr 1fr', borderBottom: idx < SCORECARD_KPIS.length-1 ? '1px solid var(--border)' : 'none', background: idx % 2 === 0 ? 'var(--surface)' : 'var(--surface-2)' }}>
+                      <div key={kpi.id} className={isMobile ? 'mgrid mkeep' : undefined} style={{ display:'grid', gridTemplateColumns:'1fr 80px 110px 1fr 1fr 1fr 1fr', minWidth: isMobile ? 720 : undefined, borderBottom: idx < SCORECARD_KPIS.length-1 ? '1px solid var(--border)' : 'none', background: idx % 2 === 0 ? 'var(--surface)' : 'var(--surface-2)' }}>
                         <div style={{ padding:'14px', display:'flex', flexDirection:'column', gap:4 }}>
                           <div style={{ fontSize:13, fontWeight:600, color:'var(--text-primary)' }}>{kpi.label}</div>
                           {rating && ratingStyle && (
@@ -1106,11 +1120,12 @@ function WeekNav({ weekBase, setWeekBase, weekLabel }) {
   )
 }
 
-function StatCard({ label, value, sub, valueColor }) {
+// compact: a tighter tile for three-across rows on a phone.
+function StatCard({ label, value, sub, valueColor, compact }) {
   return (
-    <div style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius-lg)', padding:'16px 18px' }}>
-      <div style={{ fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color:'var(--text-muted)', marginBottom:8 }}>{label}</div>
-      <div style={{ fontSize:28, fontWeight:800, letterSpacing:'-1px', color: valueColor || 'var(--text-primary)' }}>{value}</div>
+    <div style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius-lg)', padding: compact ? '10px 10px' : '16px 18px' }}>
+      <div style={{ fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color:'var(--text-muted)', marginBottom: compact ? 4 : 8 }}>{label}</div>
+      <div style={{ fontSize: compact ? 20 : 28, fontWeight:800, letterSpacing:'-1px', color: valueColor || 'var(--text-primary)' }}>{value}</div>
       {sub && <div style={{ fontSize:11, color:'var(--text-muted)', marginTop:4 }}>{sub}</div>}
     </div>
   )

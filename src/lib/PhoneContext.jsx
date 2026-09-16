@@ -26,6 +26,11 @@ export function PhoneProvider({ children }) {
   // TaskRouter worker as reachable from a screen no one is sitting at.
   const { pathname } = useLocation()
   const isWall = pathname.startsWith('/tv/') || pathname === '/warroom'
+  // A phone is for looking, not dialing: no Device, no microphone prompt.
+  // Decided once at mount — a desktop window dragged narrow mid-call must
+  // never tear the softphone down.
+  const [isHandheld] = useState(() => typeof window !== 'undefined' && !!window.matchMedia
+    && window.matchMedia('(max-width: 768px) and (pointer: coarse)').matches)
 
   const deviceRef = useRef(null)
   const callRef = useRef(null)
@@ -189,7 +194,7 @@ export function PhoneProvider({ children }) {
 
   // Register the Device once per rep, for the whole session.
   useEffect(() => {
-    if (!profile?.id || currentRep === 'Unknown' || isWall) return
+    if (!profile?.id || currentRep === 'Unknown' || isWall || isHandheld) return
     let device = null
     let cancelled = false
 
@@ -281,7 +286,7 @@ export function PhoneProvider({ children }) {
       cancelAutoWrap()
       setTwilioReady(false)
     }
-  }, [profile?.id, currentRep, stopCallTimer, isWall])
+  }, [profile?.id, currentRep, stopCallTimer, isWall, isHandheld])
 
   // Reconcile TaskRouter with reality, on a timer.
   //

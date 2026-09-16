@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { sb } from '../lib/supabase'
 import CommandCenter from '../components/dispatch/CommandCenter'
+import { useIsMobile } from '../lib/useIsMobile'
 
 // Dispatch for Profit — who to send, and whether today's board agrees.
 //
@@ -196,6 +197,7 @@ function BattingOrder() {
   const [busy, setBusy] = useState(false)
   const [weights, setWeights] = useState(null)
   const [savingW, setSavingW] = useState(false)
+  const isMobile = useIsMobile()
 
   const load = useCallback(async () => {
     try {
@@ -294,8 +296,9 @@ function BattingOrder() {
                 )
               })()}
             </div>
-            <div className="card" style={{ padding:0, overflow:'hidden' }}>
-              <table className="data-table" style={{ fontSize:12, tableLayout:'fixed', width:'100%' }}>
+            {/* Eleven columns don't fit a phone; the card scrolls sideways instead of squeezing them. */}
+            <div className="card" style={{ padding:0, overflow: isMobile ? 'auto' : 'hidden' }}>
+              <table className="data-table" style={{ fontSize:12, tableLayout:'fixed', width:'100%', ...(isMobile ? { minWidth:860 } : {}) }}>
                 <colgroup>{BO_COLS.map(c => <col key={c.key} style={{ width:c.width }} />)}</colgroup>
                 <thead><tr>
                   {BO_COLS.map(c => (
@@ -367,6 +370,7 @@ function LiveBoard() {
   const [scBusy, setScBusy] = useState(false)
   const [scErr, setScErr] = useState('')
   const [scPlan, setScPlan] = useState(null)
+  const isMobile = useIsMobile()
   const askScenario = async () => {
     if (scBusy || scenario.trim().length < 5) return
     setScBusy(true); setScErr(''); setScPlan(null)
@@ -480,10 +484,11 @@ function LiveBoard() {
             </span>
           )}
         </div>
-        <div style={{ display:'flex', gap:8, alignItems:'center' }}>
+        <div style={{ display:'flex', gap:8, alignItems:'center', ...(isMobile ? { flexWrap:'wrap' } : {}) }}>
           {/* Jumping to what needs attention is the whole job — 95 calls with
-              11 flagged is a lot of scrolling otherwise. */}
-          <div style={{ display:'flex', border:'1px solid var(--border)', borderRadius:99, overflow:'hidden' }}>
+              11 flagged is a lot of scrolling otherwise. On a phone the four
+              views scroll sideways inside their pill. */}
+          <div style={{ display:'flex', border:'1px solid var(--border)', borderRadius:99, overflow:'hidden', ...(isMobile ? { overflowX:'auto', maxWidth:'100%' } : {}) }}>
             {[['ontrack', `On track ${onTrack.length}`], ['flagged', `⚠️ Flagged ${flagged.length}`],
               ['reschedule', `↻ Reschedule ${reschedule.length}`],
               ['completed', `✓ Completed ${completed.length}`]].map(([val, label]) => (
@@ -562,7 +567,7 @@ function LiveBoard() {
 
       {/* 🎭 Scenario AI — disruptions AND goal-seeking ("sales are down…") */}
       {<div className="card" style={{ padding:'11px 15px', marginBottom:12 }}>
-        <div style={{ display:'flex', gap:8, alignItems:'center' }}>
+        <div style={{ display:'flex', gap:8, alignItems:'center', ...(isMobile ? { flexWrap:'wrap' } : {}) }}>
           <span style={{ fontSize:15, flexShrink:0 }}>🎭</span>
           <input className="form-input" value={scenario} style={{ flex:1 }}
             placeholder={day === 0
@@ -790,8 +795,8 @@ function LiveBoard() {
               {tlist.some(c => c.flags?.length) ? ` · ${tlist.filter(c => c.flags?.length).length} flagged` : ''}
             </span>
           </div>
-      <div className="card" style={{ padding:0, overflow:'hidden' }}>
-        <table className="data-table" style={{ fontSize:12, tableLayout:'fixed', width:'100%' }}>
+      <div className="card" style={{ padding:0, overflow: isMobile ? 'auto' : 'hidden' }}>
+        <table className="data-table" style={{ fontSize:12, tableLayout:'fixed', width:'100%', ...(isMobile ? { minWidth:640 } : {}) }}>
           <colgroup>{LB_COLS.map(c => <col key={c.key} style={{ width:c.width }} />)}</colgroup>
           <thead><tr>
             {LB_COLS.map(c => (
@@ -915,6 +920,7 @@ function ByJobType() {
   const [err, setErr] = useState('')
   const [pick, setPick] = useState('')
   const [q, setQ] = useState('')
+  const isMobile = useIsMobile()
 
   useEffect(() => {
     (async () => {
@@ -959,8 +965,8 @@ function ByJobType() {
       )}
 
       {pick && rows.length > 0 && (
-        <div className="card" style={{ padding:0, overflow:'hidden' }}>
-          <table className="data-table" style={{ fontSize:12 }}>
+        <div className="card" style={{ padding:0, overflow: isMobile ? 'auto' : 'hidden' }}>
+          <table className="data-table" style={{ fontSize:12, ...(isMobile ? { minWidth:760 } : {}) }}>
             <thead><tr>
               <th style={{width:34}}>#</th><th>Technician</th><th>Team</th>
               <th style={{textAlign:'right'}}>$ / opportunity</th>
@@ -1022,6 +1028,7 @@ function DecisionMaker() {
   const [res, setRes] = useState(null)
   const [err, setErr] = useState('')
   const [types, setTypes] = useState([])
+  const isMobile = useIsMobile()
 
   // Address typeahead — "did you mean…" as you type.
   const [suggests, setSuggests] = useState([])
@@ -1150,7 +1157,7 @@ function DecisionMaker() {
               placeholder={'e.g. "unit is from 2008, blowing warm, already replaced the capacitor"'} />
           </div>
         </div>
-        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginTop:14 }}>
+        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginTop:14, ...(isMobile ? { flexWrap:'wrap', gap:10 } : {}) }}>
           <label style={{ display:'flex', alignItems:'center', gap:7, fontSize:12, color:'var(--text-secondary)', cursor:'pointer' }}>
             <input type="checkbox" checked={urgent} onChange={e => setUrgent(e.target.checked)} />
             Must run today — override the worth-it math and find the least-bad slot
@@ -1218,8 +1225,8 @@ function DecisionMaker() {
           <div style={{ fontSize:11, fontWeight:700, textTransform:'uppercase', letterSpacing:.5, color:'var(--text-muted)', marginBottom:8 }}>
             Full bench ranking
           </div>
-          <div className="card" style={{ padding:0, overflow:'hidden' }}>
-            <table className="data-table" style={{ fontSize:12 }}>
+          <div className="card" style={{ padding:0, overflow: isMobile ? 'auto' : 'hidden' }}>
+            <table className="data-table" style={{ fontSize:12, ...(isMobile ? { minWidth:620 } : {}) }}>
               <thead><tr>
                 <th>Technician</th><th>Team</th>
                 <th style={{textAlign:'right'}}>$ / opportunity</th>
@@ -1278,6 +1285,7 @@ function DecisionMaker() {
 
 export default function DispatchPage() {
   const [tab, setTab] = useState(() => new URLSearchParams(window.location.search).get('tab') || 'center')
+  const isMobile = useIsMobile()
   // Survive hard refresh: the active tab lives in the URL (?tab=), like MyPage.
   useEffect(() => {
     const u = new URL(window.location)
@@ -1285,17 +1293,18 @@ export default function DispatchPage() {
   }, [tab])
   return (
     <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden' }}>
-      <div style={{ background:'var(--surface)', borderBottom:'1px solid var(--border)', flexShrink:0, padding:'0 24px', display:'flex', gap:4 }}>
+      {/* Six tabs. On a phone the bar scrolls sideways rather than wrapping into three lines. */}
+      <div style={{ background:'var(--surface)', borderBottom:'1px solid var(--border)', flexShrink:0, padding:'0 24px', display:'flex', gap:4, ...(isMobile ? { padding:'0 12px', overflowX:'auto', whiteSpace:'nowrap' } : {}) }}>
         {[['center','Command Center'],['order','Batting Order'],['jobtype','By Job Type'],['live','Live Board Analyzer'],['decide','Decision Maker'],['techinfo','Tech Info']].map(([id,label]) => (
           <button key={id} onClick={() => setTab(id)}
             style={{ padding:'12px 14px', border:'none', background:'transparent', cursor:'pointer', fontSize:13,
               fontWeight: tab===id ? 700 : 500, color: tab===id ? 'var(--accent)' : 'var(--text-muted)',
-              borderBottom: `2px solid ${tab===id ? 'var(--accent)' : 'transparent'}` }}>
+              borderBottom: `2px solid ${tab===id ? 'var(--accent)' : 'transparent'}`, ...(isMobile ? { flexShrink:0 } : {}) }}>
             {label}
           </button>
         ))}
       </div>
-      <div style={{ flex:1, overflow:'auto', padding:'20px 24px', background:'var(--bg)' }}>
+      <div style={{ flex:1, overflow:'auto', padding:'20px 24px', background:'var(--bg)', ...(isMobile ? { padding:'14px 12px' } : {}) }}>
         {tab === 'center' ? <CommandCenter /> : tab === 'order' ? <BattingOrder /> : tab === 'jobtype' ? <ByJobType /> : tab === 'decide' ? <DecisionMaker /> : tab === 'techinfo' ? <TechInfo /> : <LiveBoard />}
       </div>
     </div>

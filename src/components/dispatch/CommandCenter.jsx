@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef, useReducer, memo } f
 import { sb } from '../../lib/supabase'
 import { useAuth } from '../../lib/AuthContext'
 import { usePhone } from '../../lib/PhoneContext'
+import { useIsMobile } from '../../lib/useIsMobile'
 
 // Dispatch Command Center — the board as a queue you clear.
 // One request per day (GET /api/dispatch/center) feeds every section; the
@@ -214,21 +215,28 @@ function Kind({ kind }) {
   return <span style={{ fontSize: 10, fontWeight: 800, textTransform: 'uppercase', letterSpacing: .6, padding: '2px 7px', borderRadius: 99,
     color: `var(--tone-${m[1]}-tx)`, background: `var(--tone-${m[1]}-bg)`, border: `1px solid var(--tone-${m[1]}-bd)` }}>{m[0]}</span>
 }
+// On a phone every button is a thumb target (40px tall or more); the desktop keeps its sizes.
 function Btn({ children, primary, danger, small, ...p }) {
+  const isMobile = useIsMobile()
   return <button {...p} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: small ? '4px 10px' : '7px 14px', borderRadius: 'var(--radius)',
     fontSize: small ? 11 : 12, fontWeight: primary ? 600 : 500, border: `1px solid ${primary ? 'var(--accent)' : danger ? 'var(--danger)' : 'var(--border-strong)'}`,
     background: primary ? 'var(--accent)' : 'var(--surface)', color: primary ? '#fff' : danger ? 'var(--danger)' : 'var(--text-primary)', cursor: p.disabled ? 'default' : 'pointer',
-    opacity: p.disabled ? .45 : 1, whiteSpace: 'nowrap', ...(p.style || {}) }}>{children}</button>
+    opacity: p.disabled ? .45 : 1, whiteSpace: 'nowrap', ...(isMobile ? { minHeight: 40 } : {}), ...(p.style || {}) }}>{children}</button>
 }
 function Spin({ size = 11, light }) { return <span className="spinner" style={{ width: size, height: size, borderWidth: 1.5, display: 'inline-block', ...(light ? { borderColor: 'rgba(255,255,255,.35)', borderTopColor: '#fff' } : {}) }} /> }
-const MenuItem = ({ children, ...p }) => (
-  <button {...p} style={{ display: 'flex', width: '100%', alignItems: 'center', gap: 8, padding: '7px 8px', border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 12, color: 'var(--text-primary)', borderRadius: 6, textAlign: 'left', ...(p.style || {}) }}
-    onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'} onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>{children}</button>
-)
+const MenuItem = ({ children, ...p }) => {
+  const isMobile = useIsMobile()
+  return (
+    <button {...p} style={{ display: 'flex', width: '100%', alignItems: 'center', gap: 8, padding: '7px 8px', border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 12, color: 'var(--text-primary)', borderRadius: 6, textAlign: 'left', ...(isMobile ? { minHeight: 40 } : {}), ...(p.style || {}) }}
+      onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'} onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>{children}</button>
+  )
+}
 // Floating panel that closes on Escape or a click outside it (and outside
-// whatever opened it, so the opener's own click doesn't reopen it).
+// whatever opened it, so the opener's own click doesn't reopen it). Never wider
+// than a phone screen; callers still pick the side it hangs from.
 function Popover({ onClose, anchor, style, children }) {
   const ref = useRef(null)
+  const isMobile = useIsMobile()
   useEffect(() => {
     const k = (e) => { if (e.key === 'Escape') onClose() }
     const m = (e) => {
@@ -238,12 +246,13 @@ function Popover({ onClose, anchor, style, children }) {
     document.addEventListener('keydown', k); document.addEventListener('mousedown', m)
     return () => { document.removeEventListener('keydown', k); document.removeEventListener('mousedown', m) }
   }, [onClose, anchor])
-  return <div ref={ref} style={{ position: 'absolute', zIndex: 50, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', boxShadow: '0 6px 20px rgba(0,0,0,.14)', padding: 8, ...style }}>{children}</div>
+  return <div ref={ref} style={{ position: 'absolute', zIndex: 50, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', boxShadow: '0 6px 20px rgba(0,0,0,.14)', padding: 8, ...(isMobile ? { maxWidth: 'calc(100vw - 24px)' } : {}), ...style }}>{children}</div>
 }
 
 // ── Toasts (local; the page has no shared toast bus) ─────────────────────────
 function useToasts() {
   const [list, setList] = useState([])
+  const isMobile = useIsMobile()
   const push = useCallback((text, tone = 'ok') => {
     const id = Math.random().toString(36).slice(2)
     setList(l => [...l, { id, text, tone }]); setTimeout(() => setList(l => l.filter(t => t.id !== id)), 4200)
@@ -251,7 +260,7 @@ function useToasts() {
   const el = (
     <div style={{ position: 'fixed', bottom: 18, left: '50%', transform: 'translateX(-50%)', display: 'flex', flexDirection: 'column', gap: 8, zIndex: 900, pointerEvents: 'none' }}>
       {list.map(t => (
-        <div key={t.id} style={{ background: 'var(--text-primary)', color: 'var(--surface)', padding: '10px 14px', borderRadius: 10, fontSize: 12, boxShadow: '0 10px 30px rgba(0,0,0,.25)', display: 'flex', gap: 8, alignItems: 'center', maxWidth: 560 }}>
+        <div key={t.id} style={{ background: 'var(--text-primary)', color: 'var(--surface)', padding: '10px 14px', borderRadius: 10, fontSize: 12, boxShadow: '0 10px 30px rgba(0,0,0,.25)', display: 'flex', gap: 8, alignItems: 'center', maxWidth: isMobile ? 'calc(100vw - 24px)' : 560 }}>
           <span style={{ fontWeight: 800, color: t.tone === 'ok' ? '#6FDDA0' : t.tone === 'warn' ? '#EFC252' : '#F49382' }}>{t.tone === 'ok' ? '✓' : t.tone === 'warn' ? '!' : '×'}</span>{t.text}
         </div>
       ))}
@@ -263,6 +272,7 @@ function useToasts() {
 export default function CommandCenter() {
   const { profile } = useAuth()
   const phone = usePhone()
+  const isMobile = useIsMobile()
   const [day, setDay] = useState(0)
   const dayRef = useRef(0)
   const dayCacheRef = useRef(new Map())       // day → { payload, fetchedAt }
@@ -576,23 +586,24 @@ export default function CommandCenter() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-      {/* Header row: day toggle · status · next · report a change · refresh */}
+      {/* Header row: day toggle · status · next · report a change · refresh.
+          On a phone it stacks by flex order: toggle + freshness, then the counts, then the buttons. */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
         <div style={{ display: 'flex', border: '1px solid var(--border)', borderRadius: 99, overflow: 'hidden' }}>
           {[0, 1, 2].map(d => (
             <button key={d} onClick={() => { dayRef.current = d; setShowAll(false); setDay(d) }} style={{ padding: '5px 13px', border: 'none', fontSize: 11, fontWeight: 700, cursor: 'pointer',
-              background: day === d ? 'var(--text-primary)' : 'transparent', color: day === d ? 'var(--surface)' : 'var(--text-muted)' }}>{dayName(d)}</button>
+              background: day === d ? 'var(--text-primary)' : 'transparent', color: day === d ? 'var(--surface)' : 'var(--text-muted)', ...(isMobile ? { minHeight: 40, padding: '8px 12px' } : {}) }}>{dayName(d)}</button>
           ))}
         </div>
-        {board && <span style={MUTED}>{board.counts.total} calls · {rev.remaining} to run · {rev.done} done · {rev.working} on site</span>}
+        {board && <span style={{ ...MUTED, ...(isMobile ? { order: 2, flexBasis: '100%' } : {}) }}>{board.counts.total} calls · {rev.remaining} to run · {rev.done} done · {rev.working} on site</span>}
         <span title={payload ? `board computed ${clock(payload.generatedAt)}` : ''} style={{ fontSize: 10, fontWeight: 800, textTransform: 'uppercase', letterSpacing: .5, padding: '2px 8px', borderRadius: 99, display: 'inline-flex', alignItems: 'center', gap: 5,
           color: `var(--tone-${pill[1]}-tx)`, background: `var(--tone-${pill[1]}-bg)`, border: `1px solid var(--tone-${pill[1]}-bd)` }}>{refreshing && <Spin size={9} />}{pill[0]}</span>
-        {refreshErr && entry && <span style={{ ...MUTED, fontSize: 11, color: 'var(--tone-amber-tx)' }}>couldn’t refresh — showing {clock(new Date(entry.fetchedAt).toISOString())}</span>}
-        <span style={{ flex: 1 }} />
-        <div ref={reportWrapRef} style={{ position: 'relative' }}>
+        {refreshErr && entry && <span style={{ ...MUTED, fontSize: 11, color: 'var(--tone-amber-tx)', ...(isMobile ? { order: 2, flexBasis: '100%' } : {}) }}>couldn’t refresh — showing {clock(new Date(entry.fetchedAt).toISOString())}</span>}
+        <span style={{ flex: 1, ...(isMobile ? { display: 'none' } : {}) }} />
+        <div ref={reportWrapRef} style={{ position: 'relative', ...(isMobile ? { order: 3 } : {}) }}>
           <Btn onClick={() => { setReportOpen(o => !o); setReportPick(null) }}>Report a change ▾</Btn>
           {reportOpen && board && (
-            <Popover anchor={reportWrapRef} onClose={closeReport} style={{ right: 0, top: '110%', width: 320 }}>
+            <Popover anchor={reportWrapRef} onClose={closeReport} style={{ right: 0, top: '110%', width: 320, ...(isMobile ? { right: 'auto', left: 0 } : {}) }}>
               {reportPick ? (
                 <>
                   <div style={{ ...EYEBROW, padding: '4px 6px' }}>{reportPick.name} is out for</div>
@@ -616,7 +627,7 @@ export default function CommandCenter() {
                       {outList.map(o => (
                         <div key={o.techId} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 8px', fontSize: 12 }}>
                           <span style={{ fontWeight: 600 }}>{o.name}</span><span style={MUTED}>{o.until === 'tomorrow' ? 'through tomorrow' : 'rest of the day'} · {o.by}</span>
-                          <button onClick={() => techBack(o)} style={{ marginLeft: 'auto', border: 'none', background: 'transparent', color: 'var(--accent)', cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>Undo</button>
+                          <button onClick={() => techBack(o)} style={{ marginLeft: 'auto', border: 'none', background: 'transparent', color: 'var(--accent)', cursor: 'pointer', fontSize: 11, fontWeight: 600, ...(isMobile ? { minHeight: 40, padding: '0 8px' } : {}) }}>Undo</button>
                         </div>
                       ))}
                     </div>
@@ -627,10 +638,10 @@ export default function CommandCenter() {
             </Popover>
           )}
         </div>
-        <Btn small disabled={forcing} onClick={refresh}>{forcing && <Spin size={10} />}Refresh</Btn>
+        <Btn small disabled={forcing} onClick={refresh} style={isMobile ? { order: 3 } : undefined}>{forcing && <Spin size={10} />}Refresh</Btn>
       </div>
       {board && (
-        <div onClick={next ? jumpToNext : undefined} style={{ fontSize: 13, display: 'flex', gap: 8, alignItems: 'baseline', cursor: next ? 'pointer' : 'default', marginTop: -6 }}>
+        <div onClick={next ? jumpToNext : undefined} style={{ fontSize: 13, display: 'flex', gap: 8, alignItems: 'baseline', cursor: next ? 'pointer' : 'default', marginTop: -6, ...(isMobile ? { flexWrap: 'wrap' } : {}) }}>
           <span style={{ ...EYEBROW, color: next ? 'var(--danger)' : 'var(--success)' }}>Next</span>
           {next
             ? <span><span style={{ fontWeight: 700 }}>{next.title}</span> — by {hr(next.actBy)}{next.upside > 0 && <span style={{ color: 'var(--tone-green-tx)', fontWeight: 700 }}> (+{money(next.upside)})</span>}</span>
@@ -641,9 +652,9 @@ export default function CommandCenter() {
       {!board && <div className="spinner lg" style={{ margin: '60px auto' }} />}
       {board && (
         <>
-          {/* State tiles — "needs you" is the only tinted number */}
+          {/* State tiles — "needs you" is the only tinted number. Four across; two-up on a phone. */}
           <div style={{ position: 'relative' }}>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0,1fr))', gap: 12 }}>
+            <div className={isMobile ? 'mgrid' : undefined} style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, minmax(0,1fr))' : 'repeat(4, minmax(0,1fr))', gap: 12 }}>
               <Tile label="Needs a decision" value={cards.length ? `${cards.length} move${cards.length === 1 ? '' : 's'}` : 'Board is clean'} sub={cards.length ? `${money(queue.atStake)} expected if you take the picks` : 'nothing waiting on you'} color={cards.length ? 'var(--warning)' : 'var(--success)'} />
               <Tile label="Expected revenue" value={money(rev.expected)} sub={`${money((rev.soldToday || 0) + (rev.expected || 0))} projected day end · ${rev.opportunityCalls} opportunity calls`} />
               {day === 0 ? (
@@ -660,12 +671,12 @@ export default function CommandCenter() {
               )}
             </div>
             {leftOpen && day === 0 && (
-              <Popover anchor={leftTileRef} onClose={closeLeft} style={{ right: 0, top: '100%', marginTop: 6, width: 'min(520px, 100%)' }}>
+              <Popover anchor={leftTileRef} onClose={closeLeft} style={{ right: 0, top: '100%', marginTop: 6, width: 'min(520px, 100%)', ...(isMobile ? { left: 0, width: 'auto' } : {}) }}>
                 <div style={{ ...EYEBROW, padding: '4px 6px' }}>Quoted, not sold — worth a follow-up call</div>
                 {!leftBehind.rows.length && <div style={{ ...MUTED, padding: '6px 6px 4px' }}>Nothing quoted and left on the table yet today.</div>}
                 <div style={{ maxHeight: 280, overflow: 'auto' }}>
                   {leftBehind.rows.map(c => (
-                    <div key={c.appointmentId + '|' + c.techId} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px', fontSize: 12, borderTop: '1px solid var(--border)' }}>
+                    <div key={c.appointmentId + '|' + c.techId} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px', fontSize: 12, borderTop: '1px solid var(--border)', ...(isMobile ? { flexWrap: 'wrap' } : {}) }}>
                       <span style={{ fontWeight: 700 }}>#{c.jobNumber}</span><span style={{ color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>{c.jobType}</span>
                       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}><TierDot tier={c.techTier} />{c.techName}</span>
                       <span style={{ marginLeft: 'auto', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>Quoted {money(c.outcome.amount)}</span>
@@ -682,7 +693,7 @@ export default function CommandCenter() {
           {/* Coverage strip — information for CSRs and marketing, never a card */}
           {coverage?.board && (
             <div ref={covWrapRef} style={{ position: 'relative' }}>
-              <div className="card" style={{ padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 18, flexWrap: 'wrap' }}>
+              <div className="card" style={{ padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 18, flexWrap: 'wrap', ...(isMobile ? { gap: 10 } : {}) }}>
                 <span style={EYEBROW}>Coverage · booked %</span>
                 {coverage.board.map(r => (
                   <div key={r.trade} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
@@ -697,7 +708,7 @@ export default function CommandCenter() {
                           setCovPop({ trade: r.trade, di: i, el: e.currentTarget, left: w ? Math.max(0, Math.min(b.left - w.left, w.width - 360)) : 0 })
                         }}
                         style={{ position: 'relative', minWidth: 40, textAlign: 'center', padding: '2px 6px', borderRadius: 6, fontVariantNumeric: 'tabular-nums', fontWeight: 700, fontSize: 12, cursor: 'pointer',
-                          color: `var(--tone-${tone}-tx)`, background: `var(--tone-${tone}-bg)`, border: `1px solid var(--tone-${tone}-bd)`, outline: open ? '2px solid var(--border-strong)' : 'none', outlineOffset: 1 }}>
+                          color: `var(--tone-${tone}-tx)`, background: `var(--tone-${tone}-bg)`, border: `1px solid var(--tone-${tone}-bd)`, outline: open ? '2px solid var(--border-strong)' : 'none', outlineOffset: 1, ...(isMobile ? { minHeight: 40, padding: '6px 10px' } : {}) }}>
                         {d.status === 'none' ? '—' : `${d.pct}%`}
                         {building === `${r.trade}|${d.date}` ? <span style={{ position: 'absolute', top: -5, right: -5 }}><Spin size={9} /></span>
                           : d.list ? <span style={{ position: 'absolute', top: -6, right: -4, fontSize: 9, color: 'var(--tone-green-tx)', fontWeight: 800 }}>✓</span> : null}
@@ -712,7 +723,7 @@ export default function CommandCenter() {
                 if (!cell) return null
                 const key = `${covPop.trade}|${cell.date}`
                 return (
-                  <Popover anchor={covPop.el} onClose={closeCov} style={{ left: covPop.left, top: '100%', marginTop: 6, width: 360 }}>
+                  <Popover anchor={covPop.el} onClose={closeCov} style={{ left: covPop.left, top: '100%', marginTop: 6, width: 360, ...(isMobile ? { left: 0, right: 0, width: 'auto' } : {}) }}>
                     <div style={{ ...EYEBROW, padding: '4px 6px' }}>{covPop.trade} · {dayName(covPop.di)} · {cell.calls}/{cell.capacity} ({cell.pct}%)</div>
                     <div style={{ padding: '2px 6px', fontSize: 12, display: 'flex', flexDirection: 'column', gap: 3, maxHeight: 180, overflow: 'auto' }}>
                       {(cell.detail?.techs || []).length ? cell.detail.techs.map((t, i) => <span key={i}>{t.name}{t.off ? <span style={MUTED}> · {t.off}</span> : ''}</span>) : <span style={MUTED}>No techs scheduled</span>}
@@ -746,7 +757,7 @@ export default function CommandCenter() {
               )}
               {renderList.map(item => item.group ? (
                 <div key={`g:${item.group.techId}`} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 10px', borderRadius: 'var(--radius)', background: 'var(--tone-red-bg)', border: '1px solid var(--tone-red-bd)', fontSize: 12 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 10px', borderRadius: 'var(--radius)', background: 'var(--tone-red-bg)', border: '1px solid var(--tone-red-bd)', fontSize: 12, ...(isMobile ? { flexWrap: 'wrap' } : {}) }}>
                     <span style={{ fontWeight: 800, color: 'var(--tone-red-tx)' }}>{item.group.techName} out {item.group.until === 'tomorrow' ? 'through tomorrow' : 'for the rest of today'}</span>
                     <span style={MUTED}>{item.cards.length} call{item.cards.length === 1 ? '' : 's'}</span>
                     <span style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
@@ -808,6 +819,7 @@ function CapacityCallout({ coverage }) {
 // Today's moves — the audit trail folded into the queue header.
 function MovesStrip({ actions, dismissals }) {
   const [open, setOpen] = useState(false)
+  const isMobile = useIsMobile()
   const ok = actions.filter(a => a.st_status === 'ok')
   const applied = ok.filter(a => ST_WRITES.has(a.kind)).length
   const partial = actions.filter(a => a.st_status === 'partial').length
@@ -819,7 +831,7 @@ function MovesStrip({ actions, dismissals }) {
   const empty = !actions.length && !dismissals.length
   return (
     <>
-      <button onClick={() => setOpen(o => !o)} style={{ marginLeft: 'auto', border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 11, color: 'var(--text-secondary)', padding: 0, fontVariantNumeric: 'tabular-nums' }}>
+      <button onClick={() => setOpen(o => !o)} style={{ marginLeft: 'auto', border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 11, color: 'var(--text-secondary)', padding: 0, fontVariantNumeric: 'tabular-nums', ...(isMobile ? { minHeight: 40, textAlign: 'left' } : {}) }}>
         Today: {empty ? 'nothing yet' : <>{applied} applied <span style={{ color: 'var(--tone-green-tx)', fontWeight: 700 }}>✓</span>{partial ? <> · {partial} partial <span style={{ color: 'var(--tone-amber-tx)', fontWeight: 700 }}>⚠</span></> : ''}{failed ? <> · {failed} failed <span style={{ color: 'var(--tone-red-tx)', fontWeight: 700 }}>×</span></> : ''} · <span style={{ color: 'var(--tone-green-tx)', fontWeight: 700 }}>+{money(upside)}</span> expected · {dismissed.length} dismissed</>} · {open ? 'hide ▴' : 'show ▾'}
       </button>
       {open && (
@@ -827,7 +839,7 @@ function MovesStrip({ actions, dismissals }) {
           <div style={{ maxHeight: 220, overflow: 'auto' }}>
             {!rows.length && <div style={{ ...MUTED, padding: '8px 14px' }}>No moves yet today.</div>}
             {rows.map(a => (
-              <div key={a.id} style={{ display: 'grid', gridTemplateColumns: '58px 1fr auto', gap: 10, padding: '7px 14px', borderBottom: '1px solid var(--border)', fontSize: 12, alignItems: 'baseline' }}>
+              <div key={a.id} className="mgrid" style={{ display: 'grid', gridTemplateColumns: '58px 1fr auto', gap: 10, padding: '7px 14px', borderBottom: '1px solid var(--border)', fontSize: 12, alignItems: 'baseline' }}>
                 <span style={{ ...MUTED, fontSize: 11, fontVariantNumeric: 'tabular-nums' }}>{clock(a.created_at)}</span>
                 <span>{a.summary} <span style={{ fontWeight: 700, color: a.st_status === 'ok' ? 'var(--tone-green-tx)' : a.st_status === 'partial' ? 'var(--tone-amber-tx)' : 'var(--tone-red-tx)' }}>{a.st_status === 'ok' ? '✓' : a.st_status}</span>
                   {Number(a.after?.upside) > 0 && a.st_status === 'ok' && <span style={{ color: 'var(--tone-green-tx)', fontWeight: 700 }}> +{money(a.after.upside)}</span>}
@@ -848,6 +860,7 @@ const Card = memo(function Card({ c, day, isNext, flash, pending, stError, pick,
   // Selection is the tech id (not a row index) so a re-read can't silently
   // re-point the primary button at a different tech.
   const [dismissing, setDismissing] = useState(false)
+  const isMobile = useIsMobile()
   const alts = c.alternatives || []
   const isPartial = c.kind === 'partial'
   const selId = pick ?? defaultPick(c)
@@ -895,9 +908,11 @@ const Card = memo(function Card({ c, day, isNext, flash, pending, stError, pick,
     return onAct(pb.body, c.key, { ...pb.meta, day })
   }
   const radio = (on) => <span style={{ width: 13, height: 13, borderRadius: '50%', flexShrink: 0, border: `1.5px solid ${on ? 'var(--accent)' : 'var(--border-strong)'}`, background: on ? 'radial-gradient(circle, var(--accent) 45%, transparent 50%)' : 'transparent' }} />
+  // The severity rail is a grid column; "mgrid" keeps it one on a phone, where
+  // the phone layer would otherwise stack it into an invisible zero-height row.
   return (
-    <div id={isNext ? 'cc-next-card' : undefined} className="card" style={{ display: 'grid', gridTemplateColumns: '4px 1fr', overflow: 'hidden', outline: isNext ? '2px solid var(--accent)' : 'none', outlineOffset: -1,
-      boxShadow: flash ? '0 0 0 6px var(--accent-bg)' : 'none', transition: 'box-shadow .3s' }}>
+    <div id={isNext ? 'cc-next-card' : undefined} className="card mgrid" style={{ display: 'grid', gridTemplateColumns: '4px 1fr', overflow: 'hidden', outline: isNext ? '2px solid var(--accent)' : 'none', outlineOffset: -1,
+      boxShadow: flash ? '0 0 0 6px var(--accent-bg)' : 'none', transition: 'box-shadow .3s', ...(isMobile ? { padding: 0 } : {}) }}>
       <div style={{ background: rail }} />
       <div style={{ padding: '11px 14px', display: 'grid', gap: 8, minWidth: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', fontSize: 11, color: 'var(--text-muted)' }}>
@@ -920,7 +935,7 @@ const Card = memo(function Card({ c, day, isNext, flash, pending, stError, pick,
           <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius)', overflow: 'hidden' }}>
             <div style={{ padding: '4px 10px', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: .5, color: 'var(--text-muted)', background: 'var(--surface-2)' }}>Remove from</div>
             {(c.partialTechs || []).map((t, i) => (
-              <div key={t.techId} onClick={() => onPick(c.key, t.techId)} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', fontSize: 12, cursor: 'pointer', borderTop: i ? '1px solid var(--border)' : 'none', background: t.techId === selId ? 'var(--accent-bg)' : 'transparent' }}>
+              <div key={t.techId} onClick={() => onPick(c.key, t.techId)} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', fontSize: 12, cursor: 'pointer', borderTop: i ? '1px solid var(--border)' : 'none', background: t.techId === selId ? 'var(--accent-bg)' : 'transparent', ...(isMobile ? { minHeight: 40 } : {}) }}>
                 {radio(t.techId === selId)}<TierDot tier={t.tier} /><span style={{ fontWeight: 600 }}>{t.techName}</span>{t.recommended && <span style={{ fontSize: 9, fontWeight: 800, color: 'var(--tone-green-tx)' }}>PICK</span>}
               </div>
             ))}
@@ -929,25 +944,44 @@ const Card = memo(function Card({ c, day, isNext, flash, pending, stError, pick,
 
         {alts.length > 0 && (
           <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius)', overflow: 'hidden' }}>
-            <div style={{ display: 'grid', gridTemplateColumns: '18px 1fr 110px 90px 70px 90px', gap: 8, padding: '4px 10px', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: .5, color: 'var(--text-muted)', background: 'var(--surface-2)' }}>
-              <span /><span>Technician</span><span>Load today</span><span>Drive</span><span title="estimate close rate — not the TV $90 rule">Close</span><span style={{ textAlign: 'right' }}>$/opp</span>
+            {/* Six columns on a desk. On a phone a row is radio · tech · $/opp, with
+                load, drive and close rate folded into a second line under the name. */}
+            <div className="mgrid" style={{ display: 'grid', gridTemplateColumns: isMobile ? '18px 1fr auto' : '18px 1fr 110px 90px 70px 90px', gap: 8, padding: '4px 10px', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: .5, color: 'var(--text-muted)', background: 'var(--surface-2)' }}>
+              <span /><span>Technician</span>{!isMobile && <><span>Load today</span><span>Drive</span><span title="estimate close rate — not the TV $90 rule">Close</span></>}<span style={{ textAlign: 'right' }}>$/opp</span>
             </div>
             {alts.map((a, i) => {
               const on = !keep && a.techId === selId
+              const loadColor = a.swapWith ? 'var(--tone-green-tx)' : a.busy ? 'var(--tone-amber-tx)' : 'var(--text-secondary)'
+              const loadText = a.swapWith ? `swap · takes #${a.swapWith.jobNumber}` : a.busy ? 'has a call this window' : a.load != null ? `${a.load} of ${a.target} calls` : ''
+              const driveText = a.travel?.minutes != null ? `${a.travel.minutes} min` : a.travel?.miles != null ? `~${a.travel.miles} mi` : ''
+              const closeText = a.closeRate != null ? `${a.closeRate}%` : ''
+              const name = <span style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}><TierDot tier={a.tier} /><span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.techName}</span>{a.recommended && <span style={{ fontSize: 9, fontWeight: 800, color: 'var(--tone-green-tx)' }}>PICK</span>}</span>
+              const dollars = <span style={{ textAlign: 'right', fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: a.deltaRaw > 0 ? 'var(--tone-green-tx)' : 'var(--text-muted)' }}>{a.deltaRaw > 0 ? `+${money(a.deltaRaw)}` : money(a.expectedValue)}<span style={{ fontWeight: 500, color: 'var(--text-muted)' }}>/opp</span></span>
+              if (isMobile) return (
+                <div key={a.techId} className="mgrid" onClick={() => onPick(c.key, a.techId)} style={{ display: 'grid', gridTemplateColumns: '18px 1fr auto', gap: 8, alignItems: 'center', padding: '8px 10px', minHeight: 44, fontSize: 12, cursor: 'pointer',
+                  borderTop: i ? '1px solid var(--border)' : 'none', background: on ? 'var(--accent-bg)' : 'transparent', opacity: a.busy ? .6 : 1 }}>
+                  {radio(on)}
+                  <span style={{ minWidth: 0 }}>
+                    {name}
+                    {(loadText || driveText || closeText) ? <span style={{ display: 'block', fontSize: 11, color: loadColor, fontVariantNumeric: 'tabular-nums' }}>{[loadText, driveText && `${driveText} drive`, closeText && `${closeText} close`].filter(Boolean).join(' · ')}</span> : null}
+                  </span>
+                  {dollars}
+                </div>
+              )
               return (
                 <div key={a.techId} onClick={() => onPick(c.key, a.techId)} style={{ display: 'grid', gridTemplateColumns: '18px 1fr 110px 90px 70px 90px', gap: 8, alignItems: 'center', padding: '6px 10px', fontSize: 12, cursor: 'pointer',
                   borderTop: i ? '1px solid var(--border)' : 'none', background: on ? 'var(--accent-bg)' : 'transparent', opacity: a.busy ? .6 : 1 }}>
                   {radio(on)}
-                  <span style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}><TierDot tier={a.tier} /><span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.techName}</span>{a.recommended && <span style={{ fontSize: 9, fontWeight: 800, color: 'var(--tone-green-tx)' }}>PICK</span>}</span>
-                  <span style={{ color: a.swapWith ? 'var(--tone-green-tx)' : a.busy ? 'var(--tone-amber-tx)' : 'var(--text-secondary)' }}>{a.swapWith ? `swap · takes #${a.swapWith.jobNumber}` : a.busy ? 'has a call this window' : a.load != null ? `${a.load} of ${a.target} calls` : ''}</span>
-                  <span style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--text-secondary)' }}>{a.travel?.minutes != null ? `${a.travel.minutes} min` : a.travel?.miles != null ? `~${a.travel.miles} mi` : ''}</span>
-                  <span style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--text-secondary)' }}>{a.closeRate != null ? `${a.closeRate}%` : ''}</span>
-                  <span style={{ textAlign: 'right', fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: a.deltaRaw > 0 ? 'var(--tone-green-tx)' : 'var(--text-muted)' }}>{a.deltaRaw > 0 ? `+${money(a.deltaRaw)}` : money(a.expectedValue)}<span style={{ fontWeight: 500, color: 'var(--text-muted)' }}>/opp</span></span>
+                  {name}
+                  <span style={{ color: loadColor }}>{loadText}</span>
+                  <span style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--text-secondary)' }}>{driveText}</span>
+                  <span style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--text-secondary)' }}>{closeText}</span>
+                  {dollars}
                 </div>
               )
             })}
             {canKeep && (
-              <div onClick={() => onPick(c.key, 'keep')} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', fontSize: 12, cursor: 'pointer', borderTop: '1px solid var(--border)', background: keep ? 'var(--accent-bg)' : 'transparent', color: 'var(--text-secondary)' }}>
+              <div onClick={() => onPick(c.key, 'keep')} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', fontSize: 12, cursor: 'pointer', borderTop: '1px solid var(--border)', background: keep ? 'var(--accent-bg)' : 'transparent', color: 'var(--text-secondary)', ...(isMobile ? { minHeight: 40 } : {}) }}>
                 {radio(keep)}Keep it with {c.current.techName}
               </div>
             )}
@@ -966,7 +1000,7 @@ const Card = memo(function Card({ c, day, isNext, flash, pending, stError, pick,
         {stError && <div style={{ fontSize: 12, color: 'var(--tone-red-tx)', background: 'var(--tone-red-bg)', border: '1px solid var(--tone-red-bd)', borderRadius: 'var(--radius)', padding: '5px 10px' }}><b>ST said:</b> {stError}</div>}
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          <Btn primary disabled={disabled} onClick={run}>{pending && <Spin size={10} light />}{primary}</Btn>
+          <Btn primary disabled={disabled} onClick={run} style={isMobile ? { width: '100%', justifyContent: 'center', whiteSpace: 'normal' } : undefined}>{pending && <Spin size={10} light />}{primary}</Btn>
           {!dismissing ? (
             <span style={{ marginLeft: 'auto', display: 'flex', gap: 4 }}>
               <Btn small onClick={() => onDismiss(c.key, 'snooze', null, snoozeMin)} style={{ border: 'none', background: 'transparent', color: 'var(--text-secondary)' }}>Snooze {snoozeMin === 60 ? '1h' : `${snoozeMin}m`}</Btn>
@@ -1011,26 +1045,27 @@ const Board = memo(function Board({ board, onOpen, onUnhold, pendingKeys }) {
   const kindOf = (c) => c.status === 'Hold' ? 'hold' : /install|replacement/i.test(c.jobType) ? 'ins' : c.opportunity >= 3 ? 'hi' : /repair|service|warranty|callback|concern/i.test(c.jobType) ? 'rep' : 'rt'
   const tone = { hi: 'green', rep: 'amber', ins: 'blue', rt: 'gray' }
   const onHold = board.onHold || [], tray = board.unassigned || []
-  const COLS = '150px 1fr'
+  const isMobile = useIsMobile()
+  const COLS = isMobile ? '96px 1fr' : '150px 1fr'   // the name column gives the lane its room on a phone
   return (
     <div className="card" style={{ padding: 0, position: 'sticky', top: 0 }}>
-      <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 10 }}>
+      <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 10, ...(isMobile ? { flexWrap: 'wrap' } : {}) }}>
         <span style={{ fontSize: 13, fontWeight: 700 }}>The board</span><span style={MUTED}>click any call · $ = opportunity, ring = seat tier</span>
         <span style={{ marginLeft: 'auto', display: 'flex', gap: 10, fontSize: 10, color: 'var(--text-muted)' }}>
           {[['green', 'opportunity'], ['amber', 'repair'], ['blue', 'install'], ['gray', 'routine']].map(([t, l]) => <span key={t}><i style={{ display: 'inline-block', width: 9, height: 9, borderRadius: 2, marginRight: 4, verticalAlign: -1, background: `var(--tone-${t}-bg)`, border: `1px solid var(--tone-${t}-bd)` }} />{l}</span>)}
         </span>
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: COLS, padding: '5px 14px 3px', borderBottom: '1px solid var(--border)', background: 'var(--surface-2)' }}>
+      <div className="mgrid" style={{ display: 'grid', gridTemplateColumns: COLS, padding: '5px 14px 3px', borderBottom: '1px solid var(--border)', background: 'var(--surface-2)' }}>
         <span /><div style={{ position: 'relative', height: 13 }}>
-          {[8, 10, 12, 14, 16, 18, 20].map(h => <span key={h} style={{ position: 'absolute', left: `${((h - 7) / 13) * 100}%`, transform: 'translateX(-50%)', fontSize: 10, fontWeight: 700, color: 'var(--text-muted)' }}>{h === 12 ? '12PM' : h > 12 ? `${h - 12}PM` : `${h}AM`}</span>)}
+          {(isMobile ? [8, 12, 16, 20] : [8, 10, 12, 14, 16, 18, 20]).map(h => <span key={h} style={{ position: 'absolute', left: `${((h - 7) / 13) * 100}%`, transform: 'translateX(-50%)', fontSize: 10, fontWeight: 700, color: 'var(--text-muted)' }}>{h === 12 ? '12PM' : h > 12 ? `${h - 12}PM` : `${h}AM`}</span>)}
         </div>
       </div>
-      <div style={{ overflow: 'auto', maxHeight: 'calc(100vh - 330px)' }}>
+      <div style={{ overflow: 'auto', maxHeight: isMobile ? '70vh' : 'calc(100vh - 330px)' }}>
         {groups.map(g => (
           <div key={g.tr}>
             <div style={{ ...EYEBROW, padding: '8px 14px 2px', display: 'flex', gap: 8 }}>{g.label}<span style={{ ...MUTED, fontSize: 11, textTransform: 'none', letterSpacing: 0 }}>{g.calls} calls</span></div>
             {g.techs.map(({ t, mine, rowOf, rows, shifts, opp, label }) => (
-              <div key={t.techId} style={{ display: 'grid', gridTemplateColumns: COLS, alignItems: 'center', padding: '3px 14px', minHeight: 32, opacity: t.onShift || t.out ? 1 : .55 }}>
+              <div key={t.techId} className="mgrid" style={{ display: 'grid', gridTemplateColumns: COLS, alignItems: 'center', padding: '3px 14px', minHeight: 32, opacity: t.onShift || t.out ? 1 : .55 }}>
                 <div title={`${TIER[t.tier]?.label || ''} · ${t.status}`} style={{ minWidth: 0, paddingRight: 8 }}>
                   <div style={{ fontSize: 12, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6, overflow: 'hidden', whiteSpace: 'nowrap' }}>
                     <TierDot tier={t.tier} /><span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.name}</span>
@@ -1068,10 +1103,10 @@ const Board = memo(function Board({ board, onOpen, onUnhold, pendingKeys }) {
       </div>
       <div style={{ padding: '8px 14px 10px', borderTop: '1px solid var(--border)', display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', fontSize: 11 }}>
         <span style={{ ...EYEBROW, color: 'var(--tone-amber-tx)' }}>Unassigned tray</span>
-        {tray.length ? tray.map(u => <span key={u.appointmentId} onClick={() => onOpen({ ...u, techId: null, techName: null, status: u.status || 'Scheduled' })} style={{ cursor: 'pointer', border: '1px solid var(--tone-amber-bd)', background: 'var(--tone-amber-bg)', color: 'var(--tone-amber-tx)', borderRadius: 99, padding: '2px 8px', fontWeight: 700 }}>#{u.jobNumber} · {(u.jobType || '').replace(/^\w[\w ]*? - /, '')} · {windowLabel(u)}</span>) : <span style={MUTED}>empty</span>}
+        {tray.length ? tray.map(u => <span key={u.appointmentId} onClick={() => onOpen({ ...u, techId: null, techName: null, status: u.status || 'Scheduled' })} style={{ cursor: 'pointer', border: '1px solid var(--tone-amber-bd)', background: 'var(--tone-amber-bg)', color: 'var(--tone-amber-tx)', borderRadius: 99, padding: '2px 8px', fontWeight: 700, ...(isMobile ? { display: 'inline-flex', alignItems: 'center', minHeight: 40, padding: '4px 12px' } : {}) }}>#{u.jobNumber} · {(u.jobType || '').replace(/^\w[\w ]*? - /, '')} · {windowLabel(u)}</span>) : <span style={MUTED}>empty</span>}
         {onHold.length > 0 && <span style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center', color: 'var(--text-muted)' }}>On hold: {onHold.map(h => {
           const busy = pendingKeys.has(`unhold:${h.appointmentId}`)
-          return <span key={h.jobId}>#{h.jobNumber} <button disabled={busy} onClick={() => onUnhold(h)} style={{ border: 'none', background: 'transparent', color: 'var(--accent)', cursor: busy ? 'default' : 'pointer', fontSize: 11, fontWeight: 600, padding: 0, opacity: busy ? .5 : 1 }}>{busy ? 'releasing…' : 'release'}</button></span>
+          return <span key={h.jobId}>#{h.jobNumber} <button disabled={busy} onClick={() => onUnhold(h)} style={{ border: 'none', background: 'transparent', color: 'var(--accent)', cursor: busy ? 'default' : 'pointer', fontSize: 11, fontWeight: 600, padding: 0, opacity: busy ? .5 : 1, ...(isMobile ? { minHeight: 40, padding: '0 6px' } : {}) }}>{busy ? 'releasing…' : 'release'}</button></span>
         })}</span>}
       </div>
     </div>
@@ -1097,6 +1132,7 @@ function Drawer({ call: d, board, holdReasons, profile, phone, onClose, onAct, t
   const [priority, setPriority] = useState(() => memoHit?.data?.job?.priority || '')
   const [smsBody, setSmsBody] = useState('')
   const [busy, setBusy] = useState(false)
+  const isMobile = useIsMobile()
   const fetchDetail = useCallback(async (force = false) => {
     const had = detailMemo.current.get(d.jobId)
     if (had && !force) { setDetail(had.data); setJobTypeId(String(had.data.job.jobTypeId || '')); setPriority(had.data.job.priority || '') }
@@ -1197,6 +1233,9 @@ function Drawer({ call: d, board, holdReasons, profile, phone, onClose, onAct, t
 
   const sel = { width: '100%', border: '1px solid var(--border-strong)', borderRadius: 'var(--radius)', padding: '7px 10px', fontSize: 13, background: 'var(--surface)', color: 'var(--text-primary)', fontFamily: 'inherit' }
   const sec = { ...EYEBROW, marginBottom: 6 }
+  // Phone: each field row stacks and its button runs the full width.
+  const row = { display: 'flex', gap: 8, ...(isMobile ? { flexDirection: 'column' } : {}) }
+  const full = isMobile ? { width: '100%', justifyContent: 'center' } : undefined
   const jobType = detail?.job?.jobType || d.jobType || ''
   return (
     <>
@@ -1221,39 +1260,39 @@ function Drawer({ call: d, board, holdReasons, profile, phone, onClose, onAct, t
             ) : <><Skel w="55%" /><Skel w="80%" /></>}
             <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
               <Btn small disabled={!detail?.customer?.phone} onClick={call}>Call</Btn>
-              <a className="btn sm" href={ST_JOB_URL(d.jobId)} target="_blank" rel="noreferrer" style={{ fontSize: 11, padding: '4px 10px' }}>Open in ServiceTitan ↗</a>
+              <a className="btn sm" href={ST_JOB_URL(d.jobId)} target="_blank" rel="noreferrer" style={{ fontSize: 11, padding: '4px 10px', ...(isMobile ? { minHeight: 40 } : {}) }}>Open in ServiceTitan ↗</a>
             </div>
           </div>
           <div>
             <div style={sec}>Assigned tech</div>
-            <div style={{ display: 'flex', gap: 8 }}>
+            <div style={row}>
               <select style={sel} value={techId} onChange={e => setTechId(e.target.value)}>
                 <option value="">— Unassigned —</option>
                 {ranked.map(t => <option key={t.techId} value={String(t.techId)}>{t.name}{t.techId === d.techId ? ' (current)' : ''} — {TIER[t.tier]?.label || t.tier}{t.expectedValue != null ? ` · ${money(t.expectedValue)}/opp` : ''}{t.allDayInstall ? ' · all-day install' : ''}</option>)}
               </select>
-              <Btn primary disabled={busy || !d.appointmentId} onClick={saveAssign}>Save</Btn>
+              <Btn primary disabled={busy || !d.appointmentId} onClick={saveAssign} style={full}>Save</Btn>
             </div>
             {!d.appointmentId && <div style={{ ...MUTED, fontSize: 11, marginTop: 4 }}>No appointment on this job to assign.</div>}
           </div>
           <div>
             <div style={sec}>Arrival window</div>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <input type="date" style={{ ...sel, width: 150 }} value={dateStr} onChange={e => setDateStr(e.target.value)} />
+            <div style={row}>
+              <input type="date" style={{ ...sel, width: isMobile ? '100%' : 150 }} value={dateStr} onChange={e => setDateStr(e.target.value)} />
               <select style={sel} value={win} onChange={e => setWin(e.target.value)}>
                 <option value="">— pick —</option>
                 {WINDOWS.map(([s, e]) => <option key={s} value={`${s}-${e}`}>{s > 12 ? s - 12 : s} {s >= 12 ? 'PM' : 'AM'} – {e > 12 ? e - 12 : e} {e >= 12 ? 'PM' : 'AM'}</option>)}
               </select>
-              <Btn primary disabled={busy || !win || !d.appointmentId} onClick={saveWindow}>Move</Btn>
+              <Btn primary disabled={busy || !win || !d.appointmentId} onClick={saveWindow} style={full}>Move</Btn>
             </div>
           </div>
           <div>
             <div style={sec}>Job type · priority</div>
-            <div style={{ display: 'flex', gap: 8 }}>
+            <div style={row}>
               <select style={sel} value={jobTypeId} disabled={!detail} onChange={e => setJobTypeId(e.target.value)}>
                 {detail ? (detail.jobTypes || []).map(t => <option key={t.id} value={String(t.id)}>{t.name}</option>) : <option value="">{jobType || 'loading…'}</option>}
               </select>
-              <select style={{ ...sel, width: 120 }} value={priority} disabled={!detail} onChange={e => setPriority(e.target.value)}>{['', 'Low', 'Normal', 'High', 'Urgent'].map(p => <option key={p} value={p}>{p || '—'}</option>)}</select>
-              <Btn primary disabled={busy || !detail} onClick={saveType}>Fix</Btn>
+              <select style={{ ...sel, width: isMobile ? '100%' : 120 }} value={priority} disabled={!detail} onChange={e => setPriority(e.target.value)}>{['', 'Low', 'Normal', 'High', 'Urgent'].map(p => <option key={p} value={p}>{p || '—'}</option>)}</select>
+              <Btn primary disabled={busy || !detail} onClick={saveType} style={full}>Fix</Btn>
             </div>
           </div>
           <div>
@@ -1264,7 +1303,7 @@ function Drawer({ call: d, board, holdReasons, profile, phone, onClose, onAct, t
                 <input style={sel} placeholder="memo (optional)" value={holdMemo} onChange={e => setHoldMemo(e.target.value)} />
               </div>
             )}
-            <div style={{ marginTop: 6 }}><Btn disabled={busy || !d.appointmentId || (d.status !== 'Hold' && !holdReason)} onClick={saveHold}>{d.status === 'Hold' ? 'Take off hold' : 'Hold this appointment'}</Btn></div>
+            <div style={{ marginTop: 6 }}><Btn disabled={busy || !d.appointmentId || (d.status !== 'Hold' && !holdReason)} onClick={saveHold} style={full}>{d.status === 'Hold' ? 'Take off hold' : 'Hold this appointment'}</Btn></div>
           </div>
           <div>
             <div style={sec}>Notes on the job</div>
@@ -1274,9 +1313,9 @@ function Drawer({ call: d, board, holdReasons, profile, phone, onClose, onAct, t
                 {(detail.notes || []).slice(0, 5).map((n, i) => <div key={i} style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>{n.isPinned ? '📌 ' : ''}{n.text}<span style={{ ...MUTED, fontSize: 10 }}> · {n.createdOn ? new Date(n.createdOn).toLocaleDateString() : ''}</span></div>)}
               </>
             ) : <><Skel /><Skel w="70%" /></>}
-            <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
+            <div style={{ ...row, marginTop: 6 }}>
               <input style={sel} placeholder="Pin a note to the job" value={note} onChange={e => setNote(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') saveNote() }} />
-              <Btn disabled={busy || !note.trim()} onClick={saveNote}>Pin</Btn>
+              <Btn disabled={busy || !note.trim()} onClick={saveNote} style={full}>Pin</Btn>
             </div>
           </div>
           {(!detail || detail.estimates?.length > 0) && (
@@ -1288,9 +1327,9 @@ function Drawer({ call: d, board, holdReasons, profile, phone, onClose, onAct, t
           )}
           <div>
             <div style={sec}>Text the customer</div>
-            <div style={{ display: 'flex', gap: 8 }}>
+            <div style={row}>
               <input style={sel} placeholder={!detail ? 'loading the customer…' : detail.customer?.phone ? `Text ${detail.customer.name || 'the customer'}…` : 'No phone on file'} disabled={!detail?.customer?.phone} value={smsBody} onChange={e => setSmsBody(e.target.value)} />
-              <Btn disabled={busy || !detail?.customer?.phone || !smsBody.trim()} onClick={sendSms}>Send</Btn>
+              <Btn disabled={busy || !detail?.customer?.phone || !smsBody.trim()} onClick={sendSms} style={full}>Send</Btn>
             </div>
             <div style={{ ...MUTED, fontSize: 11, marginTop: 4 }}>You write it; nothing is sent automatically. Logged in Today’s moves.</div>
           </div>

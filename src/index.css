@@ -200,3 +200,22 @@ textarea.form-input { resize: vertical; min-height: 72px; }
   stroke-dasharray: 120;
   animation: andi-draw-pulse 1.1s ease-in-out infinite;
 }
+
+/* ── PHONE LAYER (≤768px) ────────────────────────────────────────────────────
+   Pages are laid out with inline styles for the desktop. On a phone every
+   multi-column grid becomes one column, pinned panels unpin, fixed minimum
+   widths let go, and side drawers take the whole screen — desktop is untouched.
+   A grid that is really a ROW (a table row drawn as a grid) opts out with
+   class "mgrid" and scrolls sideways instead; an element that must keep its
+   min-width opts out with "mkeep". */
+@media (max-width: 768px) {
+  [style*="grid-template-columns"]:not(.mgrid) { grid-template-columns: minmax(0, 1fr) !important; }
+  [style*="position: sticky"] { position: static !important; }
+  [style*="min-width"]:not(.mkeep):not(input):not(select):not(button):not(table):not(td):not(th) { min-width: 0 !important; }
+  aside[style*="position: fixed"] { width: 100vw !important; min-width: 0 !important; }
+  .mgrid { overflow-x: auto; }
+  html { -webkit-text-size-adjust: 100%; }
+  input, select, textarea { font-size: 16px !important; }   /* iOS zooms the page on smaller inputs */
+  .card { padding-left: 12px; padding-right: 12px; }
+  .mobile-hide { display: none !important; }
+}

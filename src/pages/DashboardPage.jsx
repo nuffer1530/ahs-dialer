@@ -9,6 +9,7 @@ import {
   acwStats, ahtOf, fmtSecs, fmtPct, SERVICE_LEVEL_SECONDS, SERVICE_LEVEL_TARGET,
 } from '../lib/analytics'
 import { exportAnalyticsWorkbook } from '../lib/exportXlsx'
+import { useIsMobile } from '../lib/useIsMobile'
 
 const TF_OPTIONS = ['today', 'yesterday', 'week', 'month', '90days', 'ytd', 'all']
 const TF_LABELS = { today:'Today', yesterday:'Yesterday', week:'This week', month:'This month', '90days':'90 days', ytd:'YTD', all:'All time' }
@@ -90,6 +91,9 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true)
   const [exporting, setExporting] = useState(false)
   const [hoveredTab, setHoveredTab] = useState(null)
+  const isMobile = useIsMobile()
+  // Phone: .btn.sm is 26px tall and a thumb needs 40. undefined leaves the desktop markup untouched.
+  const tap = isMobile ? { minHeight:40, flex:'1 1 auto' } : undefined
 
   // One definition of the window, so every query, KPI and export sheet agree.
   const range = useMemo(() => {
@@ -173,34 +177,51 @@ export default function DashboardPage() {
       {/* -- HEADER BAR (matches WFM / My Page) -- */}
       <div style={{ background:'var(--surface)', borderBottom:'1px solid var(--border)', flexShrink:0 }}>
         {/* Timeframe + exports row */}
-        <div style={{ display:'flex', alignItems:'center', gap:6, flexWrap:'wrap', padding:'14px 24px 0' }}>
+        <div style={{ display:'flex', alignItems:'center', gap:6, flexWrap:'wrap', padding: isMobile ? '10px 12px 0' : '14px 24px 0' }}>
           <span style={{ fontSize:10, fontWeight:700, letterSpacing:.5, color:'var(--text-muted)', marginRight:2 }}>TIMEFRAME</span>
-          {TF_OPTIONS.map(o => (
-            <button key={o} className={`btn sm${!custom.on && tf === o ? ' primary' : ''}`}
-              onClick={() => { setTf(o); setCustom(c => ({ ...c, on:false })) }}>{TF_LABELS[o]}</button>
-          ))}
-          <button className={`btn sm${custom.on ? ' primary' : ''}`} onClick={() => setCustom(c => ({ ...c, on:!c.on }))}>Custom</button>
+          {isMobile ? (
+            // Phone: eight buttons wrap to three lines, so the timeframe folds into one select.
+            <select value={custom.on ? 'custom' : tf}
+              onChange={e => {
+                const v = e.target.value
+                if (v === 'custom') setCustom(c => ({ ...c, on:true }))
+                else { setTf(v); setCustom(c => ({ ...c, on:false })) }
+              }}
+              style={{ flex:1, minHeight:40, padding:'6px 10px', border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface-2)', color:'var(--text-primary)' }}>
+              {TF_OPTIONS.map(o => <option key={o} value={o}>{TF_LABELS[o]}</option>)}
+              <option value="custom">Custom dates</option>
+            </select>
+          ) : (
+            <>
+              {TF_OPTIONS.map(o => (
+                <button key={o} className={`btn sm${!custom.on && tf === o ? ' primary' : ''}`}
+                  onClick={() => { setTf(o); setCustom(c => ({ ...c, on:false })) }}>{TF_LABELS[o]}</button>
+              ))}
+              <button className={`btn sm${custom.on ? ' primary' : ''}`} onClick={() => setCustom(c => ({ ...c, on:!c.on }))}>Custom</button>
+            </>
+          )}
           {custom.on && (
             <>
               <input type="date" value={custom.start} onChange={e => setCustom(c => ({ ...c, start:e.target.value }))}
-                style={{ padding:'4px 8px', border:'1px solid var(--border)', borderRadius:'var(--radius)', fontSize:12, background:'var(--surface-2)', color:'var(--text-primary)' }} />
+                style={{ padding:'4px 8px', border:'1px solid var(--border)', borderRadius:'var(--radius)', fontSize:12, background:'var(--surface-2)', color:'var(--text-primary)', minHeight: isMobile ? 40 : undefined }} />
               <span style={{ fontSize:12, color:'var(--text-muted)' }}>→</span>
               <input type="date" value={custom.end} onChange={e => setCustom(c => ({ ...c, end:e.target.value }))}
-                style={{ padding:'4px 8px', border:'1px solid var(--border)', borderRadius:'var(--radius)', fontSize:12, background:'var(--surface-2)', color:'var(--text-primary)' }} />
+                style={{ padding:'4px 8px', border:'1px solid var(--border)', borderRadius:'var(--radius)', fontSize:12, background:'var(--surface-2)', color:'var(--text-primary)', minHeight: isMobile ? 40 : undefined }} />
             </>
           )}
-          <div style={{ marginLeft:'auto', display:'flex', gap:6 }}>
-            <button className="btn sm success" onClick={doExport} disabled={exporting || loading}>
+          {/* Phone: the four exports take their own full-width line and wrap two-up. */}
+          <div style={{ marginLeft:'auto', display:'flex', gap:6, flexWrap: isMobile ? 'wrap' : undefined, flexBasis: isMobile ? '100%' : undefined }}>
+            <button className="btn sm success" onClick={doExport} disabled={exporting || loading} style={tap}>
               {exporting ? 'Building…' : '⬇ Export to Excel'}
             </button>
-            <button className="btn sm" onClick={() => exportContacts('all')}>⬇ Contacts</button>
-            <button className="btn sm" onClick={() => exportContacts('booked')}>⬇ Booked</button>
-            <button className="btn sm" onClick={() => exportContacts('dnc')}>⬇ DNC</button>
+            <button className="btn sm" onClick={() => exportContacts('all')} style={tap}>⬇ Contacts</button>
+            <button className="btn sm" onClick={() => exportContacts('booked')} style={tap}>⬇ Booked</button>
+            <button className="btn sm" onClick={() => exportContacts('dnc')} style={tap}>⬇ DNC</button>
           </div>
         </div>
 
         {/* Tab bar — underline style, matching WFM / My Page */}
-        <div style={{ display:'flex', alignItems:'center', padding:'0 24px', marginTop:10 }}>
+        <div style={{ display:'flex', alignItems:'center', padding: isMobile ? '0 12px' : '0 24px', marginTop:10 }}>
           {TABS.map(t => {
             const isActive = tab === t.id
             const isHov = hoveredTab === t.id && !isActive
@@ -210,7 +231,8 @@ export default function DashboardPage() {
                 onMouseEnter={() => setHoveredTab(t.id)}
                 onMouseLeave={() => setHoveredTab(null)}
                 style={{
-                  padding:'10px 16px', fontSize:13, fontWeight: isActive ? 600 : 400,
+                  padding: isMobile ? '12px 8px' : '10px 16px', fontSize:13, fontWeight: isActive ? 600 : 400,
+                  flex: isMobile ? 1 : undefined,   // four tabs share the phone's width instead of clipping the last one
                   border:'none', cursor:'pointer',
                   borderRadius:'var(--radius) var(--radius) 0 0',
                   background: isHov ? 'var(--surface-2)' : 'transparent',
@@ -226,11 +248,12 @@ export default function DashboardPage() {
       </div>
 
       {/* -- CONTENT -- */}
-      <div style={{ flex:1, overflow:'auto', padding:24, background:'var(--bg)', display:'flex', flexDirection:'column', gap:16 }}>
+      <div style={{ flex:1, overflow:'auto', padding: isMobile ? 12 : 24, background:'var(--bg)', display:'flex', flexDirection:'column', gap: isMobile ? 12 : 16 }}>
       {loading ? <div className="spinner lg" style={{ margin:'60px auto' }} /> : (
         <>
-          {/* Headline KPIs — visible on every tab */}
-          <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(140px, 1fr))', gap:10 }}>
+          {/* Headline KPIs — visible on every tab. mgrid: auto-fit already gives two
+              tiles a row on a phone; without it the phone layer stacks all nine. */}
+          <div className="mgrid" style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(140px, 1fr))', gap:10 }}>
             <Kpi label="Calls offered" value={inbound.offered} sub={`${inbound.handled} handled`} />
             <Kpi label={`Service level (${SERVICE_LEVEL_SECONDS}s)`} value={fmtPct(inbound.serviceLevel)} tone={slTone} sub={`target ${SERVICE_LEVEL_TARGET}%`} />
             <Kpi label="Abandon rate" value={fmtPct(inbound.abandonRate)} tone={abTone} sub={`${inbound.abandoned} abandoned`} />
@@ -265,7 +288,8 @@ export default function DashboardPage() {
                   <div className="card-title">Outcomes</div>
                   <span style={{ fontSize:11, color:'var(--text-muted)' }}>{outbound.calls} calls · {range.label}</span>
                 </div>
-                <table className="data-table">
+                {/* Three columns fit a phone, so skip the forced 640px sideways scroll. */}
+                <table className="data-table" style={isMobile ? { minWidth:0 } : undefined}>
                   <thead><tr><th>Outcome</th><th style={{textAlign:'right'}}>Count</th><th style={{textAlign:'right'}}>Share</th></tr></thead>
                   <tbody>
                     {Object.entries(outbound.byOutcome).sort((a, b) => b[1] - a[1]).map(([o, n]) => (
@@ -282,7 +306,7 @@ export default function DashboardPage() {
                   </tbody>
                 </table>
               </div>
-              <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(140px, 1fr))', gap:10 }}>
+              <div className="mgrid" style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(140px, 1fr))', gap:10 }}>
                 <Kpi label="Total contacts" value={contacts.length.toLocaleString()} sub="all time" />
                 <Kpi label="Remaining" value={contacts.filter(c => !['Booked','Not Interested','DNC','Bad Data','Max Attempts'].includes(c.status)).length.toLocaleString()} />
                 <Kpi label="Booked" value={contacts.filter(c => c.status === 'Booked').length.toLocaleString()} tone="good" sub="all time" />
@@ -340,7 +364,7 @@ export default function DashboardPage() {
 
           {tab === 'campaigns' && (
             <div className="card">
-              <div className="card-header">
+              <div className="card-header" style={isMobile ? { flexWrap:'wrap', gap:4 } : undefined}>
                 <div className="card-title">Campaign performance</div>
                 <span style={{ fontSize:11, color:'var(--text-muted)' }}>Calls and bookings within {range.label}; contacts are all-time</span>
               </div>

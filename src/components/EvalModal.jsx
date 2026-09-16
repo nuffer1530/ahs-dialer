@@ -4,6 +4,7 @@
 
 import { useEffect, useState } from 'react'
 import { sb } from '../lib/supabase'
+import { useIsMobile } from '../lib/useIsMobile'
 
 const scoreTone = (pct) => pct >= 90 ? 'green' : pct >= 75 ? 'amber' : 'red'
 
@@ -32,14 +33,16 @@ function useRecordingUrl(recordingSid) {
   return { url, err }
 }
 
-export function ScoreChip({ pct, onClick, size = 'sm' }) {
+// `style` lets a caller resize the chip (the phone recordings list makes it a
+// thumb-sized button); it layers over the defaults and is normally absent.
+export function ScoreChip({ pct, onClick, size = 'sm', style }) {
   if (pct == null) return null
   const t = scoreTone(Number(pct))
   return (
     <button onClick={onClick} title="Open the call evaluation"
       style={{ fontSize: size === 'sm' ? 10 : 12, fontWeight: 800, padding: size === 'sm' ? '2px 8px' : '4px 12px',
         borderRadius: 99, cursor: onClick ? 'pointer' : 'default',
-        background: `var(--tone-${t}-bg)`, color: `var(--tone-${t}-tx)`, border: `1px solid var(--tone-${t}-bd)` }}>
+        background: `var(--tone-${t}-bg)`, color: `var(--tone-${t}-tx)`, border: `1px solid var(--tone-${t}-bd)`, ...style }}>
       QA {Math.round(Number(pct))}
     </button>
   )
@@ -47,6 +50,8 @@ export function ScoreChip({ pct, onClick, size = 'sm' }) {
 
 export default function EvalModal({ evalRow, onClose }) {
   const { url: audioUrl, err: audioErr } = useRecordingUrl(evalRow?.recording_sid)
+  // Phone: edge-to-edge sheet, the player on its own line, a 40px close.
+  const isMobile = useIsMobile()
   if (!evalRow) return null
   const items = evalRow.scores?.items || []
   const fromST = String(evalRow.call_sid || '').startsWith('st-')
@@ -57,11 +62,11 @@ export default function EvalModal({ evalRow, onClose }) {
     : ''
 
   return (
-    <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 2000, background: 'rgba(0,0,0,.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 2000, background: 'rgba(0,0,0,.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: isMobile ? 8 : 20 }}>
       <div onClick={e => e.stopPropagation()}
-        style={{ width: 640, maxWidth: '96vw', maxHeight: '88vh', display: 'flex', flexDirection: 'column', background: 'var(--surface)', borderRadius: 14, border: '1px solid var(--border)', overflow: 'hidden' }}>
+        style={{ width: 640, maxWidth: isMobile ? '100%' : '96vw', maxHeight: '88vh', display: 'flex', flexDirection: 'column', background: 'var(--surface)', borderRadius: 14, border: '1px solid var(--border)', overflow: 'hidden' }}>
 
-        <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
+        <div style={{ padding: isMobile ? '12px 12px' : '14px 18px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
           <div style={{ width: 52, height: 52, borderRadius: 12, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
             background: `var(--tone-${t}-bg)`, border: `1.5px solid var(--tone-${t}-bd)`, color: `var(--tone-${t}-tx)`, flexShrink: 0 }}>
             <div style={{ fontSize: 17, fontWeight: 900, lineHeight: 1 }}>{Math.round(Number(evalRow.pct))}</div>
@@ -73,14 +78,14 @@ export default function EvalModal({ evalRow, onClose }) {
               {evalRow.contact_name || (evalRow.phone ? `(${String(evalRow.phone).slice(0,3)}) ${String(evalRow.phone).slice(3,6)}-${String(evalRow.phone).slice(6)}` : 'Unknown caller')} · {when} · {evalRow.earned}/{evalRow.possible} pts
             </div>
           </div>
-          <button onClick={onClose} style={{ border: 'none', background: 'var(--surface-2)', width: 28, height: 28, borderRadius: 8, cursor: 'pointer', fontSize: 15, color: 'var(--text-secondary)', flexShrink: 0 }}>×</button>
+          <button onClick={onClose} style={{ border: 'none', background: 'var(--surface-2)', width: isMobile ? 40 : 28, height: isMobile ? 40 : 28, borderRadius: 8, cursor: 'pointer', fontSize: 15, color: 'var(--text-secondary)', flexShrink: 0 }}>×</button>
         </div>
 
         {(audioUrl || audioErr) && (
-          <div style={{ padding: '10px 18px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 12, background: 'var(--surface-2)', flexShrink: 0 }}>
+          <div style={{ padding: isMobile ? '10px 12px' : '10px 18px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 12, background: 'var(--surface-2)', flexShrink: 0, flexWrap: isMobile ? 'wrap' : undefined }}>
             {audioUrl ? (
               <>
-                <audio controls preload="none" src={audioUrl} style={{ flex: 1, height: 34 }} />
+                <audio controls preload="none" src={audioUrl} style={isMobile ? { width: '100%', minWidth: 0, height: 34 } : { flex: 1, height: 34 }} />
                 <a href={`${audioUrl}${audioUrl.includes('?') ? '&' : '?'}download=1`} title="Download recording"
                   style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--text-secondary)', textDecoration: 'none', whiteSpace: 'nowrap' }}>Download</a>
               </>
@@ -91,7 +96,7 @@ export default function EvalModal({ evalRow, onClose }) {
           </div>
         )}
 
-        <div style={{ flex: 1, overflowY: 'auto', padding: 18 }}>
+        <div style={{ flex: 1, overflowY: 'auto', padding: isMobile ? 12 : 18 }}>
           {evalRow.summary && (
             <div style={{ fontSize: 12.5, lineHeight: 1.55, padding: '10px 13px', background: 'var(--surface-2)', borderRadius: 10, marginBottom: 10 }}>
               {evalRow.summary}

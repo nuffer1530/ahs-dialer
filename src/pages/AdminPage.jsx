@@ -3,6 +3,7 @@ import { toast } from '../lib/dialogs'
 import { sb } from '../lib/supabase'
 import { useAuth } from '../lib/AuthContext'
 import { useData } from '../lib/DataContext'
+import { useIsMobile } from '../lib/useIsMobile'
 import Modal from '../components/Modal'
 import CampaignsPage from './CampaignsPage'
 import Avatar from '../components/Avatar'
@@ -51,6 +52,8 @@ function CommissionMapping() {
   const [jobSearch, setJobSearch] = useState('')
   const [busy, setBusy] = useState('')        // which section is saving
   const [savedMsg, setSavedMsg] = useState('')
+  // Phone: each mapping row stacks its label over a full-width select.
+  const isMobile = useIsMobile()
 
   useEffect(() => { load() }, [])
 
@@ -203,7 +206,7 @@ function CommissionMapping() {
   const selStyle = { padding:'6px 8px', border:'1px solid var(--border)', borderRadius:'var(--radius)', fontSize:12, background:'var(--surface)', color:'var(--text-primary)' }
   const saveBtn = (onClick, key) => (
     <button onClick={onClick} disabled={busy===key} className="btn sm"
-      style={{ background:'var(--accent)', borderColor:'var(--accent)', color:'#fff', fontWeight:600 }}>
+      style={{ background:'var(--accent)', borderColor:'var(--accent)', color:'#fff', fontWeight:600, minHeight: isMobile ? 40 : undefined, padding: isMobile ? '8px 18px' : undefined }}>
       {busy===key ? 'Saving…' : 'Save'}
     </button>
   )
@@ -222,9 +225,9 @@ function CommissionMapping() {
         <div style={subStyle}>Match each CSR to their ST login so jobs they book directly in ServiceTitan get attributed. Auto-matched by name where possible.</div>
         <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
           {csrProfiles.map(p => (
-            <div key={p.id} style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:12 }}>
+            <div key={p.id} style={{ display:'flex', alignItems: isMobile ? 'stretch' : 'center', justifyContent:'space-between', gap: isMobile ? 4 : 12, flexDirection: isMobile ? 'column' : 'row' }}>
               <span style={{ fontSize:13, fontWeight:500 }}>{p.name || p.email}</span>
-              <select value={csrMap[p.id] || ''} onChange={e => setCsrMap(m => ({ ...m, [p.id]: e.target.value ? Number(e.target.value) : '' }))} style={{ ...selStyle, minWidth:240 }}>
+              <select value={csrMap[p.id] || ''} onChange={e => setCsrMap(m => ({ ...m, [p.id]: e.target.value ? Number(e.target.value) : '' }))} style={{ ...selStyle, minWidth: isMobile ? 0 : 240, minHeight: isMobile ? 40 : undefined }}>
                 <option value="">— not mapped —</option>
                 {cfg.stEmployees.map(e => <option key={e.id} value={e.id}>{e.name}{e.email ? ` (${e.email})` : ''}</option>)}
               </select>
@@ -275,10 +278,10 @@ function CommissionMapping() {
           style={{ width:'100%', padding:'7px 10px', border:'1px solid var(--border)', borderRadius:'var(--radius)', fontSize:12, marginBottom:10, background:'var(--surface-2)', color:'var(--text-primary)' }} />
         <div style={{ maxHeight:340, overflowY:'auto', display:'flex', flexDirection:'column', gap:6, paddingRight:4 }}>
           {jobHits.map(j => (
-            <div key={j.id} style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:12 }}>
+            <div key={j.id} style={{ display:'flex', alignItems: isMobile ? 'stretch' : 'center', justifyContent:'space-between', gap: isMobile ? 4 : 12, flexDirection: isMobile ? 'column' : 'row' }}>
               <span style={{ fontSize:12.5 }}>{j.name}</span>
               <select value={jobCats[j.id] || 'non_commissionable'} onChange={e => setJobCats(c => ({ ...c, [j.id]: e.target.value }))}
-                style={{ ...selStyle, minWidth:280, color: (jobCats[j.id] && jobCats[j.id]!=='non_commissionable') ? 'var(--accent)' : 'var(--text-muted)', fontWeight: (jobCats[j.id] && jobCats[j.id]!=='non_commissionable') ? 600 : 400 }}>
+                style={{ ...selStyle, minWidth: isMobile ? 0 : 280, minHeight: isMobile ? 40 : undefined, color: (jobCats[j.id] && jobCats[j.id]!=='non_commissionable') ? 'var(--accent)' : 'var(--text-muted)', fontWeight: (jobCats[j.id] && jobCats[j.id]!=='non_commissionable') ? 600 : 400 }}>
                 {JOB_CATEGORIES.map(c => (
                   <option key={c.value} value={c.value}>
                     {c.label}{catAmts[c.value] != null && catAmts[c.value] !== '' ? ` — $${Number(catAmts[c.value]).toFixed(2)}` : ''}
@@ -505,6 +508,7 @@ function FloorTicker() {
 export default function AdminPage() {
   const { profile, isAdmin, refreshProfile } = useAuth()
   const { campaigns } = useData()
+  const isMobile = useIsMobile()
   const [settingsTab, setSettingsTab] = useState(() => new URLSearchParams(window.location.search).get('tab') || 'users')
   // Survive hard refresh: the active tab lives in the URL (?tab=), like MyPage.
   useEffect(() => {
@@ -1026,11 +1030,12 @@ export default function AdminPage() {
 
       {/* Tab bar header */}
       <div style={{ background:'var(--surface)', borderBottom:'1px solid var(--border)', flexShrink:0 }}>
-        <div style={{ padding:'16px 24px 0' }}>
+        <div style={{ padding: isMobile ? '12px 12px 0' : '16px 24px 0' }}>
           <div style={{ fontSize:18, fontWeight:600, color:'var(--text-primary)' }}>Settings</div>
           <div style={{ fontSize:12, color:'var(--text-muted)', marginTop:2 }}>Manage users, campaigns, commission, and statuses</div>
         </div>
-        <div style={{ display:'flex', padding:'0 24px', marginTop:10 }}>
+        {/* Phone: nine tabs scroll sideways instead of wrapping into three lines. */}
+        <div style={{ display:'flex', padding: isMobile ? '0 12px' : '0 24px', marginTop:10, overflowX: isMobile ? 'auto' : undefined }}>
           {TABS.map(t => {
             const isActive = settingsTab === t.id
             const isHov = hoveredTab === t.id && !isActive
@@ -1046,6 +1051,7 @@ export default function AdminPage() {
                   color: isActive ? 'var(--accent)' : isHov ? 'var(--text-primary)' : 'var(--text-muted)',
                   borderBottom: isActive ? '2px solid var(--accent)' : '2px solid transparent',
                   transition:'color .1s, background .1s',
+                  whiteSpace: isMobile ? 'nowrap' : undefined, flexShrink: isMobile ? 0 : undefined,
                 }}>
                 {t.label}
               </button>
@@ -1059,7 +1065,7 @@ export default function AdminPage() {
 
 
       {settingsTab === 'floortv' && isAdmin && (
-        <div style={{ flex:1, overflowY:'auto', padding:24 }}>
+        <div style={{ flex:1, overflowY:'auto', padding: isMobile ? 12 : 24 }}>
           <FloorTicker />
         </div>
       )}
@@ -1068,7 +1074,7 @@ export default function AdminPage() {
 
       {/* Statuses tab — admin only */}
       {settingsTab === 'statuses' && isAdmin && (
-        <div style={{ flex:1, overflowY:'auto', padding:24, display:'flex', flexDirection:'column', gap:20 }}>
+        <div style={{ flex:1, overflowY:'auto', padding: isMobile ? 12 : 24, display:'flex', flexDirection:'column', gap:20 }}>
           <div className="card">
             <div className="card-header">
               <div className="card-title">Status Customization</div>
@@ -1120,7 +1126,7 @@ export default function AdminPage() {
 
       {/* Commission tab */}
       {settingsTab === 'commission' && (
-        <div style={{ flex:1, overflowY:'auto', padding:24, display:'flex', flexDirection:'column', gap:20 }}>
+        <div style={{ flex:1, overflowY:'auto', padding: isMobile ? 12 : 24, display:'flex', flexDirection:'column', gap:20 }}>
           {commLoading ? <div className="spinner" style={{ margin:'40px auto' }} /> : (
             <>
               {/* The old flat booking/membership rates are gone: payouts now come
@@ -1151,7 +1157,7 @@ export default function AdminPage() {
                       straight into commissions with the You-Got-Paid pop, plus a floor-wide unlock announcement.
                       Pays at most once per day; skips company holidays.
                     </div>
-                    <div style={{ display:'flex', gap:16, alignItems:'stretch' }}>
+                    <div style={{ display:'flex', gap:16, alignItems:'stretch', flexWrap: isMobile ? 'wrap' : undefined }}>
                       <div className="form-field" style={{ display:'flex', flexDirection:'column', width:110, flexShrink:0 }}>
                         <label className="form-label">&nbsp;</label>
                         <label style={{ display:'flex', alignItems:'center', gap:8, fontSize:13, fontWeight:700, cursor:'pointer', flex:1 }}>
@@ -1246,7 +1252,7 @@ export default function AdminPage() {
                       </div>
                       <button className="btn primary" onClick={addInlineAdjustment}
                         disabled={adjSaving || !adjProfileId || !adjAmount}
-                        style={{ whiteSpace:'nowrap', height:36 }}>
+                        style={{ whiteSpace:'nowrap', height: isMobile ? 40 : 36 }}>
                         {adjSaving ? 'Adding...' : 'Add'}
                       </button>
                     </div>
@@ -1329,7 +1335,7 @@ export default function AdminPage() {
       {settingsTab === 'callqa' && isAdmin && <CallQATab />}
 
       {settingsTab === 'ops' && isAdmin && (
-        <div style={{ flex:1, overflowY:'auto', padding:24, display:'flex', flexDirection:'column', gap:20 }}>
+        <div style={{ flex:1, overflowY:'auto', padding: isMobile ? 12 : 24, display:'flex', flexDirection:'column', gap:20 }}>
           {!opsForm || !wxLocs ? <div className="spinner"></div> : (
             <>
               <div className="card">
@@ -1446,7 +1452,7 @@ export default function AdminPage() {
       )}
 
       {settingsTab === 'users' && (
-        <div style={{ flex:1, overflowY:'auto', padding:24, display:'flex', flexDirection:'column', gap:20 }}>
+        <div style={{ flex:1, overflowY:'auto', padding: isMobile ? 12 : 24, display:'flex', flexDirection:'column', gap:20 }}>
 
           {/* MY PROFILE */}
           <div className="card">
@@ -1543,7 +1549,7 @@ export default function AdminPage() {
               <div className="card">
                 <div className="card-header">
                   <div className="card-title">User Management</div>
-                  <div style={{ display:'flex', alignItems:'center', gap:12 }}>
+                  <div style={{ display:'flex', alignItems:'center', gap:12, flexWrap: isMobile ? 'wrap' : undefined, justifyContent: isMobile ? 'flex-end' : undefined }}>
                     <span style={{ fontSize:11, color:'var(--text-muted)' }}>Invite by email below — they set their own name and password</span>
                     {removedProfiles.length > 0 && (
                       <button className="btn sm" onClick={() => setShowRemoved(v => !v)}>
@@ -1758,9 +1764,9 @@ export default function AdminPage() {
                     )}
                     {directory.map((d, i) => (
                       <div key={i} style={{ display:'flex', gap:8, alignItems:'center', flexWrap:'wrap' }}>
-                        <input className="form-input" placeholder="Name" value={d.name || ''} style={{ width:180 }}
+                        <input className="form-input" placeholder="Name" value={d.name || ''} style={{ width: isMobile ? '100%' : 180 }}
                           onChange={e => setDirectory(ds => ds.map((x, xi) => xi === i ? { ...x, name: e.target.value } : x))} />
-                        <input className="form-input" placeholder="Phone number" value={d.number || ''} style={{ width:150 }}
+                        <input className="form-input" placeholder="Phone number" value={d.number || ''} style={{ width: isMobile ? '100%' : 150 }}
                           onChange={e => setDirectory(ds => ds.map((x, xi) => xi === i ? { ...x, number: e.target.value } : x))} />
                         <input className="form-input" placeholder="Label (optional — Warehouse, HVAC tech, Vendor…)" value={d.label || ''} style={{ flex:1, minWidth:170 }}
                           onChange={e => setDirectory(ds => ds.map((x, xi) => xi === i ? { ...x, label: e.target.value } : x))} />

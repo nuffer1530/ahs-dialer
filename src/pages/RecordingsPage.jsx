@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { toast } from '../lib/dialogs'
 import { sb } from '../lib/supabase'
 import { useAuth } from '../lib/AuthContext'
+import { useIsMobile } from '../lib/useIsMobile'
 import EvalModal, { ScoreChip } from '../components/EvalModal'
 
 // Recordings tab — reads the call_recordings registry via /api/recordings.
@@ -40,6 +41,10 @@ const fmtPhone = (p) => {
 export default function RecordingsPage() {
   const { profile } = useAuth()
   const isAdmin = profile?.role === 'admin'
+  // Phone layout (≤768px): filters share rows, list rows stack into two
+  // lines, and anything tappable clears 40px.
+  const isMobile = useIsMobile()
+  const tap = isMobile ? { minHeight:40 } : undefined
 
   const [recordings, setRecordings] = useState([])
   const [loading, setLoading] = useState(true)
@@ -190,11 +195,11 @@ export default function RecordingsPage() {
   const outcomes = [...new Set(recordings.map(r => r.outcome).filter(Boolean))]
   const bookedCount = filtered.filter(r => r.st_job_id).length
 
-  const selStyle = { border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'7px 10px', fontSize:12, background:'var(--surface)', color:'var(--text-primary)' }
+  const selStyle = { border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'7px 10px', fontSize:12, background:'var(--surface)', color:'var(--text-primary)', ...tap }
   const lblStyle = { fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color:'var(--text-muted)', marginBottom:4 }
 
   return (
-    <div style={{ flex:1, overflowY:'auto', padding:24 }}>
+    <div style={{ flex:1, overflowY:'auto', padding: isMobile ? 12 : 24 }}>
       {/* Header */}
       <div style={{ marginBottom:18 }}>
         <div style={{ fontSize:18, fontWeight:600, color:'var(--text-primary)' }}>Call Recordings</div>
@@ -203,23 +208,24 @@ export default function RecordingsPage() {
         </div>
       </div>
 
-      {/* Filters */}
-      <div style={{ display:'flex', gap:10, marginBottom:16, flexWrap:'wrap', alignItems:'flex-end' }}>
+      {/* Filters — on a phone the rep picker and the period buttons each get a
+          full row, the rest pair up two to a row, so nothing hangs off the edge. */}
+      <div style={{ display:'flex', gap: isMobile ? 8 : 10, marginBottom:16, flexWrap:'wrap', alignItems:'flex-end' }}>
         {isAdmin && (
-          <div>
+          <div style={isMobile ? { flex:'1 1 100%' } : undefined}>
             <div style={lblStyle}>Rep</div>
-            <select value={repFilter} onChange={e => setRepFilter(e.target.value)} style={{ ...selStyle, minWidth:160 }}>
+            <select value={repFilter} onChange={e => setRepFilter(e.target.value)} style={{ ...selStyle, minWidth: isMobile ? 0 : 160, width: isMobile ? '100%' : undefined }}>
               <option value="">All reps</option>
               {profiles.map(p => <option key={p.id} value={p.name || p.email}>{p.name || p.email}</option>)}
             </select>
           </div>
         )}
-        <div>
+        <div style={isMobile ? { flex:'1 1 100%' } : undefined}>
           <div style={lblStyle}>Period</div>
           <div style={{ display:'flex', gap:4 }}>
             {[['today','Today'],['7d','7 days'],['30d','30 days'],['all','All']].map(([id, label]) => (
               <button key={id} onClick={() => setDateRange(id)}
-                style={{ padding:'7px 12px', fontSize:12, borderRadius:'var(--radius)', border:'1px solid', cursor:'pointer',
+                style={{ padding: isMobile ? '7px 6px' : '7px 12px', fontSize:12, borderRadius:'var(--radius)', border:'1px solid', cursor:'pointer', flex: isMobile ? 1 : undefined, ...tap,
                   borderColor: dateRange===id ? 'var(--accent)' : 'var(--border)',
                   background: dateRange===id ? 'var(--accent)' : 'var(--surface)',
                   color: dateRange===id ? '#fff' : 'var(--text-secondary)' }}>
@@ -228,33 +234,33 @@ export default function RecordingsPage() {
             ))}
           </div>
         </div>
-        <div>
+        <div style={isMobile ? { flex:'1 1 40%' } : undefined}>
           <div style={lblStyle}>Direction</div>
-          <select value={dirFilter} onChange={e => setDirFilter(e.target.value)} style={{ ...selStyle, minWidth:110 }}>
+          <select value={dirFilter} onChange={e => setDirFilter(e.target.value)} style={{ ...selStyle, minWidth: isMobile ? 0 : 110, width: isMobile ? '100%' : undefined }}>
             <option value="">All calls</option>
             <option value="inbound">Inbound</option>
             <option value="outbound">Outbound</option>
             <option value="voicemail">Voicemails</option>
           </select>
         </div>
-        <div>
+        <div style={isMobile ? { flex:'1 1 40%' } : undefined}>
           <div style={lblStyle}>Outcome</div>
-          <select value={outcomeFilter} onChange={e => setOutcomeFilter(e.target.value)} style={{ ...selStyle, minWidth:130 }}>
+          <select value={outcomeFilter} onChange={e => setOutcomeFilter(e.target.value)} style={{ ...selStyle, minWidth: isMobile ? 0 : 130, width: isMobile ? '100%' : undefined }}>
             <option value="">All outcomes</option>
             {outcomes.map(o => <option key={o} value={o}>{o}</option>)}
           </select>
         </div>
-        <div>
+        <div style={isMobile ? { flex:'1 1 40%' } : undefined}>
           <div style={lblStyle}>Booked</div>
           <button onClick={() => setBookedOnly(b => !b)}
-            style={{ padding:'7px 12px', fontSize:12, borderRadius:'var(--radius)', border:'1px solid', cursor:'pointer',
+            style={{ padding:'7px 12px', fontSize:12, borderRadius:'var(--radius)', border:'1px solid', cursor:'pointer', width: isMobile ? '100%' : undefined, ...tap,
               borderColor: bookedOnly ? 'var(--tone-green-bd)' : 'var(--border)',
               background: bookedOnly ? 'var(--tone-green-bg)' : 'var(--surface)',
               color: bookedOnly ? 'var(--tone-green-tx)' : 'var(--text-secondary)', fontWeight: bookedOnly ? 700 : 400 }}>
             Booked calls only
           </button>
         </div>
-        <div style={{ flex:1, minWidth:170 }}>
+        <div style={{ flex: isMobile ? '1 1 40%' : 1, minWidth: isMobile ? 0 : 170 }}>
           <div style={lblStyle}>Search</div>
           <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Customer, phone, notes, or job #..."
             style={{ ...selStyle, width:'100%' }} />
@@ -262,12 +268,12 @@ export default function RecordingsPage() {
       </div>
 
       {/* Summary */}
-      <div style={{ display:'flex', gap:16, marginBottom:14, fontSize:12, color:'var(--text-muted)', alignItems:'center' }}>
+      <div style={{ display:'flex', gap: isMobile ? '6px 14px' : 16, marginBottom:14, fontSize:12, color:'var(--text-muted)', alignItems:'center', flexWrap: isMobile ? 'wrap' : undefined }}>
         <span>{filtered.length} recording{filtered.length !== 1 ? 's' : ''}</span>
         {bookedCount > 0 && <span style={{ color:'var(--tone-green-tx)', fontWeight:600 }}>{bookedCount} booked</span>}
         {newVmCount > 0 && dirFilter !== 'voicemail' && (
           <button onClick={() => setDirFilter('voicemail')}
-            style={{ fontSize:11, fontWeight:700, padding:'3px 10px', borderRadius:99, cursor:'pointer',
+            style={{ fontSize:11, fontWeight:700, padding: isMobile ? '0 14px' : '3px 10px', borderRadius:99, cursor:'pointer', ...tap,
               background:'var(--tone-amber-bg)', color:'var(--tone-amber-tx)', border:'1px solid var(--tone-amber-bd)' }}>
             {newVmCount} new voicemail{newVmCount === 1 ? '' : 's'}
           </button>
@@ -301,14 +307,25 @@ export default function RecordingsPage() {
             const isVm = rec.direction === 'voicemail'
             const unheard = isVm && !rec.heard_at
             const bodyText = rec.notes || (isVm ? rec.transcript : '')
+            // The outcome pill sits beside the name on desktop; on a phone it
+            // moves to the second line with the time and duration.
+            const outcomeChip = rec.outcome && (
+              <span style={{ fontSize:10, fontWeight:600, padding:'2px 7px', borderRadius:99, background:oc.bg, color:oc.color, border:`1px solid ${oc.border}` }}>
+                {rec.outcome}
+              </span>
+            )
             return (
               <div key={rec.id}
-                style={{ padding:'12px 16px', borderBottom: i < filtered.length-1 ? '1px solid var(--border)' : 'none', background: isPlaying ? 'var(--accent-bg)' : 'transparent' }}>
-                <div style={{ display:'flex', alignItems:'center', gap:12 }}>
+                style={{ padding: isMobile ? '12px 12px' : '12px 16px', borderBottom: i < filtered.length-1 ? '1px solid var(--border)' : 'none', background: isPlaying ? 'var(--accent-bg)' : 'transparent' }}>
+                {/* Phone: the row wraps into two lines — who (play, caller, rep,
+                    job) on the first; when, how long, outcome and the buttons on
+                    the second. The caller block claims the rest of line one so
+                    the meta is pushed down. */}
+                <div style={{ display:'flex', alignItems: isMobile ? 'flex-start' : 'center', gap: isMobile ? '8px 10px' : 12, flexWrap: isMobile ? 'wrap' : undefined }}>
 
                   {/* Play button */}
                   <button onClick={() => togglePlay(rec)}
-                    style={{ width:36, height:36, borderRadius:'50%', flexShrink:0, cursor:'pointer',
+                    style={{ width: isMobile ? 40 : 36, height: isMobile ? 40 : 36, borderRadius:'50%', flexShrink:0, cursor:'pointer',
                       background: isPlaying ? 'var(--tone-green-bd)' : 'var(--surface-2)',
                       border: `1px solid ${isPlaying ? 'var(--tone-green-bd)' : 'var(--border)'}`,
                       display:'flex', alignItems:'center', justifyContent:'center' }}>
@@ -320,7 +337,7 @@ export default function RecordingsPage() {
                   </button>
 
                   {/* Customer + chips + notes preview */}
-                  <div style={{ flex:1, minWidth:0, cursor: bodyText ? 'pointer' : 'default' }}
+                  <div style={{ flex: isMobile ? '1 1 calc(100% - 50px)' : 1, minWidth:0, cursor: bodyText ? 'pointer' : 'default' }}
                     onClick={() => bodyText && setExpandedId(isOpen ? null : rec.id)}>
                     <div style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap' }}>
                       {unheard && <span title="New — nobody has listened yet" style={{ width:8, height:8, borderRadius:'50%', background:'var(--tone-amber-bd)', flexShrink:0 }} />}
@@ -336,12 +353,9 @@ export default function RecordingsPage() {
                       <span style={{ fontSize:13, fontWeight: unheard ? 800 : 600, color:'var(--text-primary)' }}>
                         {rec.contact_name || 'Unknown caller'}
                       </span>
-                      {rec.outcome && (
-                        <span style={{ fontSize:10, fontWeight:600, padding:'2px 7px', borderRadius:99, background:oc.bg, color:oc.color, border:`1px solid ${oc.border}` }}>
-                          {rec.outcome}
-                        </span>
-                      )}
-                      {rec.evaluation && (
+                      {isMobile && isAdmin && rec.rep && <span style={{ fontSize:11, color:'var(--text-muted)' }}>· {rec.rep}</span>}
+                      {!isMobile && outcomeChip}
+                      {!isMobile && rec.evaluation && (
                         <span onClick={e => e.stopPropagation()}>
                           <ScoreChip pct={rec.evaluation.pct} onClick={() => setOpenEval(rec.evaluation)} />
                         </span>
@@ -372,26 +386,30 @@ export default function RecordingsPage() {
                     )}
                   </div>
 
-                  {/* Meta */}
-                  <div style={{ textAlign:'right', flexShrink:0, minWidth:92 }}>
+                  {/* Meta — stacked at the right on desktop, inline on the phone's second line */}
+                  <div style={isMobile ? { display:'flex', alignItems:'center', gap:8, flexWrap:'wrap', minHeight:40 } : { textAlign:'right', flexShrink:0, minWidth:92 }}>
                     <div style={{ fontSize:12, fontWeight:600, color:'var(--text-primary)' }}>{fmtDuration(rec.duration)}</div>
                     <div style={{ fontSize:10, color:'var(--text-muted)' }}>{fmtWhen(rec.call_started_at || rec.created_at)}</div>
+                    {isMobile && outcomeChip}
                   </div>
 
-                  {isAdmin && (
+                  {isAdmin && !isMobile && (
                     <div style={{ fontSize:11, color:'var(--text-secondary)', flexShrink:0, minWidth:90, textAlign:'right' }}>{rec.rep || ''}</div>
                   )}
 
-                  {/* Actions */}
-                  <div style={{ display:'flex', gap:6, flexShrink:0 }}>
+                  {/* Actions — the QA score joins them on a phone as a proper 40px button */}
+                  <div style={{ display:'flex', gap:6, flexShrink:0, marginLeft: isMobile ? 'auto' : undefined }}>
+                    {isMobile && rec.evaluation && (
+                      <ScoreChip pct={rec.evaluation.pct} onClick={() => setOpenEval(rec.evaluation)} style={{ minHeight:40, padding:'0 12px', fontSize:12 }} />
+                    )}
                     {rec.external_id && (
                       <button onClick={() => window.open(`https://go.servicetitan.com/#/Customer/${rec.external_id}`, '_blank')}
-                        style={{ padding:'5px 10px', fontSize:11, border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface-2)', color:'var(--text-secondary)', cursor:'pointer' }}>
+                        style={{ padding: isMobile ? '5px 12px' : '5px 10px', fontSize:11, border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface-2)', color:'var(--text-secondary)', cursor:'pointer', ...tap }}>
                         ST
                       </button>
                     )}
                     <button onClick={() => downloadRec(rec)}
-                      style={{ padding:'5px 10px', fontSize:11, border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface-2)', color:'var(--text-secondary)', cursor:'pointer' }}>
+                      style={{ padding: isMobile ? '5px 12px' : '5px 10px', fontSize:11, border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface-2)', color:'var(--text-secondary)', cursor:'pointer', ...tap }}>
                       Download
                     </button>
                   </div>

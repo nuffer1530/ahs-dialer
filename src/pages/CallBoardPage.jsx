@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { sb } from '../lib/supabase'
 import { useAuth } from '../lib/AuthContext'
 import { useWallboard } from '../lib/useDailyReload'
+import { useIsMobile } from '../lib/useIsMobile'
 
 // 3-Day Call Board — repair/replacement capacity per trade for today + next two
 // days, live from ServiceTitan. Every number is clickable to show what's behind it.
@@ -79,6 +80,62 @@ function Cell({ trade, dayLabel, d, onDrill, tv }) {
   )
 }
 
+// Phone versions of Metric and Cell. Three days share one phone width, so a
+// cell is ~110px: metrics sit two-by-two instead of four across, type is
+// smaller, and every button still clears 40px for a thumb. The desktop and
+// TV cell above is untouched — this is a separate path, not a scaled one.
+function PhoneMetric({ label, value, accent, onClick, right, lower }) {
+  return (
+    <button onClick={onClick} title="Tap to see what's counted"
+      style={{ flex:'1 1 50%', minWidth:0, minHeight:42, padding:'5px 3px', border:'none', background:'transparent', cursor:'pointer',
+        borderLeft: right ? '1px solid var(--border)' : 'none', borderTop: lower ? '1px solid var(--border)' : 'none',
+        display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:3 }}>
+      <span style={{ fontSize:15, fontWeight:800, color: accent || 'var(--text-primary)', fontVariantNumeric:'tabular-nums', lineHeight:1 }}>{value}</span>
+      <span style={{ fontSize:9, fontWeight:700, textTransform:'uppercase', letterSpacing:.3, color:'var(--text-muted)', whiteSpace:'nowrap', maxWidth:'100%', overflow:'hidden', textOverflow:'ellipsis' }}>{label}</span>
+    </button>
+  )
+}
+
+function PhoneCell({ trade, date, dayLabel, d, onDrill, first }) {
+  const s = STATUS[d.status] || STATUS.none
+  const oppRate = d.calls ? Math.round((d.opps / d.calls) * 100) : null
+  // Short day label ("Mon 16") — the phone board has no header row to read from.
+  const dt = new Date(date + 'T12:00:00')
+  const day = `${dt.toLocaleDateString([], { weekday:'short' })} ${dt.getDate()}`
+  return (
+    <div style={{ display:'flex', flexDirection:'column', minWidth:0, borderLeft: first ? 'none' : '1px solid var(--border)' }}>
+      {/* Day + fill % on the status color */}
+      <div style={{ background:s.bg, padding:'6px 8px', display:'flex', alignItems:'center', justifyContent:'space-between', gap:4 }}>
+        <span style={{ fontSize:11, fontWeight:700, color:s.color, whiteSpace:'nowrap' }}>{day}</span>
+        <span style={{ fontSize:12, fontWeight:800, color:s.color, fontVariantNumeric:'tabular-nums' }}>{d.pct}%</span>
+      </div>
+      {/* Hero — same rule as the big board: full is a watch, not a stop */}
+      {d.oppWatch ? (
+        <div style={{ padding:'10px 8px 8px', display:'flex', flexDirection:'column', gap:3, flex:1, justifyContent:'center' }}>
+          <span style={{ fontSize:13, fontWeight:800, color:'#7C3AED', lineHeight:1.1 }}>👀 Opp Watch</span>
+          <span style={{ fontSize:9.5, color:'var(--text-muted)', fontWeight:600, lineHeight:1.3 }}>Full — keep booking strong calls</span>
+        </div>
+      ) : (
+        <div style={{ padding:'10px 8px 8px', display:'flex', flexDirection:'column', gap:3, flex:1, justifyContent:'center' }}>
+          <span style={{ fontSize:28, fontWeight:800, lineHeight:.9, color: d.needed > 0 ? s.color : 'var(--success)', fontVariantNumeric:'tabular-nums' }}>
+            {d.needed > 0 ? d.needed : '✓'}
+          </span>
+          <span style={{ fontSize:9.5, color:'var(--text-muted)', fontWeight:600 }}>{d.needed > 0 ? 'calls needed' : 'at target'}</span>
+        </div>
+      )}
+      {/* Metrics, two by two */}
+      <div style={{ display:'flex', flexWrap:'wrap', borderTop:'1px solid var(--border)', marginTop:'auto' }}>
+        <PhoneMetric label="Techs" value={d.techs} onClick={() => onDrill(trade, dayLabel, 'Service techs', d.detail.techs, 'tech')} />
+        <PhoneMetric right label="Booked" value={`${d.calls}/${d.capacity}`} onClick={() => onDrill(trade, dayLabel, 'Booked calls', d.detail.calls, 'job')} />
+        <PhoneMetric lower label={oppRate != null ? `Opps ${oppRate}%` : 'Opps'} value={d.opps}
+          accent={oppRate == null ? undefined : oppRate >= 30 ? 'var(--success)' : '#DC2626'}
+          onClick={() => onDrill(trade, dayLabel, 'Opportunities', d.detail.opps, 'job')} />
+        <PhoneMetric right lower label="Installs" value={d.installs} onClick={() => onDrill(trade, dayLabel, 'Installs', d.detail.installs, 'job')} />
+      </div>
+    </div>
+  )
+}
+
 export default function CallBoardPage() {
   const { isAdmin, profile } = useAuth()
   const [data, setData] = useState(null)
@@ -117,6 +174,10 @@ export default function CallBoardPage() {
   // Wall look survives reloads; the page updates itself when a build lands.
   const rootRef = useRef(null)
   const { isFull, toggleFull } = useWallboard(rootRef)
+  // Phone layout (≤768px). The wall TV is always wider, so nothing here
+  // reaches the isFull path. Toolbar buttons grow to a thumb-sized 40px.
+  const isMobile = useIsMobile()
+  const tap = isMobile ? { minHeight:40 } : undefined
 
   const load = useCallback(async () => {
     try {
@@ -152,18 +213,22 @@ export default function CallBoardPage() {
   return (
     <div ref={rootRef} style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden', background:'var(--bg)' }}>
       {/* Slim toolbar (page title is already in the top bar) */}
-      <div style={{ background:'var(--surface)', borderBottom:'1px solid var(--border)', flexShrink:0, padding:'10px 24px', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+      <div style={{ background:'var(--surface)', borderBottom:'1px solid var(--border)', flexShrink:0, padding: isMobile ? '8px 12px' : '10px 24px', display:'flex', alignItems:'center', justifyContent:'space-between', flexWrap: isMobile ? 'wrap' : undefined, gap: isMobile ? 8 : undefined }}>
         <span style={{ fontSize:12, color:'var(--text-muted)' }}>Target {data?.target ?? 80}% · live from ServiceTitan</span>
-        <div style={{ display:'flex', alignItems:'center', gap:12 }}>
+        <div style={{ display:'flex', alignItems:'center', gap: isMobile ? 8 : 12, flexWrap: isMobile ? 'wrap' : undefined }}>
           {refreshedAt && <span style={{ fontSize:11, color:'var(--text-muted)' }}>Updated {refreshedAt.toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' })}</span>}
-          {!isFull && isAdmin && <button className="btn sm" onClick={openConfig}>Calls / tech</button>}
+          {!isFull && isAdmin && <button className="btn sm" onClick={openConfig} style={tap}>Calls / tech</button>}
           {!isFull && isAdmin && (
-            <button className="btn sm" onClick={emailMe} disabled={emailing}
+            <button className="btn sm" onClick={emailMe} disabled={emailing} style={tap}
               title="Send this board to your own email — nobody else receives it">
               {emailing ? 'Sending…' : emailMsg || 'Email me this board'}
             </button>
           )}
-          {!isFull && <button className="btn sm" onClick={load}>Refresh</button>}
+          {!isFull && <button className="btn sm" onClick={load} style={tap}>Refresh</button>}
+          {/* Phones can't fullscreen a page and kiosk mode would pin the board
+              unscrollable, so the toggle only shows there when kiosk is already
+              on — as the way out. */}
+          {(!isMobile || isFull) && (
           <button className="btn sm" onClick={toggleFull} title={isFull ? 'Exit fullscreen' : 'Fullscreen'} style={{ display:'flex', alignItems:'center', gap:5 }}>
             {isFull ? (
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M9 3v3a3 3 0 01-3 3H3M15 3v3a3 3 0 003 3h3M9 21v-3a3 3 0 00-3-3H3M15 21v-3a3 3 0 013-3h3" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
@@ -172,14 +237,32 @@ export default function CallBoardPage() {
             )}
             {isFull ? 'Exit' : 'Fullscreen'}
           </button>
+          )}
         </div>
       </div>
 
-      <div style={{ flex:1, overflow: isFull ? 'hidden' : 'auto', padding: isFull ? '16px 28px 24px' : '20px 24px', background:'var(--bg)' }}>
+      <div style={{ flex:1, overflow: isFull ? 'hidden' : 'auto', padding: isFull ? '16px 28px 24px' : isMobile ? '12px 12px 20px' : '20px 24px', background:'var(--bg)' }}>
         {loading ? <div className="spinner lg" style={{ margin:'60px auto' }} /> :
          error ? <div style={{ color:'var(--danger)', fontSize:13, background:'var(--danger-bg)', padding:'12px 16px', borderRadius:'var(--radius)' }}>Couldn’t load the board: {error}</div> :
          !data ? null : (
           <div style={{ display:'flex', flexDirection:'column', gap: isFull ? 14 : 18, height: isFull ? '100%' : undefined }}>
+            {isMobile ? (
+              /* Phone: one card per trade with the three days side by side as
+                 compact cells, so a whole trade fits the screen with no
+                 sideways scroll. Each cell carries its own day label because
+                 there is no header row to line up with. */
+              data.board.map(row => (
+                <div key={row.trade} style={{ border:'1px solid var(--border)', borderRadius:14, background:'var(--surface)', overflow:'hidden' }}>
+                  <div style={{ padding:'9px 12px', fontSize:15, fontWeight:800, borderBottom:'1px solid var(--border)' }}>{row.trade}</div>
+                  <div className="mgrid" style={{ display:'grid', gridTemplateColumns:'repeat(3, minmax(0, 1fr))' }}>
+                    {row.days.map((d, i) => (
+                      <PhoneCell key={i} first={i === 0} date={data.dates[i]} trade={row.trade} dayLabel={DAY_LABELS[i]} d={d}
+                        onDrill={(t, day, label, items, kind) => setDrill({ trade:t, day, label, items, kind })} />
+                    ))}
+                  </div>
+                </div>
+              ))
+            ) : (<>
             {/* Day headers */}
             <div style={{ display:'grid', gridTemplateColumns: `${isFull ? 170 : 130}px repeat(3, 1fr)`, gap:16, alignItems:'end', flexShrink:0 }}>
               <div />
@@ -197,6 +280,7 @@ export default function CallBoardPage() {
                 {row.days.map((d, i) => <Cell key={i} tv={isFull} trade={row.trade} dayLabel={DAY_LABELS[i]} d={d} onDrill={(t, day, label, items, kind) => setDrill({ trade:t, day, label, items, kind })} />)}
               </div>
             ))}
+            </>)}
             {!isFull && (
               <div style={{ fontSize:11, color:'var(--text-muted)', marginTop:4, lineHeight:1.6 }}>
                 Click any number to see what it counts. Techs = service technicians scheduled (install crews excluded).
@@ -211,7 +295,7 @@ export default function CallBoardPage() {
       {/* Drill-down */}
       {drill && (
         <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,.45)', zIndex:500, display:'flex', alignItems:'center', justifyContent:'center' }} onMouseDown={() => setDrill(null)}>
-          <div onMouseDown={e => e.stopPropagation()} style={{ background:'var(--surface)', borderRadius:12, width:460, maxHeight:'80vh', overflow:'hidden', display:'flex', flexDirection:'column', boxShadow:'0 8px 32px rgba(0,0,0,.28)' }}>
+          <div onMouseDown={e => e.stopPropagation()} style={{ background:'var(--surface)', borderRadius:12, width: isMobile ? 'calc(100vw - 20px)' : 460, maxHeight: isMobile ? '85vh' : '80vh', overflow:'hidden', display:'flex', flexDirection:'column', boxShadow:'0 8px 32px rgba(0,0,0,.28)' }}>
             <div style={{ padding:'14px 18px', borderBottom:'1px solid var(--border)' }}>
               <div style={{ fontSize:15, fontWeight:700 }}>{drill.trade} · {drill.label}</div>
               <div style={{ fontSize:12, color:'var(--text-muted)' }}>{drill.day} · {drillItems.length} {drill.kind === 'tech' ? 'technician(s)' : 'job(s)'}</div>
@@ -244,7 +328,8 @@ export default function CallBoardPage() {
                       )}
                     </>
                   )
-                  const style = { display:'flex', gap:10, padding:'11px 18px', borderBottom:'1px solid var(--border)', fontSize:13 }
+                  // Phone: the "not an opportunity" tag drops under the job type instead of squeezing it.
+                  const style = { display:'flex', gap:10, padding:'11px 18px', borderBottom:'1px solid var(--border)', fontSize:13, flexWrap: isMobile ? 'wrap' : undefined }
                   // Older cached board payloads have no id — fall back to plain
                   // text rather than rendering a link that goes nowhere.
                   return j.id ? (
@@ -271,7 +356,7 @@ export default function CallBoardPage() {
       {/* Calls-per-tech config (admin) */}
       {showConfig && config && (
         <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,.45)', zIndex:500, display:'flex', alignItems:'center', justifyContent:'center' }} onMouseDown={() => setShowConfig(false)}>
-          <div onMouseDown={e => e.stopPropagation()} style={{ background:'var(--surface)', borderRadius:12, width:360, padding:22, boxShadow:'0 8px 32px rgba(0,0,0,.28)' }}>
+          <div onMouseDown={e => e.stopPropagation()} style={{ background:'var(--surface)', borderRadius:12, width: isMobile ? 'calc(100vw - 20px)' : 360, padding:22, boxShadow:'0 8px 32px rgba(0,0,0,.28)' }}>
             <div style={{ fontSize:15, fontWeight:700, marginBottom:4 }}>Calls per tech</div>
             <div style={{ fontSize:12, color:'var(--text-muted)', marginBottom:16 }}>Repair/replacement calls one service tech can run in a day, per trade. Default {config.default}.</div>
             <div style={{ display:'flex', flexDirection:'column', gap:10 }}>

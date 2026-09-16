@@ -10,6 +10,7 @@
 import { useState, useEffect, useRef, useCallback, Component } from 'react'
 import { sb } from '../lib/supabase'
 import { confirmDlg } from '../lib/dialogs'
+import { useIsMobile } from '../lib/useIsMobile'
 
 const money = (n) => `$${Math.round(Number(n) || 0).toLocaleString()}`
 const pct = (n) => (n == null ? '—' : `${Math.round(Number(n) * 100)}%`)
@@ -40,6 +41,11 @@ const S = {
   cardSub: { fontSize: 11, color: 'var(--text-secondary)', marginTop: 2 },
 }
 
+// Phone reading order for the report's top-level blocks: numbers first, the
+// AI read, then the rosters, with the fill-in sections last. Applied as flex
+// `order` under isMobile only — DOM and print order never change.
+const MOBILE_ORDER = { cover: 0, cards: 1, ai: 2, scorecard: 3, techs: 4, csrs: 5, labor: 6, pacing: 7, kpis: 8, opps: 9, trend: 10, openers: 11, topics: 12, rocks: 13, parking: 14, lists: 15, notes: 16, footer: 17 }
+
 // Green = goal hit · yellow = within 90% · red = clearly missed.
 const goalTone = (val, goal) => {
   if (val == null || !goal) return {}
@@ -50,23 +56,30 @@ const goalToneName = (val, goal) => {
   return val >= goal ? 'good' : val >= goal * 0.9 ? 'warn' : 'bad'
 }
 
-function Card({ label, value, sub, tone }) {
+// `style` and `big` are phone-only knobs (two-up widths, a larger headline
+// number) — desktop callers pass neither, so nothing changes there.
+function Card({ label, value, sub, tone, style, big }) {
   return (
-    <div style={S.card}>
+    <div style={{ ...S.card, ...style }}>
       <div style={S.cardLabel}>{label}</div>
-      <div style={{ ...S.cardValue, ...(tone === 'good' ? { color: 'var(--success)' } : tone === 'warn' ? { color: 'var(--warning)' } : tone === 'bad' ? { color: 'var(--danger)' } : {}) }}>{value}</div>
+      <div style={{ ...S.cardValue, ...(big ? { fontSize: 30 } : {}), ...(tone === 'good' ? { color: 'var(--success)' } : tone === 'warn' ? { color: 'var(--warning)' } : tone === 'bad' ? { color: 'var(--danger)' } : {}) }}>{value}</div>
       {sub && <div style={S.cardSub}>{sub}</div>}
     </div>
   )
 }
 
 function Table({ headers, rows }) {
+  // The wrapper scrolls sideways on any screen. On a phone the first column
+  // (dept / name) also pins to the left edge (.lp-pin, styled in the page)
+  // so a number is never separated from the row it belongs to.
+  const isMobile = useIsMobile()
+  const pin = isMobile ? 'lp-pin' : undefined
   return (
     <div style={{ overflowX: 'auto' }}>
       <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-        <thead><tr>{headers.map((h, i) => <th key={i} style={{ ...S.th, textAlign: i ? 'right' : 'left' }}>{h}</th>)}</tr></thead>
+        <thead><tr>{headers.map((h, i) => <th key={i} className={i === 0 ? pin : undefined} style={{ ...S.th, textAlign: i ? 'right' : 'left' }}>{h}</th>)}</tr></thead>
         <tbody>{rows.map((r, ri) => (
-          <tr key={ri}>{r.map((c, ci) => <td key={ci} style={{ ...S.td, textAlign: ci ? 'right' : 'left', ...(ci === 0 ? { fontWeight: 600 } : {}) }}>{c}</td>)}</tr>
+          <tr key={ri}>{r.map((c, ci) => <td key={ci} className={ci === 0 ? pin : undefined} style={{ ...S.td, textAlign: ci ? 'right' : 'left', ...(ci === 0 ? { fontWeight: 600 } : {}) }}>{c}</td>)}</tr>
         ))}</tbody>
       </table>
     </div>
@@ -83,8 +96,36 @@ function EditRows({ rows, cols, onChange }) {
     const next = display.map((r, ri) => ri === i ? { ...r, [key]: val } : r)
     onChange(next.filter(r => cols.some(c => String(r[c.key] || '').trim())))
   }
+  const isMobile = useIsMobile()
+  // Phone cell — same select / input the table draws, just not in a table.
+  const field = (r, ri, c) => c.options ? (
+    <select style={S.input} value={r[c.key] || ''} onChange={e => set(ri, c.key, e.target.value)}>
+      <option value=""></option>
+      {c.options.map(o => <option key={o} value={o}>{o}</option>)}
+    </select>
+  ) : (
+    <input style={S.input} value={r[c.key] || ''} placeholder={ri === display.length - 1 ? c.placeholder || '' : ''}
+      onChange={e => set(ri, c.key, e.target.value)} />
+  )
   return (
     <>
+      {isMobile ? (
+        // Phone: a five-column table of inputs squeezes to nothing, so each
+        // row becomes a labeled stack. Same data, same blank "add" row last
+        // (dashed, so it reads as the empty one).
+        <div className="no-print" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {display.map((r, ri) => (
+            <div key={ri} style={{ border: `1px ${ri === display.length - 1 ? 'dashed' : 'solid'} var(--border)`, borderRadius: 8, padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {cols.map(c => (
+                <label key={c.key} style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 10, fontWeight: 700, letterSpacing: 0.6, textTransform: 'uppercase', color: 'var(--text-muted)' }}>
+                  {c.label}
+                  {field(r, ri, c)}
+                </label>
+              ))}
+            </div>
+          ))}
+        </div>
+      ) : (
       <div style={{ overflowX: 'auto' }} className="no-print">
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead><tr>{cols.map(c => <th key={c.key} style={{ ...S.th, textAlign: 'left', width: c.width }}>{c.label}</th>)}</tr></thead>
@@ -105,6 +146,7 @@ function EditRows({ rows, cols, onChange }) {
           ))}</tbody>
         </table>
       </div>
+      )}
       {/* Inputs clip when printed — print a plain static table instead. */}
       {items.length > 0 && (
         <table className="print-only" style={{ display: 'none', width: '100%', borderCollapse: 'collapse' }}>
@@ -193,6 +235,16 @@ function LeadershipPageInner() {
   const saveTimer = useRef(null)
   const notesRef = useRef(notes)
   notesRef.current = notes
+
+  // Phone layout knobs — each one is a no-op (undefined / the desktop value)
+  // when isMobile is false, so the desktop render is byte-for-byte the same.
+  const isMobile = useIsMobile()
+  const mo = (k) => (isMobile ? { order: MOBILE_ORDER[k] } : undefined)
+  const sec = isMobile ? { ...S.section, padding: '12px 12px' } : S.section
+  const page = isMobile ? { ...S.page, padding: '12px 12px 48px' } : S.page
+  const mBtn = isMobile ? { padding: '11px 14px', minHeight: 40 } : undefined   // 40px tap targets
+  const half = isMobile ? { flex: '1 1 calc(50% - 5px)' } : undefined          // KPI cards two-up
+  const full = isMobile ? { flex: '1 1 100%' } : undefined
 
   const authHeaders = useCallback(async () => {
     const { data: { session } } = await sb.auth.getSession()
@@ -312,10 +364,10 @@ function LeadershipPageInner() {
   const weekLabel = f ? `${f.weekStart} → ${f.weekEnd}` : week
 
   return (
-    <div style={S.scroll}>
+    <div style={isMobile && ltab === 'brain' ? { ...S.scroll, display: 'flex', flexDirection: 'column' } : S.scroll}>
     {/* Same tab chrome as Dispatch for Profit / My Page: full-width surface
         bar, accent underline, sticky so it survives the agenda's scroll. */}
-    <div className="no-print" style={{ position: 'sticky', top: 0, zIndex: 30, background: 'var(--surface)', borderBottom: '1px solid var(--border)', padding: '0 24px', display: 'flex', gap: 4 }}>
+    <div className="no-print" style={{ position: 'sticky', top: 0, zIndex: 30, background: 'var(--surface)', borderBottom: '1px solid var(--border)', padding: isMobile ? '0 12px' : '0 24px', display: 'flex', gap: 4 }}>
       {[['agenda', 'Weekly Agenda'], ['brain', 'AI Analyst']].map(([k, l]) => (
         <button key={k} onClick={() => setLtab(k)}
           style={{ padding: '12px 14px', border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 13,
@@ -325,7 +377,11 @@ function LeadershipPageInner() {
         </button>
       ))}
     </div>
-    <div style={ltab === 'brain' ? { ...S.page, maxWidth: 1200, paddingBottom: 0 } : S.page}>
+    {/* Phone + AI tab: the page becomes a flex column so the chat fills the
+        space under the tabs instead of sizing itself off the viewport. */}
+    <div style={ltab === 'brain'
+      ? { ...page, maxWidth: 1200, paddingBottom: 0, ...(isMobile ? { flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' } : {}) }
+      : page}>
       <style>{`
         @media print {
           /* The app shell is 100vh + overflow:hidden, which clips printing to
@@ -350,18 +406,26 @@ function LeadershipPageInner() {
           table.print-only { display: table !important; }
         }
       `}</style>
+      {/* Phone only: report tables scroll sideways; pin their first column
+          (dept / name) to the left edge. The inset shadow stands in for the
+          bottom border, which a collapsed table doesn't carry on sticky cells. */}
+      {isMobile && <style>{`
+        #leadership-print .lp-pin { position: sticky; left: 0; z-index: 1; background: var(--surface); box-shadow: inset 0 -1px 0 var(--border), 1px 0 0 var(--border); }
+      `}</style>}
 
 
       {ltab === 'brain' && <BrainChat authHeaders={authHeaders} />}
 
       <div style={ltab === 'agenda' ? undefined : { display: 'none' }}>
 
+      {/* Phone: the title takes the whole first line so the three buttons
+          land together on one row beneath it, all 40px tall. */}
       <div className="no-print" style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 4 }}>
-        <div style={{ flex: 1 }}>
+        <div style={isMobile ? { flex: '1 1 100%' } : { flex: 1 }}>
           <h1 style={S.h1}>Weekly Leadership Agenda</h1>
           <div style={S.sub}>Week ending&nbsp;
             <select value={week || ''} onChange={e => setWeek(e.target.value)}
-              style={{ ...S.input, width: 'auto', display: 'inline-block', padding: '3px 6px' }}>
+              style={{ ...S.input, width: 'auto', display: 'inline-block', padding: isMobile ? '10px 8px' : '3px 6px' }}>
               {weeks.map(w => <option key={w} value={w}>{w}{w === currentWeek ? ' — this week (in progress)' : ''}</option>)}
             </select>
             {report?.facts?.partial && (
@@ -375,34 +439,34 @@ function LeadershipPageInner() {
             {saving === 'error' && <span style={{ marginLeft: 10, color: 'var(--danger)', fontSize: 12 }}>Save failed (migration pending?)</span>}
           </div>
         </div>
-        <button style={S.btn} disabled={loading} onClick={() => load(week, true)}>↻ Refresh numbers</button>
-        <button style={S.btn} onClick={() => window.print()}>🖨 Print</button>
-        <button style={S.btnPrimary} disabled={busy === 'email'} onClick={emailIt}>{busy === 'email' ? 'Sending…' : '✉ Email it'}</button>
+        <button style={{ ...S.btn, ...mBtn }} disabled={loading} onClick={() => load(week, true)}>↻ Refresh numbers</button>
+        <button style={{ ...S.btn, ...mBtn }} onClick={() => window.print()}>🖨 Print</button>
+        <button style={{ ...S.btnPrimary, ...mBtn }} disabled={busy === 'email'} onClick={emailIt}>{busy === 'email' ? 'Sending…' : '✉ Email it'}</button>
       </div>
 
       {migrationPending && (
-        <div className="no-print" style={{ ...S.section, borderColor: 'var(--tone-amber-bd)', background: 'var(--tone-amber-bg)', color: 'var(--tone-amber-tx)', fontSize: 13 }}>
+        <div className="no-print" style={{ ...sec, borderColor: 'var(--tone-amber-bd)', background: 'var(--tone-amber-bg)', color: 'var(--tone-amber-tx)', fontSize: 13 }}>
           <b>Archive not enabled yet:</b> the <code>leadership_reports</code> table hasn't been created in Supabase, so nothing saves — every visit
           rebuilds from scratch (~1 min) and fill-ins are lost. Run the SQL block from SUPABASE_SETUP.sql (bottom) in the Supabase SQL editor.
         </div>
       )}
-      {error && <div style={{ ...S.section, borderColor: 'var(--danger)', color: 'var(--danger)' }}>{error}</div>}
-      {loading && <div style={{ ...S.section, color: 'var(--text-secondary)' }}>Building W/E {week} from ServiceTitan + Andi — 20–60s on a fresh pull…</div>}
+      {error && <div style={{ ...sec, borderColor: 'var(--danger)', color: 'var(--danger)' }}>{error}</div>}
+      {loading && <div style={{ ...sec, color: 'var(--text-secondary)' }}>Building W/E {week} from ServiceTitan + Andi — 20–60s on a fresh pull…</div>}
 
       {f && !loading && (
-        <div id="leadership-print">
+        <div id="leadership-print" style={isMobile ? { display: 'flex', flexDirection: 'column' } : undefined}>
           <div style={{ display: 'none' }} className="print-only">
             <h1 style={S.h1}>Weekly Leadership Agenda — {weekLabel}</h1>
           </div>
 
           {/* Self-identifying: which window these numbers actually cover */}
-          <div style={{ fontSize: 12, color: 'var(--text-muted)', margin: '2px 0 6px' }}>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', margin: '2px 0 6px', ...mo('cover') }}>
             Numbers cover <b>{f.weekStart} → {f.weekEnd}</b>{f.asOf && f.asOf !== f.weekEnd ? <> · data through <b>{f.asOf}</b></> : null}
             {f.mtd?.dayOfMonth != null ? <> · MTD/YTD as of day {f.mtd.dayOfMonth} of {f.mtd.daysInMonth}</> : null}
           </div>
 
           {/* Meeting openers */}
-          <div style={S.section}>
+          <div style={{ ...sec, ...mo('openers') }}>
             <div style={S.sectionTitle}>Quote · Ice breaker · Positive news</div>
             <div style={{ display: 'grid', gap: 8 }}>
               <div className="no-print" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -418,17 +482,20 @@ function LeadershipPageInner() {
             </div>
           </div>
 
-          {/* Headline cards */}
-          <div style={{ display: 'flex', gap: 10, marginTop: 16, flexWrap: 'wrap' }}>
-            <Card label="Wk Sales" value={money(f.totals.sales)}
+          {/* Headline cards — on a phone: sales full-width and big, the rest
+              two-up, plus a clubs card (the desktop scorecard already shows it). */}
+          <div style={{ display: 'flex', gap: 10, marginTop: 16, flexWrap: 'wrap', ...mo('cards') }}>
+            <Card label="Wk Sales" value={money(f.totals.sales)} style={full} big={isMobile}
               sub={`goal ${money(f.totals.salesGoal)}${f.compare?.yoyWeek?.salesDelta != null ? ` · YoY ${f.compare.yoyWeek.salesDelta >= 0 ? '+' : ''}${pct(f.compare.yoyWeek.salesDelta)}` : ''}`}
               tone={f.totals.hitGoal ? 'good' : 'bad'} />
-            <Card label="Wk Revenue" value={money(f.totals.revenue)}
+            <Card label="Wk Revenue" value={money(f.totals.revenue)} style={half}
               sub={`${money(f.totals.unpaid)} uncollected${f.compare?.yoyWeek?.revenueDelta != null ? ` · YoY ${f.compare.yoyWeek.revenueDelta >= 0 ? '+' : ''}${pct(f.compare.yoyWeek.revenueDelta)}` : ''}`} />
-            <Card label="Close Rate" value={pct(f.totals.closeRate)} sub={`${f.totals.opps} opportunities`}
+            <Card label="Close Rate" value={pct(f.totals.closeRate)} sub={`${f.totals.opps} opportunities`} style={half}
               tone={goalToneName(f.totals.closeRate, f.kpis.find(k => k.kpi === 'Close Rate')?.goal || 0.7)} />
-            <Card label="Booking %" value={pct(f.totals.booking.rate)} sub={`${f.totals.booking.total} lead calls`}
+            <Card label="Booking %" value={pct(f.totals.booking.rate)} sub={`${f.totals.booking.total} lead calls`} style={half}
               tone={goalToneName(f.totals.booking.rate, f.kpis.find(k => k.kpi === 'Booking %')?.goal || 0.8)} />
+            {isMobile && <Card label="Clubs sold" sub="memberships this week" style={half}
+              value={String(f.totals.clubsSold ?? f.scorecard.reduce((a, d) => a + (d.clubs || 0), 0))} />}
           </div>
 
           {/* Pacing vs budgets — budgets editable, carried forward week to week */}
@@ -446,16 +513,16 @@ function LeadershipPageInner() {
               </label>
             )
             return (
-              <div style={S.section}>
+              <div style={{ ...sec, ...mo('pacing') }}>
                 <div style={S.sectionTitle}>Sales & revenue pacing</div>
                 <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                  <Card label="MTD Sales" value={money(f.mtd.sales)}
+                  <Card label="MTD Sales" value={money(f.mtd.sales)} style={half}
                     sub={`budget ${money(mSales)} · proj ${money(f.mtd.salesProjected)}`}
                     tone={goalToneName(f.mtd.salesProjected, mSales)} />
-                  <Card label="MTD Revenue" value={money(f.mtd.revenue)}
+                  <Card label="MTD Revenue" value={money(f.mtd.revenue)} style={half}
                     sub={`budget ${money(mRev)} · proj ${money(f.mtd.projected)}`}
                     tone={goalToneName(f.mtd.projected, mRev)} />
-                  {f.ytd && <Card label="YTD Sales" value={money(f.ytd.sales)}
+                  {f.ytd && <Card label="YTD Sales" value={money(f.ytd.sales)} style={half}
                     sub={`target ${money(ySales)} · proj ${money(f.ytd.projected)}`}
                     tone={goalToneName(f.ytd.projected, ySales)} />}
                 </div>
@@ -470,7 +537,7 @@ function LeadershipPageInner() {
 
           {/* AI read — a 60-second scan: headline, top highlights, actions by dept */}
           {ai && (
-            <div style={{ ...S.section, borderLeft: '4px solid var(--accent)' }}>
+            <div style={{ ...sec, borderLeft: '4px solid var(--accent)', ...mo('ai') }}>
               {ai.headline && <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--text-primary)', marginBottom: 10 }}>{ai.headline}</div>}
               {aiWins.length > 0 && <>
                 <div style={{ ...S.sectionTitle, color: 'var(--success)' }}>Wins</div>
@@ -517,7 +584,7 @@ function LeadershipPageInner() {
           )}
 
           {/* Department scorecard */}
-          <div style={S.section}>
+          <div style={{ ...sec, ...mo('scorecard') }}>
             <div style={S.sectionTitle}>Department scorecard</div>
             <Table
               headers={['Dept', 'Wk Sales', 'Budget', 'Var', 'Wk Rev', 'Rev Tgt', 'Close / Tgt', 'Avg Sale', 'Opps', 'Missed $', '5★', 'Clubs', 'Callbacks', 'LW True Labor %']}
@@ -557,7 +624,7 @@ function LeadershipPageInner() {
           </div>
 
           {/* KPIs + opportunities side-by-side feel */}
-          <div style={S.section}>
+          <div style={{ ...sec, ...mo('kpis') }}>
             <div style={S.sectionTitle}>Company KPIs — week over week</div>
             <Table headers={['KPI', 'This Wk', 'Last Wk', 'Δ', 'Goal']}
               rows={f.kpis.map(k => {
@@ -578,7 +645,7 @@ function LeadershipPageInner() {
             />
           </div>
 
-          <div style={S.section}>
+          <div style={{ ...sec, ...mo('opps') }}>
             <div style={S.sectionTitle}>Opportunities — ran vs needed vs capacity</div>
             <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 8 }}>
               "Needed" = budget ÷ (this week's actual close rate × average sale) — so a soft closing week INFLATES it.
@@ -637,18 +704,18 @@ function LeadershipPageInner() {
           </div>
 
           {/* True labor */}
-          <div style={S.section}>
+          <div style={{ ...sec, ...mo('labor') }}>
             <div style={S.sectionTitle}>
               Last week's true labor{f.labor.weekEnd ? ` — wk ending ${f.labor.weekEnd}` : ''} {f.labor.source === 'adp'
                 ? <span style={{ color: 'var(--success)' }}>— ACTUALS from ADP {f.labor.actual?.source === 'invoice' ? `invoice ${f.labor.actual?.invoiceNo}` : f.labor.actual?.invoiceNo}{f.labor.actual?.approx ? ' (burden estimated from measured rates)' : ''} ✓</span>
                 : '(ADP-burdened model)'}
             </div>
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-              <Card label="LW field labor (true)" value={money(f.labor.estFieldBurdened)}
+              <Card label="LW field labor (true)" value={money(f.labor.estFieldBurdened)} style={half}
                 sub={f.labor.source === 'adp' ? `${money(f.labor.actual?.totals?.field?.gross)} gross · ${f.labor.actual?.totals?.field?.n ?? '—'} employees` : `${money(f.labor.impliedCommissions)} commissions + pool + burden`} />
-              <Card label="LW office labor" value={money(f.labor.officeWeeklyCost)} sub={f.labor.source === 'adp' ? `${f.labor.actual?.totals?.office?.n ?? '—'} employees` : 'burdened weekly baseline'} />
-              <Card label="LW all-in labor %" value={pct(f.labor.laborPctOfRevenue)} sub="of last week's revenue" tone={f.labor.laborPctOfRevenue <= 0.36 ? 'good' : 'bad'} />
-              <Card label="LW hidden pool" value={money(f.labor.hiddenPool)} sub={f.labor.source === 'adp' ? 'actual field gross − job commissions' : 'field pay not tied to a job'} />
+              <Card label="LW office labor" value={money(f.labor.officeWeeklyCost)} style={half} sub={f.labor.source === 'adp' ? `${f.labor.actual?.totals?.office?.n ?? '—'} employees` : 'burdened weekly baseline'} />
+              <Card label="LW all-in labor %" value={pct(f.labor.laborPctOfRevenue)} style={half} sub="of last week's revenue" tone={f.labor.laborPctOfRevenue <= 0.36 ? 'good' : 'bad'} />
+              <Card label="LW hidden pool" value={money(f.labor.hiddenPool)} style={half} sub={f.labor.source === 'adp' ? 'actual field gross − job commissions' : 'field pay not tied to a job'} />
             </div>
             {f.labor.source === 'adp' && (f.labor.actual.unmatched || []).length > 0 && (
               <div style={{ fontSize: 12, color: 'var(--warning)', marginTop: 8 }}>
@@ -656,7 +723,7 @@ function LeadershipPageInner() {
               </div>
             )}
             <div className="no-print" style={{ display: 'flex', gap: 12, alignItems: 'center', marginTop: 10, flexWrap: 'wrap' }}>
-              <label style={{ ...S.btn, cursor: 'pointer', display: 'inline-block' }}>
+              <label style={{ ...S.btn, ...mBtn, cursor: 'pointer', display: 'inline-block' }}>
                 {busy === 'payroll' ? 'Parsing…' : '📎 Upload ADP payroll (.xls — invoice or register)'}
                 <input type="file" accept=".xls,.xlsx" style={{ display: 'none' }} disabled={busy === 'payroll'}
                   onChange={e => uploadPayroll(e.target.files?.[0])} />
@@ -670,7 +737,7 @@ function LeadershipPageInner() {
           </div>
 
           {/* Leaderboards — top 3 + lowest per department, not the whole roster */}
-          <div style={S.section}>
+          <div style={{ ...sec, ...mo('techs') }}>
             <div style={S.sectionTitle}>Technicians — top 3 + lowest per department · composite: revenue 40 · close 30 · $/opp 30</div>
             {['HVAC', 'Plumbing', 'Electrical', 'Garage Doors'].map(trade => {
               const scored = f.technicians.filter(t => t.score != null && t.trade === trade)
@@ -705,7 +772,7 @@ function LeadershipPageInner() {
             )}
           </div>
 
-          <div style={S.section}>
+          <div style={{ ...sec, ...mo('csrs') }}>
             <div style={S.sectionTitle}>CSRs — top 3 + lowest · from ServiceTitan · composite: booked 40 · book rate 30 · QA 30</div>
             {(() => {
               const scored = f.csrs.filter(c => c.score != null)
@@ -723,9 +790,9 @@ function LeadershipPageInner() {
           </div>
 
           {/* 6-week trend */}
-          <div style={S.section}>
+          <div style={{ ...sec, ...mo('trend') }}>
             <div style={S.sectionTitle}>6-week sales trend</div>
-            <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', height: 120, padding: '0 4px' }}>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', height: 120, padding: '0 4px', ...(isMobile ? { maxWidth: '100%' } : {}) }}>
               {f.trend.map((t, i) => {
                 const max = Math.max(...f.trend.map(x => x.sales), t.goal)
                 return (
@@ -744,7 +811,7 @@ function LeadershipPageInner() {
           </div>
 
           {/* Editable meeting sections */}
-          <div style={S.section}>
+          <div style={{ ...sec, ...mo('topics') }}>
             <div style={S.sectionTitle}>Discussion topics</div>
             <EditRows rows={notes.topics} onChange={v => patchNotes({ topics: v })}
               cols={[
@@ -753,7 +820,7 @@ function LeadershipPageInner() {
               ]} />
           </div>
 
-          <div style={S.section}>
+          <div style={{ ...sec, ...mo('rocks') }}>
             <div style={S.sectionTitle}>Rocks — one per leader, progress reported every week</div>
             <EditRows rows={notes.projects} onChange={v => patchNotes({ projects: v })}
               cols={[
@@ -770,7 +837,7 @@ function LeadershipPageInner() {
             </div>
           </div>
 
-          <div style={S.section}>
+          <div style={{ ...sec, ...mo('parking') }}>
             <div style={S.sectionTitle}>Parking lot</div>
             <EditRows rows={notes.parkingLot} onChange={v => patchNotes({ parkingLot: v })}
               cols={[
@@ -781,22 +848,22 @@ function LeadershipPageInner() {
               ]} />
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 16, marginTop: 16 }}>
-            <div style={{ ...S.section, marginTop: 0 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 16, marginTop: 16, ...mo('lists') }}>
+            <div style={{ ...sec, marginTop: 0 }}>
               <div style={S.sectionTitle}>Wins this week</div>
               <EditList items={notes.wins} mark="✓" onChange={v => patchNotes({ wins: v })} />
             </div>
-            <div style={{ ...S.section, marginTop: 0 }}>
+            <div style={{ ...sec, marginTop: 0 }}>
               <div style={S.sectionTitle}>Watch-outs / risks</div>
               <EditList items={notes.watchouts} mark="⚠" onChange={v => patchNotes({ watchouts: v })} />
             </div>
-            <div style={{ ...S.section, marginTop: 0 }}>
+            <div style={{ ...sec, marginTop: 0 }}>
               <div style={S.sectionTitle}>Commitments for next week</div>
               <EditList items={notes.commitments} mark="☐" onChange={v => patchNotes({ commitments: v })} />
             </div>
           </div>
 
-          <div style={S.section}>
+          <div style={{ ...sec, ...mo('notes') }}>
             <div style={S.sectionTitle}>Notes & key takeaways</div>
             <textarea className="no-print" style={{ ...S.input, minHeight: 90, resize: 'vertical' }} value={notes.notesText || ''}
               placeholder="Meeting notes…" onChange={e => patchNotes({ notesText: e.target.value })} />
@@ -804,7 +871,7 @@ function LeadershipPageInner() {
             <div className="print-only" style={{ display: 'none', fontSize: 12.5, lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{notes.notesText || ''}</div>
           </div>
 
-          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 18, lineHeight: 1.6 }}>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 18, lineHeight: 1.6, ...mo('footer') }}>
             Sales = estimates marked Sold · Revenue = invoiced subtotals · Opportunities = jobs with an estimate presented ·
             Booking % excludes Excused / NotLead / Abandoned · True labor uses the ADP TotalSource burden model (field ×{f.labor.factors.fieldBurden}, pool ×{f.labor.factors.poolUplift}) ·
             Generated {new Date(f.generatedAt).toLocaleString()}
@@ -888,6 +955,7 @@ function BrainChat({ authHeaders }) {
   const [err, setErr] = useState('')
   const bodyRef = useRef(null)
   const inputRef = useRef(null)
+  const isMobile = useIsMobile()
 
   const loadThreads = useCallback(async () => {
     try {
@@ -940,23 +1008,31 @@ function BrainChat({ authHeaders }) {
 
   useEffect(() => { if (bodyRef.current) bodyRef.current.scrollTop = bodyRef.current.scrollHeight }, [msgs, busy])
 
+  // Phone: stack — thread chips across the top, conversation below, filling
+  // whatever the page gives (the page is a flex column on a phone).
   return (
-    <div style={{ display: 'flex', gap: 0, height: 'calc(100vh - 130px)', minHeight: 480, margin: '0 -8px' }}>
+    <div style={isMobile
+      ? { display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, margin: '0 -4px' }
+      : { display: 'flex', gap: 0, height: 'calc(100vh - 130px)', minHeight: 480, margin: '0 -8px' }}>
 
       {/* Thread rail */}
-      <div style={{ width: 250, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 2, padding: '4px 12px 4px 4px', borderRight: '1px solid var(--border)', overflowY: 'auto' }}>
+      <div style={isMobile
+        ? { display: 'flex', alignItems: 'center', gap: 6, padding: '4px 4px 8px', borderBottom: '1px solid var(--border)', overflowX: 'auto', flexShrink: 0 }
+        : { width: 250, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 2, padding: '4px 12px 4px 4px', borderRight: '1px solid var(--border)', overflowY: 'auto' }}>
         <button onClick={() => openThread(null)}
-          style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 12px', marginBottom: 8, borderRadius: 10, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-primary)', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}
+          style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 12px', marginBottom: isMobile ? 0 : 8, borderRadius: 10, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-primary)', fontSize: 13, fontWeight: 600, cursor: 'pointer',
+            ...(isMobile ? { flexShrink: 0, whiteSpace: 'nowrap', minHeight: 40 } : {}) }}
           onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
           onMouseLeave={e => e.currentTarget.style.background = 'var(--surface)'}>
           <span style={{ fontSize: 15, lineHeight: 1 }}>+</span> New chat
         </button>
-        <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: .6, color: 'var(--text-muted)', padding: '4px 12px' }}>Recents</div>
+        {!isMobile && <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: .6, color: 'var(--text-muted)', padding: '4px 12px' }}>Recents</div>}
         {threads.length === 0 && <div style={{ fontSize: 12, color: 'var(--text-muted)', padding: '4px 12px' }}>Nothing yet.</div>}
         {threads.map(t => (
           <div key={t.id} onClick={() => openThread(t.id)} className="brain-thread"
             style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 12px', borderRadius: 10, cursor: 'pointer',
-              background: t.id === activeId ? 'var(--surface-2)' : 'transparent' }}
+              background: t.id === activeId ? 'var(--surface-2)' : 'transparent',
+              ...(isMobile ? { flex: '0 0 auto', maxWidth: 180, minHeight: 40, boxSizing: 'border-box', border: '1px solid var(--border)' } : {}) }}
             onMouseEnter={e => { if (t.id !== activeId) e.currentTarget.style.background = 'var(--surface)' }}
             onMouseLeave={e => { if (t.id !== activeId) e.currentTarget.style.background = 'transparent' }}>
             <div style={{ flex: 1, minWidth: 0, fontSize: 13, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -970,11 +1046,11 @@ function BrainChat({ authHeaders }) {
 
       {/* Conversation */}
       <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-        <div ref={bodyRef} style={{ flex: 1, overflowY: 'auto', padding: '20px 24px 8px' }}>
+        <div ref={bodyRef} style={{ flex: 1, overflowY: 'auto', padding: isMobile ? '12px 6px 8px' : '20px 24px 8px' }}>
           <div style={{ maxWidth: 780, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 20 }}>
 
             {msgs.length === 0 && !busy && (
-              <div style={{ marginTop: '14vh', textAlign: 'center' }}>
+              <div style={{ marginTop: isMobile ? '4vh' : '14vh', textAlign: 'center' }}>
                 <span style={{ display: 'inline-flex', width: 54, height: 54, marginBottom: 14 }}>
                   <svg viewBox="0 0 64 64" style={{ width: '100%', height: '100%' }}>
                     <rect x="2" y="2" width="60" height="60" rx="14" fill="#111318" />
@@ -999,7 +1075,7 @@ function BrainChat({ authHeaders }) {
             )}
 
             {msgs.map((m, i) => m.role === 'user' ? (
-              <div key={i} style={{ alignSelf: 'flex-end', maxWidth: '75%', padding: '10px 16px', borderRadius: 16, background: 'var(--surface-2)', border: '1px solid var(--border)', fontSize: 14, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
+              <div key={i} style={{ alignSelf: 'flex-end', maxWidth: isMobile ? '88%' : '75%', padding: '10px 16px', borderRadius: 16, background: 'var(--surface-2)', border: '1px solid var(--border)', fontSize: 14, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
                 {m.content}
               </div>
             ) : (
@@ -1043,7 +1119,7 @@ function BrainChat({ authHeaders }) {
         {err && <div style={{ maxWidth: 780, margin: '0 auto', width: '100%', padding: '4px 24px', fontSize: 12.5, color: 'var(--danger)' }}>{err}</div>}
 
         {/* Composer */}
-        <div style={{ padding: '10px 24px 18px' }}>
+        <div style={{ padding: isMobile ? '8px 4px 10px' : '10px 24px 18px' }}>
           <div style={{ maxWidth: 780, margin: '0 auto', position: 'relative' }}>
             <textarea ref={inputRef} rows={1} value={input} disabled={busy}
               placeholder="Ask about techs, CSRs, revenue, labor, marketing…"

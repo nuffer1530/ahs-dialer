@@ -302,6 +302,40 @@ function OutboundNudge({ agentStatus }) {
   )
 }
 
+// Phone-only bottom tabs: the four places a manager opens from a phone, plus
+// "More" for the drawer. Desktop keeps the sidebar; wall routes have neither.
+function MobileTabBar({ isAdmin, canDispatch, isLeader, onMore }) {
+  const location = useLocation()
+  const navigate = useNavigate()
+  const items = isAdmin || canDispatch
+    ? [
+        { to: '/analytics', label: 'Dashboard', iconKey: 'analytics' },
+        ...(canDispatch ? [{ to: '/dispatch', label: 'Dispatch', iconKey: 'dispatch' }] : []),
+        isLeader ? { to: '/leadership', label: 'Leadership', iconKey: 'leadership' } : { to: '/callboard', label: 'Call Board', iconKey: 'board' },
+        { to: '/recordings', label: 'Recordings', iconKey: 'recordings' },
+      ]
+    : [
+        { to: '/analytics', label: 'Dashboard', iconKey: 'analytics' },
+        { to: '/callboard', label: 'Call Board', iconKey: 'board' },
+        { to: '/recordings', label: 'Recordings', iconKey: 'recordings' },
+        { to: '/mypage', label: 'My Page', iconKey: 'mypage' },
+      ]
+  const active = (to) => location.pathname === to || (to !== '/' && location.pathname.startsWith(to + '/'))
+  const Tab = ({ label, iconKey, on, onClick }) => (
+    <button onClick={onClick} style={{ flex: 1, minWidth: 0, height: 52, border: 'none', background: 'transparent', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 3,
+      color: on ? 'var(--accent)' : 'var(--text-muted)', fontSize: 10, fontWeight: on ? 700 : 500, letterSpacing: .2 }}>
+      <span style={{ display: 'flex', width: 22, height: 22, alignItems: 'center', justifyContent: 'center' }}>{NAV_ICONS[iconKey]?.(on)}</span>
+      <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%' }}>{label}</span>
+    </button>
+  )
+  return (
+    <nav style={{ flexShrink: 0, display: 'flex', borderTop: '1px solid var(--border)', background: 'var(--surface)', paddingBottom: 'env(safe-area-inset-bottom)', zIndex: 120 }}>
+      {items.map(it => <Tab key={it.to} label={it.label} iconKey={it.iconKey} on={active(it.to)} onClick={() => navigate(it.to)} />)}
+      <Tab label="More" iconKey="settings" on={false} onClick={onMore} />
+    </nav>
+  )
+}
+
 // The phone must be registered on every route, not just the dialer, so the
 // provider wraps the whole shell and the layout consumes it.
 export default function DialerLayout() {
@@ -912,6 +946,7 @@ function DialerLayoutInner() {
         <GlobalIncomingCall />
         <OutboundNudge agentStatus={agentStatus} />
         <ScheduleAlerts />
+        <div style={isMobile && !isWall ? { flex:1, minHeight:0, display:'flex', flexDirection:'column', overflow:'hidden' } : { display:'contents' }}>
         <Routes>
           <Route path="/" element={<DialerPage />} />
           <Route path="/live" element={<LivePage />} />
@@ -927,6 +962,8 @@ function DialerLayoutInner() {
           <Route path="/mypage" element={<MyPage />} />
           <Route path="/settings" element={<AdminPage />} />
         </Routes>
+        </div>
+        {isMobile && !isWall && <MobileTabBar isAdmin={isAdmin} canDispatch={canDispatch} isLeader={isLeader} onMore={() => setMobileNav(true)} />}
       </div>
     </div>
   )

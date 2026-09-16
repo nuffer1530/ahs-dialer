@@ -1,5 +1,6 @@
 import { useState, Component } from 'react'
 import { useAuth } from '../lib/AuthContext'
+import { useIsMobile } from '../lib/useIsMobile'
 import CallEvalsTab from '../components/CallEvalsTab'
 import ScorecardsPanel from '../components/ScorecardsPanel'
 import CommissionReport from '../components/CommissionReport'
@@ -26,6 +27,7 @@ class TabBoundary extends Component {
 
 export default function TeamPage() {
   const { profile } = useAuth()
+  const isMobile = useIsMobile()
   const isAdmin = profile?.role === 'admin'
   const myTeams = isAdmin ? TEAMS : TEAMS.filter(t => (profile?.leads_teams || []).includes(t.id))
   const [team] = useState(TEAMS[0].id)
@@ -43,20 +45,22 @@ export default function TeamPage() {
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-      <div style={{ background: 'var(--surface)', borderBottom: '1px solid var(--border)', flexShrink: 0, padding: '0 24px', display: 'flex', gap: 4, alignItems: 'center' }}>
+      {/* Phone: the tab strip scrolls sideways instead of wrapping. */}
+      <div style={{ background: 'var(--surface)', borderBottom: '1px solid var(--border)', flexShrink: 0, padding: isMobile ? '0 12px' : '0 24px', display: 'flex', gap: 4, alignItems: 'center', overflowX: isMobile ? 'auto' : undefined }}>
         {TABS.map(([id, label]) => (
           <button key={id} onClick={() => setTab(id)}
             style={{ padding: '12px 14px', border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 13,
               fontWeight: tab === id ? 700 : 500, color: tab === id ? 'var(--accent)' : 'var(--text-muted)',
-              borderBottom: `2px solid ${tab === id ? 'var(--accent)' : 'transparent'}` }}>
+              borderBottom: `2px solid ${tab === id ? 'var(--accent)' : 'transparent'}`,
+              whiteSpace: isMobile ? 'nowrap' : undefined, flexShrink: isMobile ? 0 : undefined }}>
             {label}
           </button>
         ))}
-        <span style={{ marginLeft: 'auto', fontSize: 11, fontWeight: 700, letterSpacing: .5, textTransform: 'uppercase', color: 'var(--text-muted)' }}>
+        <span style={{ marginLeft: 'auto', fontSize: 11, fontWeight: 700, letterSpacing: .5, textTransform: 'uppercase', color: 'var(--text-muted)', whiteSpace: isMobile ? 'nowrap' : undefined, flexShrink: isMobile ? 0 : undefined, paddingLeft: isMobile ? 12 : undefined }}>
           {TEAMS.find(t => t.id === team)?.label}
         </span>
       </div>
-      <div style={{ flex: 1, overflowY: 'auto', padding: 24, background: 'var(--bg)' }}>
+      <div style={{ flex: 1, overflowY: 'auto', padding: isMobile ? 12 : 24, background: 'var(--bg)' }}>
         {tab === 'coaching' && <TabBoundary><CallEvalsTab profile={profile} isAdmin={true} defaultView="snapshots" /></TabBoundary>}
         {tab === 'scorecards' && <TabBoundary><ScorecardsPanel /></TabBoundary>}
         {tab === 'commissions' && <TabBoundary><CommissionReport /></TabBoundary>}

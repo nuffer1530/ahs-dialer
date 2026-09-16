@@ -7,6 +7,7 @@ import Badge from '../components/Badge'
 import { isDone, fmtShort, syncWorkerActivity } from '../lib/utils'
 import { INTERACTION_COLORS } from '../lib/constants'
 import Avatar from '../components/Avatar'
+import { useIsMobile } from '../lib/useIsMobile'
 
 const DEFAULT_STATUS_OPTIONS = [
   { value: 'Available', color: '#22c55e' },
@@ -60,6 +61,7 @@ export default function LivePage() {
   const { contacts } = useData()
   const { isAdmin, profile: myProfile } = useAuth()
   const { callTeammate, twilioReady, callStatus } = usePhone()
+  const isMobile = useIsMobile()
 
   // 👁 Live Call X-Ray (admins): read any in-progress call's transcript live.
   const [xrayCalls, setXrayCalls] = useState([])
@@ -253,20 +255,20 @@ export default function LivePage() {
   const abTone = !settled.length ? 'default' : abandonRate <= 5 ? 'good' : abandonRate <= 10 ? 'warn' : 'bad'
 
   return (
-    <div style={{ flex:1, overflowY:'auto', padding:24, display:'flex', flexDirection:'column', gap:20 }}>
+    <div style={{ flex:1, overflowY:'auto', padding: isMobile ? 12 : 24, display:'flex', flexDirection:'column', gap: isMobile ? 14 : 20 }}>
 
       {/* Admin status override modal */}
       {isAdmin && overrideTarget && (
         <div onClick={() => setOverrideTarget(null)}
           style={{ position:'fixed', inset:0, background:'rgba(0,0,0,.45)', zIndex:1000, display:'flex', alignItems:'center', justifyContent:'center' }}>
-          <div onClick={e => e.stopPropagation()}
+          <div onClick={e => e.stopPropagation()} className="mkeep"
             style={{ background:'var(--surface)', borderRadius:'var(--radius-lg)', padding:24, minWidth:260, boxShadow:'0 8px 32px rgba(0,0,0,.25)' }}>
             <div style={{ fontSize:13, fontWeight:600, marginBottom:4 }}>Change Status</div>
             <div style={{ fontSize:12, color:'var(--text-muted)', marginBottom:16 }}>{overrideTarget.name}</div>
             <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
               {statusOptions.map(s => (
                 <button key={s.value} onClick={() => adminSetStatus(overrideTarget.id, s.value)}
-                  style={{ display:'flex', alignItems:'center', gap:10, padding:'10px 14px', borderRadius:'var(--radius)',
+                  style={{ display:'flex', alignItems:'center', gap:10, padding: isMobile ? '12px 14px' : '10px 14px', borderRadius:'var(--radius)',
                     border: overrideTarget.status === s.value ? `2px solid ${s.color}` : '2px solid transparent',
                     background: overrideTarget.status === s.value ? s.color + '18' : 'var(--surface-2)',
                     cursor:'pointer', fontSize:13, fontWeight: overrideTarget.status === s.value ? 600 : 400,
@@ -277,13 +279,15 @@ export default function LivePage() {
                 </button>
               ))}
             </div>
-            <button onClick={() => setOverrideTarget(null)} className="btn sm" style={{ marginTop:16, width:'100%' }}>Cancel</button>
+            <button onClick={() => setOverrideTarget(null)} className="btn sm" style={{ marginTop:16, width:'100%', minHeight: isMobile ? 40 : undefined }}>Cancel</button>
           </div>
         </div>
       )}
 
-      {/* ── Telephony KPIs — always first, this is what a floor lead scans ── */}
-      <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(150px, 1fr))', gap:12 }}>
+      {/* ── Telephony KPIs — always first, this is what a floor lead scans.
+          mgrid: auto-fit already gives two tiles a row on a phone; without it
+          the phone layer stacks all six. ── */}
+      <div className="mgrid" style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(150px, 1fr))', gap:12 }}>
         <Kpi label="In queue" value={queued.length} tone={queueTone} big
           sub={queued.length ? `longest ${fmtWait(longestWait)}` : 'nobody waiting'} />
         <Kpi label="Live calls" value={onCall.length} tone={onCall.length ? 'accent' : 'default'} big
@@ -307,7 +311,8 @@ export default function LivePage() {
             <div className="card-title">Waiting now</div>
             <span style={{ fontSize:11, color:'var(--text-muted)' }}>{queued.length} caller{queued.length === 1 ? '' : 's'}</span>
           </div>
-          <table className="data-table">
+          {/* Three columns fit a phone, so skip the forced 640px sideways scroll. */}
+          <table className="data-table" style={isMobile ? { minWidth:0 } : undefined}>
             <thead><tr><th>Caller</th><th>Number</th><th>Waiting</th></tr></thead>
             <tbody>
               {[...queued].sort((a, b) => new Date(a.queued_at) - new Date(b.queued_at)).map(t => {
@@ -336,7 +341,8 @@ export default function LivePage() {
           <div>
             {xrayCalls.map(c => (
               <div key={c.id} onClick={() => setWatchSid(c.id)}
-                style={{ display:'flex', alignItems:'center', gap:12, padding:'10px 18px', borderBottom:'1px solid var(--border)', cursor:'pointer' }}
+                style={{ display:'flex', alignItems:'center', gap:12, padding: isMobile ? '12px 12px' : '10px 18px', borderBottom:'1px solid var(--border)', cursor:'pointer',
+                  flexWrap: isMobile ? 'wrap' : undefined }}
                 onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
                 onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
                 <span style={{ width:8, height:8, borderRadius:'50%', background:'var(--danger)', animation:'pulse 1.2s infinite', flexShrink:0 }} />
@@ -353,7 +359,7 @@ export default function LivePage() {
 
       {watchSid && (
         <div onClick={() => setWatchSid(null)}
-          style={{ position:'fixed', inset:0, background:'rgba(0,0,0,.5)', zIndex:800, display:'flex', alignItems:'center', justifyContent:'center', padding:20 }}>
+          style={{ position:'fixed', inset:0, background:'rgba(0,0,0,.5)', zIndex:800, display:'flex', alignItems:'center', justifyContent:'center', padding: isMobile ? 10 : 20 }}>
           <div onClick={e => e.stopPropagation()}
             style={{ background:'var(--surface)', borderRadius:14, width:'100%', maxWidth:640, height:'78vh', boxShadow:'0 16px 48px rgba(0,0,0,.35)', display:'flex', flexDirection:'column', overflow:'hidden' }}>
             <div style={{ padding:'12px 18px', borderBottom:'1px solid var(--border)', display:'flex', alignItems:'center', gap:10, flexShrink:0 }}>
@@ -369,7 +375,7 @@ export default function LivePage() {
                   {watchTx?.rep ? `with ${watchTx.rep} · ` : ''}updates every few seconds · the rep can't see that you're reading
                 </div>
               </div>
-              <button className="btn sm" onClick={() => setWatchSid(null)}>Close</button>
+              <button className="btn sm" onClick={() => setWatchSid(null)} style={isMobile ? { minHeight:40 } : undefined}>Close</button>
             </div>
             <div style={{ flex:1, overflowY:'auto', padding:16, display:'flex', flexDirection:'column', gap:8 }}
               ref={el => {
@@ -405,7 +411,7 @@ export default function LivePage() {
 
       {/* Agent Status Board */}
       <div className="card">
-        <div className="card-header">
+        <div className="card-header" style={isMobile ? { flexWrap:'wrap', gap:6 } : undefined}>
           <div className="card-title">Agent Status Board</div>
           <div style={{ display:'flex', gap:12, flexWrap:'wrap' }}>
             {statusOptions.map(s => {
@@ -464,7 +470,8 @@ export default function LivePage() {
                           <button onClick={() => callTeammate(p)}
                             disabled={!twilioReady || !!callStatus || status === 'Offline'}
                             title={status === 'Offline' ? `${p.name || 'They'} aren't logged in` : `Call ${p.name || p.email} — rings their browser wherever they're logged in`}
-                            style={{ marginLeft:2, padding:'2px 10px', fontSize:10.5, fontWeight:700, borderRadius:99,
+                            style={{ marginLeft:2, padding: isMobile ? '6px 14px' : '2px 10px', fontSize: isMobile ? 12 : 10.5, fontWeight:700, borderRadius:99,
+                              minHeight: isMobile ? 40 : undefined,
                               border:'1px solid var(--accent)', cursor: (!twilioReady || callStatus || status === 'Offline') ? 'not-allowed' : 'pointer',
                               background:'transparent', color:'var(--accent)', opacity: (!twilioReady || callStatus || status === 'Offline') ? .4 : 1 }}>
                             Call
@@ -475,7 +482,8 @@ export default function LivePage() {
                     <td style={{ padding:'10px 12px' }}>
                       <span
                         onClick={() => isAdmin && setOverrideTarget({ id:p.id, name:p.name || p.email, status })}
-                        style={{ display:'inline-flex', alignItems:'center', gap:6, padding:'3px 10px', borderRadius:99, fontSize:11, fontWeight:600, background:statusColor + '20', color:statusColor, cursor: isAdmin ? 'pointer' : 'default' }}
+                        style={{ display:'inline-flex', alignItems:'center', gap:6, padding:'3px 10px', borderRadius:99, fontSize:11, fontWeight:600, background:statusColor + '20', color:statusColor, cursor: isAdmin ? 'pointer' : 'default',
+                          minHeight: isMobile && isAdmin ? 40 : undefined }}
                         title={isAdmin ? 'Click to change status' : ''}>
                         <div style={{ width:6, height:6, borderRadius:'50%', background:statusColor }}></div>
                         {status}
