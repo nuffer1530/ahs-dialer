@@ -2498,10 +2498,16 @@ async function build3DayBoard({ force = false } = {}) {
   const buRes = await stGet(`/settings/v2/tenant/${ST_TENANT_ID}/business-units?active=true&pageSize=200`)
   const buMap = {}
   ;(buRes?.data || []).forEach(b => { buMap[b.id] = classifyBU(b.name) })
-  const serviceBU = {}, installBU = {}
+  // A trade's field capacity is its Service AND Maintenance business units:
+  // HVAC is the one trade with a separate Maintenance BU, and its tune-ups
+  // are run by the same techs on the same hours (Sep 17: four maint visits
+  // on Korey/Tanner/Nick were invisible — "2/6 booked, 3 needed" on a day
+  // Brittany couldn't take another HVAC call).
+  const serviceBU = {}, installBU = {}, maintBU = {}
   Object.entries(buMap).forEach(([id, c]) => {
     if (c.role === 'service' && c.trade) serviceBU[c.trade] = Number(id)
     if (c.role === 'install' && c.trade) installBU[c.trade] = Number(id)
+    if (c.role === 'maintenance' && c.trade) maintBU[c.trade] = Number(id)
   })
 
   // Techs by home BU (for the Service-tech head count). Exclude the Leadership
@@ -2509,7 +2515,11 @@ async function build3DayBoard({ force = false } = {}) {
   // Hendricks…) have a service BU as their home but aren't field capacity.
   const techs = await getBoardTechs()
   const techsByBU = {}
-  techs.forEach(t => { if (t.businessUnitId != null && t.team !== 'Leadership') (techsByBU[t.businessUnitId] ||= []).push(t.id) })
+  // Managers carry a "(FIELD)" suffix on their ST technician record (same rule
+  // as the department TVs); the install coordinator has a service BU as home
+  // but runs no calls. Neither is a truck.
+  const notField = (t) => t.team === 'Leadership' || /\(field\)/i.test(t.name || '') || /coordinator/i.test(t.team || '')
+  techs.forEach(t => { if (t.businessUnitId != null && !notField(t)) (techsByBU[t.businessUnitId] ||= []).push(t.id) })
 
   // All shifts across the 3-day window. A tech counts as scheduled that day only
   // if they have a WORKING shift (not TimeOff) — no shift means they're off, so
@@ -2723,8 +2733,9 @@ async function build3DayBoard({ force = false } = {}) {
   const techName = (id) => (techs.find(t => t.id === id)?.name) || `Tech ${id}`
 
   const board = BOARD_TRADES.map(trade => {
-    const svc = serviceBU[trade], ins = installBU[trade]
-    const svcTechIds = techsByBU[svc] || []
+    const svc = serviceBU[trade], ins = installBU[trade], mnt = maintBU[trade]
+    const fieldBU = (id) => id === svc || (mnt != null && id === mnt)
+    const svcTechIds = [...(techsByBU[svc] || []), ...(mnt != null ? (techsByBU[mnt] || []) : [])]
     const perDay = days.map((day, di) => {
       const jobs = jobsByDay[di]
 
@@ -2780,7 +2791,7 @@ async function build3DayBoard({ force = false } = {}) {
       techsAvail = Math.round(techsAvail * 10) / 10
 
       // Booked calls exclude follow-up / callback / permitting / phone-call types.
-      const svcJobs = jobs.filter(j => j.businessUnitId === svc && isCountedCall(j))
+      const svcJobs = jobs.filter(j => fieldBU(j.businessUnitId) && isCountedCall(j))
       const oppJobs = jobs.filter(j => buMap[j.businessUnitId]?.trade === trade && isOpportunity(j))
       const installJobs = jobs.filter(j => j.businessUnitId === ins)
 
