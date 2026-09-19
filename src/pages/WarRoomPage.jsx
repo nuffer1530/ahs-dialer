@@ -99,7 +99,7 @@ export default function WarRoomPage() {
       if (need > have + 4) setFit(f => Math.max(0.6, +((f * have) / need).toFixed(3)))
     }, 250)
     return () => clearTimeout(t)
-  }, [narrow, fit, board, csrMonth, sales, wins])
+  }, [narrow, fit, board, csrMonth, sales, wins, profiles])
 
   // 3-Day Call Board — show today's "calls needed" per trade on the TV.
   useEffect(() => {
@@ -227,7 +227,8 @@ export default function WarRoomPage() {
   const abColor = inbound.abandonRate == null ? C.dim : inbound.abandonRate <= 5 ? C.green : inbound.abandonRate <= 10 ? C.amber : C.red
   const queueColor = queued.length === 0 ? C.green : longestWait > 60 ? C.red : C.amber
   const zoom = narrow ? fit : 1.08
-  const rowH = narrow ? 44 : ROW_H
+  const rowH = narrow ? 40 : ROW_H
+  const floorRowH = narrow ? 30 : 60
 
   return (
     <div ref={rootRef} style={{ minHeight:`calc(100vh / ${zoom})`, height:`calc(100vh / ${zoom})`, background:C.bg, color:C.text,
@@ -374,7 +375,7 @@ export default function WarRoomPage() {
       )}
 
       {/* Main grid */}
-      <div style={{ display:'grid', gridTemplateColumns:'1.25fr 1fr 1fr', gap: narrow ? 8 : 14, flex:1, minHeight: narrow ? 260 : 0 }}>
+      <div style={{ display:'grid', gridTemplateColumns:'1.25fr 1fr 1fr', gap: narrow ? 8 : 14, flex:1, minHeight: narrow ? Math.max(260, monthly.length * rowH + 48, agents.length * floorRowH + 48) : 0 }}>
 
         {/* Monthly leaderboard — same idea as the department TVs' tech ranking:
             booking % · clubs · call QA into one score, month to date, medals. */}
@@ -392,19 +393,19 @@ export default function WarRoomPage() {
               return (
                 <div key={d.profileId || d.name} style={{ position:'absolute', left:0, right:0, top:i * rowH + 6, height:rowH - 8,
                   transition:'top .6s cubic-bezier(.22,1,.36,1)', padding: narrow ? '0 10px' : '0 16px', display:'flex', alignItems:'center', gap: narrow ? 8 : 12, opacity: d.rankable ? 1 : .6 }}>
-                  <div style={{ width: narrow ? 24 : 34, textAlign:'center', fontSize: medal ? (narrow ? 17 : 24) : (narrow ? 12 : 16), fontWeight:800, color: medal ? undefined : C.dim, flexShrink:0 }}>
+                  <div style={{ width: narrow ? 22 : 34, textAlign:'center', fontSize: medal ? (narrow ? 15 : 24) : (narrow ? 11 : 16), fontWeight:800, color: medal ? undefined : C.dim, flexShrink:0 }}>
                     {medal || `#${i+1}`}
                   </div>
-                  <div style={{ width: narrow ? 30 : 42, height: narrow ? 30 : 42, borderRadius:'50%', flexShrink:0,
+                  <div style={{ width: narrow ? 26 : 42, height: narrow ? 26 : 42, borderRadius:'50%', flexShrink:0,
                     background: isLeader ? 'linear-gradient(135deg,#D29922,#F0883E)' : C.panel2,
                     border:`2px solid ${isLeader ? C.amber : C.border}`, color: isLeader ? '#000' : C.text,
-                    display:'flex', alignItems:'center', justifyContent:'center', fontSize: p?.avatar ? (narrow ? 16 : 22) : (narrow ? 11 : 14), fontWeight:800,
+                    display:'flex', alignItems:'center', justifyContent:'center', fontSize: p?.avatar ? (narrow ? 14 : 22) : (narrow ? 10 : 14), fontWeight:800,
                     boxShadow: isLeader ? `0 0 18px ${C.amber}66` : 'none' }}>
                     <Avatar avatar={p?.avatar} name={d.name} />
                   </div>
                   <div style={{ flex:1, minWidth:0 }}>
-                    <div style={{ fontSize: narrow ? 13 : 16, fontWeight:700, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{d.name}</div>
-                    <div style={{ display:'flex', gap: narrow ? 7 : 12, marginTop: narrow ? 1 : 3, fontSize: narrow ? 10 : 12, color:C.muted, whiteSpace:'nowrap', overflow:'hidden' }}>
+                    <div style={{ fontSize: narrow ? 12 : 16, fontWeight:700, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', lineHeight:1.15 }}>{d.name}</div>
+                    <div style={{ display:'flex', gap: narrow ? 7 : 12, marginTop: narrow ? 1 : 3, fontSize: narrow ? 9 : 12, color:C.muted, whiteSpace:'nowrap', overflow:'hidden' }}>
                       <span>{d.booked}/{d.leadCalls}{narrow ? '' : ' booked'}</span>
                       <span style={{ color: d.clubs ? C.purple : C.muted }}>{d.clubs} club{d.clubs === 1 ? '' : 's'}</span>
                       <span style={{ color: d.qa == null ? C.muted : d.qa >= 85 ? C.green : d.qa >= 75 ? C.amber : C.red }}>{d.qa == null ? 'QA —' : `QA ${d.qa}%`}</span>
@@ -412,7 +413,7 @@ export default function WarRoomPage() {
                     </div>
                   </div>
                   <div style={{ textAlign:'right', flexShrink:0 }}>
-                    <div style={{ fontSize: narrow ? 20 : 30, fontWeight:800, color:pctColor, lineHeight:1, fontVariantNumeric:'tabular-nums' }}>{d.bookingPct == null ? '—' : `${d.bookingPct}%`}</div>
+                    <div style={{ fontSize: narrow ? 18 : 30, fontWeight:800, color:pctColor, lineHeight:1, fontVariantNumeric:'tabular-nums' }}>{d.bookingPct == null ? '—' : `${d.bookingPct}%`}</div>
                     <div style={{ fontSize: narrow ? 8 : 10, color:C.muted, textTransform:'uppercase', letterSpacing:.5, whiteSpace:'nowrap' }}>{narrow ? (d.score != null ? `score ${d.score}` : 'booking') : `Booking${d.score != null ? ` · score ${d.score}` : ''}`}</div>
                   </div>
                 </div>
@@ -442,16 +443,16 @@ export default function WarRoomPage() {
               const color = STATUS_COLORS[p.status] || C.dim
               const onCall = p.status === 'On Call'
               return (
-                <div key={p.id} style={{ padding: narrow ? '6px 10px' : '11px 16px', borderBottom:`1px solid ${C.panel2}`, display:'flex', alignItems:'center', gap: narrow ? 8 : 11,
+                <div key={p.id} style={{ padding: narrow ? '3px 10px' : '11px 16px', minHeight: narrow ? floorRowH : undefined, boxSizing:'border-box', borderBottom:`1px solid ${C.panel2}`, display:'flex', alignItems:'center', gap: narrow ? 8 : 11,
                   opacity: p.status === 'Offline' ? 0.5 : 1 }}>
-                  <div style={{ width: narrow ? 26 : 36, height: narrow ? 26 : 36, borderRadius:'50%', background:C.panel2, border:`2px solid ${color}`,
-                    display:'flex', alignItems:'center', justifyContent:'center', fontSize: p.avatar ? (narrow ? 13 : 18) : (narrow ? 10 : 12), fontWeight:800, flexShrink:0,
+                  <div style={{ width: narrow ? 22 : 36, height: narrow ? 22 : 36, borderRadius:'50%', background:C.panel2, border:`2px solid ${color}`,
+                    display:'flex', alignItems:'center', justifyContent:'center', fontSize: p.avatar ? (narrow ? 12 : 18) : (narrow ? 9 : 12), fontWeight:800, flexShrink:0,
                     boxShadow: onCall ? `0 0 12px ${color}77` : 'none' }}>
                     <Avatar avatar={p.avatar} name={p.name || p.email} />
                   </div>
                   <div style={{ flex:1, minWidth:0 }}>
-                    <div style={{ fontSize: narrow ? 12 : 14, fontWeight:600, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{p.name || p.email}</div>
-                    <div style={{ fontSize: narrow ? 9 : 11, color:C.muted, whiteSpace:'nowrap' }}>in status {timeSince(p.status_since)}</div>
+                    <div style={{ fontSize: narrow ? 11 : 14, fontWeight:600, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{p.name || p.email}{narrow && p.status !== 'Offline' && <span style={{ fontWeight:400, color:C.muted, fontSize:9 }}> · {timeSince(p.status_since)}</span>}</div>
+                    {!narrow && <div style={{ fontSize:11, color:C.muted, whiteSpace:'nowrap' }}>in status {timeSince(p.status_since)}</div>}
                   </div>
                   {/* What kind of interaction — sits between the name and the
                       status so the floor reads "who / on what / how long". */}
@@ -462,7 +463,7 @@ export default function WarRoomPage() {
                       {p.interaction_type}
                     </span>
                   )}
-                  <span style={{ fontSize: narrow ? 9 : 11, fontWeight:700, color, background:`${color}1f`, padding: narrow ? '2px 7px' : '4px 10px', borderRadius:99, flexShrink:0,
+                  <span style={{ fontSize: narrow ? 8 : 11, fontWeight:700, color, background:`${color}1f`, padding: narrow ? '1px 6px' : '4px 10px', borderRadius:99, flexShrink:0,
                     display:'flex', alignItems:'center', gap:5 }}>
                     {onCall && <span style={{ width:6, height:6, borderRadius:'50%', background:color, animation:'wr-pulse 1.2s infinite' }} />}
                     {p.status || 'Offline'}
