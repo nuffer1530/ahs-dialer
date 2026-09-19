@@ -38,23 +38,25 @@ const timeSince = (iso) => {
   return `${Math.floor(s/3600)}h ${Math.floor((s%3600)/60)}m`
 }
 
-function Kpi({ label, value, sub, color = C.text, glow }) {
+// `compact` = a Fire TV-class viewport (~960 CSS px): labels stay on one line
+// and the numbers shrink so eight tiles share the width without wrapping.
+function Kpi({ label, value, sub, color = C.text, glow, compact }) {
   return (
-    <div style={{ background:C.panel, border:`1px solid ${C.border}`, borderRadius:14, padding:'14px 18px',
+    <div style={{ background:C.panel, border:`1px solid ${C.border}`, borderRadius: compact ? 10 : 14, padding: compact ? '8px 10px' : '14px 18px',
       borderTop:`3px solid ${color}`, boxShadow: glow ? `0 0 24px ${color}44` : 'none', minWidth:0 }}>
-      <div style={{ fontSize:11, fontWeight:700, textTransform:'uppercase', letterSpacing:.8, color:C.muted, marginBottom:6 }}>{label}</div>
-      <div style={{ fontSize:40, fontWeight:800, color, letterSpacing:-1.5, lineHeight:1, fontVariantNumeric:'tabular-nums' }}>{value}</div>
-      {sub && <div style={{ fontSize:11, color:C.muted, marginTop:5 }}>{sub}</div>}
+      <div style={{ fontSize: compact ? 9 : 11, fontWeight:700, textTransform:'uppercase', letterSpacing: compact ? .4 : .8, color:C.muted, marginBottom: compact ? 3 : 6, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{label}</div>
+      <div style={{ fontSize: compact ? 26 : 40, fontWeight:800, color, letterSpacing: compact ? -1 : -1.5, lineHeight:1, fontVariantNumeric:'tabular-nums' }}>{value}</div>
+      {sub && <div style={{ fontSize: compact ? 9 : 11, color:C.muted, marginTop: compact ? 3 : 5, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{sub}</div>}
     </div>
   )
 }
 
-function Panel({ title, icon, live, children, style }) {
+function Panel({ title, icon, live, children, style, compact }) {
   return (
     <div style={{ background:C.panel, border:`1px solid ${C.border}`, borderRadius:14, overflow:'hidden', display:'flex', flexDirection:'column', ...style }}>
-      <div style={{ padding:'13px 18px', borderBottom:`1px solid ${C.border}`, display:'flex', alignItems:'center', gap:8, flexShrink:0 }}>
-        <span style={{ fontSize:16 }}>{icon}</span>
-        <span style={{ fontSize:13, fontWeight:700, letterSpacing:.5, color:C.text }}>{title}</span>
+      <div style={{ padding: compact ? '7px 12px' : '13px 18px', borderBottom:`1px solid ${C.border}`, display:'flex', alignItems:'center', gap:8, flexShrink:0 }}>
+        <span style={{ fontSize: compact ? 13 : 16 }}>{icon}</span>
+        <span style={{ fontSize: compact ? 11 : 13, fontWeight:700, letterSpacing:.5, color:C.text }}>{title}</span>
         {live && <div style={{ marginLeft:'auto', width:7, height:7, borderRadius:'50%', background:C.green, animation:'wr-pulse 1.5s infinite' }} />}
       </div>
       <div style={{ flex:1, overflow:'hidden', position:'relative' }}>{children}</div>
@@ -77,6 +79,27 @@ export default function WarRoomPage() {
   const rootRef = useRef(null)
   // Wall look survives reloads; the page updates itself when a build lands.
   const { isFull, toggleFull } = useWallboard(rootRef)
+  // Fire TV Silk / Fully Kiosk report ~960 CSS px: same treatment as the
+  // department boards — compact chrome, then a measured zoom-to-fit so the
+  // ticker, tiles, trades AND all three panels are on screen at once.
+  const [narrow, setNarrow] = useState(() => typeof window !== 'undefined' && window.innerWidth < 1150)
+  useEffect(() => {
+    const on = () => setNarrow(window.innerWidth < 1150)
+    window.addEventListener('resize', on)
+    return () => window.removeEventListener('resize', on)
+  }, [])
+  const [fit, setFit] = useState(1)
+  useEffect(() => { setFit(1) }, [narrow])
+  useEffect(() => {
+    if (!narrow) return
+    const el = rootRef.current
+    if (!el) return
+    const t = setTimeout(() => {
+      const need = el.scrollHeight, have = el.clientHeight
+      if (need > have + 4) setFit(f => Math.max(0.6, +((f * have) / need).toFixed(3)))
+    }, 250)
+    return () => clearTimeout(t)
+  }, [narrow, fit, board, csrMonth, sales, wins])
 
   // 3-Day Call Board — show today's "calls needed" per trade on the TV.
   useEffect(() => {
@@ -203,14 +226,17 @@ export default function WarRoomPage() {
   const slColor = inbound.serviceLevel == null ? C.dim : inbound.serviceLevel >= SERVICE_LEVEL_TARGET ? C.green : inbound.serviceLevel >= 60 ? C.amber : C.red
   const abColor = inbound.abandonRate == null ? C.dim : inbound.abandonRate <= 5 ? C.green : inbound.abandonRate <= 10 ? C.amber : C.red
   const queueColor = queued.length === 0 ? C.green : longestWait > 60 ? C.red : C.amber
+  const zoom = narrow ? fit : 1.08
+  const rowH = narrow ? 54 : ROW_H
 
   return (
-    <div ref={rootRef} style={{ minHeight:'calc(100vh / 1.08)', height:'calc(100vh / 1.08)', background:C.bg, color:C.text,
+    <div ref={rootRef} style={{ minHeight:`calc(100vh / ${zoom})`, height:`calc(100vh / ${zoom})`, background:C.bg, color:C.text,
       fontFamily:'-apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif',
-      // Readable-from-across-the-floor: everything 8% bigger, height
-      // compensated so the board still exactly fills the TV.
-      zoom: 1.08,
-      padding:20, display:'flex', flexDirection:'column', gap:14, overflow:'hidden', boxSizing:'border-box' }}>
+      // Readable-from-across-the-floor: everything 8% bigger on a real monitor,
+      // height compensated so the board still exactly fills it. On a TV-class
+      // viewport the zoom is measured instead, so nothing falls off the bottom.
+      zoom,
+      padding: narrow ? '10px 14px' : 20, display:'flex', flexDirection:'column', gap: narrow ? 8 : 14, overflow:'hidden', boxSizing:'border-box' }}>
 
       {/* Floor ticker — one strip that sweeps the admin-set messages across the
           top, enters from the right, exits left, repeats. paddingLeft:100%
@@ -221,7 +247,7 @@ export default function WarRoomPage() {
             {ticker.messages.map((m, i) => {
               const col = m.tone === 'alert' ? C.red : m.tone === 'success' ? C.green : C.text
               return (
-                <span key={i} style={{ display:'inline-block', padding:'8px 0', margin:'0 44px', fontSize:18, fontWeight:700, color:col, letterSpacing:.3 }}>
+                <span key={i} style={{ display:'inline-block', padding: narrow ? '4px 0' : '8px 0', margin:'0 44px', fontSize: narrow ? 14 : 18, fontWeight:700, color:col, letterSpacing:.3 }}>
                   {m.tone === 'alert' ? '⚠ ' : ''}{m.text}
                 </span>
               )
@@ -231,14 +257,14 @@ export default function WarRoomPage() {
       )}
 
       {/* Header */}
-      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', flexShrink:0 }}>
-        <div style={{ display:'flex', alignItems:'center', gap:12 }}>
-          <span className="pulse-mark" style={{ width:40, height:40, borderRadius:11, background:'#0b0c0f', display:'flex', alignItems:'center', justifyContent:'center', boxShadow:'0 6px 18px rgba(255,117,31,.15)' }}>
+      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', flexShrink:0, gap: narrow ? 10 : 0, flexWrap: narrow ? 'wrap' : 'nowrap' }}>
+        <div style={{ display:'flex', alignItems:'center', gap: narrow ? 8 : 12 }}>
+          <span className="pulse-mark" style={{ width: narrow ? 32 : 40, height: narrow ? 32 : 40, borderRadius:11, background:'#0b0c0f', display:'flex', alignItems:'center', justifyContent:'center', boxShadow:'0 6px 18px rgba(255,117,31,.15)' }}>
             <svg width="26" height="26" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
               <polyline points="9,32 19,32 25,17 33,47 40,26 45,32 55,32" fill="none" stroke="#ff751f" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round"/>
             </svg>
           </span>
-          <span style={{ fontSize:21, fontWeight:800, letterSpacing:.3 }}>Call Center</span>
+          <span style={{ fontSize: narrow ? 17 : 21, fontWeight:800, letterSpacing:.3, whiteSpace:'nowrap' }}>Call Center</span>
           <div style={{ width:8, height:8, borderRadius:'50%', background:C.green, animation:'wr-pulse 1.5s infinite' }} />
           <span style={{ fontSize:12, color:C.muted, letterSpacing:1 }}>LIVE</span>
         </div>
@@ -249,34 +275,34 @@ export default function WarRoomPage() {
           const clubCount = wins.memberships.length
           const starCount = wins.reviews.length
           return (
-            <div style={{ display:'flex', alignItems:'center', gap:26 }}>
+            <div style={{ display:'flex', alignItems:'center', gap: narrow ? 14 : 26 }}>
               <div style={{ textAlign:'center' }}>
-                <div style={{ fontSize:30, fontWeight:800, letterSpacing:-1, color: soldTotal >= 10000 ? '#F0B429' : C.green, fontVariantNumeric:'tabular-nums', lineHeight:1 }}>
+                <div style={{ fontSize: narrow ? 22 : 30, fontWeight:800, letterSpacing:-1, color: soldTotal >= 10000 ? '#F0B429' : C.green, fontVariantNumeric:'tabular-nums', lineHeight:1 }}>
                   ${soldTotal.toLocaleString()}
                 </div>
                 <div style={{ fontSize:10, fontWeight:700, letterSpacing:1.2, color:C.muted, textTransform:'uppercase', marginTop:3 }}>Sold today</div>
               </div>
-              <div style={{ width:1, height:34, background:C.border }} />
+              <div style={{ width:1, height: narrow ? 26 : 34, background:C.border }} />
               <div style={{ textAlign:'center' }}>
-                <div style={{ fontSize:30, fontWeight:800, letterSpacing:-1, color:C.text, fontVariantNumeric:'tabular-nums', lineHeight:1 }}>{sales.length}</div>
+                <div style={{ fontSize: narrow ? 22 : 30, fontWeight:800, letterSpacing:-1, color:C.text, fontVariantNumeric:'tabular-nums', lineHeight:1 }}>{sales.length}</div>
                 <div style={{ fontSize:10, fontWeight:700, letterSpacing:1.2, color:C.muted, textTransform:'uppercase', marginTop:3 }}>Sales</div>
               </div>
-              <div style={{ width:1, height:34, background:C.border }} />
+              <div style={{ width:1, height: narrow ? 26 : 34, background:C.border }} />
               <div style={{ textAlign:'center' }}>
-                <div style={{ fontSize:30, fontWeight:800, letterSpacing:-1, color:C.purple, fontVariantNumeric:'tabular-nums', lineHeight:1 }}>{clubCount}</div>
+                <div style={{ fontSize: narrow ? 22 : 30, fontWeight:800, letterSpacing:-1, color:C.purple, fontVariantNumeric:'tabular-nums', lineHeight:1 }}>{clubCount}</div>
                 <div style={{ fontSize:10, fontWeight:700, letterSpacing:1.2, color:C.muted, textTransform:'uppercase', marginTop:3 }}>Clubs</div>
               </div>
-              <div style={{ width:1, height:34, background:C.border }} />
+              <div style={{ width:1, height: narrow ? 26 : 34, background:C.border }} />
               <div style={{ textAlign:'center' }}>
-                <div style={{ fontSize:30, fontWeight:800, letterSpacing:-1, color:C.amber, fontVariantNumeric:'tabular-nums', lineHeight:1 }}>{starCount}</div>
+                <div style={{ fontSize: narrow ? 22 : 30, fontWeight:800, letterSpacing:-1, color:C.amber, fontVariantNumeric:'tabular-nums', lineHeight:1 }}>{starCount}</div>
                 <div style={{ fontSize:10, fontWeight:700, letterSpacing:1.2, color:C.muted, textTransform:'uppercase', marginTop:3 }}>5★ Reviews</div>
               </div>
             </div>
           )
         })()}
 
-        <div style={{ display:'flex', alignItems:'center', gap:16 }}>
-          <WeatherStrip dark />
+        <div style={{ display:'flex', alignItems:'center', gap: narrow ? 10 : 16, marginLeft:'auto', justifyContent:'flex-end' }}>
+          <div style={{ zoom: narrow ? .8 : 1 }}><WeatherStrip dark /></div>
           <button onClick={toggleFull} title={isFull ? 'Exit fullscreen' : 'Fullscreen'}
             style={{ background:C.panel, border:`1px solid ${C.border}`, borderRadius:8, color:C.muted, cursor:'pointer', padding:'8px 10px', display:'flex', alignItems:'center' }}>
             {isFull ? (
@@ -286,31 +312,31 @@ export default function WarRoomPage() {
             )}
           </button>
           <div style={{ textAlign:'right' }}>
-            <div style={{ fontSize:30, fontWeight:800, letterSpacing:-1, color:C.blue, fontVariantNumeric:'tabular-nums' }}>
+            <div style={{ fontSize: narrow ? 20 : 30, fontWeight:800, letterSpacing:-1, color:C.blue, fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap' }}>
               {time.toLocaleTimeString([], { hour:'2-digit', minute:'2-digit', second:'2-digit' })}
             </div>
-            <div style={{ fontSize:12, color:C.muted }}>{time.toLocaleDateString([], { weekday:'long', month:'long', day:'numeric' })}</div>
+            <div style={{ fontSize: narrow ? 11 : 12, color:C.muted, whiteSpace:'nowrap' }}>{time.toLocaleDateString([], { weekday:'long', month:'long', day:'numeric' })}</div>
           </div>
         </div>
       </div>
 
       {/* KPI strip */}
-      <div style={{ display:'grid', gridTemplateColumns:'repeat(8, 1fr)', gap:12, flexShrink:0 }}>
-        <Kpi label="In Queue" value={queued.length} color={queueColor} glow={queued.length > 0}
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(8, 1fr)', gap: narrow ? 8 : 12, flexShrink:0 }}>
+        <Kpi compact={narrow} label="In Queue" value={queued.length} color={queueColor} glow={queued.length > 0}
           sub={queued.length ? `longest ${fmtWait(longestWait)}` : 'clear'} />
-        <Kpi label="Live Calls" value={liveInbound + liveOutbound} color={C.blue}
+        <Kpi compact={narrow} label="Live Calls" value={liveInbound + liveOutbound} color={C.blue}
           sub={`${liveInbound} in · ${liveOutbound} out`} />
-        <Kpi label={`Service Lvl ${SERVICE_LEVEL_SECONDS}s`} value={inbound.serviceLevel == null ? '—' : `${Math.round(inbound.serviceLevel)}%`} color={slColor} sub={`target ${SERVICE_LEVEL_TARGET}%`} />
-        <Kpi label="Abandon" value={inbound.abandonRate == null ? '—' : `${Math.round(inbound.abandonRate)}%`} color={abColor} sub={`${inbound.abandoned} lost`} />
-        <Kpi label="Calls Offered" value={inbound.offered} color={C.text} sub={`${inbound.handled} handled`} />
-        <Kpi label="Avg Answer" value={fmtSecs(inbound.asa)} color={C.text} sub="speed to answer" />
-        <Kpi label="Booked Today" value={outbound.booked} color={C.green} glow={outbound.booked > 0} sub={`${outbound.calls} calls`} />
-        <Kpi label="Agents Ready" value={agentsAvailable} color={agentsAvailable ? C.green : C.red} sub={`of ${floor.length} on`} />
+        <Kpi compact={narrow} label={`Service Lvl ${SERVICE_LEVEL_SECONDS}s`} value={inbound.serviceLevel == null ? '—' : `${Math.round(inbound.serviceLevel)}%`} color={slColor} sub={`target ${SERVICE_LEVEL_TARGET}%`} />
+        <Kpi compact={narrow} label="Abandon" value={inbound.abandonRate == null ? '—' : `${Math.round(inbound.abandonRate)}%`} color={abColor} sub={`${inbound.abandoned} lost`} />
+        <Kpi compact={narrow} label="Calls Offered" value={inbound.offered} color={C.text} sub={`${inbound.handled} handled`} />
+        <Kpi compact={narrow} label="Avg Answer" value={fmtSecs(inbound.asa)} color={C.text} sub="speed to answer" />
+        <Kpi compact={narrow} label="Booked Today" value={outbound.booked} color={C.green} glow={outbound.booked > 0} sub={`${outbound.calls} calls`} />
+        <Kpi compact={narrow} label="Agents Ready" value={agentsAvailable} color={agentsAvailable ? C.green : C.red} sub={`of ${floor.length} on`} />
       </div>
 
       {/* 3-Day Call Board — today's calls needed per trade */}
       {board?.board && (
-        <div style={{ display:'grid', gridTemplateColumns:`repeat(${board.board.length}, 1fr)`, gap:12, flexShrink:0 }}>
+        <div style={{ display:'grid', gridTemplateColumns:`repeat(${board.board.length}, 1fr)`, gap: narrow ? 8 : 12, flexShrink:0 }}>
           {board.board.map(row => {
             const d = row.days[0] || {}
             const col = d.status === 'good' ? C.green : d.status === 'warn' ? C.amber : d.status === 'under' ? C.red : C.dim
@@ -319,21 +345,21 @@ export default function WarRoomPage() {
             // low-value ones. Purple + pulse so the floor can't miss it.
             const watch = Boolean(d.oppWatch)
             return (
-              <div key={row.trade} style={{ background:C.panel, border:`1px solid ${watch ? '#7C3AED' : C.border}`, borderTop:`3px solid ${watch ? '#7C3AED' : col}`, borderRadius:14, padding:'12px 16px', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
-                <div>
-                  <div style={{ fontSize:11, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color:C.muted }}>{row.trade}</div>
-                  <div style={{ fontSize:12, color:C.muted, marginTop:3 }}>{d.calls}/{d.capacity} booked · {d.pct}%</div>
+              <div key={row.trade} style={{ background:C.panel, border:`1px solid ${watch ? '#7C3AED' : C.border}`, borderTop:`3px solid ${watch ? '#7C3AED' : col}`, borderRadius: narrow ? 10 : 14, padding: narrow ? '7px 10px' : '12px 16px', display:'flex', alignItems:'center', justifyContent:'space-between', gap:8, minWidth:0 }}>
+                <div style={{ minWidth:0 }}>
+                  <div style={{ fontSize: narrow ? 10 : 11, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color:C.muted, whiteSpace:'nowrap' }}>{row.trade}</div>
+                  <div style={{ fontSize: narrow ? 11 : 12, color:C.muted, marginTop:3, whiteSpace:'nowrap' }}>{d.calls}/{d.capacity} booked · {d.pct}%</div>
                 </div>
                 {watch ? (
-                  <div style={{ textAlign:'right' }}>
-                    <div style={{ fontSize:15, fontWeight:800, lineHeight:1.15, color:'#A78BFA', letterSpacing:.4, animation:'wr-pulse 1.5s infinite' }}>
-                      👀 OPPORTUNITY<br />WATCH
+                  <div style={{ textAlign:'right', flexShrink:0 }}>
+                    <div style={{ fontSize: narrow ? 11 : 15, fontWeight:800, lineHeight:1.15, color:'#A78BFA', letterSpacing:.4, animation:'wr-pulse 1.5s infinite', whiteSpace:'nowrap' }}>
+                      {narrow ? '👀 OPP WATCH' : <>👀 OPPORTUNITY<br />WATCH</>}
                     </div>
-                    <div style={{ fontSize:9, color:C.muted, textTransform:'uppercase', letterSpacing:.4, marginTop:2 }}>full — still book strong calls</div>
+                    <div style={{ fontSize: narrow ? 8 : 9, color:C.muted, textTransform:'uppercase', letterSpacing:.4, marginTop:2, whiteSpace:'nowrap' }}>{narrow ? 'full — keep booking' : 'full — still book strong calls'}</div>
                   </div>
                 ) : (
-                  <div style={{ textAlign:'right' }}>
-                    <div style={{ fontSize:32, fontWeight:800, lineHeight:1, color: d.needed > 0 ? col : C.green, fontVariantNumeric:'tabular-nums' }}>
+                  <div style={{ textAlign:'right', flexShrink:0 }}>
+                    <div style={{ fontSize: narrow ? 24 : 32, fontWeight:800, lineHeight:1, color: d.needed > 0 ? col : C.green, fontVariantNumeric:'tabular-nums' }}>
                       {d.needed > 0 ? d.needed : '✓'}
                     </div>
                     <div style={{ fontSize:10, color:C.muted, textTransform:'uppercase', letterSpacing:.4 }}>{d.needed > 0 ? 'calls needed' : 'at target'}</div>
@@ -346,12 +372,12 @@ export default function WarRoomPage() {
       )}
 
       {/* Main grid */}
-      <div style={{ display:'grid', gridTemplateColumns:'1.25fr 1fr 1fr', gap:14, flex:1, minHeight:0 }}>
+      <div style={{ display:'grid', gridTemplateColumns:'1.25fr 1fr 1fr', gap: narrow ? 8 : 14, flex:1, minHeight: narrow ? 220 : 0 }}>
 
         {/* Monthly leaderboard — same idea as the department TVs' tech ranking:
             booking % · clubs · call QA into one score, month to date, medals. */}
-        <Panel title={`${monthName.toUpperCase()} LEADERBOARD`} icon="🏆">
-          <div style={{ position:'relative', height: Math.max(monthly.length * ROW_H, 40), padding:'6px 0' }}>
+        <Panel compact={narrow} title={`${monthName.toUpperCase()} LEADERBOARD`} icon="🏆">
+          <div style={{ position:'relative', height: Math.max(monthly.length * rowH, 40), padding:'6px 0' }}>
             {!csrMonth && <div style={{ padding:'30px 20px', color:C.muted, fontSize:14, textAlign:'center' }}>Loading the month…</div>}
             {csrMonth && monthly.length === 0 && (
               <div style={{ padding:'30px 20px', color:C.muted, fontSize:14, textAlign:'center' }}>No lead calls yet this month</div>
@@ -362,7 +388,7 @@ export default function WarRoomPage() {
               const medal = d.rankable ? ['🥇','🥈','🥉'][i] : null
               const pctColor = d.bookingPct == null ? C.muted : d.bookingPct >= 80 ? C.green : d.bookingPct >= 65 ? C.amber : C.red
               return (
-                <div key={d.profileId || d.name} style={{ position:'absolute', left:0, right:0, top:i * ROW_H + 6, height:ROW_H - 8,
+                <div key={d.profileId || d.name} style={{ position:'absolute', left:0, right:0, top:i * rowH + 6, height:rowH - 8,
                   transition:'top .6s cubic-bezier(.22,1,.36,1)', padding:'0 16px', display:'flex', alignItems:'center', gap:12, opacity: d.rankable ? 1 : .6 }}>
                   <div style={{ width:34, textAlign:'center', fontSize:medal ? 24 : 16, fontWeight:800, color: medal ? undefined : C.dim, flexShrink:0 }}>
                     {medal || `#${i+1}`}
@@ -394,7 +420,7 @@ export default function WarRoomPage() {
         </Panel>
 
         {/* Agents + queue */}
-        <Panel title="THE FLOOR" icon="🎧" live>
+        <Panel compact={narrow} title="THE FLOOR" icon="🎧" live>
           <div style={{ overflowY:'auto', height:'100%' }}>
             {queued.length > 0 && (
               <div style={{ padding:'10px 16px', background:`${C.red}18`, borderBottom:`1px solid ${C.border}` }}>
@@ -447,7 +473,7 @@ export default function WarRoomPage() {
         </Panel>
 
         {/* Live activity */}
-        <Panel title="LIVE ACTIVITY" icon="⚡" live>
+        <Panel compact={narrow} title="LIVE ACTIVITY" icon="⚡" live>
           <div style={{ overflowY:'auto', height:'100%' }}>
             {feed.length === 0 ? (
               <div style={{ padding:'30px 20px', color:C.muted, fontSize:14, textAlign:'center' }}>Waiting for activity…</div>
