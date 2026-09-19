@@ -227,7 +227,7 @@ export default function WarRoomPage() {
   const abColor = inbound.abandonRate == null ? C.dim : inbound.abandonRate <= 5 ? C.green : inbound.abandonRate <= 10 ? C.amber : C.red
   const queueColor = queued.length === 0 ? C.green : longestWait > 60 ? C.red : C.amber
   const zoom = narrow ? fit : 1.08
-  const rowH = narrow ? 54 : ROW_H
+  const rowH = narrow ? 44 : ROW_H
 
   return (
     <div ref={rootRef} style={{ minHeight:`calc(100vh / ${zoom})`, height:`calc(100vh / ${zoom})`, background:C.bg, color:C.text,
@@ -257,8 +257,8 @@ export default function WarRoomPage() {
       )}
 
       {/* Header */}
-      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', flexShrink:0, gap: narrow ? 10 : 0, flexWrap: narrow ? 'wrap' : 'nowrap' }}>
-        <div style={{ display:'flex', alignItems:'center', gap: narrow ? 8 : 12 }}>
+      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', flexShrink:0, gap: narrow ? 10 : 0, flexWrap:'nowrap', minWidth:0 }}>
+        <div style={{ display:'flex', alignItems:'center', gap: narrow ? 8 : 12, flexShrink:0 }}>
           <span className="pulse-mark" style={{ width: narrow ? 32 : 40, height: narrow ? 32 : 40, borderRadius:11, background:'#0b0c0f', display:'flex', alignItems:'center', justifyContent:'center', boxShadow:'0 6px 18px rgba(255,117,31,.15)' }}>
             <svg width="26" height="26" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
               <polyline points="9,32 19,32 25,17 33,47 40,26 45,32 55,32" fill="none" stroke="#ff751f" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round"/>
@@ -301,16 +301,16 @@ export default function WarRoomPage() {
           )
         })()}
 
-        <div style={{ display:'flex', alignItems:'center', gap: narrow ? 10 : 16, marginLeft:'auto', justifyContent:'flex-end' }}>
-          <div style={{ zoom: narrow ? .8 : 1 }}><WeatherStrip dark /></div>
-          <button onClick={toggleFull} title={isFull ? 'Exit fullscreen' : 'Fullscreen'}
+        <div style={{ display:'flex', alignItems:'center', gap: narrow ? 10 : 16, marginLeft:'auto', justifyContent:'flex-end', flexShrink:0 }}>
+          {!narrow && <WeatherStrip dark />}
+          {!(narrow && isFull) && <button onClick={toggleFull} title={isFull ? 'Exit fullscreen' : 'Fullscreen'}
             style={{ background:C.panel, border:`1px solid ${C.border}`, borderRadius:8, color:C.muted, cursor:'pointer', padding:'8px 10px', display:'flex', alignItems:'center' }}>
             {isFull ? (
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M9 3v3a3 3 0 01-3 3H3M15 3v3a3 3 0 003 3h3M9 21v-3a3 3 0 00-3-3H3M15 21v-3a3 3 0 013-3h3" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
             ) : (
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M3 9V5a2 2 0 012-2h4M21 9V5a2 2 0 00-2-2h-4M3 15v4a2 2 0 002 2h4M21 15v4a2 2 0 01-2 2h-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
             )}
-          </button>
+          </button>}
           <div style={{ textAlign:'right' }}>
             <div style={{ fontSize: narrow ? 20 : 30, fontWeight:800, letterSpacing:-1, color:C.blue, fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap' }}>
               {time.toLocaleTimeString([], { hour:'2-digit', minute:'2-digit', second:'2-digit' })}
@@ -319,6 +319,8 @@ export default function WarRoomPage() {
           </div>
         </div>
       </div>
+
+      {narrow && <div style={{ display:'flex', justifyContent:'flex-end', flexShrink:0, zoom:.8, marginTop:-4 }}><WeatherStrip dark /></div>}
 
       {/* KPI strip */}
       <div style={{ display:'grid', gridTemplateColumns:'repeat(8, 1fr)', gap: narrow ? 8 : 12, flexShrink:0 }}>
@@ -372,7 +374,7 @@ export default function WarRoomPage() {
       )}
 
       {/* Main grid */}
-      <div style={{ display:'grid', gridTemplateColumns:'1.25fr 1fr 1fr', gap: narrow ? 8 : 14, flex:1, minHeight: narrow ? 220 : 0 }}>
+      <div style={{ display:'grid', gridTemplateColumns:'1.25fr 1fr 1fr', gap: narrow ? 8 : 14, flex:1, minHeight: narrow ? 260 : 0 }}>
 
         {/* Monthly leaderboard — same idea as the department TVs' tech ranking:
             booking % · clubs · call QA into one score, month to date, medals. */}
@@ -389,29 +391,29 @@ export default function WarRoomPage() {
               const pctColor = d.bookingPct == null ? C.muted : d.bookingPct >= 80 ? C.green : d.bookingPct >= 65 ? C.amber : C.red
               return (
                 <div key={d.profileId || d.name} style={{ position:'absolute', left:0, right:0, top:i * rowH + 6, height:rowH - 8,
-                  transition:'top .6s cubic-bezier(.22,1,.36,1)', padding:'0 16px', display:'flex', alignItems:'center', gap:12, opacity: d.rankable ? 1 : .6 }}>
-                  <div style={{ width:34, textAlign:'center', fontSize:medal ? 24 : 16, fontWeight:800, color: medal ? undefined : C.dim, flexShrink:0 }}>
+                  transition:'top .6s cubic-bezier(.22,1,.36,1)', padding: narrow ? '0 10px' : '0 16px', display:'flex', alignItems:'center', gap: narrow ? 8 : 12, opacity: d.rankable ? 1 : .6 }}>
+                  <div style={{ width: narrow ? 24 : 34, textAlign:'center', fontSize: medal ? (narrow ? 17 : 24) : (narrow ? 12 : 16), fontWeight:800, color: medal ? undefined : C.dim, flexShrink:0 }}>
                     {medal || `#${i+1}`}
                   </div>
-                  <div style={{ width:42, height:42, borderRadius:'50%', flexShrink:0,
+                  <div style={{ width: narrow ? 30 : 42, height: narrow ? 30 : 42, borderRadius:'50%', flexShrink:0,
                     background: isLeader ? 'linear-gradient(135deg,#D29922,#F0883E)' : C.panel2,
                     border:`2px solid ${isLeader ? C.amber : C.border}`, color: isLeader ? '#000' : C.text,
-                    display:'flex', alignItems:'center', justifyContent:'center', fontSize: p?.avatar ? 22 : 14, fontWeight:800,
+                    display:'flex', alignItems:'center', justifyContent:'center', fontSize: p?.avatar ? (narrow ? 16 : 22) : (narrow ? 11 : 14), fontWeight:800,
                     boxShadow: isLeader ? `0 0 18px ${C.amber}66` : 'none' }}>
                     <Avatar avatar={p?.avatar} name={d.name} />
                   </div>
                   <div style={{ flex:1, minWidth:0 }}>
-                    <div style={{ fontSize:16, fontWeight:700, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{d.name}</div>
-                    <div style={{ display:'flex', gap:12, marginTop:3, fontSize:12, color:C.muted, whiteSpace:'nowrap' }}>
-                      <span>{d.booked}/{d.leadCalls} booked</span>
+                    <div style={{ fontSize: narrow ? 13 : 16, fontWeight:700, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{d.name}</div>
+                    <div style={{ display:'flex', gap: narrow ? 7 : 12, marginTop: narrow ? 1 : 3, fontSize: narrow ? 10 : 12, color:C.muted, whiteSpace:'nowrap', overflow:'hidden' }}>
+                      <span>{d.booked}/{d.leadCalls}{narrow ? '' : ' booked'}</span>
                       <span style={{ color: d.clubs ? C.purple : C.muted }}>{d.clubs} club{d.clubs === 1 ? '' : 's'}</span>
                       <span style={{ color: d.qa == null ? C.muted : d.qa >= 85 ? C.green : d.qa >= 75 ? C.amber : C.red }}>{d.qa == null ? 'QA —' : `QA ${d.qa}%`}</span>
                       {!d.rankable && <span>{10 - d.leadCalls} more lead calls to rank</span>}
                     </div>
                   </div>
                   <div style={{ textAlign:'right', flexShrink:0 }}>
-                    <div style={{ fontSize:30, fontWeight:800, color:pctColor, lineHeight:1, fontVariantNumeric:'tabular-nums' }}>{d.bookingPct == null ? '—' : `${d.bookingPct}%`}</div>
-                    <div style={{ fontSize:10, color:C.muted, textTransform:'uppercase', letterSpacing:.5 }}>Booking{d.score != null ? ` · score ${d.score}` : ''}</div>
+                    <div style={{ fontSize: narrow ? 20 : 30, fontWeight:800, color:pctColor, lineHeight:1, fontVariantNumeric:'tabular-nums' }}>{d.bookingPct == null ? '—' : `${d.bookingPct}%`}</div>
+                    <div style={{ fontSize: narrow ? 8 : 10, color:C.muted, textTransform:'uppercase', letterSpacing:.5, whiteSpace:'nowrap' }}>{narrow ? (d.score != null ? `score ${d.score}` : 'booking') : `Booking${d.score != null ? ` · score ${d.score}` : ''}`}</div>
                   </div>
                 </div>
               )
@@ -440,16 +442,16 @@ export default function WarRoomPage() {
               const color = STATUS_COLORS[p.status] || C.dim
               const onCall = p.status === 'On Call'
               return (
-                <div key={p.id} style={{ padding:'11px 16px', borderBottom:`1px solid ${C.panel2}`, display:'flex', alignItems:'center', gap:11,
+                <div key={p.id} style={{ padding: narrow ? '6px 10px' : '11px 16px', borderBottom:`1px solid ${C.panel2}`, display:'flex', alignItems:'center', gap: narrow ? 8 : 11,
                   opacity: p.status === 'Offline' ? 0.5 : 1 }}>
-                  <div style={{ width:36, height:36, borderRadius:'50%', background:C.panel2, border:`2px solid ${color}`,
-                    display:'flex', alignItems:'center', justifyContent:'center', fontSize: p.avatar ? 18 : 12, fontWeight:800, flexShrink:0,
+                  <div style={{ width: narrow ? 26 : 36, height: narrow ? 26 : 36, borderRadius:'50%', background:C.panel2, border:`2px solid ${color}`,
+                    display:'flex', alignItems:'center', justifyContent:'center', fontSize: p.avatar ? (narrow ? 13 : 18) : (narrow ? 10 : 12), fontWeight:800, flexShrink:0,
                     boxShadow: onCall ? `0 0 12px ${color}77` : 'none' }}>
                     <Avatar avatar={p.avatar} name={p.name || p.email} />
                   </div>
                   <div style={{ flex:1, minWidth:0 }}>
-                    <div style={{ fontSize:14, fontWeight:600, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{p.name || p.email}</div>
-                    <div style={{ fontSize:11, color:C.muted }}>in status {timeSince(p.status_since)}</div>
+                    <div style={{ fontSize: narrow ? 12 : 14, fontWeight:600, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{p.name || p.email}</div>
+                    <div style={{ fontSize: narrow ? 9 : 11, color:C.muted, whiteSpace:'nowrap' }}>in status {timeSince(p.status_since)}</div>
                   </div>
                   {/* What kind of interaction — sits between the name and the
                       status so the floor reads "who / on what / how long". */}
@@ -460,7 +462,7 @@ export default function WarRoomPage() {
                       {p.interaction_type}
                     </span>
                   )}
-                  <span style={{ fontSize:11, fontWeight:700, color, background:`${color}1f`, padding:'4px 10px', borderRadius:99, flexShrink:0,
+                  <span style={{ fontSize: narrow ? 9 : 11, fontWeight:700, color, background:`${color}1f`, padding: narrow ? '2px 7px' : '4px 10px', borderRadius:99, flexShrink:0,
                     display:'flex', alignItems:'center', gap:5 }}>
                     {onCall && <span style={{ width:6, height:6, borderRadius:'50%', background:color, animation:'wr-pulse 1.2s infinite' }} />}
                     {p.status || 'Offline'}
@@ -482,14 +484,14 @@ export default function WarRoomPage() {
               if (l.kind === 'bonus') {
                 const g = '#F0B429'
                 return (
-                  <div key={l.id} style={{ padding:'12px 16px', borderBottom:`1px solid ${C.panel2}`, display:'flex', alignItems:'center', gap:11,
+                  <div key={l.id} style={{ padding: narrow ? '6px 10px' : '12px 16px', borderBottom:`1px solid ${C.panel2}`, display:'flex', alignItems:'center', gap: narrow ? 8 : 11,
                     opacity: i > 9 ? 0.45 : 1, background:`${g}1c`, boxShadow:`inset 3px 0 0 ${g}` }}>
                     <div style={{ width:9, height:9, borderRadius:'50%', background:g, flexShrink:0, boxShadow:`0 0 12px ${g}` }} />
                     <div style={{ flex:1, minWidth:0 }}>
-                      <div style={{ fontSize:14, fontWeight:800, color:g, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
+                      <div style={{ fontSize: narrow ? 12 : 14, fontWeight:800, color:g, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
                         🎯 OPPORTUNITY WATCH BONUS UNLOCKED
                       </div>
-                      <div style={{ fontSize:11, color:C.muted }}>${Number(l.pool).toFixed(0)} pool split {l.n} ways · {t(l.at)}</div>
+                      <div style={{ fontSize: narrow ? 9 : 11, color:C.muted }}>${Number(l.pool).toFixed(0)} pool split {l.n} ways · {t(l.at)}</div>
                     </div>
                     <span style={{ fontSize:12, fontWeight:800, color:g, flexShrink:0 }}>💰🎉</span>
                   </div>
@@ -497,14 +499,14 @@ export default function WarRoomPage() {
               }
               if (l.kind === 'review') {
                 return (
-                  <div key={l.id} style={{ padding:'11px 16px', borderBottom:`1px solid ${C.panel2}`, display:'flex', alignItems:'center', gap:11,
+                  <div key={l.id} style={{ padding: narrow ? '6px 10px' : '11px 16px', borderBottom:`1px solid ${C.panel2}`, display:'flex', alignItems:'center', gap: narrow ? 8 : 11,
                     opacity: i > 9 ? 0.45 : 1, background:`${C.amber}10` }}>
                     <div style={{ width:9, height:9, borderRadius:'50%', background:C.amber, flexShrink:0 }} />
                     <div style={{ flex:1, minWidth:0 }}>
-                      <div style={{ fontSize:14, fontWeight:700, color:C.amber, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
+                      <div style={{ fontSize: narrow ? 12 : 14, fontWeight:700, color:C.amber, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
                         ⭐ {l.tech || 'The team'} got a 5-star review
                       </div>
-                      <div style={{ fontSize:11, color:C.muted, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
+                      <div style={{ fontSize: narrow ? 9 : 11, color:C.muted, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
                         {l.author} on {l.platform} · {t(l.at)}
                       </div>
                     </div>
@@ -514,14 +516,14 @@ export default function WarRoomPage() {
               }
               if (l.kind === 'membership') {
                 return (
-                  <div key={l.id} style={{ padding:'11px 16px', borderBottom:`1px solid ${C.panel2}`, display:'flex', alignItems:'center', gap:11,
+                  <div key={l.id} style={{ padding: narrow ? '6px 10px' : '11px 16px', borderBottom:`1px solid ${C.panel2}`, display:'flex', alignItems:'center', gap: narrow ? 8 : 11,
                     opacity: i > 9 ? 0.45 : 1, background:`${C.purple}12` }}>
                     <div style={{ width:9, height:9, borderRadius:'50%', background:C.purple, flexShrink:0 }} />
                     <div style={{ flex:1, minWidth:0 }}>
-                      <div style={{ fontSize:14, fontWeight:700, color:C.purple, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
+                      <div style={{ fontSize: narrow ? 12 : 14, fontWeight:700, color:C.purple, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
                         🏅 {l.seller} sold a membership
                       </div>
-                      <div style={{ fontSize:11, color:C.muted, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
+                      <div style={{ fontSize: narrow ? 9 : 11, color:C.muted, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
                         {l.type} · {t(l.at)}
                       </div>
                     </div>
@@ -532,14 +534,14 @@ export default function WarRoomPage() {
               if (l.kind === 'sale') {
                 const big = l.amount >= 1000
                 return (
-                  <div key={l.id} style={{ padding:'11px 16px', borderBottom:`1px solid ${C.panel2}`, display:'flex', alignItems:'center', gap:11,
+                  <div key={l.id} style={{ padding: narrow ? '6px 10px' : '11px 16px', borderBottom:`1px solid ${C.panel2}`, display:'flex', alignItems:'center', gap: narrow ? 8 : 11,
                     opacity: i > 9 ? 0.45 : 1, background: big ? '#B4530918' : `${C.green}10` }}>
                     <div style={{ width:9, height:9, borderRadius:'50%', background: big ? '#F59E0B' : C.green, flexShrink:0, boxShadow: big ? '0 0 10px #F59E0B' : 'none' }} />
                     <div style={{ flex:1, minWidth:0 }}>
                       <div style={{ fontSize:14, fontWeight:700, color: big ? '#F59E0B' : C.green, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
                         💰 {l.tech} sold ${l.amount.toLocaleString()}
                       </div>
-                      <div style={{ fontSize:11, color:C.muted, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
+                      <div style={{ fontSize: narrow ? 9 : 11, color:C.muted, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
                         {l.what} · {l.at ? new Date(l.at).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' }) : ''}
                       </div>
                     </div>
@@ -551,11 +553,11 @@ export default function WarRoomPage() {
               const c = contacts.find(x => x.id === l.contact_id)
               const booked = l.outcome === 'Booked'
               return (
-                <div key={l.id} style={{ padding:'11px 16px', borderBottom:`1px solid ${C.panel2}`, display:'flex', alignItems:'center', gap:11,
+                <div key={l.id} style={{ padding: narrow ? '6px 10px' : '11px 16px', borderBottom:`1px solid ${C.panel2}`, display:'flex', alignItems:'center', gap: narrow ? 8 : 11,
                   opacity: i > 9 ? 0.45 : 1, background: booked ? `${C.green}12` : 'transparent' }}>
                   <div style={{ width:9, height:9, borderRadius:'50%', background:color, flexShrink:0, boxShadow: booked ? `0 0 10px ${color}` : 'none' }} />
                   <div style={{ flex:1, minWidth:0 }}>
-                    <div style={{ fontSize:14, fontWeight:600, color: booked ? C.green : C.text, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
+                    <div style={{ fontSize: narrow ? 12 : 14, fontWeight:600, color: booked ? C.green : C.text, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
                       {booked ? '🎉 ' : ''}{c?.name || l.contact_name || '—'}
                     </div>
                     <div style={{ fontSize:11, color:C.muted }}>{l.rep} · {new Date(l.created_at).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' })}</div>
