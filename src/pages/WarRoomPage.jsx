@@ -258,7 +258,7 @@ export default function WarRoomPage() {
       )}
 
       {/* Header */}
-      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', flexShrink:0, gap: narrow ? 10 : 0, flexWrap:'nowrap', minWidth:0 }}>
+      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', flexShrink:0, gap: narrow ? 12 : 0, flexWrap: narrow ? 'wrap' : 'nowrap', minWidth:0 }}>
         <div style={{ display:'flex', alignItems:'center', gap: narrow ? 8 : 12, flexShrink:0 }}>
           <span className="pulse-mark" style={{ width: narrow ? 32 : 40, height: narrow ? 32 : 40, borderRadius:11, background:'#0b0c0f', display:'flex', alignItems:'center', justifyContent:'center', boxShadow:'0 6px 18px rgba(255,117,31,.15)' }}>
             <svg width="26" height="26" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
@@ -267,7 +267,7 @@ export default function WarRoomPage() {
           </span>
           <span style={{ fontSize: narrow ? 17 : 21, fontWeight:800, letterSpacing:.3, whiteSpace:'nowrap' }}>Call Center</span>
           <div style={{ width:8, height:8, borderRadius:'50%', background:C.green, animation:'wr-pulse 1.5s infinite' }} />
-          <span style={{ fontSize:12, color:C.muted, letterSpacing:1 }}>LIVE</span>
+          {!narrow && <span style={{ fontSize:12, color:C.muted, letterSpacing:1 }}>LIVE</span>}
         </div>
 
         {/* Today's money — sold revenue + sales + club count, front and center */}
@@ -302,8 +302,8 @@ export default function WarRoomPage() {
           )
         })()}
 
-        <div style={{ display:'flex', alignItems:'center', gap: narrow ? 10 : 16, marginLeft:'auto', justifyContent:'flex-end', flexShrink:0 }}>
-          {!narrow && <WeatherStrip dark />}
+        <div style={{ display:'flex', alignItems:'center', gap: narrow ? 12 : 16, marginLeft:'auto', justifyContent:'flex-end', flexShrink:0 }}>
+          <div style={{ zoom: narrow ? .7 : 1 }}><WeatherStrip dark /></div>
           {!(narrow && isFull) && <button onClick={toggleFull} title={isFull ? 'Exit fullscreen' : 'Fullscreen'}
             style={{ background:C.panel, border:`1px solid ${C.border}`, borderRadius:8, color:C.muted, cursor:'pointer', padding:'8px 10px', display:'flex', alignItems:'center' }}>
             {isFull ? (
@@ -320,8 +320,6 @@ export default function WarRoomPage() {
           </div>
         </div>
       </div>
-
-      {narrow && <div style={{ display:'flex', justifyContent:'flex-end', flexShrink:0, zoom:.8, marginTop:-4 }}><WeatherStrip dark /></div>}
 
       {/* KPI strip */}
       <div style={{ display:'grid', gridTemplateColumns:'repeat(8, 1fr)', gap: narrow ? 8 : 12, flexShrink:0 }}>
