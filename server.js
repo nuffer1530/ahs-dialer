@@ -4191,8 +4191,10 @@ async function tvWindow({ fromIso, invFrom, invTo, revFrom, perTech, capMul = 1 
 const TV_SALES_CATS = new Set(['repair', 'other', 'free_estimate'])
 // ST's configured conversion threshold: a job that invoices >= this converted,
 // Sold estimate or not (techs invoice repairs directly; $89 trip-fee-only
-// visits don't count). Brandyn confirmed $90, Sep 11.
-const TV_CONV_THRESHOLD = 90
+// visits don't count). Brandyn said "$90" on Sep 11; ST's own numbers prove
+// an $89 consult fee converts (Electrical wk of Sep 14: 26/36 = 72.2% only at
+// >= $89), so the line is $89.
+const TV_CONV_THRESHOLD = 89
 let _tvCats = { at: 0, map: new Map() }
 async function tvCatMap() {
   if (Date.now() - _tvCats.at < 6 * 3600_000 && _tvCats.map.size) return _tvCats.map
@@ -4241,7 +4243,7 @@ function tvStClose(ranSet, jobTypeOf, cats, jtNames, presented, sold) {
   let opps = 0, conv = 0
   for (const jid of ranSet) {
     const info = jobTypeOf.get(jid) || {}
-    // ST threshold semantics: invoicing >= $90 converts the job even with no
+    // ST threshold semantics: invoicing >= $89 converts the job even with no
     // Sold estimate, and such a job is an opportunity even with no estimate.
     const revConv = (info.total || 0) >= TV_CONV_THRESHOLD
     if (!presented.has(jid) && !sold.has(jid) && !revConv) continue
@@ -11033,7 +11035,7 @@ function brainSystem() {
 METRIC DEFINITIONS — these are calibrated to the company's leadership sheet; never invent alternatives:
 - Sales = sales/v2 estimates with status.name "Sold", summing subtotal, in a soldAfter/soldBefore window. Trade from businessUnitName (hvac/plumb/electric/garage substrings).
 - Revenue = accounting/v2 invoices summing subTotal (NOT total). Invoice dates are DATE-ONLY: bound them T00:00:00Z→T23:59:59Z on calendar days.
-- Close rate = converted opportunities ÷ opportunities. Opportunity = a ran job with estimate activity OR job total >= $90 (ST's conversion threshold), EXCLUDING install-typed jobs entirely (an install fulfills an estimate already sold earlier — owner's rule) and maintenance/callback job types. Converted = a Sold estimate on the job OR job total >= $90 (techs invoice repairs directly; $89 trip-fee-only visits never count).
+- Close rate = converted opportunities ÷ opportunities. Opportunity = a ran job with estimate activity OR job total >= $89 (ST's conversion threshold — an $89 consult/trip fee DOES convert), EXCLUDING install-typed jobs entirely (an install fulfills an estimate already sold earlier — owner's rule) and maintenance/callback job types. Converted = a Sold estimate on the job OR job total >= $89 (techs invoice repairs directly).
 - Booking % = telecom/v2 inbound calls: Booked ÷ (Booked + Unbooked) by callType. NEVER count Excused/NotLead/Abandoned as leads. Calls taken by admin-role users (owners/managers: test calls, phone cover) are excluded from booking % and call QA.
 - Booked calls (per person) = jpm/v2 jobs where createdById = their ST user id, createdOn in window. This matches ST's own reports.
 - Memberships = memberships/v2 created in window. 5★ reviews = marketingreputation/v2 reviews rating>=5.

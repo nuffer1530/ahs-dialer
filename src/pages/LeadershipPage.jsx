@@ -872,7 +872,7 @@ function LeadershipPageInner() {
           </div>
 
           <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 18, lineHeight: 1.6, ...mo('footer') }}>
-            Sales = estimates marked Sold · Revenue = invoiced subtotals · Opportunities = jobs that ran on a sales-type call (no installs, no maintenance) with an estimate or $90+ invoiced; converted = sold or $90+ invoiced (ServiceTitan's rule) ·
+            Sales = estimates marked Sold · Revenue = invoiced subtotals · Opportunities = jobs that ran on a sales-type call (no installs, no maintenance) with an estimate or $89+ invoiced; converted = sold or $89+ invoiced (ServiceTitan's rule) ·
             Booking % excludes Excused / NotLead / Abandoned · True labor uses the ADP TotalSource burden model (field ×{f.labor.factors.fieldBurden}, pool ×{f.labor.factors.poolUplift}) ·
             Generated {new Date(f.generatedAt).toLocaleString()}
           </div>
