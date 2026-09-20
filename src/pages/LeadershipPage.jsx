@@ -736,58 +736,7 @@ function LeadershipPageInner() {
             </div>
           </div>
 
-          {/* Leaderboards — top 3 + lowest per department, not the whole roster */}
-          <div style={{ ...sec, ...mo('techs') }}>
-            <div style={S.sectionTitle}>Technicians — top 3 + lowest per department · composite: revenue 40 · close 30 · $/opp 30</div>
-            {['HVAC', 'Plumbing', 'Electrical', 'Garage Doors'].map(trade => {
-              const scored = f.technicians.filter(t => t.score != null && t.trade === trade)
-              if (!scored.length) return null
-              const top = scored.slice(0, 3)
-              const lowest = scored.length > 3 ? scored[scored.length - 1] : null
-              const row = (t, isLow) => [
-                isLow ? <span style={{ color: 'var(--danger)', fontWeight: 700 }}>{t.name}</span> : t.name,
-                String(t.score), money(t.soldAmount),
-                t.closeRate != null ? pct(t.closeRate) : '—',
-                t.dollarsPerOpp != null ? money(t.dollarsPerOpp) : '—',
-                String(t.jobsRan),
-                t.callbacks ? <span style={{ color: 'var(--warning)', fontWeight: 700 }}>{t.callbacks}</span> : '0',
-              ]
-              return (
-                <div key={trade} style={{ marginBottom: 12 }}>
-                  <div style={{ fontSize: 12.5, fontWeight: 800, color: 'var(--accent)', marginBottom: 4 }}>{trade}</div>
-                  <Table headers={['Tech', 'Score', 'Sold', 'Close', '$/Opp', 'Jobs', 'Callbacks']}
-                    rows={[...top.map(t => row(t, false)), ...(lowest ? [row(lowest, true)] : [])]} />
-                </div>
-              )
-            })}
-            {f.technicians.some(t => t.score != null && !t.trade) && (
-              <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
-                Unassigned to a department: {f.technicians.filter(t => t.score != null && !t.trade).map(t => t.name).join(', ')}
-              </div>
-            )}
-            {f.callbacks.total > 0 && (
-              <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 8 }}>
-                {f.callbacks.total} callback/warranty jobs this week: {Object.entries(f.callbacks.byType).map(([n, c]) => `${n} (${c})`).join(' · ')}
-              </div>
-            )}
-          </div>
-
-          <div style={{ ...sec, ...mo('csrs') }}>
-            <div style={S.sectionTitle}>CSRs — top 3 + lowest · from ServiceTitan · composite: booked 40 · book rate 30 · QA 30</div>
-            {(() => {
-              const scored = f.csrs.filter(c => c.score != null)
-              const top = scored.slice(0, 3)
-              const lowest = scored.length > 3 ? scored[scored.length - 1] : null
-              const row = (c, isLow) => [
-                isLow ? <span style={{ color: 'var(--danger)', fontWeight: 700 }}>{c.name}</span> : c.name,
-                String(c.score), String(c.booked), String(c.leadCalls),
-                c.bookRate != null ? pct(c.bookRate) : '—', String(c.inbound ?? '—'), String(c.outbound ?? 0),
-                c.qa != null ? `${c.qa}%` : '—',
-              ]
-              return <Table headers={['CSR', 'Score', 'Booked', 'Lead calls', 'Book rate', 'Total inbound', 'Outbound', 'QA (Andi)']}
-                rows={[...top.map(c => row(c, false)), ...(lowest ? [row(lowest, true)] : [])]} />
-            })()}
-          </div>
+          {/* Technician / CSR leaderboards removed from the agenda (Brandyn, Sep 20, 2026) — the facts still feed the AI agenda. */}
 
           {/* 6-week trend */}
           <div style={{ ...sec, ...mo('trend') }}>
