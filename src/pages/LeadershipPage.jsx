@@ -665,60 +665,30 @@ function LeadershipPageInner() {
           </div>
 
           <div style={{ ...sec, ...mo('opps') }}>
-            <div style={S.sectionTitle}>Opportunities — ran vs needed vs capacity</div>
+            <div style={S.sectionTitle}>Opportunities per day vs the $20M plan</div>
             <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 8 }}>
-              "Needed" = budget ÷ (this week's actual close rate × average sale) — so a soft closing week INFLATES it.
-              A huge Needed number doesn't mean "get that many calls"; it means the close rate is the real fix.
-              "Capacity" = techs on working shifts that week × the board's calls-per-tech.
+              Sales opportunities (ServiceTitan's rule) ÷ effective days — Mon–Fri = 1, Saturday = ½, Sunday = 0, so a full week is 5.5
+              {f.oppsDaily?.partial ? ` (this week: ${f.oppsDaily.effDays} days through ${f.oppsDaily.through})` : ''}.
+              Goals are the $20M plan: HVAC 12 · Plumbing 14 · Electrical 9 · Garage 5 = 40 a day, paired with the 70% close target —
+              under goal is a booking problem, at goal but under 70% close is a conversion problem.
             </div>
-            <Table headers={['Dept', 'Ran', 'Needed', 'Capacity', 'Empty truck slots', 'Verdict']}
-              rows={f.scorecard.map(d => {
-                const cap = d.oppCapacity
-                const open = cap != null ? Math.max(0, cap - d.opps) : null
-                // Calls needed if the dept closed at TARGET rate instead of
-                // this week's actual — the honest reframe of a scary Needed.
-                const atTarget = (d.convTarget && d.avgSale)
-                  ? Math.ceil(d.budget / (d.convTarget * d.avgSale)) : null
-                let verdict
-                if (d.oppsNeeded == null) verdict = '—'
-                else if (d.opps >= d.oppsNeeded) verdict = d.sales >= d.budget
-                  ? <span style={S.good}>✓ on budget</span>
-                  : <span style={S.bad}>fix: closing — the calls were there</span>
-                else if (cap == null) verdict = <span style={S.bad}>fix: book more calls</span>
-                else {
-                  // Empty slots come FIRST: you can't blame staffing while
-                  // trucks sat unfilled (HVAC ran 36 of 90 — that's a leads
-                  // problem today, whatever the math says about full trucks).
-                  const fillable = Math.max(0, Math.min(d.oppsNeeded, cap) - d.opps)
-                  if (fillable > 0) verdict = (
-                    <span style={S.bad}>
-                      fix: book {fillable} more — trucks had room
-                      {d.oppsNeeded > cap && (
-                        <div style={{ fontSize: 11, fontWeight: 400, color: 'var(--text-muted)', marginTop: 2 }}>
-                          and even full, trucks max at {cap} of {d.oppsNeeded} needed at this close rate
-                          {atTarget != null && atTarget <= cap ? ` — at the ${Math.round(d.convTarget * 100)}% target close, ~${atTarget} calls hits budget` : ''}
-                        </div>
-                      )}
-                    </span>
-                  )
-                  else verdict = (
-                    <span style={S.bad}>
-                      fix: capacity — trucks ran full at {cap}; budget needs {d.oppsNeeded} at this close rate &amp; ticket
-                      {atTarget != null && atTarget <= cap && (
-                        <div style={{ fontSize: 11, fontWeight: 400, color: 'var(--text-muted)', marginTop: 2 }}>
-                          or: at the {Math.round(d.convTarget * 100)}% target close, ~{atTarget} calls would do it — closing is the cheaper fix
-                        </div>
-                      )}
-                    </span>
-                  )
+            <Table headers={['Dept', 'Opps', 'Per day', 'Goal / day', 'Gap / day', 'Last wk / day', 'Verdict']}
+              rows={(() => {
+                const od = f.oppsDaily || { rows: [], all: null }
+                const row = (r, bold) => {
+                  const w = (x) => bold ? <b>{x}</b> : x
+                  const tone = r.onPlan == null ? { color: 'var(--text-muted)' } : r.onPlan ? S.good : S.bad
+                  return [
+                    w(r.trade), w(String(r.opps)),
+                    r.perDay != null ? <span style={{ ...tone, fontWeight: 700 }}>{r.perDay}</span> : '—',
+                    w(String(r.goal || '—')),
+                    r.gapPerDay != null ? <span style={r.gapPerDay >= 0 ? S.good : S.bad}>{r.gapPerDay >= 0 ? '+' : ''}{r.gapPerDay}</span> : '—',
+                    r.priorPerDay != null ? String(r.priorPerDay) : '—',
+                    <span style={tone}>{r.verdict}</span>,
+                  ]
                 }
-                return [
-                  d.trade, String(d.opps), d.oppsNeeded != null ? String(d.oppsNeeded) : '—',
-                  cap != null ? String(cap) : '—',
-                  open != null ? (open > 0 ? <span style={S.bad}>{open}</span> : <span style={S.good}>full</span>) : '—',
-                  verdict,
-                ]
-              })}
+                return [...od.rows.map(r => row(r, false)), ...(od.all ? [row(od.all, true)] : [])]
+              })()}
             />
           </div>
 
