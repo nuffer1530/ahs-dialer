@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { sb } from '../lib/supabase'
 import { useAuth } from '../lib/AuthContext'
 import { useWallboard } from '../lib/useDailyReload'
+import { fmtTime, fmtDate } from '../lib/denver'
 import { useIsMobile } from '../lib/useIsMobile'
 
 // 3-Day Call Board — repair/replacement capacity per trade for today + next two
@@ -100,8 +101,7 @@ function PhoneCell({ trade, date, dayLabel, d, onDrill, first }) {
   const s = STATUS[d.status] || STATUS.none
   const oppRate = d.calls ? Math.round((d.opps / d.calls) * 100) : null
   // Short day label ("Mon 16") — the phone board has no header row to read from.
-  const dt = new Date(date + 'T12:00:00')
-  const day = `${dt.toLocaleDateString([], { weekday:'short' })} ${dt.getDate()}`
+  const day = `${fmtDate(date + 'T18:00:00Z', { weekday:'short' })} ${Number(date.slice(8, 10))}`
   return (
     <div style={{ display:'flex', flexDirection:'column', minWidth:0, borderLeft: first ? 'none' : '1px solid var(--border)' }}>
       {/* Day + fill % on the status color */}
@@ -216,7 +216,7 @@ export default function CallBoardPage() {
       <div style={{ background:'var(--surface)', borderBottom:'1px solid var(--border)', flexShrink:0, padding: isMobile ? '8px 12px' : '10px 24px', display:'flex', alignItems:'center', justifyContent:'space-between', flexWrap: isMobile ? 'wrap' : undefined, gap: isMobile ? 8 : undefined }}>
         <span style={{ fontSize:12, color:'var(--text-muted)' }}>Target {data?.target ?? 80}% · live from ServiceTitan</span>
         <div style={{ display:'flex', alignItems:'center', gap: isMobile ? 8 : 12, flexWrap: isMobile ? 'wrap' : undefined }}>
-          {refreshedAt && <span style={{ fontSize:11, color:'var(--text-muted)' }}>Updated {refreshedAt.toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' })}</span>}
+          {refreshedAt && <span style={{ fontSize:11, color:'var(--text-muted)' }}>Updated {fmtTime(refreshedAt, { hour:'2-digit', minute:'2-digit' })}</span>}
           {!isFull && isAdmin && <button className="btn sm" onClick={openConfig} style={tap}>Calls / tech</button>}
           {!isFull && isAdmin && (
             <button className="btn sm" onClick={emailMe} disabled={emailing} style={tap}
@@ -269,7 +269,7 @@ export default function CallBoardPage() {
               {data.dates.map((date, i) => (
                 <div key={date} style={{ textAlign:'center' }}>
                   <div style={{ fontSize: isFull ? 24 : 15, fontWeight:800 }}>{DAY_LABELS[i]}</div>
-                  <div style={{ fontSize: isFull ? 15 : 11, color:'var(--text-muted)' }}>{new Date(date + 'T12:00:00').toLocaleDateString([], { weekday:'long', month:'short', day:'numeric' })}</div>
+                  <div style={{ fontSize: isFull ? 15 : 11, color:'var(--text-muted)' }}>{fmtDate(date + 'T18:00:00Z', { weekday:'long', month:'short', day:'numeric' })}</div>
                 </div>
               ))}
             </div>

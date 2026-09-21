@@ -6,6 +6,7 @@ import { inboundStats, outboundStats, fmtSecs, SERVICE_LEVEL_SECONDS, SERVICE_LE
 import { INTERACTION_COLORS } from '../lib/constants'
 import Avatar from '../components/Avatar'
 import { useWallboard } from '../lib/useDailyReload'
+import { fmtTime, fmtDate, denverStartOfToday } from '../lib/denver'
 
 // Call-centre wallboard — a modern "Simon board" for the floor TV. Everything
 // real-time: inbound queue health, live calls, the leaderboard (rows slide when
@@ -28,7 +29,7 @@ const OUTCOME_COLORS = {
 }
 const ROW_H = 74
 
-const startOfToday = () => { const d = new Date(); d.setHours(0,0,0,0); return d }
+const startOfToday = () => denverStartOfToday()   // Denver midnight, whatever zone the TV stick is on
 const fmtWait = (s) => s == null ? '—' : s < 60 ? `${s}s` : `${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}`
 const timeSince = (iso) => {
   if (!iso) return '—'
@@ -208,7 +209,7 @@ export default function WarRoomPage() {
   })
   const leaderboard = Object.values(repStats).sort((a, b) => b.booked - a.booked || b.calls - a.calls)
   const monthly = (csrMonth?.csrs || []).slice(0, 10)
-  const monthName = new Date().toLocaleDateString('en-US', { month: 'long' })
+  const monthName = fmtDate(new Date(), { month: 'long' })
 
   const agents = [...floor].sort((a, b) =>
     (STATUS_ORDER[a.status] ?? 6) - (STATUS_ORDER[b.status] ?? 6) || (a.name||'').localeCompare(b.name||''))
@@ -314,9 +315,9 @@ export default function WarRoomPage() {
           </button>}
           <div style={{ textAlign:'right' }}>
             <div style={{ fontSize: narrow ? 20 : 30, fontWeight:800, letterSpacing:-1, color:C.blue, fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap' }}>
-              {time.toLocaleTimeString([], { hour:'2-digit', minute:'2-digit', second:'2-digit' })}
+              {fmtTime(time, { hour:'2-digit', minute:'2-digit', second:'2-digit' })}
             </div>
-            <div style={{ fontSize: narrow ? 11 : 12, color:C.muted, whiteSpace:'nowrap' }}>{time.toLocaleDateString([], { weekday:'long', month:'long', day:'numeric' })}</div>
+            <div style={{ fontSize: narrow ? 11 : 12, color:C.muted, whiteSpace:'nowrap' }}>{fmtDate(time, { weekday:'long', month:'long', day:'numeric' })}</div>
           </div>
         </div>
       </div>
@@ -479,7 +480,7 @@ export default function WarRoomPage() {
             {feed.length === 0 ? (
               <div style={{ padding:'30px 20px', color:C.muted, fontSize:14, textAlign:'center' }}>Waiting for activity…</div>
             ) : feed.map((l, i) => {
-              const t = (v) => v ? new Date(v).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' }) : ''
+              const t = (v) => v ? fmtTime(v, { hour:'2-digit', minute:'2-digit' }) : ''
               if (l.kind === 'bonus') {
                 const g = '#F0B429'
                 return (
@@ -541,7 +542,7 @@ export default function WarRoomPage() {
                         💰 {l.tech} sold ${l.amount.toLocaleString()}
                       </div>
                       <div style={{ fontSize: narrow ? 9 : 11, color:C.muted, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
-                        {l.what} · {l.at ? new Date(l.at).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' }) : ''}
+                        {l.what} · {l.at ? fmtTime(l.at, { hour:'2-digit', minute:'2-digit' }) : ''}
                       </div>
                     </div>
                     <span style={{ fontSize:12, fontWeight:700, color: big ? '#F59E0B' : C.green, flexShrink:0 }}>SOLD</span>
@@ -559,7 +560,7 @@ export default function WarRoomPage() {
                     <div style={{ fontSize: narrow ? 12 : 14, fontWeight:600, color: booked ? C.green : C.text, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
                       {booked ? '🎉 ' : ''}{c?.name || l.contact_name || '—'}
                     </div>
-                    <div style={{ fontSize:11, color:C.muted }}>{l.rep} · {new Date(l.created_at).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' })}</div>
+                    <div style={{ fontSize:11, color:C.muted }}>{l.rep} · {fmtTime(l.created_at, { hour:'2-digit', minute:'2-digit' })}</div>
                   </div>
                   <span style={{ fontSize:12, fontWeight:700, color, flexShrink:0 }}>{l.outcome}</span>
                 </div>

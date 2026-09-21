@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { sb } from '../lib/supabase'
 import { useWallboard } from '../lib/useDailyReload'
+import { fmtTime, fmtDate } from '../lib/denver'
 import WeatherStrip from '../components/WeatherStrip'
 
 // Department TV board — one per trade, hung in each manager's office.
@@ -39,7 +40,7 @@ const timeAgo = (iso) => {
   if (s < 90) return 'just now'
   if (s < 3600) return `${Math.floor(s / 60)}m ago`
   if (s < 86400) return `${Math.floor(s / 3600)}h ago`
-  return new Date(iso).toLocaleDateString([], { month:'short', day:'numeric' })
+  return fmtDate(iso, { month:'short', day:'numeric' })
 }
 
 function Stat({ label, value, color = C.text, big }) {
@@ -240,9 +241,9 @@ export default function DeptTVPage() {
           </button>
           <div style={{ textAlign:'right' }}>
             <div style={{ fontSize: narrow ? 19 : 'clamp(20px, 2.4vw, 30px)', fontWeight:800, letterSpacing:-1, color:C.blue, fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap' }}>
-              {time.toLocaleTimeString([], { hour:'2-digit', minute:'2-digit', second:'2-digit' })}
+              {fmtTime(time, { hour:'2-digit', minute:'2-digit', second:'2-digit' })}
             </div>
-            <div style={{ fontSize:12, color:C.muted }}>{time.toLocaleDateString([], { weekday:'long', month:'long', day:'numeric' })}</div>
+            <div style={{ fontSize:12, color:C.muted }}>{fmtDate(time, { weekday:'long', month:'long', day:'numeric' })}</div>
           </div>
         </div>
       </div>
@@ -260,7 +261,7 @@ export default function DeptTVPage() {
         <div style={{ flex:3, background:C.panel, border:`1px solid ${C.border}`, borderRadius:14, overflow:'hidden', display:'flex', flexDirection:'column', minWidth:0, minHeight:0 }}>
           <div style={{ padding: narrow ? '8px 14px' : '13px 18px', borderBottom:`1px solid ${C.border}`, display:'flex', alignItems:'baseline', gap:10, flexShrink:0 }}>
             <span style={{ fontSize:13, fontWeight:700, letterSpacing:.5 }}>
-              {trade.key === 'company' ? 'Top 10 service techs' : 'Service ranking'} — {time.toLocaleDateString([], { month:'long' })}
+              {trade.key === 'company' ? 'Top 10 service techs' : 'Service ranking'} — {fmtDate(time, { month:'long' })}
             </span>
             <span style={{ fontSize:11, color:C.dim }}>ranked by composite score · bold = best in column</span>
           </div>

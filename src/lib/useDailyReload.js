@@ -1,3 +1,4 @@
+import { denverNext } from './denver'
 import { useEffect, useState, useCallback } from 'react'
 
 // Wallboards (department TVs, Call Center TV, Call Board) run 24/7 and nobody
@@ -95,9 +96,8 @@ export function useWallboard(rootRef, { reloadHour = 4 } = {}) {
   // don't hit the server at once). Looks identical afterwards.
   useEffect(() => {
     const now = new Date()
-    const next = new Date(now)
-    next.setHours(reloadHour, Math.floor(Math.random() * 10), Math.floor(Math.random() * 60), 0)
-    if (next <= now) next.setDate(next.getDate() + 1)
+    // Denver clock, not the stick's — a Fire TV left on UTC would reload at 10 PM.
+    const next = denverNext(reloadHour, Math.floor(Math.random() * 10), Math.floor(Math.random() * 60), now)
     const t = setTimeout(() => window.location.reload(), next - now)
     return () => clearTimeout(t)
   }, [reloadHour])
