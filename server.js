@@ -10932,7 +10932,12 @@ async function carriedNotes(weekEnd) {
 
 async function generateLeadershipReport(weekEnd, existingNotes) {
   const facts = await gatherWeeklyFacts(leadershipDeps(weekEnd))
-  const ai = await generateAgendaAI(facts, ANTHROPIC_KEY)
+  let ai = await generateAgendaAI(facts, ANTHROPIC_KEY)
+  // A refresh whose AI pass still failed keeps the week's previous agenda
+  // text rather than blanking the section (numbers still update).
+  if (!ai) {
+    try { const prev = await loadLeadershipRow(weekEnd); if (prev?.ai) { ai = { ...prev.ai, stale: true }; console.warn(`leadership AI: kept previous agenda text for ${weekEnd}`) } } catch {}
+  }
   const notes = existingNotes ?? await carriedNotes(weekEnd)
   const saved = await saveLeadershipRow(weekEnd, { facts, ai, notes })
   return { weekEnd, facts, ai, notes, saved }

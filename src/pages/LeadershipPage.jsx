@@ -548,6 +548,7 @@ function LeadershipPageInner() {
           {/* AI read — a 60-second scan: headline, top highlights, actions by dept */}
           {ai && (
             <div style={{ ...sec, borderLeft: '4px solid var(--accent)', ...mo('ai') }}>
+              {ai.stale && <div className="no-print" style={{ fontSize: 11.5, color: 'var(--warning)', marginBottom: 6 }}>AI text is from the previous refresh — the AI pass failed this time. Refresh numbers to try again.</div>}
               {ai.headline && <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--text-primary)', marginBottom: 10 }}>{ai.headline}</div>}
               {aiWins.length > 0 && <>
                 <div style={{ ...S.sectionTitle, color: 'var(--success)' }}>Wins</div>
