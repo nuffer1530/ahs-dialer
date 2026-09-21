@@ -392,8 +392,10 @@ function LeadershipPageInner() {
           @page { size: letter portrait; margin: 7mm 8mm; }
           /* The app shell is 100vh + overflow:hidden, which clips printing to
              one page — undo all of that for print only. */
-          html, body, body * { overflow: visible !important; height: auto !important; max-height: none !important; }
+          html, body, body *:not(#leadership-print *) { overflow: visible !important; height: auto !important; max-height: none !important; }
           body .app-shell, body .app-shell.has-tabbar { height: auto !important; min-height: 0 !important; display: block !important; }
+          /* Inside the agenda, inline heights stay (KPI cards, the 6-week bars) — only scroll wrappers un-clip. */
+          #leadership-print [style*="overflow-x: auto"] { overflow: visible !important; }
           body { background: #fff !important; }
           body * { visibility: hidden !important; }
           #leadership-print, #leadership-print * { visibility: visible !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
