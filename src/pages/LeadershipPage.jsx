@@ -667,24 +667,21 @@ function LeadershipPageInner() {
           <div style={{ ...sec, ...mo('opps') }}>
             <div style={S.sectionTitle}>Opportunities per day vs the $20M plan</div>
             <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 8 }}>
-              Sales opportunities (ServiceTitan's rule) ÷ effective days — Mon–Fri = 1, Saturday = ½, Sunday = 0, so a full week is 5.5
-              {f.oppsDaily?.partial ? ` (this week: ${f.oppsDaily.effDays} days through ${f.oppsDaily.through})` : ''}.
-              Goals are the $20M plan: HVAC 12 · Plumbing 14 · Electrical 9 · Garage 5 = 40 a day, paired with the 70% close target —
-              under goal is a booking problem, at goal but under 70% close is a conversion problem.
+              Average sales opportunities run per working day (Mon–Fri full, Saturday half), this week and last, against the plan's daily goal.
+              {f.oppsDaily?.partial ? ` This week counts ${f.oppsDaily.effDays} completed days through ${f.oppsDaily.through}.` : ''}
             </div>
-            <Table headers={['Dept', 'Opps', 'Per day', 'Goal / day', 'Gap / day', 'Last wk / day', 'Verdict']}
+            <Table headers={['Dept', 'Goal / day', 'This week / day', 'Last week / day', 'Short of goal / day']}
               rows={(() => {
                 const od = f.oppsDaily || { rows: [], all: null }
                 const row = (r, bold) => {
                   const w = (x) => bold ? <b>{x}</b> : x
                   const tone = r.onPlan == null ? { color: 'var(--text-muted)' } : r.onPlan ? S.good : S.bad
                   return [
-                    w(r.trade), w(String(r.opps)),
-                    r.perDay != null ? <span style={{ ...tone, fontWeight: 700 }}>{r.perDay}</span> : '—',
+                    w(r.trade),
                     w(String(r.goal || '—')),
-                    r.gapPerDay != null ? <span style={r.gapPerDay >= 0 ? S.good : S.bad}>{r.gapPerDay >= 0 ? '+' : ''}{r.gapPerDay}</span> : '—',
+                    r.perDay != null ? <span style={{ ...tone, fontWeight: 700 }}>{r.perDay}</span> : '—',
                     r.priorPerDay != null ? String(r.priorPerDay) : '—',
-                    <span style={tone}>{r.verdict}</span>,
+                    r.gapPerDay == null ? '—' : r.gapPerDay >= 0 ? <span style={S.good}>on goal</span> : <span style={S.bad}>{Math.abs(r.gapPerDay)} short</span>,
                   ]
                 }
                 return [...od.rows.map(r => row(r, false)), ...(od.all ? [row(od.all, true)] : [])]
