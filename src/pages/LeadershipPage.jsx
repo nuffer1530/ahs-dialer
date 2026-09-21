@@ -587,7 +587,7 @@ function LeadershipPageInner() {
           <div style={{ ...sec, ...mo('scorecard') }}>
             <div style={S.sectionTitle}>Department scorecard</div>
             <Table
-              headers={['Dept', 'Wk Sales', 'Budget', 'Var', 'Wk Rev', 'Rev Tgt', 'Close / Tgt', 'Avg Sale', 'Opps', 'Missed $', '5★', 'Clubs', 'Callbacks', 'LW True Labor %']}
+              headers={['Dept', 'Wk Sales', 'Budget', 'Var', 'Wk Rev', 'Rev Tgt', 'Close / Tgt', 'Avg Sale', 'Opps', 'Missed $', '5★', 'Clubs', 'Callbacks', 'GM / Tgt', 'LW True Labor %']}
               rows={[
                 ...f.scorecard.map(d => [
                   d.trade, money(d.sales), money(d.budget),
@@ -603,6 +603,9 @@ function LeadershipPageInner() {
                   String(d.fiveStar || 0),
                   String(d.clubs || 0),
                   d.callbacks ? <span style={{ color: 'var(--warning)', fontWeight: 700 }}>{d.callbacks}</span> : '0',
+                  d.gm != null
+                    ? <span style={goalTone(d.gm, d.gmTarget || 0.55)} title={d.gmCosts ? `Revenue ${money(d.gmCosts.revenue)} · materials/equipment ${money(d.gmCosts.materials)} · POs ${money(d.gmCosts.po)} · other ${money(d.gmCosts.otherNonLabor)} · labor ${money(d.gmCosts.labor)} (${d.gmCosts.laborSource}) · ST's own GM ${d.gmSt != null ? pct(d.gmSt) : '—'}` : undefined}>{pct(d.gm)} <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>/ {pct(d.gmTarget || 0.55)}</span></span>
+                    : '—',
                   d.trueLaborPct != null
                     ? <span style={d.trueLaborPct <= (d.laborTarget || 0.25) ? S.good : S.bad}>{pct(d.trueLaborPct)}</span>
                     : '—',
@@ -617,10 +620,16 @@ function LeadershipPageInner() {
                   <b>{String(f.kpis.find(k => k.kpi === '5 Star Reviews')?.thisWk ?? f.scorecard.reduce((a, d) => a + (d.fiveStar || 0), 0))}</b>,
                   <b>{String(f.totals.clubsSold ?? f.scorecard.reduce((a, d) => a + (d.clubs || 0), 0))}</b>,
                   <b>{String(f.scorecard.reduce((a, d) => a + (d.callbacks || 0), 0))}</b>,
+                  f.totals.gm != null ? <b><span style={goalTone(f.totals.gm, f.totals.gmTarget || 0.55)}>{pct(f.totals.gm)}</span></b> : '—',
                   pct(f.labor.laborPctOfRevenue),
                 ],
               ]}
             />
+            <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 6 }}>
+              {f.totals.gm != null
+                ? <>GM = invoiced revenue − ServiceTitan job-costing material / equipment / PO costs − burdened field labor ({f.totals.gmSource === 'adp' ? 'actual ADP payroll for this week' : `${Math.round((f.labor.factors?.commissionRate || 0) * 100)}% commission × ${f.labor.factors?.poolUplift} pool × ${f.labor.factors?.fieldBurden} burden on this week's commissionable revenue`}). Hover a cell for the breakdown. ST's own job costing counts only commission labor and reads {['HVAC', 'Plumbing', 'Electrical', 'Garage Doors'].map(t => `${t} ${f.totals.gmStByTrade?.[t] != null ? pct(f.totals.gmStByTrade[t]) : '—'}`).join(' · ')}.</>
+                : 'GM unavailable this run — the ServiceTitan job-costing report did not answer. Refresh numbers to try again.'}
+            </div>
           </div>
 
           {/* KPIs + opportunities side-by-side feel */}

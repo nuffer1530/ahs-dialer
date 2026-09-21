@@ -10892,7 +10892,7 @@ async function requireLeadership(req, res) {
 }
 
 const leadershipDeps = (weekEnd) => ({
-  stGet, stPageAll, supabase, tenantId: ST_TENANT_ID, anthropicKey: ANTHROPIC_KEY, weekEnd,
+  stGet, stPageAll, stPost, supabase, tenantId: ST_TENANT_ID, anthropicKey: ANTHROPIC_KEY, weekEnd,
 })
 
 async function loadLeadershipRow(weekEnd) {
