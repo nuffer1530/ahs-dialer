@@ -384,9 +384,19 @@ function LeadershipPageInner() {
       : page}>
       <style>{`
         @media print {
+          /* Landscape: the department scorecard is 15 columns wide. */
+          @page { size: landscape; margin: 10mm 12mm; }
           /* The app shell is 100vh + overflow:hidden, which clips printing to
-             one page — undo all of that for print only. */
+             one page — undo all of that for print only. (The phone CSS layer
+             used to re-apply 100dvh at Letter width, which cut the print at
+             one page — it is screen-only now; the shell rule here is belt and
+             braces.) */
           html, body, body * { overflow: visible !important; height: auto !important; max-height: none !important; }
+          body .app-shell, body .app-shell.has-tabbar { height: auto !important; min-height: 0 !important; display: block !important; }
+          /* Wide tables wrap and shrink instead of running off the page. */
+          #leadership-print table { width: 100% !important; table-layout: auto; }
+          #leadership-print th, #leadership-print td { white-space: normal !important; font-size: 10.5px !important; padding: 4px 6px !important; }
+          #leadership-print tr { break-inside: avoid; }
           body { background: #fff !important; }
           body * { visibility: hidden !important; }
           #leadership-print, #leadership-print * { visibility: visible !important; }
@@ -795,45 +805,7 @@ function LeadershipPageInner() {
             </div>
           </div>
 
-          <div style={{ ...sec, ...mo('parking') }}>
-            <div style={S.sectionTitle}>Parking lot</div>
-            <EditRows rows={notes.parkingLot} onChange={v => patchNotes({ parkingLot: v })}
-              cols={[
-                { key: 'item', label: 'Item', placeholder: 'Capture it, keep the meeting moving…' },
-                { key: 'raisedBy', label: 'Raised by', width: 120 },
-                { key: 'owner', label: 'Owner', width: 120 },
-                { key: 'next', label: 'Next step', width: 200 },
-              ]} />
-          </div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 16, marginTop: 16, ...mo('lists') }}>
-            <div style={{ ...sec, marginTop: 0 }}>
-              <div style={S.sectionTitle}>Wins this week</div>
-              <EditList items={notes.wins} mark="✓" onChange={v => patchNotes({ wins: v })} />
-            </div>
-            <div style={{ ...sec, marginTop: 0 }}>
-              <div style={S.sectionTitle}>Watch-outs / risks</div>
-              <EditList items={notes.watchouts} mark="⚠" onChange={v => patchNotes({ watchouts: v })} />
-            </div>
-            <div style={{ ...sec, marginTop: 0 }}>
-              <div style={S.sectionTitle}>Commitments for next week</div>
-              <EditList items={notes.commitments} mark="☐" onChange={v => patchNotes({ commitments: v })} />
-            </div>
-          </div>
-
-          <div style={{ ...sec, ...mo('notes') }}>
-            <div style={S.sectionTitle}>Notes & key takeaways</div>
-            <textarea className="no-print" style={{ ...S.input, minHeight: 90, resize: 'vertical' }} value={notes.notesText || ''}
-              placeholder="Meeting notes…" onChange={e => patchNotes({ notesText: e.target.value })} />
-            {/* Textareas print only their visible rows — print the full text. */}
-            <div className="print-only" style={{ display: 'none', fontSize: 12.5, lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{notes.notesText || ''}</div>
-          </div>
-
-          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 18, lineHeight: 1.6, ...mo('footer') }}>
-            Sales = estimates marked Sold · Revenue = invoiced subtotals · Opportunities = jobs that ran on a sales-type call (no installs, no maintenance) with an estimate or $89+ invoiced; converted = sold or $89+ invoiced (ServiceTitan's rule) ·
-            Booking % excludes Excused / NotLead / Abandoned · True labor uses the ADP TotalSource burden model (field ×{f.labor.factors.fieldBurden}, pool ×{f.labor.factors.poolUplift}) ·
-            Generated {new Date(f.generatedAt).toLocaleString()}
-          </div>
+          {/* Parking lot, wins / watch-outs / commitments, notes and the footnote were removed from the agenda (Brandyn, Sep 20, 2026). */}
         </div>
       )}
       </div>

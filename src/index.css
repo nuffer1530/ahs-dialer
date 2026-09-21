@@ -208,7 +208,7 @@ textarea.form-input { resize: vertical; min-height: 72px; }
    A grid that is really a ROW (a table row drawn as a grid) opts out with
    class "mgrid" and scrolls sideways instead; an element that must keep its
    min-width opts out with "mkeep". */
-@media (max-width: 768px) {
+@media screen and (max-width: 768px) {
   [style*="grid-template-columns"]:not(.mgrid) { grid-template-columns: minmax(0, 1fr) !important; }
   [style*="position: sticky"] { position: static !important; }
   [style*="min-width"]:not(.mkeep):not(input):not(select):not(button):not(table):not(td):not(th) { min-width: 0 !important; }
