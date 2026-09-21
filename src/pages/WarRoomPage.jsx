@@ -183,9 +183,14 @@ export default function WarRoomPage() {
   const longestWait = queued.length ? Math.max(...queued.map(t => Math.round((Date.now() - new Date(t.queued_at)) / 1000))) : 0
   const liveInbound = tasks.filter(t => t.state === 'answered' && !t.ended_at).length
   const liveOutbound = liveCalls.filter(c => c.direction === 'outbound' && !c.ended_at && ['in-progress','answered','initiated','ringing'].includes(c.status)).length
-  // The owner watches this TV; he isn't staffed on it. (Brandyn's profile id —
-  // Brittany and Deanna stay: they take calls.)
-  const HIDE_FROM_TV = new Set(['35d1b28f-e6f4-4e46-b63c-9544ae7af00b'])
+  // Not staffed on the floor: the owner (watches this TV) and the field
+  // managers Dean Christian and Cedric Hendricks (Brandyn, Sep 21, 2026).
+  // Brittany and Deanna stay — they take calls.
+  const HIDE_FROM_TV = new Set([
+    '35d1b28f-e6f4-4e46-b63c-9544ae7af00b',   // Brandyn Nuffer
+    'aa8b6dae-0b7a-48cd-80ca-2e365d56d86f',   // Dean Christian
+    '382fe5bc-ad13-4228-b3eb-179d78ac7853',   // Cedric Hendricks
+  ])
   const floor = profiles.filter(p => !HIDE_FROM_TV.has(p.id))
   const agentsAvailable = floor.filter(p => p.status === 'Available').length
 
