@@ -384,23 +384,20 @@ function LeadershipPageInner() {
       : page}>
       <style>{`
         @media print {
-          /* Landscape: the department scorecard is 15 columns wide. */
-          @page { size: landscape; margin: 10mm 12mm; }
+          /* Front and back: portrait Letter, compact spacing, sections flow
+             across the page break (only table rows and cards stay whole).
+             The old "keep every section whole" rule pushed half-empty pages
+             (5 pages for a 2-page agenda). Portrait fits the 15-column
+             scorecard once cells wrap. Verified in headless Chrome. */
+          @page { size: letter portrait; margin: 7mm 8mm; }
           /* The app shell is 100vh + overflow:hidden, which clips printing to
-             one page — undo all of that for print only. (The phone CSS layer
-             used to re-apply 100dvh at Letter width, which cut the print at
-             one page — it is screen-only now; the shell rule here is belt and
-             braces.) */
+             one page — undo all of that for print only. */
           html, body, body * { overflow: visible !important; height: auto !important; max-height: none !important; }
           body .app-shell, body .app-shell.has-tabbar { height: auto !important; min-height: 0 !important; display: block !important; }
-          /* Wide tables wrap and shrink instead of running off the page. */
-          #leadership-print table { width: 100% !important; table-layout: auto; }
-          #leadership-print th, #leadership-print td { white-space: normal !important; font-size: 10.5px !important; padding: 4px 6px !important; }
-          #leadership-print tr { break-inside: avoid; }
           body { background: #fff !important; }
           body * { visibility: hidden !important; }
-          #leadership-print, #leadership-print * { visibility: visible !important; }
-          #leadership-print { position: absolute; top: 0; left: 0; width: 100%; font-size: 12px; }
+          #leadership-print, #leadership-print * { visibility: visible !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+          #leadership-print { position: absolute; top: 0; left: 0; width: 100%; font-size: 10px; }
           /* Print in a light palette even if the app is in dark mode. */
           #leadership-print {
             --bg: #fff; --surface: #fff; --surface-2: #f5f5f4; --border: #c8c8c4; --border-strong: #999;
@@ -408,12 +405,29 @@ function LeadershipPageInner() {
             --accent: #1A5C8A; --success: #15803D; --danger: #B91C1C; --warning: #8A5A00;
             --tone-amber-bg: #fff; --tone-amber-bd: #c8c8c4; --tone-amber-tx: #6a6a66;
           }
-          /* Keep each section whole on a page. */
-          #leadership-print > div { break-inside: avoid; }
           /* Editors are replaced by their static .print-only twins. */
           .no-print { display: none !important; }
           .print-only { display: block !important; }
           table.print-only { display: table !important; }
+          /* Compact everything — the screen styles are inline, so these win with !important. */
+          #leadership-print > div { break-inside: auto !important; margin-top: 6px !important; padding: 7px 10px !important; border-radius: 6px !important; }
+          #leadership-print tr, #leadership-print [style*="min-width: 150px"], #leadership-print [style*="break-inside: avoid"] { break-inside: avoid; }
+          #leadership-print [style*="min-width: 150px"] { min-width: 0 !important; padding: 5px 8px !important; border-radius: 6px !important; }
+          #leadership-print [style*="flex-wrap: wrap"] { flex-wrap: nowrap !important; gap: 6px !important; }
+          #leadership-print h1 { font-size: 15px !important; }
+          #leadership-print [style*="font-size: 30px"], #leadership-print [style*="font-size: 22px"] { font-size: 14px !important; margin-top: 1px !important; }
+          #leadership-print [style*="font-size: 15px"] { font-size: 11.5px !important; margin-bottom: 4px !important; }
+          #leadership-print [style*="font-size: 13px"], #leadership-print [style*="font-size: 12.5px"] { font-size: 9.5px !important; line-height: 1.3 !important; }
+          #leadership-print [style*="font-size: 12px"] { font-size: 9px !important; }
+          #leadership-print [style*="font-size: 11.5px"], #leadership-print [style*="font-size: 11px"] { font-size: 8.5px !important; }
+          #leadership-print [style*="font-size: 10px"] { font-size: 8px !important; }
+          #leadership-print [style*="letter-spacing: 1px"] { margin-bottom: 4px !important; }
+          #leadership-print [style*="margin-top: 12px"], #leadership-print [style*="margin-top: 14px"], #leadership-print [style*="margin-top: 16px"] { margin-top: 6px !important; }
+          #leadership-print [style*="margin-bottom: 12px"] { margin-bottom: 4px !important; }
+          #leadership-print [style*="columns: 2"] { column-gap: 14px !important; }
+          #leadership-print table { width: 100% !important; table-layout: auto; }
+          #leadership-print th, #leadership-print td { white-space: normal !important; font-size: 8.5px !important; padding: 2px 4px !important; line-height: 1.25 !important; }
+          #leadership-print .lp-trend { height: 96px !important; }
         }
       `}</style>
       {/* Phone only: report tables scroll sideways; pin their first column
@@ -728,7 +742,7 @@ function LeadershipPageInner() {
           {/* 6-week trend */}
           <div style={{ ...sec, ...mo('trend') }}>
             <div style={S.sectionTitle}>6-week sales trend</div>
-            <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', height: 120, padding: '0 4px', ...(isMobile ? { maxWidth: '100%' } : {}) }}>
+            <div className="lp-trend" style={{ display: 'flex', gap: 8, alignItems: 'flex-end', height: 120, padding: '0 4px', ...(isMobile ? { maxWidth: '100%' } : {}) }}>
               {f.trend.map((t, i) => {
                 const max = Math.max(...f.trend.map(x => x.sales), t.goal)
                 return (
