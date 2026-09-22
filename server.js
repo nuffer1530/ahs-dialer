@@ -4789,12 +4789,16 @@ app.get('/api/tv/department/:trade', async (req, res) => {
 //                  and the rich live feed (sold / booked / missed / quotes /
 //                  invoices / reviews / clubs, each with who, what, trade)
 //  slow  (12 h)  — run-rate × seasonality pacing, job-matched true GM
-//  trend (weekly)— 13 closed weeks + this week vs the same weeks last year:
-//                  revenue, sales, leads, opportunities. Closed weeks are
-//                  persisted forever, so only the current week re-pulls.
+//  daily (30 min)— per-day revenue, leads by trade and lead calls by channel
+//                  for the last 59 days (+ last year's leads for 30): feeds
+//                  the 30-day chart, the leads panel and the channel watchdog.
+//                  Finished days persist forever (ceo_daily_cache).
+//  trend (weekly)— this week's opportunities vs the weekly goal (history is
+//                  kept for later use; only the current week re-pulls).
 // requireLeadership-gated: true GM is on this board.
 let _ceoFast = { at: 0, data: null }, _ceoSlow = { at: 0, data: null }, _ceoTrend = { at: 0, weeks: {} }
-let _ceoFastBusy = false, _ceoSlowBusy = false, _ceoTrendBusy = false, _ceoLoaded = false
+let _ceoDaily = { at: 0, days: {}, ly: {} }
+let _ceoFastBusy = false, _ceoSlowBusy = false, _ceoTrendBusy = false, _ceoDailyBusy = false, _ceoLoaded = false
 const CEO_SLOW_V = 2
 // Burdened field labor as a share of each trade's revenue — the ADP-validated
 // July 2026 reconciliation (Pro Pay + unattached pool × TotalSource burden).
@@ -4824,12 +4828,13 @@ async function ceoLoadPersisted() {
   if (_ceoLoaded) return
   _ceoLoaded = true
   try {
-    const { data } = await supabase.from('app_settings').select('key, value').in('key', ['ceo_slow_cache', 'ceo_trend_cache'])
+    const { data } = await supabase.from('app_settings').select('key, value').in('key', ['ceo_slow_cache', 'ceo_trend_cache', 'ceo_daily_cache'])
     for (const row of data || []) {
       const v = JSON.parse(row.value || 'null'); if (!v) continue
       // An older slow-cache shape keeps its month history but recomputes the rest.
       if (row.key === 'ceo_slow_cache') _ceoSlow = v.v === CEO_SLOW_V ? v : { at: 0, data: v.data ? { months: v.data.months } : null }
       if (row.key === 'ceo_trend_cache' && v.weeks) _ceoTrend = v
+      if (row.key === 'ceo_daily_cache' && v.days) _ceoDaily = { ...v, at: 0 }
     }
   } catch (e) { console.warn('ceo cache load:', e.message) }
 }
@@ -4890,16 +4895,6 @@ async function ceoReps() {
     names: new Set([...reps.values()].map(p => norm(p.name)).filter(Boolean)),
   }
   return _ceoReps
-}
-
-let _ceoMemTypes = { at: 0, byId: new Map() }
-async function ceoMemTypes() {
-  if (_ceoMemTypes.at && Date.now() - _ceoMemTypes.at < 6 * 3600_000) return _ceoMemTypes.byId
-  try {
-    const d = await stGet(`/memberships/v2/tenant/${ST_TENANT_ID}/membership-types?pageSize=200`)
-    _ceoMemTypes = { at: Date.now(), byId: new Map((d?.data || []).map(t => [String(t.id), t.name || ''])) }
-  } catch (e) { console.warn('ceo mem types:', e.message) }
-  return _ceoMemTypes.byId
 }
 
 async function ceoBuildSlow() {
@@ -5113,18 +5108,14 @@ async function ceoBuildFast() {
     await ceoLoadBuNames()
     const today = tvDenverDate()
     const fromIso = tvBounds(today)
-    const [calls, created, sold, invs, jobs, membs, reviews, meta, admins, reps, memTypes, jtNames] = await Promise.all([
+    const [calls, created, invs, jobs, admins, reps, jtNames] = await Promise.all([
       stPageAll(pg => `/telecom/v2/tenant/${ST_TENANT_ID}/calls?createdOnOrAfter=${fromIso}&pageSize=500&page=${pg}`, 5000).catch(() => []),
       stPageAll(pg => `/sales/v2/tenant/${ST_TENANT_ID}/estimates?createdOnOrAfter=${fromIso}&pageSize=500&page=${pg}`, 2000).catch(() => []),
-      stPageAll(pg => `/sales/v2/tenant/${ST_TENANT_ID}/estimates?soldAfter=${fromIso}&pageSize=500&page=${pg}`, 1000).catch(() => []),
       stPageAll(pg => `/accounting/v2/tenant/${ST_TENANT_ID}/invoices?invoicedOnOrAfter=${today}T00:00:00Z&invoicedOnBefore=${today}T23:59:59Z&pageSize=500&page=${pg}`, 2000).catch(() => []),
       stPageAll(pg => `/jpm/v2/tenant/${ST_TENANT_ID}/jobs?createdOnOrAfter=${fromIso}&pageSize=500&page=${pg}`, 1500).catch(() => []),
-      stPageAll(pg => `/memberships/v2/tenant/${ST_TENANT_ID}/memberships?createdOnOrAfter=${fromIso}&pageSize=500&page=${pg}`, 500).catch(() => []),
-      stPageAll(pg => `/marketingreputation/v2/tenant/${ST_TENANT_ID}/reviews?fromDate=${today}&pageSize=200&page=${pg}`, 400).catch(() => []),
-      tvTechMeta(), loadAdminAgents(supabase), ceoReps(), ceoMemTypes(), tvJobTypeNames(),
+      loadAdminAgents(supabase), ceoReps(), tvJobTypeNames(),
     ])
-    const norm = (s) => String(s || '').trim().toLowerCase()
-    const nameOf = (id) => meta.get(String(id))?.name || null
+    const norm = (x) => String(x || '').trim().toLowerCase()
     const campTrade = (name) => {
       const b = norm(name)
       if (/hvac|air|heat|climate|furnace|click|credible/.test(b)) return 'HVAC'
@@ -5133,8 +5124,9 @@ async function ceoBuildFast() {
       if (/garage|door|overhead/.test(b)) return 'Garage Doors'
       return null
     }
-    const feed = []
-    let booked = 0, unbooked = 0, outbounds = 0
+    // Calls: booking %, CSR outbounds, and the missed (unbooked) lead calls.
+    let booked = 0, outbounds = 0
+    const missed = []
     for (const c of calls) {
       const lc = c.leadCall || c
       if (admins.isAdminCall(lc)) continue
@@ -5143,61 +5135,38 @@ async function ceoBuildFast() {
         if (reps.ids.has(String(ag.id)) || reps.names.has(norm(ag.name))) outbounds++
         continue
       }
-      if ((lc.direction || '') !== 'Inbound' || !['Booked', 'Unbooked'].includes(lc.callType)) continue
-      const camp = (lc.campaign || {}).name || null
-      if (lc.callType === 'Booked') {
-        booked++
-        const bu = (c.businessUnit || {}).name
-        feed.push({ kind: 'booked', at: lc.receivedOn || lc.createdOn, title: (c.type || {}).name || 'Job booked',
-          who: ag.name || null, trade: tvTradeOf(bu) || campTrade(camp), sub: [camp, c.jobNumber ? `#${c.jobNumber}` : null, (lc.customer || {}).name].filter(Boolean).join(' · ') })
-      } else {
-        unbooked++
-        feed.push({ kind: 'missed', at: lc.receivedOn || lc.createdOn, title: (lc.reason || {}).name || 'Lead call not booked',
-          who: (lc.customer || {}).name || lc.from || 'Unknown caller', trade: campTrade(camp), sub: [camp, ag.name ? `took: ${ag.name}` : null].filter(Boolean).join(' · ') })
+      if ((lc.direction || '') !== 'Inbound') continue
+      if (lc.callType === 'Booked') booked++
+      else if (lc.callType === 'Unbooked') {
+        const camp = (lc.campaign || {}).name || null
+        missed.push({ at: lc.receivedOn || lc.createdOn, who: (lc.customer || {}).name || lc.from || 'Unknown caller',
+          reason: (lc.reason || {}).name || null, trade: campTrade(camp), channel: camp, csr: ag.name || null })
       }
     }
-    for (const e of sold) {
-      if ((e.status || {}).name !== 'Sold' || !e.soldOn || Date.parse(e.soldOn) < Date.parse(fromIso)) continue
-      feed.push({ kind: 'sold', at: e.soldOn, amount: Math.round(Number(e.subtotal) || 0), title: String(e.name || e.summary || 'Estimate sold').slice(0, 70),
-        who: nameOf(e.soldBy), trade: tvTradeOf(e.businessUnitName), sub: e.jobNumber ? `#${e.jobNumber}` : '' })
-    }
-    const soldJobs = new Set(sold.filter(e => (e.status || {}).name === 'Sold').map(e => e.jobId))
+    missed.sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')))
+    // Open quotes presented today and not sold (a sold option on the same job
+    // counts as won), biggest first — the money still on the table.
+    const soldJobs = new Set(created.filter(e => (e.status || {}).name === 'Sold').map(e => e.jobId))
+    const byJob = new Map()
     for (const e of created) {
       const amt = Number(e.subtotal) || 0
-      if (amt < 1500 || soldJobs.has(e.jobId) || (e.status || {}).name === 'Sold') continue
-      feed.push({ kind: 'quote', at: e.createdOn, amount: Math.round(amt), title: String(e.name || e.summary || 'Estimate presented').slice(0, 70),
-        who: null, trade: tvTradeOf(e.businessUnitName), sub: e.jobNumber ? `#${e.jobNumber} · open` : 'open' })
+      if (!e.jobId || soldJobs.has(e.jobId) || amt <= 0) continue
+      const cur = byJob.get(e.jobId)
+      if (!cur || amt > cur.amount) byJob.set(e.jobId, { at: e.createdOn, amount: Math.round(amt), title: String(e.name || e.summary || 'Estimate').slice(0, 60), trade: tvTradeOf(e.businessUnitName), job: e.jobNumber || null })
     }
+    const quotes = [...byJob.values()].filter(q => q.amount >= 1500).sort((a, b) => b.amount - a.amount)
+    // Revenue today + opportunities (non-install job invoiced ≥ $90, or a
+    // non-install estimate presented; one job = one opportunity).
+    let revToday = 0
     const invByJob = new Map()
     for (const i of invs) {
-      const j = i.job || {}; const amt = Number(i.subTotal) || 0
-      if (!j.id || amt <= 0) continue
+      const amt = Number(i.subTotal) || 0
+      revToday += amt
+      const j = i.job || {}
+      if (!j.id) continue
       const cur = invByJob.get(j.id) || { amt: 0, i }
       cur.amt += amt; invByJob.set(j.id, cur)
     }
-    for (const { amt, i } of invByJob.values()) {
-      const tech = (i.items || []).find(x => x.technicianId)?.technicianId
-      feed.push({ kind: 'invoice', at: i.createdOn || null, amount: Math.round(amt), title: (i.job || {}).type || 'Job invoiced',
-        who: nameOf(tech), trade: tvTradeOf((i.businessUnit || {}).name), sub: (i.job || {}).number ? `#${i.job.number}` : '' })
-    }
-    for (const m of membs) {
-      feed.push({ kind: 'club', at: m.createdOn, title: memTypes.get(String(m.membershipTypeId)) || 'Membership sold',
-        who: nameOf(m.soldById), trade: null, sub: '' })
-    }
-    let fiveToday = 0
-    for (const r of reviews) {
-      const stars = Number(r.rating ?? r.reviewRating) || 0
-      if (!stars) continue
-      if (stars >= 5) fiveToday++
-      const text = String(r.review || '').replace(/\s+/g, ' ').trim()
-      feed.push({ kind: stars >= 5 ? 'review' : 'lowreview', stars, at: r.publishDate || r.createdOn, title: text ? `“${text.slice(0, 90)}${text.length > 90 ? '…' : ''}”` : `${stars}★ review`,
-        who: r.technicianFullName || null, trade: null, sub: [r.platform, r.customerName].filter(Boolean).join(' · ') })
-    }
-    feed.sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')))
-
-    // Opportunities ran today: non-install job invoiced ≥ $90 today, or a
-    // non-install estimate presented today. One job = one opportunity. The
-    // goal is the 3-trade 2027 plan, so the headline total is 3-trade too.
     const oppJobs = new Map()
     for (const [jid, { amt, i }] of invByJob) {
       if (amt < 90 || /install/i.test((i.job || {}).type || '')) continue
@@ -5210,30 +5179,185 @@ async function ceoBuildFast() {
     }
     const oppsByTrade = {}
     for (const t of oppJobs.values()) oppsByTrade[t] = (oppsByTrade[t] || 0) + 1
-    // Leads today, Meghan's definition (new demand jobs).
+    // Leads today, Meghan's definition (new demand jobs), by trade.
+    const leadsByTrade = {}
     let leads = 0
     for (const j of jobs) {
-      if (!tvTradeOf(TV_BU_NAME.get(String(j.businessUnitId)))) continue
-      if (!CEO_MAINT_RE.test(jtNames.get(String(j.jobTypeId)) || '')) leads++
+      const t = tvTradeOf(TV_BU_NAME.get(String(j.businessUnitId)))
+      if (!t || CEO_MAINT_RE.test(jtNames.get(String(j.jobTypeId)) || '')) continue
+      leads++; leadsByTrade[t] = (leadsByTrade[t] || 0) + 1
     }
-    const soldToday = feed.filter(f => f.kind === 'sold')
-    const quotes = feed.filter(f => f.kind === 'quote')
     _ceoFast = {
       at: Date.now(),
       data: {
-        booking: { booked, leadCalls: booked + unbooked, pct: booked + unbooked > 0 ? Math.round(booked / (booked + unbooked) * 100) : null },
+        booking: { booked, leadCalls: booked + missed.length, pct: booked + missed.length > 0 ? Math.round(booked / (booked + missed.length) * 100) : null },
         csrOutbounds: outbounds,
-        leads,
+        leads, leadsByTrade, revToday: Math.round(revToday),
         opps: { total: CEO_OPP_TRADES.reduce((a, t) => a + (oppsByTrade[t] || 0), 0), byTrade: oppsByTrade },
-        summary: {
-          sold: soldToday.length, soldAmt: soldToday.reduce((a, f) => a + (f.amount || 0), 0),
-          booked, missed: unbooked, quotes: quotes.length, quoteAmt: quotes.reduce((a, f) => a + (f.amount || 0), 0),
-          clubs: membs.length, fiveStar: fiveToday,
+        leaks: {
+          missed: missed.slice(0, 12), missedCount: missed.length,
+          quotes: quotes.slice(0, 5), quoteCount: quotes.length, quoteAmt: quotes.reduce((a, q) => a + q.amount, 0),
         },
-        feed: feed.slice(0, 45),
       },
     }
   } finally { _ceoFastBusy = false }
+}
+
+// One day of the chart / watchdog inputs. `full` = revenue + lead calls by
+// channel too; last year's days only need leads.
+async function ceoDayStats(d, admins, jtNames, full) {
+  const next = ceoAddDays(d, 1), startIso = tvBounds(d), endIso = tvBounds(next), endMs = Date.parse(endIso)
+  const out = { leads: 0, lt: {} }
+  await ceoEachPage(pg => `/jpm/v2/tenant/${ST_TENANT_ID}/jobs?createdOnOrAfter=${startIso}&createdBefore=${endIso}&pageSize=500&page=${pg}`, rows => {
+    for (const j of rows) {
+      if (Date.parse(j.createdOn) >= endMs) continue
+      const t = tvTradeOf(TV_BU_NAME.get(String(j.businessUnitId)))
+      if (!t || CEO_MAINT_RE.test(jtNames.get(String(j.jobTypeId)) || '')) continue
+      out.leads++; out.lt[t] = (out.lt[t] || 0) + 1
+    }
+  })
+  if (!full) return out
+  out.rev = 0; out.lc = 0; out.camps = {}
+  await ceoEachPage(pg => `/accounting/v2/tenant/${ST_TENANT_ID}/invoices?invoicedOnOrAfter=${d}T00:00:00Z&invoicedOnBefore=${next}T00:00:00Z&pageSize=500&page=${pg}`, rows => {
+    for (const i of rows) out.rev += Number(i.subTotal) || 0
+  })
+  out.rev = Math.round(out.rev)
+  await ceoEachPage(pg => `/telecom/v2/tenant/${ST_TENANT_ID}/calls?createdOnOrAfter=${startIso}&createdBefore=${endIso}&pageSize=500&page=${pg}`, rows => {
+    for (const c of rows) {
+      const lc = c.leadCall || c
+      if ((lc.direction || '') !== 'Inbound' || !['Booked', 'Unbooked'].includes(lc.callType) || admins.isAdminCall(lc)) continue
+      out.lc++
+      const name = String((lc.campaign || {}).name || 'Unattributed').trim()
+      out.camps[name] = (out.camps[name] || 0) + 1
+    }
+  }, 8000)
+  return out
+}
+
+async function ceoPersistDaily() {
+  try { await supabase.from('app_settings').upsert({ key: 'ceo_daily_cache', value: JSON.stringify({ days: _ceoDaily.days, ly: _ceoDaily.ly }) }, { onConflict: 'key' }) }
+  catch (e) { console.warn('ceo daily save:', e.message) }
+}
+
+async function ceoBuildDaily() {
+  if (_ceoDailyBusy || (_ceoDaily.at && Date.now() - _ceoDaily.at < 30 * 60_000)) return
+  _ceoDailyBusy = true
+  try {
+    await ceoLoadPersisted()
+    await ceoLoadBuNames()
+    const today = tvDenverDate()
+    const [admins, jtNames] = await Promise.all([loadAdminAgents(supabase), tvJobTypeNames()])
+    const days = { ..._ceoDaily.days }, ly = { ..._ceoDaily.ly }
+    let n = 0
+    // Newest first so a cold start fills the chart from the right.
+    for (let k = 1; k <= 59; k++) {
+      const d = ceoAddDays(today, -k)
+      if (days[d]?.final || (days[d] && Date.now() - (days[d].at || 0) < 6 * 3600_000)) continue
+      try {
+        // A day is final once it's 3+ days old (late invoices have landed).
+        days[d] = { ...(await ceoDayStats(d, admins, jtNames, true)), at: Date.now(), final: k >= 3 }
+        _ceoDaily = { ..._ceoDaily, days }
+        if (++n % 5 === 0) await ceoPersistDaily()
+      } catch (e) { console.warn('ceo day', d, e.message) }
+    }
+    for (let k = 1; k <= 30; k++) {
+      const d = ceoAddDays(ceoAddDays(today, -k), -364)
+      if (ly[d]) continue
+      try { ly[d] = { leads: (await ceoDayStats(d, admins, jtNames, false)).leads } }
+      catch (e) { console.warn('ceo ly day', d, e.message) }
+    }
+    const oldest = ceoAddDays(today, -59), oldestLy = ceoAddDays(ceoAddDays(today, -30), -364)
+    for (const k of Object.keys(days)) if (k < oldest) delete days[k]
+    for (const k of Object.keys(ly)) if (k < oldestLy) delete ly[k]
+    _ceoDaily = { at: Date.now(), days, ly }
+    await ceoPersistDaily()
+  } finally { _ceoDailyBusy = false }
+}
+
+// Month revenue budget: what Brandyn enters on /leadership (latest report's
+// budgets.monthRevenue); digest_budgets is only the fallback.
+let _ceoBudget = { at: 0, v: null }
+async function ceoBudget() {
+  if (_ceoBudget.at && Date.now() - _ceoBudget.at < 10 * 60_000) return _ceoBudget.v
+  let v = null
+  try {
+    const { data } = await supabase.from('leadership_reports').select('notes').order('week_ending', { ascending: false }).limit(1)
+    v = Number(data?.[0]?.notes?.budgets?.monthRevenue) || null
+  } catch {}
+  if (!v) {
+    try {
+      const { data } = await supabase.from('app_settings').select('value').eq('key', 'digest_budgets').maybeSingle()
+      v = Number(JSON.parse(data?.value || '{}').monthlyRevenueTarget) || null
+    } catch {}
+  }
+  _ceoBudget = { at: Date.now(), v }
+  return v
+}
+
+const ceoDayWeight = (d) => { const g = new Date(`${d}T12:00:00Z`).getUTCDay(); return g === 0 ? 0 : g === 6 ? 0.5 : 1 }
+
+async function ceoDailyView(fast, goals) {
+  const today = tvDenverDate()
+  const D = _ceoDaily.days || {}, LY = _ceoDaily.ly || {}
+  const series = []
+  for (let k = 29; k >= 1; k--) {
+    const d = ceoAddDays(today, -k)
+    series.push({ d, rev: D[d]?.rev ?? null, leads: D[d]?.leads ?? null })
+  }
+  series.push({ d: today, rev: fast?.revToday ?? null, leads: fast?.leads ?? null, today: true })
+  // Leads: 30-day average and vs the same 30 days last year (matched days only).
+  let sum30 = 0, n30 = 0, cur = 0, prev = 0
+  for (let k = 1; k <= 30; k++) {
+    const d = ceoAddDays(today, -k), x = D[d], y = LY[ceoAddDays(d, -364)]
+    if (x?.leads == null) continue
+    sum30 += x.leads; n30++
+    if (y?.leads != null) { cur += x.leads; prev += y.leads }
+  }
+  const avg30 = n30 ? sum30 / n30 : null
+  // Budget pace: the month's budget spread over its effective days
+  // (Mon–Fri 1, Sat ½, Sun 0); the client works out what's still needed.
+  const budget = await ceoBudget()
+  const mStart = today.slice(0, 8) + '01'
+  const mEnd = ceoAddDays(ceoAddDays(mStart, 32).slice(0, 8) + '01', -1)
+  let effMonth = 0, effLeft = 0
+  for (let d = mStart; d <= mEnd; d = ceoAddDays(d, 1)) {
+    effMonth += ceoDayWeight(d)
+    if (d > today) effLeft += ceoDayWeight(d)
+  }
+  effLeft += ceoDayWeight(today) * (1 - Math.min(1, Math.max(0, (ceoDenverHour() - 7) / 10)))
+  // Channel watchdog: last 3 finished days vs the same 3 weekdays averaged
+  // over the prior 8 weeks. Only channels that normally produce show up.
+  const win = (name, off) => {
+    let s = 0, have = 0
+    for (let k = 1; k <= 3; k++) { const x = D[ceoAddDays(today, -(k + off))]; if (x?.camps) { s += x.camps[name] || 0; have++ } }
+    return have === 3 ? s : null
+  }
+  const names = new Set()
+  for (let k = 1; k <= 59; k++) for (const nm of Object.keys(D[ceoAddDays(today, -k)]?.camps || {})) names.add(nm)
+  const channels = []
+  for (const nm of names) {
+    const recent = win(nm, 0)
+    if (recent == null) continue
+    const base = []
+    for (let w = 1; w <= 8; w++) { const b = win(nm, 7 * w); if (b != null) base.push(b) }
+    if (base.length < 6) continue
+    const avg = base.reduce((a, b) => a + b, 0) / base.length
+    if (avg < 2) continue
+    let kind = null
+    if (recent === 0) kind = 'dark'
+    else if (recent < avg * 0.45) kind = 'fading'
+    else if (recent > avg * 1.7 && recent >= 6) kind = 'surging'
+    if (kind) channels.push({ kind, name: nm, recent, normal: Math.round(avg * 10) / 10 })
+  }
+  const rank = { dark: 0, fading: 1, surging: 2 }
+  channels.sort((a, b) => rank[a.kind] - rank[b.kind] || b.normal - a.normal)
+  return {
+    series,
+    leads: { avg30: avg30 != null ? Math.round(avg30 * 10) / 10 : null, vsGoal: avg30 != null ? avg30 / goals.leadsPerDay - 1 : null, vsLy: prev > 0 ? cur / prev - 1 : null },
+    budget: budget ? { amount: budget, perDay: Math.round(budget / effMonth), effLeft: Math.round(effLeft * 10) / 10 } : null,
+    channels: channels.slice(0, 6),
+    watchReady: n30 >= 29,
+  }
 }
 
 app.get('/api/tv/ceo', async (req, res) => {
@@ -5242,14 +5366,18 @@ app.get('/api/tv/ceo', async (req, res) => {
   try {
     ceoBuildSlow().catch(e => console.warn('ceo slow:', e.message))
     ceoBuildTrend().catch(e => console.warn('ceo trend:', e.message))
+    ceoBuildDaily().catch(e => console.warn('ceo daily:', e.message))
     await Promise.race([ceoBuildFast(), new Promise(r => setTimeout(r, 15_000))])
     const goals = await ceoGoals()
     const dow = new Date(`${tvDenverDate()}T12:00:00Z`).getUTCDay()
+    const trend = ceoTrendView(goals)
+    const curWeek = trend.weeks[trend.weeks.length - 1]
     res.json({
       updatedAt: new Date(_ceoFast.at || Date.now()).toISOString(),
       fast: _ceoFast.data,
       slow: _ceoSlow.data ? { pacing: _ceoSlow.data.pacing, gm: _ceoSlow.data.gm } : null,
-      trend: ceoTrendView(goals),
+      daily: await ceoDailyView(_ceoFast.data, goals),
+      week: { opps: curWeek?.opps ?? null, oppsGoal: trend.goals.oppsWeek },
       goals: { ...goals, oppsToday: dow === 0 ? 0 : dow === 6 ? Math.round(goals.oppsPerDay / 2) : goals.oppsPerDay },
     })
   } catch (e) {

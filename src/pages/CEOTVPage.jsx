@@ -7,8 +7,9 @@ import WeatherStrip from '../components/WeatherStrip'
 
 // CEO board (/tv/ceo) — Brandyn's office TV, in the same visual language as
 // the department boards: pulse-mark header, period strip, ranking tables,
-// feed chips. Adds the executive layer: run-rate pacing, job-matched true GM,
-// opportunities and leads vs goal, weekly trend lines, and a rich live feed.
+// feed. Adds the executive layer: run-rate pacing, job-matched true GM,
+// opportunities and leads vs goal, the 30-day revenue/leads chart against the
+// month's budget pace, money left on the table, and the channel watchdog.
 const C = {
   bg:'#0B0F14', panel:'#141A21', panel2:'#1B222B', border:'#252E38',
   text:'#E6EDF3', muted:'#8B949E', dim:'#6E7681',
@@ -84,114 +85,74 @@ function PeriodPanel({ title, d, accent, compact }) {
   )
 }
 
+// Company-board feed kinds, plus the two "left on the table" kinds.
 const FEED_STYLE = {
-  sold:      { tag:'SOLD',   color:C.green },
-  booked:    { tag:'BOOKED', color:C.blue },
-  missed:    { tag:'MISSED', color:C.red },
-  quote:     { tag:'QUOTE',  color:C.amber },
-  invoice:   { tag:'REV',    color:'#39C5CF' },
-  review:    { tag:'5★',     color:C.amber },
-  lowreview: { tag:'REVIEW', color:C.red },
-  club:      { tag:'CLUB',   color:C.purple },
+  sale:       { tag:'SALE',   color:C.green },
+  review:     { tag:'5★',     color:C.amber },
+  membership: { tag:'CLUB',   color:C.purple },
+  invoice:    { tag:'REV',    color:C.blue },
+  missed:     { tag:'MISSED', color:C.red },
+  quote:      { tag:'QUOTE',  color:C.amber },
 }
-
-// Weekly trends: 13 closed weeks + this week's pace, the same weeks last year
-// dashed behind, and a goal line where one exists. Weekly (not daily) buckets
-// strip out day-of-week noise so direction is readable from across the room.
+const WATCH_STYLE = {
+  dark:    { tag:'DARK',    color:C.red },
+  fading:  { tag:'FADING',  color:C.amber },
+  surging: { tag:'SURGING', color:C.green },
+}
 const fmtK = (n) => n == null ? '—' : Math.abs(n) >= 1e6 ? '$' + (n / 1e6).toFixed(2) + 'M' : Math.abs(n) >= 1000 ? '$' + Math.round(n / 1000) + 'k' : '$' + Math.round(n)
-const md = (d) => d ? `${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))}` : ''
+const signPct = (v) => v == null || !isFinite(v) ? '—' : (v >= 0 ? '+' : '−') + Math.abs(Math.round(v * 100)) + '%'
 
-function Delta({ v, label }) {
-  if (v == null || !isFinite(v)) return null
-  const up = v >= 0
+// Last 30 days: daily revenue (line, labeled), leads (bars, labeled) and the
+// month's budget pace (dashed). Today is the hollow point, still filling in.
+function DailyChart({ series, budget }) {
+  const n = series.length
+  if (!n || series.filter(p => p.rev != null).length < 5) return <div style={{ color:C.dim, fontSize:13 }}>Building 30 days of history — first load takes a few minutes…</div>
+  const W = 1000, H = 250, L = 10, R = 10, T = 22, B = 30
+  const band = (W - L - R) / n
+  const x = (i) => L + band * (i + 0.5)
+  const PH = H - T - B
+  const top = Math.max(...series.map(p => p.rev || 0), budget?.perDay || 0) * 1.16 || 1
+  const y = (v) => T + PH * (1 - v / top)
+  const maxLeads = Math.max(1, ...series.map(p => p.leads || 0))
+  const barH = (v) => (v / maxLeads) * PH * 0.34
+  const pts = series.map((p, i) => p.rev == null ? null : { i, v: p.rev, today: p.today }).filter(Boolean)
+  const closed = pts.filter(p => !p.today)
+  const todayPt = pts.find(p => p.today)
+  const line = closed.map(p => `${x(p.i).toFixed(1)},${y(p.v).toFixed(1)}`).join(' ')
+  const dow = (d) => new Date(`${d}T12:00:00Z`).getUTCDay()
   return (
-    <span style={{ fontSize:11, fontWeight:800, color: up ? C.green : C.red, background: `${up ? C.green : C.red}14`, border:`1px solid ${up ? C.green : C.red}44`, borderRadius:6, padding:'1px 6px', whiteSpace:'nowrap' }}>
-      {up ? '▲' : '▼'} {Math.abs(Math.round(v * 100))}% <span style={{ color:C.muted, fontWeight:600 }}>{label}</span>
-    </span>
-  )
-}
-
-function MiniTrend({ title, color, weeks, field, fmt, goal }) {
-  const n = weeks.length
-  const vals = weeks.map(w => (w.current ? null : (w[field] ?? null)))
-  const lys = weeks.map(w => w.ly?.[field] ?? null)
-  const cur = weeks[n - 1]
-  const pace = cur?.pace?.[field] ?? null
-  let lastIdx = -1
-  vals.forEach((v, i) => { if (v != null) lastIdx = i })
-  const have = vals.filter(v => v != null)
-  if (have.length < 3) return <div style={{ color:C.dim, fontSize:12, padding:8 }}>{title}: building history…</div>
-  const last = vals[lastIdx]
-  const prior4 = vals.slice(Math.max(0, lastIdx - 4), lastIdx).filter(v => v != null)
-  const avg4 = prior4.length ? prior4.reduce((a, b) => a + b, 0) / prior4.length : null
-  const lyLast = lys[lastIdx]
-  const W = 330, H = 150, L = 8, R = 10, T = 18, B = 20
-  const top = Math.max(...have, ...lys.filter(v => v != null), pace || 0, goal || 0) * 1.14 || 1
-  const x = (i) => L + i * (W - L - R) / (n - 1)
-  const y = (v) => T + (H - T - B) * (1 - v / top)
-  const pts = vals.map((v, i) => v == null ? null : [x(i), y(v)]).filter(Boolean)
-  const lyPts = lys.map((v, i) => v == null ? null : `${x(i).toFixed(1)},${y(v).toFixed(1)}`).filter(Boolean).join(' ')
-  let maxI = -1, minI = -1
-  vals.forEach((v, i) => {
-    if (v == null) return
-    if (maxI < 0 || v > vals[maxI]) maxI = i
-    if (minI < 0 || v < vals[minI]) minI = i
-  })
-  const labelAt = (i, below) => {
-    const v = vals[i]
-    const ax = Math.min(W - 4, Math.max(20, x(i)))
-    return <text key={`l${i}`} x={ax} y={below ? y(v) + 14 : y(v) - 7} fontSize="11" fontWeight="800" fill={i === lastIdx ? C.text : C.muted} textAnchor={i === lastIdx ? 'end' : 'middle'}>{fmt(v)}</text>
-  }
-  return (
-    <div style={{ minWidth:0, display:'flex', flexDirection:'column' }}>
-      <div style={{ display:'flex', alignItems:'baseline', gap:8, flexWrap:'wrap' }}>
-        <span style={{ fontSize:11, fontWeight:800, letterSpacing:1, color, textTransform:'uppercase' }}>{title}</span>
-        <span style={{ fontSize:'clamp(15px, 1.6vw, 21px)', fontWeight:800, fontVariantNumeric:'tabular-nums' }}>{fmt(last)}</span>
-        <span style={{ fontSize:10, color:C.dim }}>wk of {md(weeks[lastIdx]?.mon)}</span>
-      </div>
-      <div style={{ display:'flex', gap:6, flexWrap:'wrap', margin:'4px 0 2px' }}>
-        <Delta v={avg4 ? last / avg4 - 1 : null} label="vs 4-wk avg" />
-        <Delta v={lyLast ? last / lyLast - 1 : null} label="vs last yr" />
-      </div>
-      <svg viewBox={`0 0 ${W} ${H}`} style={{ width:'100%', flex:1, minHeight:0 }} preserveAspectRatio="none">
-        {goal ? <>
-          <line x1={L} x2={W - R} y1={y(goal)} y2={y(goal)} stroke={C.amber} strokeWidth="1.4" strokeDasharray="5 4" />
-          <text x={L + 2} y={y(goal) - 4} fontSize="10" fill={C.amber} fontWeight="700">goal {fmt(goal)}</text>
-        </> : null}
-        {lyPts && <polyline points={lyPts} fill="none" stroke={C.dim} strokeWidth="1.6" strokeDasharray="4 4" />}
-        <polyline points={pts.map(p => `${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ')} fill="none" stroke={color} strokeWidth="2.6" strokeLinejoin="round" />
-        {pts.map((p, i) => <circle key={i} cx={p[0]} cy={p[1]} r="2.6" fill={color} />)}
-        {pace != null && lastIdx >= 0 && <>
-          <line x1={x(lastIdx)} y1={y(last)} x2={x(n - 1)} y2={y(pace)} stroke={color} strokeWidth="2" strokeDasharray="3 3" />
-          <circle cx={x(n - 1)} cy={y(pace)} r="4" fill={C.panel} stroke={color} strokeWidth="2" />
-          <text x={x(n - 1) - 2} y={y(pace) + (pace > last ? -8 : 15)} fontSize="10.5" fill={color} fontWeight="800" textAnchor="end">pace {fmt(pace)}</text>
-        </>}
-        {maxI >= 0 && maxI !== lastIdx && labelAt(maxI, false)}
-        {minI >= 0 && minI !== lastIdx && minI !== maxI && labelAt(minI, true)}
-        {labelAt(lastIdx, last < (vals[lastIdx - 1] ?? last))}
-        {[0, Math.floor((n - 2) / 2), n - 2].map(i => <text key={`x${i}`} x={x(i)} y={H - 4} fontSize="10" fill={C.dim} textAnchor={i === 0 ? 'start' : 'middle'}>{md(weeks[i]?.end)}</text>)}
-        <text x={x(n - 1)} y={H - 4} fontSize="10" fill={C.dim} textAnchor="end">now</text>
-      </svg>
-    </div>
-  )
-}
-
-function TrendPanel({ trend, compact }) {
-  const weeks = trend?.weeks || []
-  const ready = (trend?.ready || 0) >= 4
-  return (
-    <Panel title="Trends — weekly, last 13 weeks · dashed gray = same weeks last year · hollow dot = this week's pace" accent={C.orange} compact={compact} style={{ flex:'1 1 auto', minHeight:230 }}>
-      {ready ? (
-        <div style={{ flex:1, minHeight:0, display:'grid', gridTemplateColumns:'repeat(4, 1fr)', gap:18 }}>
-          <MiniTrend title="Revenue" color={C.blue} weeks={weeks} field="rev" fmt={fmtK} />
-          <MiniTrend title="Sales" color={C.green} weeks={weeks} field="sales" fmt={fmtK} />
-          <MiniTrend title="Leads" color={C.amber} weeks={weeks} field="leads" fmt={fmtN} goal={trend?.goals?.leadsWeek} />
-          <MiniTrend title="Opportunities" color={C.purple} weeks={weeks} field="opps" fmt={fmtN} goal={trend?.goals?.oppsWeek} />
-        </div>
-      ) : (
-        <div style={{ color:C.dim, fontSize:13 }}>Building trend history — the first load pulls 28 weeks from ServiceTitan (a few minutes); after that it's cached and only the current week refreshes.</div>
-      )}
-    </Panel>
+    <svg viewBox={`0 0 ${W} ${H}`} style={{ width:'100%', height:'100%' }} preserveAspectRatio="xMidYMid meet">
+      <line x1={L} y1={T + PH} x2={W - R} y2={T + PH} stroke={C.border} />
+      {series.map((p, i) => p.leads == null ? null : (
+        <g key={`b${i}`}>
+          <rect x={x(i) - band * 0.3} y={T + PH - barH(p.leads)} width={band * 0.6} height={barH(p.leads)} rx="2"
+            fill={p.today ? 'none' : '#2A3A55'} stroke={p.today ? '#5B7BB0' : 'none'} strokeDasharray={p.today ? '3 2' : undefined} />
+          <text x={x(i)} y={T + PH - barH(p.leads) + (barH(p.leads) > 15 ? 11 : -3)} fontSize="9.5" fill="#8FA6CC" textAnchor="middle" fontWeight="700">{p.leads}</text>
+        </g>
+      ))}
+      {budget?.perDay ? <>
+        <line x1={L} x2={W - R} y1={y(budget.perDay)} y2={y(budget.perDay)} stroke={C.amber} strokeWidth="1.6" strokeDasharray="6 5" />
+        <text x={L + 2} y={y(budget.perDay) - 5} fontSize="11" fill={C.amber} fontWeight="800">budget pace {fmtK(budget.perDay)}/day</text>
+      </> : null}
+      <polyline points={line} fill="none" stroke={C.green} strokeWidth="2.6" strokeLinejoin="round" />
+      {closed.map(p => (
+        <g key={`p${p.i}`}>
+          <circle cx={x(p.i)} cy={y(p.v)} r="3" fill={C.green} />
+          <text x={x(p.i)} y={y(p.v) - 7} fontSize="10" fill={C.text} textAnchor="middle" fontWeight="700">{Math.round(p.v / 1000)}</text>
+        </g>
+      ))}
+      {todayPt && closed.length ? <>
+        <line x1={x(closed[closed.length - 1].i)} y1={y(closed[closed.length - 1].v)} x2={x(todayPt.i)} y2={y(todayPt.v)} stroke={C.green} strokeWidth="2" strokeDasharray="3 3" />
+        <circle cx={x(todayPt.i)} cy={y(todayPt.v)} r="4.5" fill={C.panel} stroke={C.green} strokeWidth="2" />
+        <text x={x(todayPt.i) - 2} y={y(todayPt.v) - 8} fontSize="10" fill="#7EE2A8" textAnchor="end" fontWeight="800">so far {Math.round(todayPt.v / 1000)}</text>
+      </> : null}
+      {series.map((p, i) => (
+        <text key={`x${i}`} x={x(i)} y={H - 10} fontSize="9.5" textAnchor="middle"
+          fill={p.today ? C.text : [0, 6].includes(dow(p.d)) ? '#4A525C' : C.dim} fontWeight={p.today ? 800 : 500}>
+          {p.d.slice(8) === '01' || i === 0 ? `${Number(p.d.slice(5, 7))}/${Number(p.d.slice(8))}` : Number(p.d.slice(8))}
+        </text>
+      ))}
+    </svg>
   )
 }
 
@@ -220,7 +181,7 @@ export default function CEOTVPage() {
     if (!el) return
     const t = setTimeout(() => {
       const need = el.scrollHeight, have = el.clientHeight
-      if (need > have + 4) setFit(f => Math.max(0.55, +((f * have) / need).toFixed(3)))
+      if (need > have + 2) setFit(f => Math.max(0.55, +((f * have) / need * 0.99).toFixed(3)))
     }, 300)
     return () => clearTimeout(t)
   }, [narrow, co, ceo, csr, fit])
@@ -253,7 +214,7 @@ export default function CEOTVPage() {
     return () => { clearInterval(t1); clearInterval(t2); clearInterval(t3) }
   }, [load, loadCsr])
 
-  const fast = ceo?.fast, slow = ceo?.slow, trend = ceo?.trend, goals = ceo?.goals
+  const fast = ceo?.fast, slow = ceo?.slow, daily = ceo?.daily, goals = ceo?.goals
   const gm = slow?.gm
   const techs = (co?.techs || []).slice(0, 5)
   const techMax = useMemo(() => {
@@ -273,15 +234,18 @@ export default function CEOTVPage() {
     for (const c of ['score', 'booked', 'rate', 'leadCalls', 'outbound', 'clubs', 'qa']) m[c] = Math.max(0, ...csrs.map(x => Number(x[c]) || 0))
     return m
   }, [csrs])
-  const feed = fast?.feed || []
-  const sum = fast?.summary
+  const leaks = fast?.leaks
   const oppGoal = goals?.oppsToday ?? 33
   const oppTotal = fast?.opps?.total
   const oppPct = oppGoal > 0 && oppTotal != null ? Math.min(100, Math.round(oppTotal / oppGoal * 100)) : 0
   const oppCol = oppGoal === 0 ? C.muted : oppPct >= 100 ? C.green : oppPct >= 70 ? C.amber : C.red
-  const curWeek = trend?.weeks?.[trend.weeks.length - 1]
   const leadGoal = goals?.leadsPerDay ?? 43
+  const leadsToday = fast?.leads
+  const leadPct = leadsToday != null ? Math.min(100, Math.round(leadsToday / leadGoal * 100)) : 0
   const gmCol = (v) => v == null ? C.dim : v >= 50 ? C.green : v >= 42 ? C.amber : C.red
+  const budget = daily?.budget
+  const mtdRev = co?.monthly?.revenue
+  const need = budget && mtdRev != null && budget.effLeft > 0 ? (budget.amount - mtdRev) / budget.effLeft : null
 
   const cell = (v, isMax, fmt = fmtN, color) => (
     <td style={{ padding: narrow ? '4px 8px' : '6px 9px', textAlign:'right', fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap',
@@ -293,6 +257,18 @@ export default function CEOTVPage() {
   const th = (label, right = true) => (
     <th style={{ padding: narrow ? '4px 8px' : '5px 9px', textAlign: right ? 'right' : 'left', fontSize:10, fontWeight:700, letterSpacing:1, color:C.dim, textTransform:'uppercase', whiteSpace:'nowrap' }}>{label}</th>
   )
+  const feedRow = (key, kind, line, sub) => {
+    const st = FEED_STYLE[kind] || FEED_STYLE.sale
+    return (
+      <div key={key} style={{ display:'flex', alignItems:'center', gap:10, padding:'8px 16px', borderBottom:`1px solid ${C.border}55` }}>
+        <span style={{ fontSize:10, fontWeight:800, letterSpacing:.8, color:st.color, background:`${st.color}1A`, border:`1px solid ${st.color}55`, borderRadius:6, padding:'3px 7px', flexShrink:0 }}>{st.tag}</span>
+        <div style={{ minWidth:0, flex:1 }}>
+          <div style={{ fontSize:13, fontWeight:700, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{line}</div>
+          <div style={{ fontSize:11, color:C.dim, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{sub}</div>
+        </div>
+      </div>
+    )
+  }
 
   if (denied) {
     return (
@@ -367,11 +343,11 @@ export default function CEOTVPage() {
           </div>
         </Panel>
         <Panel title={`True GM — ${gm?.month || 'month'}`} accent={C.amber} compact={narrow}>
-          <div style={{ display:'grid', gridTemplateColumns:'repeat(2, 1fr)', gap:'10px 8px' }}>
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:'10px 8px' }}>
             <Stat big label="Company" value={gm?.company != null ? gm.company + '%' : '—'} color={gmCol(gm?.company)} />
-            <Stat label="HVAC" value={gm?.byTrade?.HVAC != null ? gm.byTrade.HVAC + '%' : '—'} color={gmCol(gm?.byTrade?.HVAC)} />
-            <Stat label="Plumbing" value={gm?.byTrade?.Plumbing != null ? gm.byTrade.Plumbing + '%' : '—'} color={gmCol(gm?.byTrade?.Plumbing)} />
-            <Stat label="Electrical" value={gm?.byTrade?.Electrical != null ? gm.byTrade.Electrical + '%' : '—'} color={gmCol(gm?.byTrade?.Electrical)} />
+            {['HVAC', 'Plumbing', 'Electrical', 'Garage Doors'].map(t => (
+              <Stat key={t} label={t === 'Garage Doors' ? 'Garage' : t} value={gm?.byTrade?.[t] != null ? gm.byTrade[t] + '%' : '—'} color={gmCol(gm?.byTrade?.[t])} />
+            ))}
           </div>
         </Panel>
         <Panel title="Call center — today" accent={C.green} compact={narrow}>
@@ -379,29 +355,56 @@ export default function CEOTVPage() {
             <Stat big label="Booking rate" value={fast?.booking?.pct != null ? fast.booking.pct + '%' : '—'} color={C.green} />
             <Stat label="Booked / lead calls" value={`${fmtN(fast?.booking?.booked)} / ${fmtN(fast?.booking?.leadCalls)}`} />
             <Stat label="CSR outbounds" value={fmtN(fast?.csrOutbounds)} color={C.blue} />
-            <Stat label={`Leads · goal ${leadGoal}`} value={fmtN(fast?.leads)} color={(fast?.leads || 0) >= leadGoal ? C.green : C.amber} />
+            <Stat label="Missed lead calls" value={fmtN(leaks?.missedCount)} color={leaks?.missedCount ? C.red : C.muted} />
           </div>
         </Panel>
         <Panel title={oppGoal ? `Opportunities — goal ${oppGoal} today` : 'Opportunities — closed day'} accent={C.purple} compact={narrow}>
-          <div style={{ display:'flex', alignItems:'baseline', gap:14 }}>
+          <div style={{ display:'flex', alignItems:'baseline', gap:18 }}>
             <Stat big label="Ran today · 3 trades" value={fmtN(oppTotal)} color={oppCol} />
-            {curWeek?.opps != null && <Stat label={`This week · goal ${trend?.goals?.oppsWeek ?? ''}`} value={fmtN(curWeek.opps)} color={C.purple} />}
+            {ceo?.week?.opps != null && <Stat label={`This week · goal ${ceo.week.oppsGoal}`} value={fmtN(ceo.week.opps)} color={C.purple} />}
           </div>
           <div style={{ height:9, borderRadius:5, background:C.panel2, margin:'8px 0' }}>
             <div style={{ height:'100%', width:`${oppPct}%`, borderRadius:5, background:oppCol }} />
           </div>
-          <div style={{ display:'flex', gap:14 }}>
+          <div style={{ display:'flex', gap:16 }}>
             {['HVAC', 'Plumbing', 'Electrical'].map(t => <Stat key={t} label={TRADE_SHORT[t]} value={fmtN(fast?.opps?.byTrade?.[t] || 0)} />)}
+            <Stat label="GAR · not in goal" value={fmtN(fast?.opps?.byTrade?.['Garage Doors'] || 0)} color={C.muted} />
           </div>
         </Panel>
       </div>
 
-      {/* Trends + rankings (left) · live feed (right). The row grows to its
-          content so auto-fit can see overflow; the feed is absolutely placed
-          so its length never sets the row height. */}
+      {/* Chart + leads + rankings (left) · live feed + channel watch (right).
+          The row grows to its content so auto-fit sees any overflow; the feed
+          is absolutely placed so its length never sets the row height. */}
       <div style={{ display:'flex', flexDirection: narrow ? 'column' : 'row', gap: narrow ? 10 : 12, flex:'1 0 auto' }}>
         <div style={{ flex:1.65, display:'flex', flexDirection:'column', gap: narrow ? 10 : 12, minWidth:0 }}>
-          <TrendPanel trend={trend} compact={narrow} />
+          <div style={{ display:'flex', gap: narrow ? 10 : 12, flex:'1 1 auto', minHeight: 270 }}>
+            <Panel title="Last 30 days — revenue $k (line) · leads (bars) · budget pace (dashed)" accent={C.green} compact={narrow} style={{ flex:2.5 }}>
+              {budget && mtdRev != null && (
+                <div style={{ fontSize:12, color:C.muted, marginTop:-4, marginBottom:4 }}>
+                  {fmtDate(time, { month:'long' })} budget <b style={{ color:C.text }}>{fmtMoneyC(budget.amount)}</b> · MTD <b style={{ color:C.text }}>{fmtMoneyC(mtdRev)}</b> ·{' '}
+                  {need > 0
+                    ? <>need <b style={{ color: need > budget.perDay ? C.red : C.green }}>{fmtK(need)}</b> per business day the rest of the month</>
+                    : <b style={{ color:C.green }}>budget hit — {fmtK(-need * budget.effLeft)} over</b>}
+                </div>
+              )}
+              <div style={{ flex:1, minHeight:0 }}><DailyChart series={daily?.series || []} budget={budget} /></div>
+            </Panel>
+            <Panel title="Leads — today vs goal" accent={C.amber} compact={narrow} style={{ flex:1 }}>
+              <Stat big label={`Leads today · goal ${leadGoal}`} value={fmtN(leadsToday)} color={(leadsToday || 0) >= leadGoal ? C.green : C.amber} />
+              <div style={{ height:9, borderRadius:5, background:C.panel2, margin:'10px 0' }}>
+                <div style={{ height:'100%', width:`${leadPct}%`, borderRadius:5, background: leadPct >= 100 ? C.green : C.amber }} />
+              </div>
+              <div style={{ display:'flex', gap:14, flexWrap:'wrap' }}>
+                {['HVAC', 'Plumbing', 'Electrical', 'Garage Doors'].map(t => <Stat key={t} label={TRADE_SHORT[t]} value={fmtN(fast?.leadsByTrade?.[t] || 0)} />)}
+              </div>
+              <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:8, marginTop:'auto', paddingTop:12, borderTop:`1px solid ${C.border}` }}>
+                <Stat label="30-day avg" value={daily?.leads?.avg30 != null ? daily.leads.avg30.toFixed(1) : '—'} />
+                <Stat label="vs goal" value={signPct(daily?.leads?.vsGoal)} color={(daily?.leads?.vsGoal ?? 0) >= 0 ? C.green : C.red} />
+                <Stat label="vs last year" value={signPct(daily?.leads?.vsLy)} color={(daily?.leads?.vsLy ?? 0) >= 0 ? C.green : C.red} />
+              </div>
+            </Panel>
+          </div>
           <Panel title={`Top 5 techs — ${fmtDate(time, { month:'long' })} · composite score`} accent={C.green} compact={narrow} style={{ flexShrink:0 }}>
             <table style={{ width:'100%', borderCollapse:'collapse' }}>
               <thead><tr>{th('#', false)}{th('Technician', false)}{th('Score')}{th('Sold')}{th('Avg ticket')}{th('Close')}{th('5★')}{th('Clubs')}{th('YTD sold')}</tr></thead>
@@ -446,44 +449,65 @@ export default function CEOTVPage() {
           </Panel>
         </div>
 
-        {/* Live feed — who did what, on which job, in which trade, when */}
-        <div style={{ flex:.62, minWidth: narrow ? 0 : 300, position:'relative', minHeight: narrow ? 420 : 0 }}>
-          <Panel title="Today — live" accent={C.green} compact={narrow} style={{ position:'absolute', inset:0 }}>
-            {sum && (
-              <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:'8px 10px', paddingBottom:10, marginBottom:6, borderBottom:`1px solid ${C.border}` }}>
-                <Stat label={`Sold · ${fmtK(sum.soldAmt)}`} value={fmtN(sum.sold)} color={C.green} />
-                <Stat label="Booked" value={fmtN(sum.booked)} color={C.blue} />
-                <Stat label="Missed" value={fmtN(sum.missed)} color={sum.missed ? C.red : C.muted} />
-                <Stat label={`Open quotes · ${fmtK(sum.quoteAmt)}`} value={fmtN(sum.quotes)} color={C.amber} />
-                <Stat label="Clubs" value={fmtN(sum.clubs)} color={C.purple} />
-                <Stat label="5★ reviews" value={fmtN(sum.fiveStar)} color={C.amber} />
+        <div style={{ flex:.62, minWidth: narrow ? 0 : 300, display:'flex', flexDirection:'column', gap: narrow ? 10 : 12 }}>
+          {/* Live feed — the company board's feed, with money left on the table pinned on top */}
+          <div style={{ flex:1, position:'relative', minHeight: narrow ? 380 : 0 }}>
+            <div style={{ position:'absolute', inset:0, background:C.panel, border:`1px solid ${C.border}`, borderRadius:14, overflow:'hidden', display:'flex', flexDirection:'column' }}>
+              <div style={{ padding:'13px 18px', borderBottom:`1px solid ${C.border}`, display:'flex', alignItems:'center', gap:8, flexShrink:0 }}>
+                <span style={{ fontSize:13, fontWeight:700, letterSpacing:.5 }}>Today in Company</span>
+                <div style={{ marginLeft:'auto', width:7, height:7, borderRadius:'50%', background:C.green, animation:'wr-pulse 1.5s infinite' }} />
               </div>
-            )}
-            <div style={{ flex:1, minHeight:0, overflow:'hidden' }}>
-              {feed.map((f, i) => {
-                const st = FEED_STYLE[f.kind] || FEED_STYLE.sold
-                return (
-                  <div key={i} style={{ padding:'6px 0', borderBottom:`1px solid ${C.border}`, minWidth:0 }}>
-                    <div style={{ display:'flex', alignItems:'center', gap:8, minWidth:0 }}>
-                      <span style={{ fontSize:9, fontWeight:800, letterSpacing:.6, color:st.color, border:`1px solid ${st.color}55`, background:`${st.color}14`, borderRadius:5, padding:'2px 6px', flexShrink:0, minWidth:44, textAlign:'center' }}>{st.tag}</span>
-                      {f.amount != null && <b style={{ color:st.color, fontSize:'clamp(12px, 1.2vw, 14px)', fontVariantNumeric:'tabular-nums', flexShrink:0 }}>{fmtMoney(f.amount)}</b>}
-                      <span style={{ fontSize:'clamp(11px, 1.1vw, 13px)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', flex:1, minWidth:0 }}>{f.title}</span>
-                      <span style={{ fontSize:10, color:C.dim, flexShrink:0, fontVariantNumeric:'tabular-nums' }}>{f.at ? fmtTime(f.at, { hour:'numeric', minute:'2-digit' }) : ''}</span>
+              <div style={{ flex:1, overflow:'hidden', padding:'4px 0 8px' }}>
+                {leaks && (leaks.missedCount > 0 || leaks.quoteCount > 0) && (
+                  <div style={{ background:`${C.red}0A`, borderBottom:`1px solid ${C.border}` }}>
+                    <div style={{ padding:'8px 16px 2px', fontSize:10, fontWeight:800, letterSpacing:1.2, color:C.red, textTransform:'uppercase' }}>
+                      Left on the table · {leaks.missedCount} missed · {leaks.quoteCount} open quotes {fmtK(leaks.quoteAmt)}
                     </div>
-                    <div style={{ fontSize:10.5, color:C.muted, marginTop:2, paddingLeft:52, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
-                      {[f.who, f.trade ? TRADE_SHORT[f.trade] || f.trade : null, f.sub].filter(Boolean).join(' · ')}
-                    </div>
+                    {(leaks.missed || []).slice(0, 4).map((m, i) => feedRow(`m${i}`, 'missed',
+                      `Missed lead — ${m.who}`,
+                      [m.reason, m.trade ? TRADE_SHORT[m.trade] : null, m.channel, m.csr ? `took: ${m.csr}` : null, timeAgo(m.at)].filter(Boolean).join(' · ')))}
+                    {(leaks.quotes || []).slice(0, 3).map((q, i) => feedRow(`q${i}`, 'quote',
+                      `${fmtMoney(q.amount)} open — ${q.title}`,
+                      [q.trade ? TRADE_SHORT[q.trade] : null, q.job ? `#${q.job}` : null, timeAgo(q.at)].filter(Boolean).join(' · ')))}
                   </div>
-                )
-              })}
-              {!feed.length && <div style={{ color:C.dim, fontSize:13 }}>{fast ? 'Quiet so far today…' : 'Loading today…'}</div>}
+                )}
+                {(co?.feed || []).map((f, i) => feedRow(`f${i}`, f.kind,
+                  <>
+                    {f.kind === 'sale' && `${f.who || 'The team'} sold ${fmtMoney(f.amount)}`}
+                    {f.kind === 'review' && `${f.who || 'The team'} earned a 5★ review`}
+                    {f.kind === 'membership' && `${f.who || 'The team'} sold a membership`}
+                    {f.kind === 'invoice' && `${f.who || 'The team'} closed ${fmtMoney(f.amount)} in revenue`}
+                  </>,
+                  [f.text, timeAgo(f.at)].filter(Boolean).join(' · ')))}
+                {!(co?.feed || []).length && !leaks?.missedCount && (
+                  <div style={{ padding:24, textAlign:'center', color:C.dim, fontSize:13 }}>Nothing yet today — first win lands here.</div>
+                )}
+              </div>
             </div>
-            <div style={{ fontSize:9.5, color:C.dim, marginTop:6, lineHeight:1.5 }}>
-              Opps goal 33/day = 2027 $20.5M plan ÷ 281 effective days (Sat = ½) ÷ ~$2,224/opp (+6% price, 70% close) · 3 trades, ex-garage · Leads = new demand jobs (Meghan's definition) · GM = revenue − job POs − ADP-burdened field labor
-            </div>
+          </div>
+
+          {/* Channel watchdog: last 3 days vs each channel's 8-week normal */}
+          <Panel title="Channel watch — last 3 days vs normal" accent={C.red} compact={narrow} style={{ flexShrink:0 }}>
+            {!daily?.watchReady ? (
+              <div style={{ color:C.dim, fontSize:12 }}>Building 8 weeks of channel history…</div>
+            ) : !(daily?.channels || []).length ? (
+              <div style={{ color:C.muted, fontSize:12 }}>All channels are within their normal range.</div>
+            ) : daily.channels.map((c, i) => {
+              const st = WATCH_STYLE[c.kind]
+              return (
+                <div key={i} style={{ display:'flex', alignItems:'center', gap:10, padding:'5px 0', borderBottom: i < daily.channels.length - 1 ? `1px solid ${C.border}55` : 'none' }}>
+                  <span style={{ fontSize:10, fontWeight:800, letterSpacing:.8, color:st.color, background:`${st.color}1A`, border:`1px solid ${st.color}55`, borderRadius:6, padding:'3px 7px', flexShrink:0, minWidth:58, textAlign:'center' }}>{st.tag}</span>
+                  <div style={{ minWidth:0, flex:1 }}>
+                    <div style={{ fontSize:13, fontWeight:700, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{c.name}</div>
+                    <div style={{ fontSize:11, color:C.dim }}>{c.recent} lead calls in 3 days · normally ~{c.normal}</div>
+                  </div>
+                </div>
+              )
+            })}
           </Panel>
         </div>
       </div>
+      <style>{`@keyframes wr-pulse { 0%,100%{opacity:1} 50%{opacity:.25} }`}</style>
     </div>
   )
 }
