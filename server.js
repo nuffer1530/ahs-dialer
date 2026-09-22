@@ -4110,16 +4110,37 @@ async function tvTechMeta() {
 // Page like stPageAll but KEEP what's already fetched when a page errors — at
 // year scale one flaky page out of 15 was silently zeroing YTD 5★ reviews
 // (Brandyn's catch: plumbing YTD showed 0 while the month showed 4).
-async function tvPageSoft(pathForPage, cap) {
+// A page is retried before we settle for a partial pull: a single 25 s
+// timeout on page 1 of the year's reviews zeroed YTD 5★ on every board
+// (Brandyn, Sep 22).
+async function tvPageSoft(pathForPage, cap, { retries = 2 } = {}) {
   const out = []
   for (let page = 1; page <= 500; page++) {
-    let d
-    try { d = await stGet(pathForPage(page)) }
-    catch (e) { console.warn(`tv page soft (kept ${out.length} rows):`, e.message); break }
+    let d = null
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      try { d = await stGet(pathForPage(page)); break }
+      catch (e) {
+        if (attempt < retries) { await new Promise(r => setTimeout(r, 4000 * (attempt + 1))); continue }
+        console.warn(`tv page soft (kept ${out.length} rows after ${retries + 1} tries):`, e.message)
+      }
+    }
+    if (!d) break
     out.push(...(d?.data || []))
     if (!d?.hasMore || out.length >= cap) break
   }
   return out
+}
+// When a pull comes back EMPTY (the source timed out), the previous tier's
+// numbers are truer than zeros — carry them forward and say so.
+function tvCarryReviews(w, prev, label) {
+  if (w.reviews.length || !prev?.dept) return false
+  let carried = 0
+  for (const t of Object.values(TV_TRADES)) {
+    const p = prev.dept[t]
+    if (p && p.fiveStar) { w.dept[t].fiveStar = p.fiveStar; carried++ }
+  }
+  if (carried) console.warn(`tv ${label}: reviews pull returned nothing — carried 5★ forward from the previous build`)
+  return carried > 0
 }
 
 // One window's pulls, aggregated per trade (+ per tech when asked).
@@ -4522,6 +4543,8 @@ async function tvBuildSlow() {
 
     if (Date.now() - _tvMonth.at > 60 * 60_000) {
       const w = await tvWindow({ fromIso: tvBounds(monthStart), invFrom: `${monthStart}T00:00:00Z`, invTo: `${today}T23:59:59Z`, revFrom: monthStart, perTech: true })
+      const prevMonth = _tvMonth.data
+      const reviewsCarried = tvCarryReviews(w, prevMonth, 'month')
       let mJobTypeOf = new Map(), mJtNames = new Map()
       // Month tech table needs jobs ran + presented per tech → assignments.
       try {
@@ -4569,8 +4592,11 @@ async function tvBuildSlow() {
         }
       } catch (e) { console.warn('tv month close:', e.message) }
       const byTrade = {}; for (const t of Object.values(TV_TRADES)) byTrade[t] = []
+      const prevTechFive = new Map()
+      if (reviewsCarried) for (const rows of Object.values(prevMonth?.techsByTrade || {})) for (const x of rows) prevTechFive.set(String(x.id), x.fiveStar || 0)
       for (const [id, r] of w.techRow) {
         const m = meta.get(String(id)); if (!m?.trade || !m.roster) continue
+        if (reviewsCarried && prevTechFive.has(String(id))) r.fiveStar = prevTechFive.get(String(id))
         // Per-tech close = their line on ST's Technician Scorecard.
         const c = mClose ? techStats(mClose.result, id) : { opps: 0, closed: 0, rate: null }
         byTrade[m.trade].push({
@@ -4604,9 +4630,12 @@ async function tvBuildSlow() {
 
     if (Date.now() - _tvYear.at > 6 * 3600_000) {
       const w = await tvWindow({ fromIso: tvBounds(yearStart), invFrom: `${yearStart}T00:00:00Z`, invTo: `${today}T23:59:59Z`, revFrom: yearStart, perTech: true, capMul: 5 })
+      const prevYear = _tvYear.data
+      const yearReviewsCarried = tvCarryReviews(w, prevYear, 'year')
       const ytdTech = {}
       for (const [id, r] of w.techRow) {
-        ytdTech[String(id)] = { sold: Math.round(r.sold), fiveStar: r.fiveStar, memberships: r.memberships }
+        const five = yearReviewsCarried ? (prevYear?.ytdTech?.[String(id)]?.fiveStar ?? r.fiveStar) : r.fiveStar
+        ytdTech[String(id)] = { sold: Math.round(r.sold), fiveStar: five, memberships: r.memberships }
       }
       // Fallback if the jobs pull below fails: distinct invoiced jobs.
       for (const t of Object.values(TV_TRADES)) w.dept[t].jobsRan = w.dept[t].revJobs
