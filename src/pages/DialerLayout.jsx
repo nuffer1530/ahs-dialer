@@ -22,6 +22,7 @@ import DispatchPage from './DispatchPage'
 import AdminPage from './AdminPage'
 import WarRoomPage from './WarRoomPage'
 import DeptTVPage from './DeptTVPage'
+import CEOTVPage from './CEOTVPage'
 import AttendancePage from './AttendancePage'
 import RecordingsPage from './RecordingsPage'
 import MyPage from './MyPage'
@@ -962,6 +963,7 @@ function DialerLayoutInner() {
           {(isAdmin || (profile?.leads_teams || []).length > 0) && <Route path="/team" element={<TeamPage />} />}
           {isLeader && <Route path="/leadership" element={<LeadershipPage />} />}
           <Route path="/warroom" element={<WarRoomPage />} />
+          {isLeader && <Route path="/tv/ceo" element={<CEOTVPage />} />}
           <Route path="/tv/:trade" element={<DeptTVPage />} />
           <Route path="/mypage" element={<MyPage />} />
           <Route path="/settings" element={<AdminPage />} />

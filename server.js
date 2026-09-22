@@ -4771,6 +4771,220 @@ app.get('/api/tv/department/:trade', async (req, res) => {
   }
 })
 
+// ================= CEO board (/tv/ceo — Brandyn's office TV) =================
+// Composes with /api/tv/department/company and /api/tv/csr-month; this endpoint
+// adds what those don't have. Fast tier (5 min): today's leads / booking % /
+// CSR outbounds / opportunities-vs-goal. Slow tier (12 h, persisted in
+// app_settings): monthly revenue series for the Path-of-the-Year chart,
+// run-rate + seasonality pacing, true burdened GM, channel watchdog.
+// requireLeadership-gated: true GM is on this board.
+let _ceoFast = { at: 0, data: null }, _ceoSlow = { at: 0, data: null }
+let _ceoFastBusy = false, _ceoSlowBusy = false, _ceoLoaded = false
+const CEO_LABOR = 0.224      // Pro Pay ~18% of net × 1.243 TotalSource burden
+const CEO_OPPS_GOAL = 33     // per effective day (Mon-Fri, Sat=½) for $20.5M
+const CEO_LEADS_GOAL = 43    // Meghan's monthly lead goal / 30
+
+async function ceoLoadPersisted() {
+  if (_ceoLoaded) return
+  _ceoLoaded = true
+  try {
+    const { data } = await supabase.from('app_settings').select('value').eq('key', 'ceo_slow_cache').maybeSingle()
+    if (data?.value) { const v = JSON.parse(data.value); if (v?.at) _ceoSlow = v }
+  } catch (e) { console.warn('ceo cache load:', e.message) }
+}
+
+async function ceoMonthRevenue(ym) {
+  const [y, m] = ym.split('-').map(Number)
+  const to = m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, '0')}`
+  const invs = await stPageAll(pg => `/accounting/v2/tenant/${ST_TENANT_ID}/invoices?invoicedOnOrAfter=${ym}-01T00:00:00Z&invoicedOnBefore=${to}-01T00:00:00Z&pageSize=500&page=${pg}`, 6000)
+  const out = {}
+  for (const i of invs) {
+    const t = tvTradeOf((i.businessUnit || {}).name); if (!t) continue
+    out[t] = Math.round((out[t] || 0) + (Number(i.subTotal) || 0))
+  }
+  return out
+}
+
+async function ceoBuildSlow() {
+  if (_ceoSlowBusy) return
+  _ceoSlowBusy = true
+  try {
+    await ceoLoadPersisted()
+    if (_ceoSlow.data && Date.now() - _ceoSlow.at < 12 * 3600_000) return
+    const today = tvDenverDate()
+    const curY = Number(today.slice(0, 4)), curM = Number(today.slice(5, 7))
+    const curYm = today.slice(0, 7)
+    const months = { ...(_ceoSlow.data?.months || {}) }
+    const want = []
+    for (let m = 1; m <= 12; m++) want.push(`${curY - 1}-${String(m).padStart(2, '0')}`)
+    for (let m = 1; m < curM; m++) want.push(`${curY}-${String(m).padStart(2, '0')}`)
+    const lastClosed = curM > 1 ? `${curY}-${String(curM - 1).padStart(2, '0')}` : `${curY - 1}-12`
+    for (const ym of want) {
+      // Closed months are cached forever; the most recent closed month gets
+      // one refresh per calendar month (late invoices trickle in).
+      if (months[ym] && (ym !== lastClosed || _ceoSlow.data?.refreshedFor === curYm)) continue
+      months[ym] = await ceoMonthRevenue(ym)
+    }
+
+    // Current month to date (also feeds GM) + POs for materials.
+    const mFrom = `${today.slice(0, 8)}01T00:00:00Z`
+    const [mInvs, mPos] = await Promise.all([
+      stPageAll(pg => `/accounting/v2/tenant/${ST_TENANT_ID}/invoices?invoicedOnOrAfter=${mFrom}&invoicedOnBefore=${today}T23:59:59Z&pageSize=500&page=${pg}`, 6000).catch(() => []),
+      stPageAll(pg => `/inventory/v2/tenant/${ST_TENANT_ID}/purchase-orders?createdOnOrAfter=${mFrom}&pageSize=500&page=${pg}`, 4000).catch(() => []),
+    ])
+    const mtd = {}, poByTrade = {}
+    const buOfPo = new Map()
+    for (const i of mInvs) {
+      const t = tvTradeOf((i.businessUnit || {}).name); if (!t) continue
+      mtd[t] = Math.round((mtd[t] || 0) + (Number(i.subTotal) || 0))
+      const jid = (i.job || {}).id
+      if (jid != null) buOfPo.set(jid, t)
+    }
+    for (const p of mPos) {
+      if (['Canceled', 'Rejected'].includes(p.status)) continue
+      const t = buOfPo.get(p.jobId) || tvTradeOf(String(p.businessUnitId || ''))
+      if (t) poByTrade[t] = (poByTrade[t] || 0) + (Number(p.total) || 0)
+      else poByTrade._other = (poByTrade._other || 0) + (Number(p.total) || 0)
+    }
+    const gm = { month: curYm, byTrade: {}, company: null }
+    let gRev = 0, gPo = 0
+    for (const t of Object.values(TV_TRADES)) {
+      const rev = mtd[t] || 0, po = poByTrade[t] || 0
+      gRev += rev; gPo += po
+      gm.byTrade[t] = rev > 500 ? Math.round(((rev - po - rev * CEO_LABOR) / rev) * 1000) / 10 : null
+    }
+    gPo += poByTrade._other || 0   // unattributed POs count against company GM
+    gm.company = gRev > 0 ? Math.round(((gRev - gPo - gRev * CEO_LABOR) / gRev) * 1000) / 10 : null
+
+    // Pacing: YoY factor from the last 3 closed months vs same months prior
+    // year; project current + future months as prior-year month × factor.
+    const sumM = (ym) => Object.values(months[ym] || {}).reduce((a, b) => a + b, 0)
+    const closed3 = [], prior3 = []
+    for (let k = 1; k <= 3; k++) {
+      let mm = curM - k, yy = curY
+      if (mm < 1) { mm += 12; yy-- }
+      closed3.push(sumM(`${yy}-${String(mm).padStart(2, '0')}`))
+      prior3.push(sumM(`${yy - 1}-${String(mm).padStart(2, '0')}`))
+    }
+    const yoy = prior3.reduce((a, b) => a + b, 0) > 0 ? closed3.reduce((a, b) => a + b, 0) / prior3.reduce((a, b) => a + b, 0) : 1.35
+    const mtdTotal = Object.values(mtd).reduce((a, b) => a + b, 0)
+    let yearProj = 0
+    const projMonths = {}
+    for (let m = 1; m <= 12; m++) {
+      const ym = `${curY}-${String(m).padStart(2, '0')}`
+      if (m < curM) { yearProj += sumM(ym); continue }
+      const proj = Math.round(sumM(`${curY - 1}-${String(m).padStart(2, '0')}`) * yoy)
+      projMonths[ym] = m === curM ? Math.max(proj, mtdTotal) : proj
+      yearProj += projMonths[ym]
+    }
+    const prevYearTotal = Array.from({ length: 12 }, (_, i) => sumM(`${curY - 1}-${String(i + 1).padStart(2, '0')}`)).reduce((a, b) => a + b, 0)
+
+    _ceoSlow = {
+      at: Date.now(), refreshedFor: curYm,
+      data: {
+        months, mtd, projMonths,
+        pacing: { yearProj: Math.round(yearProj), yoy: Math.round((yoy - 1) * 100), monthProj: projMonths[curYm] || mtdTotal, prevYearTotal: Math.round(prevYearTotal) },
+        gm,
+      },
+    }
+    try {
+      await supabase.from('app_settings').upsert({ key: 'ceo_slow_cache', value: JSON.stringify(_ceoSlow) }, { onConflict: 'key' })
+    } catch (e) { console.warn('ceo cache save:', e.message) }
+  } finally { _ceoSlowBusy = false }
+}
+
+async function ceoBuildFast() {
+  if (_ceoFastBusy || (_ceoFast.data && Date.now() - _ceoFast.at < 5 * 60_000)) return
+  _ceoFastBusy = true
+  try {
+    const today = tvDenverDate()
+    const fromIso = tvBounds(today)
+    const [calls, ests, invs, meta, admins] = await Promise.all([
+      stPageAll(pg => `/telecom/v2/tenant/${ST_TENANT_ID}/calls?createdOnOrAfter=${fromIso}&pageSize=500&page=${pg}`, 4000).catch(() => []),
+      stPageAll(pg => `/sales/v2/tenant/${ST_TENANT_ID}/estimates?createdOnOrAfter=${fromIso}&pageSize=500&page=${pg}`, 2000).catch(() => []),
+      stPageAll(pg => `/accounting/v2/tenant/${ST_TENANT_ID}/invoices?invoicedOnOrAfter=${today}T00:00:00Z&invoicedOnBefore=${today}T23:59:59Z&pageSize=500&page=${pg}`, 2000).catch(() => []),
+      tvTechMeta(), loadAdminAgents(supabase),
+    ])
+    const norm = (s) => String(s || '').trim().toLowerCase()
+    const techNames = new Set([...meta.values()].map(m => norm(m.name)))
+    const tradeOfCampaign = (name) => {
+      const b = norm(name)
+      if (/hvac|air|heat|climate|furnace|click|credible/.test(b)) return 'HVAC'
+      if (/plumb/.test(b)) return 'Plumbing'
+      if (/electric/.test(b)) return 'Electrical'
+      if (/garage|door|overhead/.test(b)) return 'Garage Doors'
+      return null
+    }
+    let booked = 0, unbooked = 0, outbounds = 0
+    const leadsByTrade = {}
+    for (const c of calls) {
+      const lc = c.leadCall || c
+      if (admins.isAdminCall && admins.isAdminCall(lc)) continue
+      if ((lc.direction || '') === 'Outbound') {
+        // "Any external outbound by a CSR" — techs and admin/dispatch logins
+        // excluded; everything else a CSR dials counts (Brandyn, Sep 2026).
+        const who = norm((lc.createdBy || {}).name || (lc.agent || {}).name)
+        if (who && !techNames.has(who)) outbounds++
+        continue
+      }
+      if ((lc.direction || '') !== 'Inbound') continue
+      if (lc.callType === 'Booked') booked++
+      else if (lc.callType === 'Unbooked') unbooked++
+      else continue
+      const camp = (lc.campaign || {})
+      const t = tvTradeOf(camp.businessUnit) || tradeOfCampaign(camp.name)
+      if (t) leadsByTrade[t] = (leadsByTrade[t] || 0) + 1
+    }
+    // Opportunities ran today: non-install job invoiced ≥ $90 today, or a
+    // non-install-BU estimate presented today. One job = one opportunity.
+    const oppJobs = new Map()   // jobId -> trade
+    const revByJob = new Map()
+    for (const i of invs) {
+      const j = i.job || {}
+      if (!j.id || /install/i.test(j.type || '')) continue
+      revByJob.set(j.id, (revByJob.get(j.id) || 0) + (Number(i.subTotal) || 0))
+      const t = tvTradeOf((i.businessUnit || {}).name)
+      if (t && !oppJobs.has(j.id)) oppJobs.set(j.id, t)
+    }
+    for (const [jid, amt] of revByJob) if (amt < 90) oppJobs.delete(jid)
+    for (const e of ests) {
+      if (!e.jobId || /install/i.test(e.businessUnitName || '')) continue
+      const t = tvTradeOf(e.businessUnitName)
+      if (t && !oppJobs.has(e.jobId)) oppJobs.set(e.jobId, t)
+    }
+    const oppsByTrade = {}
+    for (const t of oppJobs.values()) oppsByTrade[t] = (oppsByTrade[t] || 0) + 1
+    _ceoFast = {
+      at: Date.now(),
+      data: {
+        booking: { booked, leadCalls: booked + unbooked, pct: booked + unbooked > 0 ? Math.round(booked / (booked + unbooked) * 100) : null },
+        csrOutbounds: outbounds,
+        leads: { total: booked + unbooked, byTrade: leadsByTrade, goal: CEO_LEADS_GOAL },
+        opps: { total: [...oppJobs.keys()].length, byTrade: oppsByTrade, goal: CEO_OPPS_GOAL },
+      },
+    }
+  } finally { _ceoFastBusy = false }
+}
+
+app.get('/api/tv/ceo', async (req, res) => {
+  const me = await requireLeadership(req, res)
+  if (!me) return
+  try {
+    ceoBuildSlow().catch(e => console.warn('ceo slow:', e.message))
+    await Promise.race([ceoBuildFast(), new Promise(r => setTimeout(r, 15_000))])
+    res.json({
+      updatedAt: new Date(_ceoFast.at || Date.now()).toISOString(),
+      fast: _ceoFast.data,
+      slow: _ceoSlow.data,
+      slowAt: _ceoSlow.at ? new Date(_ceoSlow.at).toISOString() : null,
+      config: { oppsGoal: CEO_OPPS_GOAL, leadsGoal: CEO_LEADS_GOAL, laborPct: CEO_LABOR },
+    })
+  } catch (e) {
+    console.error('tv ceo:', e.message)
+    res.status(500).json({ error: e.message })
+  }
+})
+
 app.get('/api/admin/csr-coaching', async (req, res) => {
   const prof = await requireAdmin(req, res)
   if (!prof) return
