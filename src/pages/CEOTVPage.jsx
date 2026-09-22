@@ -7,8 +7,8 @@ import WeatherStrip from '../components/WeatherStrip'
 
 // CEO board (/tv/ceo) — Brandyn's office TV, in the same visual language as
 // the department boards: pulse-mark header, period strip, ranking tables,
-// feed chips. Adds the executive layer: run-rate pacing, true burdened GM,
-// opportunities-vs-goal, lead calls, Path-of-the-Year chart.
+// feed chips. Adds the executive layer: run-rate pacing, job-matched true GM,
+// opportunities and leads vs goal, weekly trend lines, and a rich live feed.
 const C = {
   bg:'#0B0F14', panel:'#141A21', panel2:'#1B222B', border:'#252E38',
   text:'#E6EDF3', muted:'#8B949E', dim:'#6E7681',
@@ -85,60 +85,113 @@ function PeriodPanel({ title, d, accent, compact }) {
 }
 
 const FEED_STYLE = {
-  sale:       { tag:'SALE', color:C.green },
-  review:     { tag:'5★',   color:C.amber },
-  membership: { tag:'CLUB', color:C.purple },
-  invoice:    { tag:'REV',  color:C.blue },
+  sold:      { tag:'SOLD',   color:C.green },
+  booked:    { tag:'BOOKED', color:C.blue },
+  missed:    { tag:'MISSED', color:C.red },
+  quote:     { tag:'QUOTE',  color:C.amber },
+  invoice:   { tag:'REV',    color:'#39C5CF' },
+  review:    { tag:'5★',     color:C.amber },
+  lowreview: { tag:'REVIEW', color:C.red },
+  club:      { tag:'CLUB',   color:C.purple },
 }
 
-// Path of the Year: monthly bars, booked → projected, prior-year dots.
-function YearChart({ slow }) {
-  if (!slow?.months) return <div style={{ color:C.dim, fontSize:13 }}>Building the year — the first load pulls 20 months of history…</div>
-  const now = new Date()
-  const curY = now.getFullYear(), curM = now.getMonth() + 1
-  const ym = (y, m) => `${y}-${String(m).padStart(2, '0')}`
-  const sum = (o) => Object.values(o || {}).reduce((a, b) => a + b, 0)
-  const bars = []
-  for (let m = 1; m <= 12; m++) {
-    const actual = m < curM ? sum(slow.months[ym(curY, m)]) : m === curM ? sum(slow.mtd) : 0
-    const proj = m >= curM ? (slow.projMonths?.[ym(curY, m)] || 0) : 0
-    bars.push({ m, actual, proj, prior: sum(slow.months[ym(curY - 1, m)]) })
-  }
-  const mx = Math.max(...bars.map(b => Math.max(b.actual, b.proj, b.prior)), 1) * 1.22
-  const W = 1000, H = 232, BW = 54, GAP = (W - 60 - 12 * BW) / 11
-  const x = (i) => 40 + i * (BW + GAP)
-  const y = (v) => 198 - (v / mx) * 168
-  const names = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+// Weekly trends: 13 closed weeks + this week's pace, the same weeks last year
+// dashed behind, and a goal line where one exists. Weekly (not daily) buckets
+// strip out day-of-week noise so direction is readable from across the room.
+const fmtK = (n) => n == null ? '—' : Math.abs(n) >= 1e6 ? '$' + (n / 1e6).toFixed(2) + 'M' : Math.abs(n) >= 1000 ? '$' + Math.round(n / 1000) + 'k' : '$' + Math.round(n)
+const md = (d) => d ? `${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))}` : ''
+
+function Delta({ v, label }) {
+  if (v == null || !isFinite(v)) return null
+  const up = v >= 0
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} style={{ width:'100%', height:'100%' }} preserveAspectRatio="xMidYMid meet">
-      <line x1="30" y1="198" x2={W - 5} y2="198" stroke={C.border} />
-      {bars.map((b, i) => (
-        <g key={b.m}>
-          {b.m < curM && b.actual > 0 && <>
-            <rect x={x(i)} y={y(b.actual)} width={BW} height={198 - y(b.actual)} fill={C.green} rx="3" />
-            <text x={x(i) + BW / 2} y={y(b.actual) - 6} fontSize="12" fill={C.text} textAnchor="middle" fontWeight="700" fontVariantNumeric="tabular-nums">{Math.round(b.actual / 1000)}</text>
-          </>}
-          {b.m === curM && <>
-            {b.actual > 0 && <rect x={x(i)} y={y(b.actual)} width={BW} height={198 - y(b.actual)} fill={C.green} rx="3" />}
-            {b.proj > b.actual && <rect x={x(i)} y={y(b.proj)} width={BW} height={y(b.actual) - y(b.proj)} fill={`${C.green}44`} stroke={C.green} strokeDasharray="4 3" rx="3" />}
-            <text x={x(i) + BW / 2} y={y(Math.max(b.proj, b.actual)) - 6} fontSize="12" fill="#7EE2A8" textAnchor="middle" fontWeight="700">→{Math.round(Math.max(b.proj, b.actual) / 1000)}</text>
-          </>}
-          {b.m > curM && b.proj > 0 && <>
-            <rect x={x(i)} y={y(b.proj)} width={BW} height={198 - y(b.proj)} fill={C.panel2} stroke={C.blue} strokeDasharray="4 3" rx="3" />
-            <text x={x(i) + BW / 2} y={y(b.proj) - 6} fontSize="12" fill="#8FC1FF" textAnchor="middle" fontWeight="700">{Math.round(b.proj / 1000)}</text>
-          </>}
-          {b.prior > 0 && <circle cx={x(i) + BW / 2} cy={y(b.prior)} r="4" fill={C.dim} />}
-          <text x={x(i) + BW / 2} y="216" fontSize="11" fill={C.muted} textAnchor="middle">{names[b.m - 1]}</text>
-        </g>
-      ))}
-      <g>
-        <rect x={W - 252} y="6" width="247" height="42" rx="9" fill={C.panel2} stroke={C.blue} />
-        <text x={W - 128} y="24" fontSize="14" fill="#8FC1FF" textAnchor="middle" fontWeight="800">
-          YEAR LANDS: {fmtMoneyC(slow.pacing?.yearProj)} ({slow.pacing?.yoy >= 0 ? '+' : ''}{slow.pacing?.yoy}%)
-        </text>
-        <text x={W - 128} y="40" fontSize="10.5" fill={C.muted} textAnchor="middle">solid = booked · dashed = projected · dots = last year · $k</text>
-      </g>
-    </svg>
+    <span style={{ fontSize:11, fontWeight:800, color: up ? C.green : C.red, background: `${up ? C.green : C.red}14`, border:`1px solid ${up ? C.green : C.red}44`, borderRadius:6, padding:'1px 6px', whiteSpace:'nowrap' }}>
+      {up ? '▲' : '▼'} {Math.abs(Math.round(v * 100))}% <span style={{ color:C.muted, fontWeight:600 }}>{label}</span>
+    </span>
+  )
+}
+
+function MiniTrend({ title, color, weeks, field, fmt, goal }) {
+  const n = weeks.length
+  const vals = weeks.map(w => (w.current ? null : (w[field] ?? null)))
+  const lys = weeks.map(w => w.ly?.[field] ?? null)
+  const cur = weeks[n - 1]
+  const pace = cur?.pace?.[field] ?? null
+  let lastIdx = -1
+  vals.forEach((v, i) => { if (v != null) lastIdx = i })
+  const have = vals.filter(v => v != null)
+  if (have.length < 3) return <div style={{ color:C.dim, fontSize:12, padding:8 }}>{title}: building history…</div>
+  const last = vals[lastIdx]
+  const prior4 = vals.slice(Math.max(0, lastIdx - 4), lastIdx).filter(v => v != null)
+  const avg4 = prior4.length ? prior4.reduce((a, b) => a + b, 0) / prior4.length : null
+  const lyLast = lys[lastIdx]
+  const W = 330, H = 150, L = 8, R = 10, T = 18, B = 20
+  const top = Math.max(...have, ...lys.filter(v => v != null), pace || 0, goal || 0) * 1.14 || 1
+  const x = (i) => L + i * (W - L - R) / (n - 1)
+  const y = (v) => T + (H - T - B) * (1 - v / top)
+  const pts = vals.map((v, i) => v == null ? null : [x(i), y(v)]).filter(Boolean)
+  const lyPts = lys.map((v, i) => v == null ? null : `${x(i).toFixed(1)},${y(v).toFixed(1)}`).filter(Boolean).join(' ')
+  let maxI = -1, minI = -1
+  vals.forEach((v, i) => {
+    if (v == null) return
+    if (maxI < 0 || v > vals[maxI]) maxI = i
+    if (minI < 0 || v < vals[minI]) minI = i
+  })
+  const labelAt = (i, below) => {
+    const v = vals[i]
+    const ax = Math.min(W - 4, Math.max(20, x(i)))
+    return <text key={`l${i}`} x={ax} y={below ? y(v) + 14 : y(v) - 7} fontSize="11" fontWeight="800" fill={i === lastIdx ? C.text : C.muted} textAnchor={i === lastIdx ? 'end' : 'middle'}>{fmt(v)}</text>
+  }
+  return (
+    <div style={{ minWidth:0, display:'flex', flexDirection:'column' }}>
+      <div style={{ display:'flex', alignItems:'baseline', gap:8, flexWrap:'wrap' }}>
+        <span style={{ fontSize:11, fontWeight:800, letterSpacing:1, color, textTransform:'uppercase' }}>{title}</span>
+        <span style={{ fontSize:'clamp(15px, 1.6vw, 21px)', fontWeight:800, fontVariantNumeric:'tabular-nums' }}>{fmt(last)}</span>
+        <span style={{ fontSize:10, color:C.dim }}>wk of {md(weeks[lastIdx]?.mon)}</span>
+      </div>
+      <div style={{ display:'flex', gap:6, flexWrap:'wrap', margin:'4px 0 2px' }}>
+        <Delta v={avg4 ? last / avg4 - 1 : null} label="vs 4-wk avg" />
+        <Delta v={lyLast ? last / lyLast - 1 : null} label="vs last yr" />
+      </div>
+      <svg viewBox={`0 0 ${W} ${H}`} style={{ width:'100%', flex:1, minHeight:0 }} preserveAspectRatio="none">
+        {goal ? <>
+          <line x1={L} x2={W - R} y1={y(goal)} y2={y(goal)} stroke={C.amber} strokeWidth="1.4" strokeDasharray="5 4" />
+          <text x={L + 2} y={y(goal) - 4} fontSize="10" fill={C.amber} fontWeight="700">goal {fmt(goal)}</text>
+        </> : null}
+        {lyPts && <polyline points={lyPts} fill="none" stroke={C.dim} strokeWidth="1.6" strokeDasharray="4 4" />}
+        <polyline points={pts.map(p => `${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ')} fill="none" stroke={color} strokeWidth="2.6" strokeLinejoin="round" />
+        {pts.map((p, i) => <circle key={i} cx={p[0]} cy={p[1]} r="2.6" fill={color} />)}
+        {pace != null && lastIdx >= 0 && <>
+          <line x1={x(lastIdx)} y1={y(last)} x2={x(n - 1)} y2={y(pace)} stroke={color} strokeWidth="2" strokeDasharray="3 3" />
+          <circle cx={x(n - 1)} cy={y(pace)} r="4" fill={C.panel} stroke={color} strokeWidth="2" />
+          <text x={x(n - 1) - 2} y={y(pace) + (pace > last ? -8 : 15)} fontSize="10.5" fill={color} fontWeight="800" textAnchor="end">pace {fmt(pace)}</text>
+        </>}
+        {maxI >= 0 && maxI !== lastIdx && labelAt(maxI, false)}
+        {minI >= 0 && minI !== lastIdx && minI !== maxI && labelAt(minI, true)}
+        {labelAt(lastIdx, last < (vals[lastIdx - 1] ?? last))}
+        {[0, Math.floor((n - 2) / 2), n - 2].map(i => <text key={`x${i}`} x={x(i)} y={H - 4} fontSize="10" fill={C.dim} textAnchor={i === 0 ? 'start' : 'middle'}>{md(weeks[i]?.end)}</text>)}
+        <text x={x(n - 1)} y={H - 4} fontSize="10" fill={C.dim} textAnchor="end">now</text>
+      </svg>
+    </div>
+  )
+}
+
+function TrendPanel({ trend, compact }) {
+  const weeks = trend?.weeks || []
+  const ready = (trend?.ready || 0) >= 4
+  return (
+    <Panel title="Trends — weekly, last 13 weeks · dashed gray = same weeks last year · hollow dot = this week's pace" accent={C.orange} compact={compact} style={{ flex:'1 1 auto', minHeight:230 }}>
+      {ready ? (
+        <div style={{ flex:1, minHeight:0, display:'grid', gridTemplateColumns:'repeat(4, 1fr)', gap:18 }}>
+          <MiniTrend title="Revenue" color={C.blue} weeks={weeks} field="rev" fmt={fmtK} />
+          <MiniTrend title="Sales" color={C.green} weeks={weeks} field="sales" fmt={fmtK} />
+          <MiniTrend title="Leads" color={C.amber} weeks={weeks} field="leads" fmt={fmtN} goal={trend?.goals?.leadsWeek} />
+          <MiniTrend title="Opportunities" color={C.purple} weeks={weeks} field="opps" fmt={fmtN} goal={trend?.goals?.oppsWeek} />
+        </div>
+      ) : (
+        <div style={{ color:C.dim, fontSize:13 }}>Building trend history — the first load pulls 28 weeks from ServiceTitan (a few minutes); after that it's cached and only the current week refreshes.</div>
+      )}
+    </Panel>
   )
 }
 
@@ -159,14 +212,16 @@ export default function CEOTVPage() {
 
   const rootRef = useRef(null)
   const { isFull, toggleFull } = useWallboard(rootRef)
+  // Auto-fit: when the board is taller than the screen, zoom it down so every
+  // row — including all five CSRs — is visible with no scrolling.
   const [fit, setFit] = useState(1)
   useEffect(() => {
     const el = rootRef.current
     if (!el) return
     const t = setTimeout(() => {
       const need = el.scrollHeight, have = el.clientHeight
-      if (need > have + 4) setFit(f => Math.max(0.6, +((f * have) / need).toFixed(3)))
-    }, 250)
+      if (need > have + 4) setFit(f => Math.max(0.55, +((f * have) / need).toFixed(3)))
+    }, 300)
     return () => clearTimeout(t)
   }, [narrow, co, ceo, csr, fit])
 
@@ -198,7 +253,7 @@ export default function CEOTVPage() {
     return () => { clearInterval(t1); clearInterval(t2); clearInterval(t3) }
   }, [load, loadCsr])
 
-  const fast = ceo?.fast, slow = ceo?.slow
+  const fast = ceo?.fast, slow = ceo?.slow, trend = ceo?.trend, goals = ceo?.goals
   const gm = slow?.gm
   const techs = (co?.techs || []).slice(0, 5)
   const techMax = useMemo(() => {
@@ -213,25 +268,30 @@ export default function CEOTVPage() {
     for (const r of list) r.score = Math.round(100 * (0.5 * r.booked / mb + 0.3 * r.rate / mr + 0.2 * (r.qa || 0) / mq))
     return list.sort((a, b) => b.score - a.score).slice(0, 5)
   }, [csr])
-  const csrMax = useMemo(() => ({
-    score: Math.max(0, ...csrs.map(x => x.score || 0)), booked: Math.max(0, ...csrs.map(x => x.booked || 0)),
-    rate: Math.max(0, ...csrs.map(x => x.rate || 0)), leadCalls: Math.max(0, ...csrs.map(x => x.leadCalls || 0)),
-    clubs: Math.max(0, ...csrs.map(x => x.clubs || 0)), qa: Math.max(0, ...csrs.map(x => x.qa || 0)),
-  }), [csrs])
-  const feed = (co?.feed || []).slice(0, 8)
-  const oppGoal = fast?.opps?.goal || 33
-  const oppPct = fast?.opps ? Math.min(100, Math.round(fast.opps.total / oppGoal * 100)) : 0
+  const csrMax = useMemo(() => {
+    const m = {}
+    for (const c of ['score', 'booked', 'rate', 'leadCalls', 'outbound', 'clubs', 'qa']) m[c] = Math.max(0, ...csrs.map(x => Number(x[c]) || 0))
+    return m
+  }, [csrs])
+  const feed = fast?.feed || []
+  const sum = fast?.summary
+  const oppGoal = goals?.oppsToday ?? 33
+  const oppTotal = fast?.opps?.total
+  const oppPct = oppGoal > 0 && oppTotal != null ? Math.min(100, Math.round(oppTotal / oppGoal * 100)) : 0
+  const oppCol = oppGoal === 0 ? C.muted : oppPct >= 100 ? C.green : oppPct >= 70 ? C.amber : C.red
+  const curWeek = trend?.weeks?.[trend.weeks.length - 1]
+  const leadGoal = goals?.leadsPerDay ?? 43
   const gmCol = (v) => v == null ? C.dim : v >= 50 ? C.green : v >= 42 ? C.amber : C.red
 
   const cell = (v, isMax, fmt = fmtN, color) => (
-    <td style={{ padding: narrow ? '4px 8px' : '7px 9px', textAlign:'right', fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap',
+    <td style={{ padding: narrow ? '4px 8px' : '6px 9px', textAlign:'right', fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap',
       fontWeight: isMax ? 800 : 500, color: isMax ? (color || C.text) : C.muted,
       fontSize: isMax ? 'clamp(13px, 1.4vw, 16px)' : 'clamp(12px, 1.3vw, 14px)' }}>
       {fmt(v)}
     </td>
   )
   const th = (label, right = true) => (
-    <th style={{ padding: narrow ? '5px 8px' : '7px 9px', textAlign: right ? 'right' : 'left', fontSize:10, fontWeight:700, letterSpacing:1, color:C.dim, textTransform:'uppercase', whiteSpace:'nowrap' }}>{label}</th>
+    <th style={{ padding: narrow ? '4px 8px' : '5px 9px', textAlign: right ? 'right' : 'left', fontSize:10, fontWeight:700, letterSpacing:1, color:C.dim, textTransform:'uppercase', whiteSpace:'nowrap' }}>{label}</th>
   )
 
   if (denied) {
@@ -317,15 +377,18 @@ export default function CEOTVPage() {
         <Panel title="Call center — today" accent={C.green} compact={narrow}>
           <div style={{ display:'grid', gridTemplateColumns:'repeat(2, 1fr)', gap:'10px 8px' }}>
             <Stat big label="Booking rate" value={fast?.booking?.pct != null ? fast.booking.pct + '%' : '—'} color={C.green} />
-            <Stat label="Booked / leads" value={`${fmtN(fast?.booking?.booked)} / ${fmtN(fast?.booking?.leadCalls)}`} />
+            <Stat label="Booked / lead calls" value={`${fmtN(fast?.booking?.booked)} / ${fmtN(fast?.booking?.leadCalls)}`} />
             <Stat label="CSR outbounds" value={fmtN(fast?.csrOutbounds)} color={C.blue} />
-            <Stat label="Lead calls · goal" value={`${fmtN(fast?.leads?.total)} / ${fast?.leads?.goal || 43}`} color={(fast?.leads?.total || 0) >= (fast?.leads?.goal || 43) ? C.green : C.amber} />
+            <Stat label={`Leads · goal ${leadGoal}`} value={fmtN(fast?.leads)} color={(fast?.leads || 0) >= leadGoal ? C.green : C.amber} />
           </div>
         </Panel>
-        <Panel title={`Opportunities — goal ${oppGoal}`} accent={C.purple} compact={narrow}>
-          <Stat big label="Ran today" value={fmtN(fast?.opps?.total)} color={oppPct >= 100 ? C.green : oppPct >= 70 ? C.amber : C.red} />
+        <Panel title={oppGoal ? `Opportunities — goal ${oppGoal} today` : 'Opportunities — closed day'} accent={C.purple} compact={narrow}>
+          <div style={{ display:'flex', alignItems:'baseline', gap:14 }}>
+            <Stat big label="Ran today · 3 trades" value={fmtN(oppTotal)} color={oppCol} />
+            {curWeek?.opps != null && <Stat label={`This week · goal ${trend?.goals?.oppsWeek ?? ''}`} value={fmtN(curWeek.opps)} color={C.purple} />}
+          </div>
           <div style={{ height:9, borderRadius:5, background:C.panel2, margin:'8px 0' }}>
-            <div style={{ height:'100%', width:`${oppPct}%`, borderRadius:5, background: oppPct >= 100 ? C.green : oppPct >= 70 ? C.amber : C.red }} />
+            <div style={{ height:'100%', width:`${oppPct}%`, borderRadius:5, background:oppCol }} />
           </div>
           <div style={{ display:'flex', gap:14 }}>
             {['HVAC', 'Plumbing', 'Electrical'].map(t => <Stat key={t} label={TRADE_SHORT[t]} value={fmtN(fast?.opps?.byTrade?.[t] || 0)} />)}
@@ -333,13 +396,13 @@ export default function CEOTVPage() {
         </Panel>
       </div>
 
-      {/* The year + rankings + feed */}
-      <div style={{ display:'flex', flexDirection: narrow ? 'column' : 'row', gap: narrow ? 10 : 12, flex:1, minHeight:0 }}>
-        <div style={{ flex:1.6, display:'flex', flexDirection:'column', gap: narrow ? 10 : 12, minWidth:0 }}>
-          <Panel title="The year — booked → projected" accent={CEO_COLOR} compact={narrow} style={{ flex:1.1, minHeight:170 }}>
-            <div style={{ flex:1, minHeight:0 }}><YearChart slow={slow} /></div>
-          </Panel>
-          <Panel title={`Top 5 techs — ${fmtDate(time, { month:'long' })}`} accent={C.green} compact={narrow} style={{ flex:1.2 }}>
+      {/* Trends + rankings (left) · live feed (right). The row grows to its
+          content so auto-fit can see overflow; the feed is absolutely placed
+          so its length never sets the row height. */}
+      <div style={{ display:'flex', flexDirection: narrow ? 'column' : 'row', gap: narrow ? 10 : 12, flex:'1 0 auto' }}>
+        <div style={{ flex:1.65, display:'flex', flexDirection:'column', gap: narrow ? 10 : 12, minWidth:0 }}>
+          <TrendPanel trend={trend} compact={narrow} />
+          <Panel title={`Top 5 techs — ${fmtDate(time, { month:'long' })} · composite score`} accent={C.green} compact={narrow} style={{ flexShrink:0 }}>
             <table style={{ width:'100%', borderCollapse:'collapse' }}>
               <thead><tr>{th('#', false)}{th('Technician', false)}{th('Score')}{th('Sold')}{th('Avg ticket')}{th('Close')}{th('5★')}{th('Clubs')}{th('YTD sold')}</tr></thead>
               <tbody>
@@ -361,9 +424,9 @@ export default function CEOTVPage() {
               </tbody>
             </table>
           </Panel>
-          <Panel title={`Top 5 CSRs — ${fmtDate(time, { month:'long' })}`} accent={C.blue} compact={narrow} style={{ flex:1 }}>
+          <Panel title={`Top 5 CSRs — ${fmtDate(time, { month:'long' })} · composite score`} accent={C.blue} compact={narrow} style={{ flexShrink:0 }}>
             <table style={{ width:'100%', borderCollapse:'collapse' }}>
-              <thead><tr>{th('#', false)}{th('CSR', false)}{th('Score')}{th('Booked')}{th('Book rate')}{th('Lead calls')}{th('Clubs')}{th('QA')}</tr></thead>
+              <thead><tr>{th('#', false)}{th('CSR', false)}{th('Score')}{th('Booked')}{th('Book rate')}{th('Lead calls')}{th('Outbounds')}{th('Clubs')}{th('QA')}</tr></thead>
               <tbody>
                 {csrs.map((x, i) => (
                   <tr key={x.name} style={{ borderBottom:`1px solid ${C.border}`, background: i === 0 ? `${C.blue}12` : 'transparent' }}>
@@ -373,6 +436,7 @@ export default function CEOTVPage() {
                     {cell(x.booked, x.booked === csrMax.booked, fmtN, C.green)}
                     {cell(x.rate, x.rate === csrMax.rate, fmtPct, C.amber)}
                     {cell(x.leadCalls, x.leadCalls === csrMax.leadCalls)}
+                    {cell(x.outbound ?? null, (x.outbound || 0) === csrMax.outbound && csrMax.outbound > 0, fmtN, C.blue)}
                     {cell(x.clubs, x.clubs === csrMax.clubs, fmtN, C.purple)}
                     {cell(x.qa, x.qa != null && x.qa === csrMax.qa, (v) => v == null ? '—' : Number(v).toFixed(1), C.amber)}
                   </tr>
@@ -382,28 +446,40 @@ export default function CEOTVPage() {
           </Panel>
         </div>
 
-        {/* Live feed — same chips as the department boards */}
-        <div style={{ flex:.55, minWidth: narrow ? 0 : 250, display:'flex' }}>
-          <Panel title="Today — live" accent={C.green} compact={narrow} style={{ flex:1 }}>
-            <div style={{ flex:1, overflow:'hidden', display:'flex', flexDirection:'column', gap:2 }}>
+        {/* Live feed — who did what, on which job, in which trade, when */}
+        <div style={{ flex:.62, minWidth: narrow ? 0 : 300, position:'relative', minHeight: narrow ? 420 : 0 }}>
+          <Panel title="Today — live" accent={C.green} compact={narrow} style={{ position:'absolute', inset:0 }}>
+            {sum && (
+              <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:'8px 10px', paddingBottom:10, marginBottom:6, borderBottom:`1px solid ${C.border}` }}>
+                <Stat label={`Sold · ${fmtK(sum.soldAmt)}`} value={fmtN(sum.sold)} color={C.green} />
+                <Stat label="Booked" value={fmtN(sum.booked)} color={C.blue} />
+                <Stat label="Missed" value={fmtN(sum.missed)} color={sum.missed ? C.red : C.muted} />
+                <Stat label={`Open quotes · ${fmtK(sum.quoteAmt)}`} value={fmtN(sum.quotes)} color={C.amber} />
+                <Stat label="Clubs" value={fmtN(sum.clubs)} color={C.purple} />
+                <Stat label="5★ reviews" value={fmtN(sum.fiveStar)} color={C.amber} />
+              </div>
+            )}
+            <div style={{ flex:1, minHeight:0, overflow:'hidden' }}>
               {feed.map((f, i) => {
-                const s = FEED_STYLE[f.kind] || FEED_STYLE.sale
+                const st = FEED_STYLE[f.kind] || FEED_STYLE.sold
                 return (
-                  <div key={i} style={{ display:'flex', alignItems:'center', gap:8, padding:'5px 0', borderBottom:`1px solid ${C.border}`, minWidth:0 }}>
-                    <span style={{ fontSize:9, fontWeight:800, letterSpacing:.6, color:s.color, border:`1px solid ${s.color}55`, background:`${s.color}14`, borderRadius:5, padding:'2px 6px', flexShrink:0 }}>{s.tag}</span>
-                    <span style={{ fontSize:'clamp(11px, 1.1vw, 13px)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
-                      {f.kind === 'sale' && <><b style={{ color:C.green }}>{fmtMoney(f.amount)}</b>{f.who ? ` — ${f.who}` : ''}</>}
-                      {f.kind === 'review' && <>{f.who}{f.text ? ` ${f.text}` : ''}</>}
-                      {f.kind === 'membership' && <>{f.who || 'Club sold'}</>}
-                      {f.kind === 'invoice' && <><b style={{ color:C.blue }}>{fmtMoney(f.amount)}</b>{f.who ? ` — ${f.who}` : ''}</>}
-                    </span>
+                  <div key={i} style={{ padding:'6px 0', borderBottom:`1px solid ${C.border}`, minWidth:0 }}>
+                    <div style={{ display:'flex', alignItems:'center', gap:8, minWidth:0 }}>
+                      <span style={{ fontSize:9, fontWeight:800, letterSpacing:.6, color:st.color, border:`1px solid ${st.color}55`, background:`${st.color}14`, borderRadius:5, padding:'2px 6px', flexShrink:0, minWidth:44, textAlign:'center' }}>{st.tag}</span>
+                      {f.amount != null && <b style={{ color:st.color, fontSize:'clamp(12px, 1.2vw, 14px)', fontVariantNumeric:'tabular-nums', flexShrink:0 }}>{fmtMoney(f.amount)}</b>}
+                      <span style={{ fontSize:'clamp(11px, 1.1vw, 13px)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', flex:1, minWidth:0 }}>{f.title}</span>
+                      <span style={{ fontSize:10, color:C.dim, flexShrink:0, fontVariantNumeric:'tabular-nums' }}>{f.at ? fmtTime(f.at, { hour:'numeric', minute:'2-digit' }) : ''}</span>
+                    </div>
+                    <div style={{ fontSize:10.5, color:C.muted, marginTop:2, paddingLeft:52, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
+                      {[f.who, f.trade ? TRADE_SHORT[f.trade] || f.trade : null, f.sub].filter(Boolean).join(' · ')}
+                    </div>
                   </div>
                 )
               })}
-              {!feed.length && <div style={{ color:C.dim, fontSize:13 }}>Quiet so far today…</div>}
+              {!feed.length && <div style={{ color:C.dim, fontSize:13 }}>{fast ? 'Quiet so far today…' : 'Loading today…'}</div>}
             </div>
             <div style={{ fontSize:9.5, color:C.dim, marginTop:6, lineHeight:1.5 }}>
-              GM = revenue − POs − burdened field labor · pacing = run rate × last year's seasonality · opps goal 33/effective day
+              Opps goal 33/day = 2027 $20.5M plan ÷ 281 effective days (Sat = ½) ÷ ~$2,224/opp (+6% price, 70% close) · 3 trades, ex-garage · Leads = new demand jobs (Meghan's definition) · GM = revenue − job POs − ADP-burdened field labor
             </div>
           </Panel>
         </div>
