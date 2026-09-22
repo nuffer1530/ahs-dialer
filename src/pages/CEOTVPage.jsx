@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
+import { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { sb } from '../lib/supabase'
 import { useWallboard } from '../lib/useDailyReload'
@@ -39,7 +39,7 @@ const timeAgo = (iso) => {
 function Stat({ label, value, color = C.text, big }) {
   return (
     <div style={{ minWidth:0 }}>
-      <div style={{ fontSize: big ? 'clamp(18px, 2.3vw, 30px)' : 'clamp(15px, 1.9vw, 24px)', fontWeight:800, color, letterSpacing:-1, lineHeight:1.05, fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap' }}>{value}</div>
+      <div style={{ fontSize: big ? 30 : 24, fontWeight:800, color, letterSpacing:-1, lineHeight:1.05, fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap' }}>{value}</div>
       <div style={{ fontSize:10, fontWeight:700, letterSpacing:1, color:C.muted, textTransform:'uppercase', marginTop:4 }}>{label}</div>
     </div>
   )
@@ -57,20 +57,20 @@ function RankBadge({ i }) {
   )
 }
 
-function Panel({ title, accent, compact, children, style }) {
+function Panel({ title, accent, children, style }) {
   return (
-    <div style={{ background:C.panel, border:`1px solid ${C.border}`, borderTop:`3px solid ${accent}`, borderRadius:14, padding: compact ? '9px 14px' : '14px 18px', minWidth:0, minHeight:0, display:'flex', flexDirection:'column', overflow:'hidden', ...style }}>
-      <div style={{ fontSize: compact ? 11 : 12, fontWeight:800, letterSpacing:1.4, color:accent, textTransform:'uppercase', marginBottom: compact ? 7 : 12, whiteSpace:'nowrap' }}>{title}</div>
+    <div style={{ background:C.panel, border:`1px solid ${C.border}`, borderTop:`3px solid ${accent}`, borderRadius:14, padding:'12px 18px', minWidth:0, minHeight:0, display:'flex', flexDirection:'column', overflow:'hidden', ...style }}>
+      <div style={{ fontSize:12, fontWeight:800, letterSpacing:1.4, color:accent, textTransform:'uppercase', marginBottom:10, whiteSpace:'nowrap' }}>{title}</div>
       {children}
     </div>
   )
 }
 
-function PeriodPanel({ title, d, accent, compact }) {
+function PeriodPanel({ title, d, accent }) {
   return (
-    <Panel title={title} accent={accent} compact={compact}>
+    <Panel title={title} accent={accent}>
       {d ? (
-        <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap: compact ? '8px 8px' : '12px 10px' }}>
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:'10px 10px' }}>
           <Stat label="Jobs ran" value={fmtN(d.jobsRan)} />
           <Stat label="Sales" value={fmtMoneyC(d.sales)} color={C.green} />
           <Stat label="Revenue" value={fmtMoneyC(d.revenue)} color={C.blue} />
@@ -105,15 +105,16 @@ const signPct = (v) => v == null || !isFinite(v) ? '—' : (v >= 0 ? '+' : '−'
 // at that day's share of the month budget (weekday full, Saturday half,
 // Sunday none) — green = hit, amber = within 80%, red = short. Remaining days
 // are outlined at what's now needed per day. Bottom: leads per day vs goal.
-function MonthCharts({ month, budget, need, leadGoal }) {
+function MonthCharts({ month, budget, need, leadGoal, aspect }) {
   const n = month.length
   if (!n) return null
   const W = 1000, L = 6, R = 6
+  const H = Math.max(300, Math.round(W * (aspect || 0.36)))
   const band = (W - L - R) / n, bw = band * 0.62
   const x = (i) => L + band * (i + 0.5)
-  const RT = 30, RH = 172
-  const LT = RT + RH + 48, LH = 84
-  const H = LT + LH + 24
+  const room = H - 30 - 48 - 24
+  const RT = 30, RH = Math.round(room * 0.64)
+  const LT = RT + RH + 48, LH = room - RH
   const perDay = budget?.perDay || 0
   const targetOf = (p) => p.w * (p.future && need > 0 ? need : perDay)
   const revTop = Math.max(1, ...month.map(p => Math.max(p.rev || 0, targetOf(p)))) * 1.16
@@ -178,6 +179,27 @@ function MonthCharts({ month, budget, need, leadGoal }) {
   )
 }
 
+// Height ÷ width of an element, kept current as it resizes.
+function useAspect(ref) {
+  const [aspect, setAspect] = useState(null)
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el || typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(([e]) => {
+      const { width, height } = e.contentRect
+      if (width > 0 && height > 0) setAspect(+(height / width).toFixed(3))
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [ref])
+  return aspect
+}
+
+// The board is laid out on a fixed 1920×1080 canvas and scaled to the screen,
+// so the office TV (Fire TV Silk reports ~960×540 CSS px) shows exactly what a
+// laptop shows. A narrow reflow used to push the rankings and feed off-screen.
+const DESIGN_W = 1920, DESIGN_H = 1080
+
 export default function CEOTVPage() {
   const navigate = useNavigate()
   const [co, setCo] = useState(null)
@@ -186,27 +208,18 @@ export default function CEOTVPage() {
   const [err, setErr] = useState(null)
   const [denied, setDenied] = useState(false)
   const [time, setTime] = useState(new Date())
-  const [narrow, setNarrow] = useState(() => typeof window !== 'undefined' && window.innerWidth < 1150)
+  const [vp, setVp] = useState(() => ({ w: window.innerWidth, h: window.innerHeight }))
   useEffect(() => {
-    const on = () => setNarrow(window.innerWidth < 1150)
+    const on = () => setVp({ w: window.innerWidth, h: window.innerHeight })
     window.addEventListener('resize', on)
     return () => window.removeEventListener('resize', on)
   }, [])
+  const scale = Math.min(vp.w / DESIGN_W, vp.h / DESIGN_H)
 
   const rootRef = useRef(null)
+  const chartRef = useRef(null)
+  const chartAspect = useAspect(chartRef)
   const { isFull, toggleFull } = useWallboard(rootRef)
-  // Auto-fit: when the board is taller than the screen, zoom it down so every
-  // row — including all five CSRs — is visible with no scrolling.
-  const [fit, setFit] = useState(1)
-  useEffect(() => {
-    const el = rootRef.current
-    if (!el) return
-    const t = setTimeout(() => {
-      const need = el.scrollHeight, have = el.clientHeight
-      if (need > have + 2) setFit(f => Math.max(0.55, +((f * have) / need * 0.99).toFixed(3)))
-    }, 300)
-    return () => clearTimeout(t)
-  }, [narrow, co, ceo, csr, fit])
 
   const load = useCallback(async () => {
     try {
@@ -274,14 +287,13 @@ export default function CEOTVPage() {
   const onPace = pctBudget != null && pctTime != null && pctBudget >= pctTime
 
   const cell = (v, isMax, fmt = fmtN, color) => (
-    <td style={{ padding: narrow ? '4px 8px' : '6px 9px', textAlign:'right', fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap',
-      fontWeight: isMax ? 800 : 500, color: isMax ? (color || C.text) : C.muted,
-      fontSize: isMax ? 'clamp(13px, 1.4vw, 16px)' : 'clamp(12px, 1.3vw, 14px)' }}>
+    <td style={{ padding:'6px 7px', textAlign:'right', fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap',
+      fontWeight: isMax ? 800 : 500, color: isMax ? (color || C.text) : C.muted, fontSize: isMax ? 16 : 15 }}>
       {fmt(v)}
     </td>
   )
   const th = (label, right = true) => (
-    <th style={{ padding: narrow ? '4px 8px' : '5px 9px', textAlign: right ? 'right' : 'left', fontSize:10, fontWeight:700, letterSpacing:1, color:C.dim, textTransform:'uppercase', whiteSpace:'nowrap' }}>{label}</th>
+    <th style={{ padding:'4px 7px', textAlign: right ? 'right' : 'left', fontSize:10, fontWeight:700, letterSpacing:1, color:C.dim, textTransform:'uppercase', whiteSpace:'nowrap' }}>{label}</th>
   )
   const feedRow = (key, kind, line, sub) => {
     const st = FEED_STYLE[kind] || FEED_STYLE.sale
@@ -306,18 +318,19 @@ export default function CEOTVPage() {
   }
 
   return (
-    <div ref={rootRef} style={{ height:`calc(100vh / ${fit})`, minHeight:`calc(100vh / ${fit})`, zoom: fit, boxSizing:'border-box', background:C.bg, color:C.text, padding: narrow ? '10px 14px' : '14px 20px', display:'flex', flexDirection:'column', gap: narrow ? 10 : 12, overflow:'auto', fontFamily:'inherit' }}>
+    <div ref={rootRef} style={{ width:'100vw', height:'100vh', background:C.bg, overflow:'hidden', display:'flex', alignItems:'center', justifyContent:'center' }}>
+    <div style={{ width:DESIGN_W, height:DESIGN_H, zoom:scale, flexShrink:0, boxSizing:'border-box', color:C.text, padding:'14px 20px', display:'flex', flexDirection:'column', gap:12, overflow:'hidden', fontFamily:'inherit' }}>
 
       {/* Header — same construction as the department boards */}
       <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:16, flexShrink:0, flexWrap:'wrap' }}>
         <div style={{ display:'flex', alignItems:'center', gap:12 }}>
-          <span className="pulse-mark" style={{ width: narrow ? 34 : 40, height: narrow ? 34 : 40, borderRadius:11, background:'#0b0c0f', display:'flex', alignItems:'center', justifyContent:'center', boxShadow:'0 6px 18px rgba(255,117,31,.15)', flexShrink:0 }}>
+          <span className="pulse-mark" style={{ width:40, height:40, borderRadius:11, background:'#0b0c0f', display:'flex', alignItems:'center', justifyContent:'center', boxShadow:'0 6px 18px rgba(255,117,31,.15)', flexShrink:0 }}>
             <svg width="26" height="26" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
               <polyline points="9,32 19,32 25,17 33,47 40,26 45,32 55,32" fill="none" stroke="#ff751f" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round"/>
             </svg>
           </span>
-          <span style={{ fontSize: narrow ? 18 : 21, fontWeight:800, letterSpacing:.3, whiteSpace:'nowrap' }}>CEO</span>
-          {!narrow && <span style={{ fontSize:12, color:C.muted, letterSpacing:1, textTransform:'uppercase' }}>Executive board</span>}
+          <span style={{ fontSize:21, fontWeight:800, letterSpacing:.3, whiteSpace:'nowrap' }}>CEO</span>
+          <span style={{ fontSize:12, color:C.muted, letterSpacing:1, textTransform:'uppercase' }}>Executive board</span>
           {!isFull && (
             <div style={{ display:'flex', gap:6, marginLeft:10, flexWrap:'wrap' }}>
               <button style={{ background:C.panel2, border:`1px solid ${CEO_COLOR}`, color:C.text, borderRadius:8, padding:'6px 12px', fontSize:12, fontWeight:700, cursor:'default' }}>CEO</button>
@@ -331,8 +344,8 @@ export default function CEOTVPage() {
           )}
         </div>
         <div style={{ display:'flex', alignItems:'center', gap:16, marginLeft:'auto', justifyContent:'flex-end', flexWrap:'wrap' }}>
-          <div style={{ zoom: narrow ? .8 : 1 }}><WeatherStrip dark /></div>
-          {co?.updatedAt && <span style={{ fontSize: narrow ? 10 : 11, color:C.dim, whiteSpace:'nowrap' }}>Updated {timeAgo(co.updatedAt)}</span>}
+          <WeatherStrip dark />
+          {co?.updatedAt && <span style={{ fontSize:11, color:C.dim, whiteSpace:'nowrap' }}>Updated {timeAgo(co.updatedAt)}</span>}
           {err && <span style={{ fontSize:11, color:C.red }}>Refresh failed — retrying</span>}
           <button onClick={toggleFull} title={isFull ? 'Exit fullscreen' : 'Fullscreen'}
             style={{ background:C.panel, border:`1px solid ${C.border}`, borderRadius:8, color:C.muted, cursor:'pointer', padding:'8px 10px', display:'flex', alignItems:'center' }}>
@@ -343,7 +356,7 @@ export default function CEOTVPage() {
             )}
           </button>
           <div style={{ textAlign:'right' }}>
-            <div style={{ fontSize: narrow ? 19 : 'clamp(20px, 2.4vw, 30px)', fontWeight:800, letterSpacing:-1, color:C.blue, fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap' }}>
+            <div style={{ fontSize:30, fontWeight:800, letterSpacing:-1, color:C.blue, fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap' }}>
               {fmtTime(time, { hour:'2-digit', minute:'2-digit', second:'2-digit' })}
             </div>
             <div style={{ fontSize:12, color:C.muted }}>{fmtDate(time, { weekday:'long', month:'long', day:'numeric' })}</div>
@@ -352,15 +365,15 @@ export default function CEOTVPage() {
       </div>
 
       {/* Daily / Monthly / Yearly strip — identical to the company board */}
-      <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap: narrow ? 10 : 12, flexShrink:0 }}>
-        <PeriodPanel title="Today" d={co?.daily} accent={C.green} compact={narrow} />
-        <PeriodPanel title="This month" d={co?.monthly} accent={CEO_COLOR} compact={narrow} />
-        <PeriodPanel title="This year" d={co?.yearly} accent={C.blue} compact={narrow} />
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:12, flexShrink:0 }}>
+        <PeriodPanel title="Today" d={co?.daily} accent={C.green} />
+        <PeriodPanel title="This month" d={co?.monthly} accent={CEO_COLOR} />
+        <PeriodPanel title="This year" d={co?.yearly} accent={C.blue} />
       </div>
 
       {/* Executive strip: pacing · true GM · call center */}
-      <div style={{ display:'grid', gridTemplateColumns: narrow ? 'repeat(2, 1fr)' : 'repeat(3, 1fr)', gap: narrow ? 10 : 12, flexShrink:0 }}>
-        <Panel title="Pacing — run rate" accent={C.blue} compact={narrow}>
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:12, flexShrink:0 }}>
+        <Panel title="Pacing — run rate" accent={C.blue}>
           <div style={{ display:'grid', gridTemplateColumns:'repeat(2, 1fr)', gap:'10px 8px' }}>
             <Stat big label="Year lands" value={fmtMoneyC(slow?.pacing?.yearProj)} color={C.blue} />
             <Stat label="vs last year" value={slow?.pacing?.yoy != null ? (slow.pacing.yoy >= 0 ? '+' : '') + slow.pacing.yoy + '%' : '—'} color={C.green} />
@@ -368,7 +381,7 @@ export default function CEOTVPage() {
             <Stat label="Last year total" value={fmtMoneyC(slow?.pacing?.prevYearTotal)} />
           </div>
         </Panel>
-        <Panel title={`True GM — ${gm?.month || 'month'}`} accent={C.amber} compact={narrow}>
+        <Panel title={`True GM — ${gm?.month || 'month'}`} accent={C.amber}>
           <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:'10px 8px' }}>
             <Stat big label="Company" value={gm?.company != null ? gm.company + '%' : '—'} color={gmCol(gm?.company)} />
             {['HVAC', 'Plumbing', 'Electrical', 'Garage Doors'].map(t => (
@@ -376,7 +389,7 @@ export default function CEOTVPage() {
             ))}
           </div>
         </Panel>
-        <Panel title="Call center — today" accent={C.green} compact={narrow}>
+        <Panel title="Call center — today" accent={C.green}>
           <div style={{ display:'grid', gridTemplateColumns:'repeat(2, 1fr)', gap:'10px 8px' }}>
             <Stat big label="Booking rate" value={fast?.booking?.pct != null ? fast.booking.pct + '%' : '—'} color={C.green} />
             <Stat label="Booked / lead calls" value={`${fmtN(fast?.booking?.booked)} / ${fmtN(fast?.booking?.leadCalls)}`} />
@@ -389,10 +402,10 @@ export default function CEOTVPage() {
       {/* Month chart + leads & opportunities + rankings (left) · live feed (right).
           The row grows to its content so auto-fit sees any overflow; the feed
           is absolutely placed so its length never sets the row height. */}
-      <div style={{ display:'flex', flexDirection: narrow ? 'column' : 'row', gap: narrow ? 10 : 12, flex:'1 0 auto' }}>
-        <div style={{ flex:1.65, display:'flex', flexDirection:'column', gap: narrow ? 10 : 12, minWidth:0 }}>
-          <div style={{ display:'flex', gap: narrow ? 10 : 12, flex:'1 1 auto', minHeight: 330 }}>
-            <Panel title={`${fmtDate(time, { month:'long' })} — revenue & leads per day vs budget`} accent={C.green} compact={narrow} style={{ flex:2.4 }}>
+      <div style={{ display:'flex', gap:12, flex:'1 1 0', minHeight:0 }}>
+        <div style={{ flex:1.65, display:'flex', flexDirection:'column', gap:12, minWidth:0, minHeight:0 }}>
+          <div style={{ display:'flex', gap:12, flex:'1 1 0', minHeight:0 }}>
+            <Panel title={`${fmtDate(time, { month:'long' })} — revenue & leads per day vs budget`} accent={C.green} style={{ flex:2.4 }}>
               {budget && mtdRev != null && (
                 <div style={{ display:'flex', gap:22, flexWrap:'wrap', alignItems:'baseline', marginTop:-4, marginBottom:6, fontSize:13, color:C.muted }}>
                   <span>Budget <b style={{ color:C.text }}>{fmtMoneyC(budget.amount)}</b></span>
@@ -403,13 +416,13 @@ export default function CEOTVPage() {
                     : <b style={{ color:C.green }}>Budget hit</b>}
                 </div>
               )}
-              <div style={{ flex:1, minHeight:0 }}>
+              <div ref={chartRef} style={{ flex:1, minHeight:0 }}>
                 {daily?.ready
-                  ? <MonthCharts month={daily.month} budget={budget} need={need} leadGoal={leadGoal} />
+                  ? <MonthCharts month={daily.month} budget={budget} need={need} leadGoal={leadGoal} aspect={chartAspect} />
                   : <div style={{ color:C.dim, fontSize:13 }}>Building this month's daily history — first load takes a few minutes…</div>}
               </div>
             </Panel>
-            <Panel title="Leads & opportunities — today" accent={C.amber} compact={narrow} style={{ flex:1 }}>
+            <Panel title="Leads & opportunities — today" accent={C.amber} style={{ flex:1 }}>
               <div style={{ display:'flex', alignItems:'baseline', gap:10 }}>
                 <Stat big label={`Leads · goal ${leadGoal}`} value={fmtN(leadsToday)} color={(leadsToday || 0) >= leadGoal ? C.green : C.amber} />
               </div>
@@ -440,14 +453,15 @@ export default function CEOTVPage() {
               </div>
             </Panel>
           </div>
-          <Panel title={`Top 5 techs — ${fmtDate(time, { month:'long' })} · composite score`} accent={C.green} compact={narrow} style={{ flexShrink:0 }}>
+          <div style={{ display:'flex', gap:12, flexShrink:0 }}>
+          <Panel title={`Top 5 techs — ${fmtDate(time, { month:'long' })} · composite score`} accent={C.green} style={{ flex:1 }}>
             <table style={{ width:'100%', borderCollapse:'collapse' }}>
-              <thead><tr>{th('#', false)}{th('Technician', false)}{th('Score')}{th('Sold')}{th('Avg ticket')}{th('Close')}{th('5★')}{th('Clubs')}{th('YTD sold')}</tr></thead>
+              <thead><tr>{th('#', false)}{th('Technician', false)}{th('Score')}{th('Sold')}{th('Avg')}{th('Close')}{th('5★')}{th('Clubs')}{th('YTD')}</tr></thead>
               <tbody>
                 {techs.map((x, i) => (
                   <tr key={x.id || i} style={{ borderBottom:`1px solid ${C.border}`, background: i === 0 ? `${CEO_COLOR}14` : 'transparent' }}>
-                    <td style={{ padding:'3px 8px', width:30 }}><RankBadge i={i} /></td>
-                    <td style={{ padding:'3px 8px', fontWeight:700, whiteSpace:'nowrap', fontSize:'clamp(12px, 1.4vw, 15px)' }}>
+                    <td style={{ padding:'5px 4px', width:30 }}><RankBadge i={i} /></td>
+                    <td style={{ padding:'5px 6px', fontWeight:700, whiteSpace:'nowrap', fontSize:15 }}>
                       {x.name}{x.trade && <span style={{ marginLeft:8, fontSize:10, fontWeight:800, letterSpacing:.8, color:C.dim }}>{TRADE_SHORT[x.trade] || x.trade}</span>}
                     </td>
                     {cell(x.score, x.score === techMax.score, fmtN, CEO_COLOR)}
@@ -462,14 +476,14 @@ export default function CEOTVPage() {
               </tbody>
             </table>
           </Panel>
-          <Panel title={`Top 5 CSRs — ${fmtDate(time, { month:'long' })} · composite score`} accent={C.blue} compact={narrow} style={{ flexShrink:0 }}>
+          <Panel title={`Top 5 CSRs — ${fmtDate(time, { month:'long' })} · composite score`} accent={C.blue} style={{ flex:1 }}>
             <table style={{ width:'100%', borderCollapse:'collapse' }}>
-              <thead><tr>{th('#', false)}{th('CSR', false)}{th('Score')}{th('Booked')}{th('Book rate')}{th('Lead calls')}{th('Outbounds')}{th('Clubs')}{th('QA')}</tr></thead>
+              <thead><tr>{th('#', false)}{th('CSR', false)}{th('Score')}{th('Booked')}{th('Book %')}{th('Calls')}{th('Outb.')}{th('Clubs')}{th('QA')}</tr></thead>
               <tbody>
                 {csrs.map((x, i) => (
                   <tr key={x.name} style={{ borderBottom:`1px solid ${C.border}`, background: i === 0 ? `${C.blue}12` : 'transparent' }}>
-                    <td style={{ padding:'3px 8px', width:30 }}><RankBadge i={i} /></td>
-                    <td style={{ padding:'3px 8px', fontWeight:700, fontSize:'clamp(12px, 1.4vw, 15px)', whiteSpace:'nowrap' }}>{x.name}</td>
+                    <td style={{ padding:'5px 4px', width:30 }}><RankBadge i={i} /></td>
+                    <td style={{ padding:'5px 6px', fontWeight:700, fontSize:15, whiteSpace:'nowrap' }}>{x.name}</td>
                     {cell(x.score, x.score === csrMax.score, fmtN, C.blue)}
                     {cell(x.booked, x.booked === csrMax.booked, fmtN, C.green)}
                     {cell(x.rate, x.rate === csrMax.rate, fmtPct, C.amber)}
@@ -482,11 +496,12 @@ export default function CEOTVPage() {
               </tbody>
             </table>
           </Panel>
+          </div>
         </div>
 
-        <div style={{ flex:.62, minWidth: narrow ? 0 : 320, display:'flex', flexDirection:'column' }}>
+        <div style={{ flex:.62, minWidth:320, display:'flex', flexDirection:'column', minHeight:0 }}>
           {/* Live feed — the company board's feed, with money left on the table pinned on top */}
-          <div style={{ flex:1, position:'relative', minHeight: narrow ? 380 : 0 }}>
+          <div style={{ flex:1, position:'relative', minHeight:0 }}>
             <div style={{ position:'absolute', inset:0, background:C.panel, border:`1px solid ${C.border}`, borderRadius:14, overflow:'hidden', display:'flex', flexDirection:'column' }}>
               <div style={{ padding:'13px 18px', borderBottom:`1px solid ${C.border}`, display:'flex', alignItems:'center', gap:8, flexShrink:0 }}>
                 <span style={{ fontSize:13, fontWeight:700, letterSpacing:.5 }}>Today in Company</span>
@@ -524,6 +539,7 @@ export default function CEOTVPage() {
         </div>
       </div>
       <style>{`@keyframes wr-pulse { 0%,100%{opacity:1} 50%{opacity:.25} }`}</style>
+    </div>
     </div>
   )
 }
