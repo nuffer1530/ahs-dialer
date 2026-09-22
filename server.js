@@ -4789,9 +4789,9 @@ app.get('/api/tv/department/:trade', async (req, res) => {
 //                  and the rich live feed (sold / booked / missed / quotes /
 //                  invoices / reviews / clubs, each with who, what, trade)
 //  slow  (12 h)  — run-rate × seasonality pacing, job-matched true GM
-//  daily (30 min)— per-day revenue, leads by trade and lead calls by channel
-//                  for the last 59 days (+ last year's leads for 30): feeds
-//                  the 30-day chart, the leads panel and the channel watchdog.
+//  daily (30 min)— per-day revenue and leads by trade for the last 45 days
+//                  (+ last year's leads for 30): feeds the month chart and
+//                  the leads panel.
 //                  Finished days persist forever (ceo_daily_cache).
 //  trend (weekly)— this week's opportunities vs the weekly goal (history is
 //                  kept for later use; only the current week re-pulls).
@@ -5203,8 +5203,8 @@ async function ceoBuildFast() {
   } finally { _ceoFastBusy = false }
 }
 
-// One day of the chart / watchdog inputs. `full` = revenue + lead calls by
-// channel too; last year's days only need leads.
+// One day of chart inputs: leads (new demand jobs) by trade, and — for this
+// year's days — invoiced revenue. Last year's days only need leads.
 async function ceoDayStats(d, admins, jtNames, full) {
   const next = ceoAddDays(d, 1), startIso = tvBounds(d), endIso = tvBounds(next), endMs = Date.parse(endIso)
   const out = { leads: 0, lt: {} }
@@ -5217,20 +5217,11 @@ async function ceoDayStats(d, admins, jtNames, full) {
     }
   })
   if (!full) return out
-  out.rev = 0; out.lc = 0; out.camps = {}
+  out.rev = 0
   await ceoEachPage(pg => `/accounting/v2/tenant/${ST_TENANT_ID}/invoices?invoicedOnOrAfter=${d}T00:00:00Z&invoicedOnBefore=${next}T00:00:00Z&pageSize=500&page=${pg}`, rows => {
     for (const i of rows) out.rev += Number(i.subTotal) || 0
   })
   out.rev = Math.round(out.rev)
-  await ceoEachPage(pg => `/telecom/v2/tenant/${ST_TENANT_ID}/calls?createdOnOrAfter=${startIso}&createdBefore=${endIso}&pageSize=500&page=${pg}`, rows => {
-    for (const c of rows) {
-      const lc = c.leadCall || c
-      if ((lc.direction || '') !== 'Inbound' || !['Booked', 'Unbooked'].includes(lc.callType) || admins.isAdminCall(lc)) continue
-      out.lc++
-      const name = String((lc.campaign || {}).name || 'Unattributed').trim()
-      out.camps[name] = (out.camps[name] || 0) + 1
-    }
-  }, 8000)
   return out
 }
 
@@ -5250,7 +5241,7 @@ async function ceoBuildDaily() {
     const days = { ..._ceoDaily.days }, ly = { ..._ceoDaily.ly }
     let n = 0
     // Newest first so a cold start fills the chart from the right.
-    for (let k = 1; k <= 59; k++) {
+    for (let k = 1; k <= 45; k++) {
       const d = ceoAddDays(today, -k)
       if (days[d]?.final || (days[d] && Date.now() - (days[d].at || 0) < 6 * 3600_000)) continue
       try {
@@ -5266,7 +5257,7 @@ async function ceoBuildDaily() {
       try { ly[d] = { leads: (await ceoDayStats(d, admins, jtNames, false)).leads } }
       catch (e) { console.warn('ceo ly day', d, e.message) }
     }
-    const oldest = ceoAddDays(today, -59), oldestLy = ceoAddDays(ceoAddDays(today, -30), -364)
+    const oldest = ceoAddDays(today, -45), oldestLy = ceoAddDays(ceoAddDays(today, -30), -364)
     for (const k of Object.keys(days)) if (k < oldest) delete days[k]
     for (const k of Object.keys(ly)) if (k < oldestLy) delete ly[k]
     _ceoDaily = { at: Date.now(), days, ly }
@@ -5299,12 +5290,6 @@ const ceoDayWeight = (d) => { const g = new Date(`${d}T12:00:00Z`).getUTCDay(); 
 async function ceoDailyView(fast, goals) {
   const today = tvDenverDate()
   const D = _ceoDaily.days || {}, LY = _ceoDaily.ly || {}
-  const series = []
-  for (let k = 29; k >= 1; k--) {
-    const d = ceoAddDays(today, -k)
-    series.push({ d, rev: D[d]?.rev ?? null, leads: D[d]?.leads ?? null })
-  }
-  series.push({ d: today, rev: fast?.revToday ?? null, leads: fast?.leads ?? null, today: true })
   // Leads: 30-day average and vs the same 30 days last year (matched days only).
   let sum30 = 0, n30 = 0, cur = 0, prev = 0
   for (let k = 1; k <= 30; k++) {
@@ -5314,49 +5299,27 @@ async function ceoDailyView(fast, goals) {
     if (y?.leads != null) { cur += x.leads; prev += y.leads }
   }
   const avg30 = n30 ? sum30 / n30 : null
-  // Budget pace: the month's budget spread over its effective days
-  // (Mon–Fri 1, Sat ½, Sun 0); the client works out what's still needed.
+  // This month, day by day. Each day's revenue target is its share of the
+  // month budget by effective day (Mon–Fri 1, Sat ½, Sun 0); the client turns
+  // the rest of the month into "needed per day" from live MTD revenue.
   const budget = await ceoBudget()
   const mStart = today.slice(0, 8) + '01'
   const mEnd = ceoAddDays(ceoAddDays(mStart, 32).slice(0, 8) + '01', -1)
+  const month = []
   let effMonth = 0, effLeft = 0
   for (let d = mStart; d <= mEnd; d = ceoAddDays(d, 1)) {
-    effMonth += ceoDayWeight(d)
-    if (d > today) effLeft += ceoDayWeight(d)
+    const w = ceoDayWeight(d)
+    effMonth += w
+    if (d < today) month.push({ d, w, rev: D[d]?.rev ?? null, leads: D[d]?.leads ?? null })
+    else if (d === today) month.push({ d, w, rev: fast?.revToday ?? null, leads: fast?.leads ?? null, today: true })
+    else { month.push({ d, w, future: true }); effLeft += w }
   }
   effLeft += ceoDayWeight(today) * (1 - Math.min(1, Math.max(0, (ceoDenverHour() - 7) / 10)))
-  // Channel watchdog: last 3 finished days vs the same 3 weekdays averaged
-  // over the prior 8 weeks. Only channels that normally produce show up.
-  const win = (name, off) => {
-    let s = 0, have = 0
-    for (let k = 1; k <= 3; k++) { const x = D[ceoAddDays(today, -(k + off))]; if (x?.camps) { s += x.camps[name] || 0; have++ } }
-    return have === 3 ? s : null
-  }
-  const names = new Set()
-  for (let k = 1; k <= 59; k++) for (const nm of Object.keys(D[ceoAddDays(today, -k)]?.camps || {})) names.add(nm)
-  const channels = []
-  for (const nm of names) {
-    const recent = win(nm, 0)
-    if (recent == null) continue
-    const base = []
-    for (let w = 1; w <= 8; w++) { const b = win(nm, 7 * w); if (b != null) base.push(b) }
-    if (base.length < 6) continue
-    const avg = base.reduce((a, b) => a + b, 0) / base.length
-    if (avg < 2) continue
-    let kind = null
-    if (recent === 0) kind = 'dark'
-    else if (recent < avg * 0.45) kind = 'fading'
-    else if (recent > avg * 1.7 && recent >= 6) kind = 'surging'
-    if (kind) channels.push({ kind, name: nm, recent, normal: Math.round(avg * 10) / 10 })
-  }
-  const rank = { dark: 0, fading: 1, surging: 2 }
-  channels.sort((a, b) => rank[a.kind] - rank[b.kind] || b.normal - a.normal)
   return {
-    series,
+    month,
+    ready: month.every(x => x.future || x.today || x.rev != null),
     leads: { avg30: avg30 != null ? Math.round(avg30 * 10) / 10 : null, vsGoal: avg30 != null ? avg30 / goals.leadsPerDay - 1 : null, vsLy: prev > 0 ? cur / prev - 1 : null },
-    budget: budget ? { amount: budget, perDay: Math.round(budget / effMonth), effLeft: Math.round(effLeft * 10) / 10 } : null,
-    channels: channels.slice(0, 6),
-    watchReady: n30 >= 29,
+    budget: budget ? { amount: budget, perDay: Math.round(budget / effMonth), effMonth, effLeft: Math.round(effLeft * 10) / 10 } : null,
   }
 }
 

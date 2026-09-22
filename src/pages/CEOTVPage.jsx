@@ -7,9 +7,9 @@ import WeatherStrip from '../components/WeatherStrip'
 
 // CEO board (/tv/ceo) — Brandyn's office TV, in the same visual language as
 // the department boards: pulse-mark header, period strip, ranking tables,
-// feed. Adds the executive layer: run-rate pacing, job-matched true GM,
-// opportunities and leads vs goal, the 30-day revenue/leads chart against the
-// month's budget pace, money left on the table, and the channel watchdog.
+// feed. Adds the executive layer: run-rate pacing, job-matched true GM, the
+// month's revenue-per-day and leads-per-day against budget and goal, leads +
+// opportunities vs goal, and money left on the table.
 const C = {
   bg:'#0B0F14', panel:'#141A21', panel2:'#1B222B', border:'#252E38',
   text:'#E6EDF3', muted:'#8B949E', dim:'#6E7681',
@@ -94,62 +94,84 @@ const FEED_STYLE = {
   missed:     { tag:'MISSED', color:C.red },
   quote:      { tag:'QUOTE',  color:C.amber },
 }
-const WATCH_STYLE = {
-  dark:    { tag:'DARK',    color:C.red },
-  fading:  { tag:'FADING',  color:C.amber },
-  surging: { tag:'SURGING', color:C.green },
-}
 const fmtK = (n) => n == null ? '—' : Math.abs(n) >= 1e6 ? '$' + (n / 1e6).toFixed(2) + 'M' : Math.abs(n) >= 1000 ? '$' + Math.round(n / 1000) + 'k' : '$' + Math.round(n)
+const fmtPhone = (v) => {
+  const d = String(v || '').replace(/\D/g, ''), t = d.length === 11 && d[0] === '1' ? d.slice(1) : d
+  return /^[\d\s()+-]+$/.test(String(v || '')) && t.length === 10 ? `(${t.slice(0, 3)}) ${t.slice(3, 6)}-${t.slice(6)}` : v
+}
 const signPct = (v) => v == null || !isFinite(v) ? '—' : (v >= 0 ? '+' : '−') + Math.abs(Math.round(v * 100)) + '%'
 
-// Last 30 days: daily revenue (line, labeled), leads (bars, labeled) and the
-// month's budget pace (dashed). Today is the hollow point, still filling in.
-function DailyChart({ series, budget }) {
-  const n = series.length
-  if (!n || series.filter(p => p.rev != null).length < 5) return <div style={{ color:C.dim, fontSize:13 }}>Building 30 days of history — first load takes a few minutes…</div>
-  const W = 1000, H = 250, L = 10, R = 10, T = 22, B = 30
-  const band = (W - L - R) / n
+// This month, day by day. Top: revenue per day as bars, each with a white tick
+// at that day's share of the month budget (weekday full, Saturday half,
+// Sunday none) — green = hit, amber = within 80%, red = short. Remaining days
+// are outlined at what's now needed per day. Bottom: leads per day vs goal.
+function MonthCharts({ month, budget, need, leadGoal }) {
+  const n = month.length
+  if (!n) return null
+  const W = 1000, L = 6, R = 6
+  const band = (W - L - R) / n, bw = band * 0.62
   const x = (i) => L + band * (i + 0.5)
-  const PH = H - T - B
-  const top = Math.max(...series.map(p => p.rev || 0), budget?.perDay || 0) * 1.16 || 1
-  const y = (v) => T + PH * (1 - v / top)
-  const maxLeads = Math.max(1, ...series.map(p => p.leads || 0))
-  const barH = (v) => (v / maxLeads) * PH * 0.34
-  const pts = series.map((p, i) => p.rev == null ? null : { i, v: p.rev, today: p.today }).filter(Boolean)
-  const closed = pts.filter(p => !p.today)
-  const todayPt = pts.find(p => p.today)
-  const line = closed.map(p => `${x(p.i).toFixed(1)},${y(p.v).toFixed(1)}`).join(' ')
+  const RT = 30, RH = 172
+  const LT = RT + RH + 48, LH = 84
+  const H = LT + LH + 24
+  const perDay = budget?.perDay || 0
+  const targetOf = (p) => p.w * (p.future && need > 0 ? need : perDay)
+  const revTop = Math.max(1, ...month.map(p => Math.max(p.rev || 0, targetOf(p)))) * 1.16
+  const ry = (v) => RT + RH * (1 - v / revTop)
+  const leadTop = Math.max(leadGoal, ...month.map(p => p.leads || 0)) * 1.22
+  const lyy = (v) => LT + LH * (1 - v / leadTop)
+  const k = (v) => Math.round(v / 1000)
+  const revCol = (p) => {
+    const t = targetOf(p)
+    if (!t) return '#3A4452'
+    const r = (p.rev || 0) / t
+    return r >= 0.98 ? C.green : r >= 0.8 ? C.amber : C.red
+  }
   const dow = (d) => new Date(`${d}T12:00:00Z`).getUTCDay()
   return (
     <svg viewBox={`0 0 ${W} ${H}`} style={{ width:'100%', height:'100%' }} preserveAspectRatio="xMidYMid meet">
-      <line x1={L} y1={T + PH} x2={W - R} y2={T + PH} stroke={C.border} />
-      {series.map((p, i) => p.leads == null ? null : (
-        <g key={`b${i}`}>
-          <rect x={x(i) - band * 0.3} y={T + PH - barH(p.leads)} width={band * 0.6} height={barH(p.leads)} rx="2"
-            fill={p.today ? 'none' : '#2A3A55'} stroke={p.today ? '#5B7BB0' : 'none'} strokeDasharray={p.today ? '3 2' : undefined} />
-          <text x={x(i)} y={T + PH - barH(p.leads) + (barH(p.leads) > 15 ? 11 : -3)} fontSize="9.5" fill="#8FA6CC" textAnchor="middle" fontWeight="700">{p.leads}</text>
+      <text x={L} y={14} fontSize="12" fontWeight="800" fill={C.muted} letterSpacing="1">REVENUE PER DAY ($K)</text>
+      <text x={W - R} y={14} fontSize="11" fill={C.dim} textAnchor="end">white tick = day's budget · outlined = needed per day to hit budget</text>
+      <line x1={L} x2={W - R} y1={RT + RH} y2={RT + RH} stroke={C.border} />
+      {month.map((p, i) => {
+        const t = targetOf(p)
+        if (p.future) {
+          if (!t) return null
+          return (
+            <g key={`r${i}`}>
+              <rect x={x(i) - bw / 2} y={ry(t)} width={bw} height={RT + RH - ry(t)} rx="2" fill="none" stroke="#4A5563" strokeDasharray="3 3" />
+              <text x={x(i)} y={ry(t) - 5} fontSize="10" fill={C.dim} textAnchor="middle">{k(t)}</text>
+            </g>
+          )
+        }
+        if (p.rev == null) return null
+        const col = revCol(p)
+        return (
+          <g key={`r${i}`}>
+            {p.today && t ? <rect x={x(i) - bw / 2} y={ry(t)} width={bw} height={RT + RH - ry(t)} rx="2" fill="none" stroke={C.blue} strokeDasharray="3 3" /> : null}
+            <rect x={x(i) - bw / 2} y={ry(p.rev)} width={bw} height={Math.max(1, RT + RH - ry(p.rev))} rx="2" fill={p.today ? C.blue : col} opacity={p.today ? 0.85 : 1} />
+            {t && !p.today ? <line x1={x(i) - bw / 2 - 3} x2={x(i) + bw / 2 + 3} y1={ry(t)} y2={ry(t)} stroke="#E6EDF3" strokeWidth="2.2" /> : null}
+            <text x={x(i)} y={Math.min(ry(p.rev), t ? ry(t) : ry(p.rev)) - 5} fontSize="11" fontWeight="800" fill={p.today ? C.blue : C.text} textAnchor="middle">{k(p.rev)}</text>
+          </g>
+        )
+      })}
+
+      <text x={L} y={LT - 14} fontSize="12" fontWeight="800" fill={C.muted} letterSpacing="1">LEADS PER DAY</text>
+      <line x1={L} x2={W - R} y1={LT + LH} y2={LT + LH} stroke={C.border} />
+      <line x1={L} x2={W - R} y1={lyy(leadGoal)} y2={lyy(leadGoal)} stroke={C.amber} strokeWidth="1.6" strokeDasharray="6 5" />
+      <text x={W - R} y={lyy(leadGoal) - 5} fontSize="11" fontWeight="800" fill={C.amber} textAnchor="end">goal {leadGoal}</text>
+      {month.map((p, i) => p.future || p.leads == null ? null : (
+        <g key={`l${i}`}>
+          <rect x={x(i) - bw / 2} y={lyy(p.leads)} width={bw} height={Math.max(1, LT + LH - lyy(p.leads))} rx="2"
+            fill={p.today ? C.blue : p.leads >= leadGoal ? C.green : '#3B6FB6'} opacity={p.today ? 0.85 : 1} />
+          <text x={x(i)} y={lyy(p.leads) - 4} fontSize="10.5" fontWeight="700" fill={C.text} textAnchor="middle">{p.leads}</text>
         </g>
       ))}
-      {budget?.perDay ? <>
-        <line x1={L} x2={W - R} y1={y(budget.perDay)} y2={y(budget.perDay)} stroke={C.amber} strokeWidth="1.6" strokeDasharray="6 5" />
-        <text x={L + 2} y={y(budget.perDay) - 5} fontSize="11" fill={C.amber} fontWeight="800">budget pace {fmtK(budget.perDay)}/day</text>
-      </> : null}
-      <polyline points={line} fill="none" stroke={C.green} strokeWidth="2.6" strokeLinejoin="round" />
-      {closed.map(p => (
-        <g key={`p${p.i}`}>
-          <circle cx={x(p.i)} cy={y(p.v)} r="3" fill={C.green} />
-          <text x={x(p.i)} y={y(p.v) - 7} fontSize="10" fill={C.text} textAnchor="middle" fontWeight="700">{Math.round(p.v / 1000)}</text>
-        </g>
-      ))}
-      {todayPt && closed.length ? <>
-        <line x1={x(closed[closed.length - 1].i)} y1={y(closed[closed.length - 1].v)} x2={x(todayPt.i)} y2={y(todayPt.v)} stroke={C.green} strokeWidth="2" strokeDasharray="3 3" />
-        <circle cx={x(todayPt.i)} cy={y(todayPt.v)} r="4.5" fill={C.panel} stroke={C.green} strokeWidth="2" />
-        <text x={x(todayPt.i) - 2} y={y(todayPt.v) - 8} fontSize="10" fill="#7EE2A8" textAnchor="end" fontWeight="800">so far {Math.round(todayPt.v / 1000)}</text>
-      </> : null}
-      {series.map((p, i) => (
-        <text key={`x${i}`} x={x(i)} y={H - 10} fontSize="9.5" textAnchor="middle"
-          fill={p.today ? C.text : [0, 6].includes(dow(p.d)) ? '#4A525C' : C.dim} fontWeight={p.today ? 800 : 500}>
-          {p.d.slice(8) === '01' || i === 0 ? `${Number(p.d.slice(5, 7))}/${Number(p.d.slice(8))}` : Number(p.d.slice(8))}
+
+      {month.map((p, i) => (
+        <text key={`x${i}`} x={x(i)} y={H - 6} fontSize="10.5" textAnchor="middle"
+          fill={p.today ? C.blue : [0, 6].includes(dow(p.d)) ? '#4A525C' : C.dim} fontWeight={p.today ? 800 : 500}>
+          {Number(p.d.slice(8))}
         </text>
       ))}
     </svg>
@@ -246,6 +268,10 @@ export default function CEOTVPage() {
   const budget = daily?.budget
   const mtdRev = co?.monthly?.revenue
   const need = budget && mtdRev != null && budget.effLeft > 0 ? (budget.amount - mtdRev) / budget.effLeft : null
+  // Month health: share of budget banked vs share of the month's selling days gone.
+  const pctBudget = budget && mtdRev != null ? mtdRev / budget.amount : null
+  const pctTime = budget ? (budget.effMonth - budget.effLeft) / budget.effMonth : null
+  const onPace = pctBudget != null && pctTime != null && pctBudget >= pctTime
 
   const cell = (v, isMax, fmt = fmtN, color) => (
     <td style={{ padding: narrow ? '4px 8px' : '6px 9px', textAlign:'right', fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap',
@@ -260,11 +286,11 @@ export default function CEOTVPage() {
   const feedRow = (key, kind, line, sub) => {
     const st = FEED_STYLE[kind] || FEED_STYLE.sale
     return (
-      <div key={key} style={{ display:'flex', alignItems:'center', gap:10, padding:'8px 16px', borderBottom:`1px solid ${C.border}55` }}>
+      <div key={key} style={{ display:'flex', alignItems:'center', gap:12, padding:'10px 18px', borderBottom:`1px solid ${C.border}55` }}>
         <span style={{ fontSize:10, fontWeight:800, letterSpacing:.8, color:st.color, background:`${st.color}1A`, border:`1px solid ${st.color}55`, borderRadius:6, padding:'3px 7px', flexShrink:0 }}>{st.tag}</span>
         <div style={{ minWidth:0, flex:1 }}>
-          <div style={{ fontSize:13, fontWeight:700, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{line}</div>
-          <div style={{ fontSize:11, color:C.dim, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{sub}</div>
+          <div style={{ fontSize:14, fontWeight:700, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{line}</div>
+          <div style={{ fontSize:11.5, color:C.dim, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', marginTop:1 }}>{sub}</div>
         </div>
       </div>
     )
@@ -332,8 +358,8 @@ export default function CEOTVPage() {
         <PeriodPanel title="This year" d={co?.yearly} accent={C.blue} compact={narrow} />
       </div>
 
-      {/* Executive strip: pacing · true GM · call center · opportunities */}
-      <div style={{ display:'grid', gridTemplateColumns: narrow ? 'repeat(2, 1fr)' : 'repeat(4, 1fr)', gap: narrow ? 10 : 12, flexShrink:0 }}>
+      {/* Executive strip: pacing · true GM · call center */}
+      <div style={{ display:'grid', gridTemplateColumns: narrow ? 'repeat(2, 1fr)' : 'repeat(3, 1fr)', gap: narrow ? 10 : 12, flexShrink:0 }}>
         <Panel title="Pacing — run rate" accent={C.blue} compact={narrow}>
           <div style={{ display:'grid', gridTemplateColumns:'repeat(2, 1fr)', gap:'10px 8px' }}>
             <Stat big label="Year lands" value={fmtMoneyC(slow?.pacing?.yearProj)} color={C.blue} />
@@ -358,48 +384,57 @@ export default function CEOTVPage() {
             <Stat label="Missed lead calls" value={fmtN(leaks?.missedCount)} color={leaks?.missedCount ? C.red : C.muted} />
           </div>
         </Panel>
-        <Panel title={oppGoal ? `Opportunities — goal ${oppGoal} today` : 'Opportunities — closed day'} accent={C.purple} compact={narrow}>
-          <div style={{ display:'flex', alignItems:'baseline', gap:18 }}>
-            <Stat big label="Ran today · 3 trades" value={fmtN(oppTotal)} color={oppCol} />
-            {ceo?.week?.opps != null && <Stat label={`This week · goal ${ceo.week.oppsGoal}`} value={fmtN(ceo.week.opps)} color={C.purple} />}
-          </div>
-          <div style={{ height:9, borderRadius:5, background:C.panel2, margin:'8px 0' }}>
-            <div style={{ height:'100%', width:`${oppPct}%`, borderRadius:5, background:oppCol }} />
-          </div>
-          <div style={{ display:'flex', gap:16 }}>
-            {['HVAC', 'Plumbing', 'Electrical'].map(t => <Stat key={t} label={TRADE_SHORT[t]} value={fmtN(fast?.opps?.byTrade?.[t] || 0)} />)}
-            <Stat label="GAR · not in goal" value={fmtN(fast?.opps?.byTrade?.['Garage Doors'] || 0)} color={C.muted} />
-          </div>
-        </Panel>
       </div>
 
-      {/* Chart + leads + rankings (left) · live feed + channel watch (right).
+      {/* Month chart + leads & opportunities + rankings (left) · live feed (right).
           The row grows to its content so auto-fit sees any overflow; the feed
           is absolutely placed so its length never sets the row height. */}
       <div style={{ display:'flex', flexDirection: narrow ? 'column' : 'row', gap: narrow ? 10 : 12, flex:'1 0 auto' }}>
         <div style={{ flex:1.65, display:'flex', flexDirection:'column', gap: narrow ? 10 : 12, minWidth:0 }}>
-          <div style={{ display:'flex', gap: narrow ? 10 : 12, flex:'1 1 auto', minHeight: 270 }}>
-            <Panel title="Last 30 days — revenue $k (line) · leads (bars) · budget pace (dashed)" accent={C.green} compact={narrow} style={{ flex:2.5 }}>
+          <div style={{ display:'flex', gap: narrow ? 10 : 12, flex:'1 1 auto', minHeight: 330 }}>
+            <Panel title={`${fmtDate(time, { month:'long' })} — revenue & leads per day vs budget`} accent={C.green} compact={narrow} style={{ flex:2.4 }}>
               {budget && mtdRev != null && (
-                <div style={{ fontSize:12, color:C.muted, marginTop:-4, marginBottom:4 }}>
-                  {fmtDate(time, { month:'long' })} budget <b style={{ color:C.text }}>{fmtMoneyC(budget.amount)}</b> · MTD <b style={{ color:C.text }}>{fmtMoneyC(mtdRev)}</b> ·{' '}
+                <div style={{ display:'flex', gap:22, flexWrap:'wrap', alignItems:'baseline', marginTop:-4, marginBottom:6, fontSize:13, color:C.muted }}>
+                  <span>Budget <b style={{ color:C.text }}>{fmtMoneyC(budget.amount)}</b></span>
+                  <span>MTD <b style={{ color:C.text }}>{fmtMoneyC(mtdRev)}</b></span>
+                  <span><b style={{ color: onPace ? C.green : C.amber }}>{Math.round(pctBudget * 100)}% of budget</b> with {Math.round(pctTime * 100)}% of the month gone</span>
                   {need > 0
-                    ? <>need <b style={{ color: need > budget.perDay ? C.red : C.green }}>{fmtK(need)}</b> per business day the rest of the month</>
-                    : <b style={{ color:C.green }}>budget hit — {fmtK(-need * budget.effLeft)} over</b>}
+                    ? <span>Need <b style={{ color: need > budget.perDay ? C.red : C.green }}>{fmtK(need)}/day</b> · {budget.effLeft} selling days left</span>
+                    : <b style={{ color:C.green }}>Budget hit</b>}
                 </div>
               )}
-              <div style={{ flex:1, minHeight:0 }}><DailyChart series={daily?.series || []} budget={budget} /></div>
+              <div style={{ flex:1, minHeight:0 }}>
+                {daily?.ready
+                  ? <MonthCharts month={daily.month} budget={budget} need={need} leadGoal={leadGoal} />
+                  : <div style={{ color:C.dim, fontSize:13 }}>Building this month's daily history — first load takes a few minutes…</div>}
+              </div>
             </Panel>
-            <Panel title="Leads — today vs goal" accent={C.amber} compact={narrow} style={{ flex:1 }}>
-              <Stat big label={`Leads today · goal ${leadGoal}`} value={fmtN(leadsToday)} color={(leadsToday || 0) >= leadGoal ? C.green : C.amber} />
-              <div style={{ height:9, borderRadius:5, background:C.panel2, margin:'10px 0' }}>
+            <Panel title="Leads & opportunities — today" accent={C.amber} compact={narrow} style={{ flex:1 }}>
+              <div style={{ display:'flex', alignItems:'baseline', gap:10 }}>
+                <Stat big label={`Leads · goal ${leadGoal}`} value={fmtN(leadsToday)} color={(leadsToday || 0) >= leadGoal ? C.green : C.amber} />
+              </div>
+              <div style={{ height:9, borderRadius:5, background:C.panel2, margin:'8px 0' }}>
                 <div style={{ height:'100%', width:`${leadPct}%`, borderRadius:5, background: leadPct >= 100 ? C.green : C.amber }} />
               </div>
-              <div style={{ display:'flex', gap:14, flexWrap:'wrap' }}>
+              <div style={{ display:'flex', gap:16, flexWrap:'wrap' }}>
                 {['HVAC', 'Plumbing', 'Electrical', 'Garage Doors'].map(t => <Stat key={t} label={TRADE_SHORT[t]} value={fmtN(fast?.leadsByTrade?.[t] || 0)} />)}
               </div>
+
+              <div style={{ borderTop:`1px solid ${C.border}`, margin:'12px 0 10px' }} />
+              <div style={{ display:'flex', alignItems:'baseline', gap:18 }}>
+                <Stat big label={oppGoal ? `Opportunities · goal ${oppGoal}` : 'Opportunities · closed day'} value={fmtN(oppTotal)} color={oppCol} />
+                {ceo?.week?.opps != null && <Stat label={`This week · goal ${ceo.week.oppsGoal}`} value={fmtN(ceo.week.opps)} color={C.purple} />}
+              </div>
+              <div style={{ height:9, borderRadius:5, background:C.panel2, margin:'8px 0' }}>
+                <div style={{ height:'100%', width:`${oppPct}%`, borderRadius:5, background:oppCol }} />
+              </div>
+              <div style={{ display:'flex', gap:16, flexWrap:'wrap' }}>
+                {['HVAC', 'Plumbing', 'Electrical'].map(t => <Stat key={t} label={TRADE_SHORT[t]} value={fmtN(fast?.opps?.byTrade?.[t] || 0)} />)}
+                <Stat label="GAR · not in goal" value={fmtN(fast?.opps?.byTrade?.['Garage Doors'] || 0)} color={C.muted} />
+              </div>
+
               <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:8, marginTop:'auto', paddingTop:12, borderTop:`1px solid ${C.border}` }}>
-                <Stat label="30-day avg" value={daily?.leads?.avg30 != null ? daily.leads.avg30.toFixed(1) : '—'} />
+                <Stat label="Leads 30-day avg" value={daily?.leads?.avg30 != null ? daily.leads.avg30.toFixed(1) : '—'} />
                 <Stat label="vs goal" value={signPct(daily?.leads?.vsGoal)} color={(daily?.leads?.vsGoal ?? 0) >= 0 ? C.green : C.red} />
                 <Stat label="vs last year" value={signPct(daily?.leads?.vsLy)} color={(daily?.leads?.vsLy ?? 0) >= 0 ? C.green : C.red} />
               </div>
@@ -449,7 +484,7 @@ export default function CEOTVPage() {
           </Panel>
         </div>
 
-        <div style={{ flex:.62, minWidth: narrow ? 0 : 300, display:'flex', flexDirection:'column', gap: narrow ? 10 : 12 }}>
+        <div style={{ flex:.62, minWidth: narrow ? 0 : 320, display:'flex', flexDirection:'column' }}>
           {/* Live feed — the company board's feed, with money left on the table pinned on top */}
           <div style={{ flex:1, position:'relative', minHeight: narrow ? 380 : 0 }}>
             <div style={{ position:'absolute', inset:0, background:C.panel, border:`1px solid ${C.border}`, borderRadius:14, overflow:'hidden', display:'flex', flexDirection:'column' }}>
@@ -464,7 +499,7 @@ export default function CEOTVPage() {
                       Left on the table · {leaks.missedCount} missed · {leaks.quoteCount} open quotes {fmtK(leaks.quoteAmt)}
                     </div>
                     {(leaks.missed || []).slice(0, 4).map((m, i) => feedRow(`m${i}`, 'missed',
-                      `Missed lead — ${m.who}`,
+                      `Missed lead — ${fmtPhone(m.who)}`,
                       [m.reason, m.trade ? TRADE_SHORT[m.trade] : null, m.channel, m.csr ? `took: ${m.csr}` : null, timeAgo(m.at)].filter(Boolean).join(' · ')))}
                     {(leaks.quotes || []).slice(0, 3).map((q, i) => feedRow(`q${i}`, 'quote',
                       `${fmtMoney(q.amount)} open — ${q.title}`,
@@ -486,25 +521,6 @@ export default function CEOTVPage() {
             </div>
           </div>
 
-          {/* Channel watchdog: last 3 days vs each channel's 8-week normal */}
-          <Panel title="Channel watch — last 3 days vs normal" accent={C.red} compact={narrow} style={{ flexShrink:0 }}>
-            {!daily?.watchReady ? (
-              <div style={{ color:C.dim, fontSize:12 }}>Building 8 weeks of channel history…</div>
-            ) : !(daily?.channels || []).length ? (
-              <div style={{ color:C.muted, fontSize:12 }}>All channels are within their normal range.</div>
-            ) : daily.channels.map((c, i) => {
-              const st = WATCH_STYLE[c.kind]
-              return (
-                <div key={i} style={{ display:'flex', alignItems:'center', gap:10, padding:'5px 0', borderBottom: i < daily.channels.length - 1 ? `1px solid ${C.border}55` : 'none' }}>
-                  <span style={{ fontSize:10, fontWeight:800, letterSpacing:.8, color:st.color, background:`${st.color}1A`, border:`1px solid ${st.color}55`, borderRadius:6, padding:'3px 7px', flexShrink:0, minWidth:58, textAlign:'center' }}>{st.tag}</span>
-                  <div style={{ minWidth:0, flex:1 }}>
-                    <div style={{ fontSize:13, fontWeight:700, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{c.name}</div>
-                    <div style={{ fontSize:11, color:C.dim }}>{c.recent} lead calls in 3 days · normally ~{c.normal}</div>
-                  </div>
-                </div>
-              )
-            })}
-          </Panel>
         </div>
       </div>
       <style>{`@keyframes wr-pulse { 0%,100%{opacity:1} 50%{opacity:.25} }`}</style>
