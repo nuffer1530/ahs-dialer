@@ -412,8 +412,14 @@ export default function CEOTVPage() {
           </div>
         </Panel>
         <Panel title={`True GM — ${gm?.month || 'month'}`} accent={C.amber}>
-          <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:'10px 8px' }}>
-            <Stat big label="Company" value={gm?.company != null ? gm.company + '%' : '—'} color={gmCol(gm?.company)} />
+          <div style={{ display:'grid', gridTemplateColumns:'1.15fr 1fr 1fr', gap:'10px 8px', alignItems:'center' }}>
+            {/* Company spans both rows as the headline; the four trades sit 2×2 beside it. */}
+            <div style={{ gridRow:'1 / span 2', minWidth:0 }}>
+              <div style={{ fontSize:58, fontWeight:800, color:gmCol(gm?.company), letterSpacing:-2, lineHeight:1, fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap' }}>
+                {gm?.company != null ? gm.company + '%' : '—'}
+              </div>
+              <div style={{ fontSize:11, fontWeight:700, letterSpacing:1, color:C.muted, textTransform:'uppercase', marginTop:6 }}>Company</div>
+            </div>
             {['HVAC', 'Plumbing', 'Electrical', 'Garage Doors'].map(t => (
               <Stat key={t} label={t === 'Garage Doors' ? 'Garage' : t} value={gm?.byTrade?.[t] != null ? gm.byTrade[t] + '%' : '—'} color={gmCol(gm?.byTrade?.[t])} />
             ))}
