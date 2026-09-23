@@ -4785,9 +4785,9 @@ app.get('/api/tv/department/:trade', async (req, res) => {
 // ================= CEO board (/tv/ceo — Brandyn's office TV) =================
 // Composes with /api/tv/department/company (period strip, tech ranking) and
 // /api/tv/csr-month (CSR ranking). This endpoint adds:
-//  fast  (4 min) — booking %, CSR outbounds, leads + opportunities vs goal,
-//                  and the rich live feed (sold / booked / missed / quotes /
-//                  invoices / reviews / clubs, each with who, what, trade)
+//  fast  (4 min) — booking %, CSR outbounds, missed lead calls, leads +
+//                  opportunities vs goal
+//  booked (60 s) — today's ServiceTitan bookings for the live feed
 //  slow  (12 h)  — run-rate × seasonality pacing, job-matched true GM
 //  daily (30 min)— per-day revenue and leads by trade for the last 45 days
 //                  (+ last year's leads for 30): feeds the month chart and
@@ -5101,6 +5101,35 @@ function ceoTrendView(goals) {
   }
 }
 
+// Today's bookings for the live feed, straight from ServiceTitan call records
+// (CSRs take calls in ST, not Andi yet). Small pull, 60 s cache, concurrent
+// requests share one in-flight fetch.
+let _ceoBooked = { at: 0, data: [] }, _ceoBookedP = null
+function ceoBookedToday() {
+  if (Date.now() - _ceoBooked.at < 60_000) return Promise.resolve(_ceoBooked.data)
+  if (_ceoBookedP) return _ceoBookedP
+  _ceoBookedP = (async () => {
+    try {
+      const calls = await stPageAll(pg => `/telecom/v2/tenant/${ST_TENANT_ID}/calls?createdOnOrAfter=${tvBounds(tvDenverDate())}&pageSize=500&page=${pg}`, 5000)
+      const out = []
+      for (const c of calls) {
+        const lc = c.leadCall || c
+        if ((lc.direction || '') !== 'Inbound' || lc.callType !== 'Booked') continue
+        out.push({
+          id: `bk-${c.id ?? lc.id}`, at: lc.receivedOn || lc.createdOn || null,
+          csr: (lc.agent || lc.createdBy || {}).name || null, customer: (lc.customer || {}).name || null,
+          jobType: (c.type || {}).name || null, trade: tvTradeOf((c.businessUnit || {}).name), job: c.jobNumber || null,
+        })
+      }
+      out.sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')))
+      _ceoBooked = { at: Date.now(), data: out.slice(0, 60) }
+    } catch (e) { console.warn('ceo booked:', e.message) }
+    finally { _ceoBookedP = null }
+    return _ceoBooked.data
+  })()
+  return _ceoBookedP
+}
+
 async function ceoBuildFast() {
   if (_ceoFastBusy || (_ceoFast.data && Date.now() - _ceoFast.at < 4 * 60_000)) return
   _ceoFastBusy = true
@@ -5116,17 +5145,8 @@ async function ceoBuildFast() {
       loadAdminAgents(supabase), ceoReps(), tvJobTypeNames(),
     ])
     const norm = (x) => String(x || '').trim().toLowerCase()
-    const campTrade = (name) => {
-      const b = norm(name)
-      if (/hvac|air|heat|climate|furnace|click|credible/.test(b)) return 'HVAC'
-      if (/plumb/.test(b)) return 'Plumbing'
-      if (/electric/.test(b)) return 'Electrical'
-      if (/garage|door|overhead/.test(b)) return 'Garage Doors'
-      return null
-    }
-    // Calls: booking %, CSR outbounds, and the missed (unbooked) lead calls.
-    let booked = 0, outbounds = 0
-    const missed = []
+    // Calls: booking %, CSR outbounds, missed (unbooked) lead calls.
+    let booked = 0, outbounds = 0, missed = 0
     for (const c of calls) {
       const lc = c.leadCall || c
       if (admins.isAdminCall(lc)) continue
@@ -5137,24 +5157,8 @@ async function ceoBuildFast() {
       }
       if ((lc.direction || '') !== 'Inbound') continue
       if (lc.callType === 'Booked') booked++
-      else if (lc.callType === 'Unbooked') {
-        const camp = (lc.campaign || {}).name || null
-        missed.push({ at: lc.receivedOn || lc.createdOn, who: (lc.customer || {}).name || lc.from || 'Unknown caller',
-          reason: (lc.reason || {}).name || null, trade: campTrade(camp), channel: camp, csr: ag.name || null })
-      }
+      else if (lc.callType === 'Unbooked') missed++
     }
-    missed.sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')))
-    // Open quotes presented today and not sold (a sold option on the same job
-    // counts as won), biggest first — the money still on the table.
-    const soldJobs = new Set(created.filter(e => (e.status || {}).name === 'Sold').map(e => e.jobId))
-    const byJob = new Map()
-    for (const e of created) {
-      const amt = Number(e.subtotal) || 0
-      if (!e.jobId || soldJobs.has(e.jobId) || amt <= 0) continue
-      const cur = byJob.get(e.jobId)
-      if (!cur || amt > cur.amount) byJob.set(e.jobId, { at: e.createdOn, amount: Math.round(amt), title: String(e.name || e.summary || 'Estimate').slice(0, 60), trade: tvTradeOf(e.businessUnitName), job: e.jobNumber || null })
-    }
-    const quotes = [...byJob.values()].filter(q => q.amount >= 1500).sort((a, b) => b.amount - a.amount)
     // Revenue today + opportunities (non-install job invoiced ≥ $90, or a
     // non-install estimate presented; one job = one opportunity).
     let revToday = 0
@@ -5190,14 +5194,11 @@ async function ceoBuildFast() {
     _ceoFast = {
       at: Date.now(),
       data: {
-        booking: { booked, leadCalls: booked + missed.length, pct: booked + missed.length > 0 ? Math.round(booked / (booked + missed.length) * 100) : null },
+        booking: { booked, leadCalls: booked + missed, pct: booked + missed > 0 ? Math.round(booked / (booked + missed) * 100) : null },
         csrOutbounds: outbounds,
         leads, leadsByTrade, revToday: Math.round(revToday),
         opps: { total: CEO_OPP_TRADES.reduce((a, t) => a + (oppsByTrade[t] || 0), 0), byTrade: oppsByTrade },
-        leaks: {
-          missed: missed.slice(0, 12), missedCount: missed.length,
-          quotes: quotes.slice(0, 5), quoteCount: quotes.length, quoteAmt: quotes.reduce((a, q) => a + q.amount, 0),
-        },
+        missed,
       },
     }
   } finally { _ceoFastBusy = false }
@@ -5341,6 +5342,7 @@ app.get('/api/tv/ceo', async (req, res) => {
       slow: _ceoSlow.data ? { pacing: _ceoSlow.data.pacing, gm: _ceoSlow.data.gm } : null,
       daily: await ceoDailyView(_ceoFast.data, goals),
       week: { opps: curWeek?.opps ?? null, oppsGoal: trend.goals.oppsWeek },
+      booked: await Promise.race([ceoBookedToday(), new Promise(r => setTimeout(() => r(_ceoBooked.data), 8_000))]),
       goals: { ...goals, oppsToday: dow === 0 ? 0 : dow === 6 ? Math.round(goals.oppsPerDay / 2) : goals.oppsPerDay },
     })
   } catch (e) {

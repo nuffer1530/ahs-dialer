@@ -2,8 +2,7 @@ import { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } fr
 import { useNavigate } from 'react-router-dom'
 import { sb } from '../lib/supabase'
 import { useWallboard } from '../lib/useDailyReload'
-import { fmtTime, fmtDate, denverStartOfToday } from '../lib/denver'
-import { useData } from '../lib/DataContext'
+import { fmtTime, fmtDate } from '../lib/denver'
 import WeatherStrip from '../components/WeatherStrip'
 
 // CEO board (/tv/ceo) — Brandyn's office TV, in the same visual language as
@@ -86,8 +85,7 @@ function PeriodPanel({ title, d, accent }) {
   )
 }
 
-// Live-stream kinds (same sources as the Call Center board), plus the two
-// "left on the table" kinds pinned above them.
+// Today's Activity kinds.
 const FEED_STYLE = {
   booked:     { tag:'BOOKED', color:C.blue },
   bonus:      { tag:'BONUS',  color:'#F0B429' },
@@ -95,14 +93,8 @@ const FEED_STYLE = {
   review:     { tag:'5★',     color:C.amber },
   membership: { tag:'CLUB',   color:C.purple },
   invoice:    { tag:'REV',    color:'#39C5CF' },
-  missed:     { tag:'MISSED', color:C.red },
-  quote:      { tag:'QUOTE',  color:C.amber },
 }
 const fmtK = (n) => n == null ? '—' : Math.abs(n) >= 1e6 ? '$' + (n / 1e6).toFixed(2) + 'M' : Math.abs(n) >= 1000 ? '$' + Math.round(n / 1000) + 'k' : '$' + Math.round(n)
-const fmtPhone = (v) => {
-  const d = String(v || '').replace(/\D/g, ''), t = d.length === 11 && d[0] === '1' ? d.slice(1) : d
-  return /^[\d\s()+-]+$/.test(String(v || '')) && t.length === 10 ? `(${t.slice(0, 3)}) ${t.slice(3, 6)}-${t.slice(6)}` : v
-}
 const signPct = (v) => v == null || !isFinite(v) ? '—' : (v >= 0 ? '+' : '−') + Math.abs(Math.round(v * 100)) + '%'
 
 // This month, day by day. Top: revenue per day as bars, each with a white tick
@@ -211,10 +203,8 @@ export default function CEOTVPage() {
   const [ceo, setCeo] = useState(null)
   const [err, setErr] = useState(null)
   const [denied, setDenied] = useState(false)
-  // Today's Activity stream — the Call Center board's sources: Andi bookings
-  // live over realtime, ServiceTitan sales every 2 min, reviews/clubs every 5.
-  const { contacts } = useData() || {}
-  const [logs, setLogs] = useState([])
+  // Today's Activity stream: ServiceTitan bookings (60 s, via /api/tv/ceo),
+  // sales every 2 min, reviews/clubs every 5 — the Call Center board's cadence.
   const [sales, setSales] = useState([])
   const [wins, setWins] = useState({ reviews: [], memberships: [], bonus: null })
   const seenRef = useRef(new Map())
@@ -254,25 +244,13 @@ export default function CEOTVPage() {
     } catch {}
   }, [])
   useEffect(() => {
-    const since = denverStartOfToday().toISOString()
-    // select('*'): naming a column that isn't there yet 400s the whole query.
-    const loadLogs = () => sb.from('call_logs').select('*').gte('created_at', since).eq('outcome', 'Booked')
-      .order('created_at', { ascending: false }).limit(200).then(({ data }) => { if (data) setLogs(data) })
     const loadSales = () => fetch('/api/tv/sales-today').then(r => r.json()).then(d => setSales(d.sales || [])).catch(() => {})
     const loadWins = () => fetch('/api/tv/wins-today').then(r => r.json())
       .then(d => setWins({ reviews: d.reviews || [], memberships: d.memberships || [], bonus: d.bonus || null })).catch(() => {})
-    loadLogs(); loadSales(); loadWins()
-    const ch = sb.channel('ceo-activity')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'call_logs' }, p => {
-        if (p.new?.outcome === 'Booked') setLogs(prev => prev.some(x => x.id === p.new.id) ? prev : [p.new, ...prev])
-      })
-      .subscribe()
-    // Realtime is the fast path; on a 24/7 wall the socket can die silently,
-    // so the poll is the floor.
-    const tl = setInterval(loadLogs, 60_000)
+    loadSales(); loadWins()
     const ts = setInterval(loadSales, 2 * 60_000)
     const tw = setInterval(loadWins, 5 * 60_000)
-    return () => { clearInterval(tl); clearInterval(ts); clearInterval(tw); sb.removeChannel(ch) }
+    return () => { clearInterval(ts); clearInterval(tw) }
   }, [])
 
   useEffect(() => {
@@ -303,11 +281,10 @@ export default function CEOTVPage() {
     for (const c of ['score', 'booked', 'rate', 'leadCalls', 'outbound', 'clubs', 'qa']) m[c] = Math.max(0, ...csrs.map(x => Number(x[c]) || 0))
     return m
   }, [csrs])
-  const leaks = fast?.leaks
-  const nameById = useMemo(() => new Map((contacts || []).map(c => [c.id, c.name])), [contacts])
   const stream = useMemo(() => [
-    ...logs.map(l => ({ id: `log-${l.id}`, kind: 'booked', at: l.created_at,
-      line: `${l.rep || 'A CSR'} booked ${nameById.get(l.contact_id) || l.contact_name || 'a customer'}`, sub: 'Call center' })),
+    ...(ceo?.booked || []).map(b => ({ id: b.id, kind: 'booked', at: b.at,
+      line: `${b.csr || 'A CSR'} booked ${b.customer || 'a customer'}`,
+      sub: [b.jobType, b.trade ? TRADE_SHORT[b.trade] : null, b.job ? `#${b.job}` : null].filter(Boolean).join(' · ') })),
     ...sales.map(x => ({ id: x.id, kind: 'sale', at: x.soldOn, line: `${x.tech} sold ${fmtMoney(x.amount)}`, sub: x.what, big: x.amount >= 5000 })),
     ...wins.reviews.map(x => ({ id: x.id, kind: 'review', at: x.at, line: `${x.tech || 'The team'} earned a 5★ review`, sub: `${x.author} on ${x.platform}` })),
     ...wins.memberships.map(x => ({ id: x.id, kind: 'membership', at: x.at, line: `${x.seller} sold a membership`, sub: x.type })),
@@ -315,7 +292,7 @@ export default function CEOTVPage() {
     // Closed revenue has no faster source than the company board's day tier.
     ...(co?.feed || []).filter(f => f.kind === 'invoice').map(f => ({ id: `inv-${f.at}-${f.amount}`, kind: 'invoice', at: f.at,
       line: `${f.who || 'The team'} closed ${fmtMoney(f.amount)} in revenue`, sub: f.text || '' })),
-  ].filter(x => x.at).sort((a, b) => Date.parse(b.at) - Date.parse(a.at)).slice(0, 40), [logs, sales, wins, co, nameById])
+  ].filter(x => x.at).sort((a, b) => Date.parse(b.at) - Date.parse(a.at)).slice(0, 40), [ceo, sales, wins, co])
   // Anything that arrives after the first load gets a brief highlight.
   for (const it of stream) if (!seenRef.current.has(it.id)) seenRef.current.set(it.id, Date.now())
   const isFresh = (id) => {
@@ -447,7 +424,7 @@ export default function CEOTVPage() {
             <Stat big label="Booking rate" value={fast?.booking?.pct != null ? fast.booking.pct + '%' : '—'} color={C.green} />
             <Stat label="Booked / lead calls" value={`${fmtN(fast?.booking?.booked)} / ${fmtN(fast?.booking?.leadCalls)}`} />
             <Stat label="CSR outbounds" value={fmtN(fast?.csrOutbounds)} color={C.blue} />
-            <Stat label="Missed lead calls" value={fmtN(leaks?.missedCount)} color={leaks?.missedCount ? C.red : C.muted} />
+            <Stat label="Missed lead calls" value={fmtN(fast?.missed)} color={fast?.missed ? C.red : C.muted} />
           </div>
         </Panel>
       </div>
@@ -563,21 +540,8 @@ export default function CEOTVPage() {
                 </span>
               </div>
               <div style={{ flex:1, overflow:'hidden', padding:'4px 0 8px' }}>
-                {leaks && (leaks.missedCount > 0 || leaks.quoteCount > 0) && (
-                  <div style={{ background:`${C.red}0A`, borderBottom:`1px solid ${C.border}` }}>
-                    <div style={{ padding:'8px 16px 2px', fontSize:10, fontWeight:800, letterSpacing:1.2, color:C.red, textTransform:'uppercase' }}>
-                      Left on the table · {leaks.missedCount} missed · {leaks.quoteCount} open quotes {fmtK(leaks.quoteAmt)}
-                    </div>
-                    {(leaks.missed || []).slice(0, 4).map((m, i) => feedRow(`m${i}`, 'missed',
-                      `Missed lead — ${fmtPhone(m.who)}`,
-                      [m.reason, m.trade ? TRADE_SHORT[m.trade] : null, m.channel, m.csr ? `took: ${m.csr}` : null, timeAgo(m.at)].filter(Boolean).join(' · ')))}
-                    {(leaks.quotes || []).slice(0, 3).map((q, i) => feedRow(`q${i}`, 'quote',
-                      `${fmtMoney(q.amount)} open — ${q.title}`,
-                      [q.trade ? TRADE_SHORT[q.trade] : null, q.job ? `#${q.job}` : null, timeAgo(q.at)].filter(Boolean).join(' · ')))}
-                  </div>
-                )}
                 {stream.map(it => feedRow(it.id, it.kind, it.line, [it.sub, timeAgo(it.at)].filter(Boolean).join(' · '), isFresh(it.id)))}
-                {!stream.length && !leaks?.missedCount && (
+                {!stream.length && (
                   <div style={{ padding:24, textAlign:'center', color:C.dim, fontSize:13 }}>Nothing yet today — first win lands here.</div>
                 )}
               </div>
