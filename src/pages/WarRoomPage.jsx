@@ -79,6 +79,17 @@ export default function WarRoomPage() {
   const [wins, setWins] = useState({ reviews: [], memberships: [], bonus: null })   // 5★ / club sales / 🎯 unlock
   const [booked, setBooked] = useState([])   // today's booked calls, from ServiceTitan (same feed as the CEO board)
   const rootRef = useRef(null)
+  // Live Activity shows only the rows that FIT — nobody scrolls a wall TV
+  // (Brandyn, Sep 23: it was cut off mid-row with a scrollbar).
+  const feedRef = useRef(null)
+  const [feedH, setFeedH] = useState(0)
+  useEffect(() => {
+    const el = feedRef.current
+    if (!el || typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(([e]) => setFeedH(e.contentRect.height))
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
   // Wall look survives reloads; the page updates itself when a build lands.
   const { isFull, toggleFull } = useWallboard(rootRef)
   // Fire TV Silk / Fully Kiosk report ~960 CSS px: same treatment as the
@@ -231,7 +242,7 @@ export default function WarRoomPage() {
     ...wins.reviews.map(x => ({ kind: 'review', ...x })),
     ...wins.memberships.map(x => ({ kind: 'membership', ...x })),
     ...(wins.bonus ? [{ kind: 'bonus', ...wins.bonus }] : []),
-  ].sort((a, b) => Date.parse(b.at || 0) - Date.parse(a.at || 0)).slice(0, 14)
+  ].sort((a, b) => Date.parse(b.at || 0) - Date.parse(a.at || 0)).slice(0, 40)
 
   const slColor = inbound.serviceLevel == null ? C.dim : inbound.serviceLevel >= SERVICE_LEVEL_TARGET ? C.green : inbound.serviceLevel >= 60 ? C.amber : C.red
   const abColor = inbound.abandonRate == null ? C.dim : inbound.abandonRate <= 5 ? C.green : inbound.abandonRate <= 10 ? C.amber : C.red
@@ -239,6 +250,8 @@ export default function WarRoomPage() {
   const zoom = narrow ? fit : 1.08
   const rowH = narrow ? 40 : ROW_H
   const floorRowH = narrow ? 30 : 60
+  const feedRowH = narrow ? 38 : 56
+  const feedFits = feedH ? Math.max(1, Math.floor(feedH / feedRowH)) : 10
 
   return (
     <div ref={rootRef} style={{ minHeight:`calc(100vh / ${zoom})`, height:`calc(100vh / ${zoom})`, background:C.bg, color:C.text,
@@ -383,7 +396,7 @@ export default function WarRoomPage() {
       )}
 
       {/* Main grid */}
-      <div style={{ display:'grid', gridTemplateColumns:'1.25fr 1fr 1fr', gap: narrow ? 8 : 14, flex:1, minHeight: narrow ? Math.max(260, monthly.length * rowH + 48, agents.length * floorRowH + 48) : 0 }}>
+      <div style={{ display:'grid', gridTemplateColumns:'1.2fr 0.8fr 1.3fr', gap: narrow ? 8 : 14, flex:1, minHeight: narrow ? Math.max(260, monthly.length * rowH + 48, agents.length * floorRowH + 48) : 0 }}>
 
         {/* Monthly leaderboard — same idea as the department TVs' tech ranking:
             booking % · clubs · call QA into one score, month to date, medals. */}
@@ -485,15 +498,15 @@ export default function WarRoomPage() {
 
         {/* Live activity */}
         <Panel compact={narrow} title="LIVE ACTIVITY" icon="⚡" live>
-          <div style={{ overflowY:'auto', height:'100%' }}>
+          <div ref={feedRef} style={{ overflow:'hidden', height:'100%' }}>
             {feed.length === 0 ? (
               <div style={{ padding:'30px 20px', color:C.muted, fontSize:14, textAlign:'center' }}>Waiting for activity…</div>
-            ) : feed.map((l, i) => {
+            ) : feed.slice(0, feedFits).map((l, i) => {
               const t = (v) => v ? fmtTime(v, { hour:'2-digit', minute:'2-digit' }) : ''
               if (l.kind === 'bonus') {
                 const g = '#F0B429'
                 return (
-                  <div key={l.id} style={{ padding: narrow ? '6px 10px' : '12px 16px', borderBottom:`1px solid ${C.panel2}`, display:'flex', alignItems:'center', gap: narrow ? 8 : 11,
+                  <div key={l.id} style={{ height: feedRowH, boxSizing:'border-box', padding: narrow ? '0 10px' : '0 16px', borderBottom:`1px solid ${C.panel2}`, display:'flex', alignItems:'center', gap: narrow ? 8 : 11,
                     opacity: i > 9 ? 0.45 : 1, background:`${g}1c`, boxShadow:`inset 3px 0 0 ${g}` }}>
                     <div style={{ width:9, height:9, borderRadius:'50%', background:g, flexShrink:0, boxShadow:`0 0 12px ${g}` }} />
                     <div style={{ flex:1, minWidth:0 }}>
@@ -508,7 +521,7 @@ export default function WarRoomPage() {
               }
               if (l.kind === 'review') {
                 return (
-                  <div key={l.id} style={{ padding: narrow ? '6px 10px' : '11px 16px', borderBottom:`1px solid ${C.panel2}`, display:'flex', alignItems:'center', gap: narrow ? 8 : 11,
+                  <div key={l.id} style={{ height: feedRowH, boxSizing:'border-box', padding: narrow ? '0 10px' : '0 16px', borderBottom:`1px solid ${C.panel2}`, display:'flex', alignItems:'center', gap: narrow ? 8 : 11,
                     opacity: i > 9 ? 0.45 : 1, background:`${C.amber}10` }}>
                     <div style={{ width:9, height:9, borderRadius:'50%', background:C.amber, flexShrink:0 }} />
                     <div style={{ flex:1, minWidth:0 }}>
@@ -525,14 +538,14 @@ export default function WarRoomPage() {
               }
               if (l.kind === 'booked') {
                 const blue = C.blue || '#60A5FA'
-                const sub = [l.jobType, l.trade, l.job ? `#${l.job}` : null].filter(Boolean).join(' · ')
+                const sub = [l.jobType, l.job ? `#${l.job}` : null].filter(Boolean).join(' · ')
                 return (
-                  <div key={l.id} style={{ padding: narrow ? '6px 10px' : '11px 16px', borderBottom:`1px solid ${C.panel2}`, display:'flex', alignItems:'center', gap: narrow ? 8 : 11,
+                  <div key={l.id} style={{ height: feedRowH, boxSizing:'border-box', padding: narrow ? '0 10px' : '0 16px', borderBottom:`1px solid ${C.panel2}`, display:'flex', alignItems:'center', gap: narrow ? 8 : 11,
                     opacity: i > 9 ? 0.45 : 1, background:`${blue}12` }}>
                     <div style={{ width:9, height:9, borderRadius:'50%', background:blue, flexShrink:0, boxShadow:`0 0 10px ${blue}` }} />
                     <div style={{ flex:1, minWidth:0 }}>
                       <div style={{ fontSize: narrow ? 12 : 14, fontWeight:700, color:blue, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
-                        📞 {l.csr || 'A CSR'} booked {l.customer || 'a customer'}
+                        📞 {l.csr || 'A CSR'} booked a call
                       </div>
                       <div style={{ fontSize: narrow ? 9 : 11, color:C.muted, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
                         {sub}{sub ? ' · ' : ''}{t(l.at)}
@@ -544,7 +557,7 @@ export default function WarRoomPage() {
               }
               if (l.kind === 'membership') {
                 return (
-                  <div key={l.id} style={{ padding: narrow ? '6px 10px' : '11px 16px', borderBottom:`1px solid ${C.panel2}`, display:'flex', alignItems:'center', gap: narrow ? 8 : 11,
+                  <div key={l.id} style={{ height: feedRowH, boxSizing:'border-box', padding: narrow ? '0 10px' : '0 16px', borderBottom:`1px solid ${C.panel2}`, display:'flex', alignItems:'center', gap: narrow ? 8 : 11,
                     opacity: i > 9 ? 0.45 : 1, background:`${C.purple}12` }}>
                     <div style={{ width:9, height:9, borderRadius:'50%', background:C.purple, flexShrink:0 }} />
                     <div style={{ flex:1, minWidth:0 }}>
@@ -562,11 +575,11 @@ export default function WarRoomPage() {
               if (l.kind === 'sale') {
                 const big = l.amount >= 1000
                 return (
-                  <div key={l.id} style={{ padding: narrow ? '6px 10px' : '11px 16px', borderBottom:`1px solid ${C.panel2}`, display:'flex', alignItems:'center', gap: narrow ? 8 : 11,
+                  <div key={l.id} style={{ height: feedRowH, boxSizing:'border-box', padding: narrow ? '0 10px' : '0 16px', borderBottom:`1px solid ${C.panel2}`, display:'flex', alignItems:'center', gap: narrow ? 8 : 11,
                     opacity: i > 9 ? 0.45 : 1, background: big ? '#B4530918' : `${C.green}10` }}>
                     <div style={{ width:9, height:9, borderRadius:'50%', background: big ? '#F59E0B' : C.green, flexShrink:0, boxShadow: big ? '0 0 10px #F59E0B' : 'none' }} />
                     <div style={{ flex:1, minWidth:0 }}>
-                      <div style={{ fontSize:14, fontWeight:700, color: big ? '#F59E0B' : C.green, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
+                      <div style={{ fontSize: narrow ? 12 : 14, fontWeight:700, color: big ? '#F59E0B' : C.green, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
                         💰 {l.tech} sold ${l.amount.toLocaleString()}
                       </div>
                       <div style={{ fontSize: narrow ? 9 : 11, color:C.muted, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
@@ -581,14 +594,14 @@ export default function WarRoomPage() {
               const c = contacts.find(x => x.id === l.contact_id)
               const booked = l.outcome === 'Booked'
               return (
-                <div key={l.id} style={{ padding: narrow ? '6px 10px' : '11px 16px', borderBottom:`1px solid ${C.panel2}`, display:'flex', alignItems:'center', gap: narrow ? 8 : 11,
+                <div key={l.id} style={{ height: feedRowH, boxSizing:'border-box', padding: narrow ? '0 10px' : '0 16px', borderBottom:`1px solid ${C.panel2}`, display:'flex', alignItems:'center', gap: narrow ? 8 : 11,
                   opacity: i > 9 ? 0.45 : 1, background: booked ? `${C.green}12` : 'transparent' }}>
                   <div style={{ width:9, height:9, borderRadius:'50%', background:color, flexShrink:0, boxShadow: booked ? `0 0 10px ${color}` : 'none' }} />
                   <div style={{ flex:1, minWidth:0 }}>
                     <div style={{ fontSize: narrow ? 12 : 14, fontWeight:600, color: booked ? C.green : C.text, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
                       {booked ? '🎉 ' : ''}{c?.name || l.contact_name || '—'}
                     </div>
-                    <div style={{ fontSize:11, color:C.muted }}>{l.rep} · {fmtTime(l.created_at, { hour:'2-digit', minute:'2-digit' })}</div>
+                    <div style={{ fontSize: narrow ? 9 : 11, color:C.muted }}>{l.rep} · {fmtTime(l.created_at, { hour:'2-digit', minute:'2-digit' })}</div>
                   </div>
                   <span style={{ fontSize:12, fontWeight:700, color, flexShrink:0 }}>{l.outcome}</span>
                 </div>

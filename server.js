@@ -4762,6 +4762,17 @@ app.get('/api/tv/department/:trade', async (req, res) => {
       installers = month?.installersByTrade?.[trade] || []
       feed = _tvDay.data?.feed?.[trade] || []
     }
+    // Calls the call center booked for this trade (Brandyn, Sep 23) — the
+    // same ServiceTitan source as the Call Center and CEO boards, merged at
+    // request time (60 s cache) so they don't wait on the 10-min day tier.
+    try {
+      const bookedAll = await Promise.race([ceoBookedToday(), new Promise(r => setTimeout(() => r(_ceoBooked.data), 3_000))])
+      const bk = (bookedAll || []).filter(b => isCompany || b.trade === trade).map(b => ({
+        kind: 'booked', at: b.at, who: b.csr || null,
+        text: [b.jobType, b.job ? `#${b.job}` : null].filter(Boolean).join(' · '),
+      }))
+      if (bk.length) feed = [...feed, ...bk].sort((a, b) => String(b.at || '').localeCompare(String(a.at || ''))).slice(0, 40)
+    } catch (e) { console.warn('tv dept booked:', e.message) }
     techs = techs.map(x => ({
       ...x, ytd: _tvYear.data?.ytdTech?.[String(x.id)] || { sold: 0, fiveStar: 0, memberships: 0 },
     }))
@@ -5128,7 +5139,8 @@ function ceoBookedToday() {
         if ((lc.direction || '') !== 'Inbound' || lc.callType !== 'Booked') continue
         out.push({
           id: `bk-${c.id ?? lc.id}`, at: lc.receivedOn || lc.createdOn || null,
-          csr: (lc.agent || lc.createdBy || {}).name || null, customer: (lc.customer || {}).name || null,
+          // No customer name — these rows go on wall TVs (Brandyn, Sep 23).
+          csr: (lc.agent || lc.createdBy || {}).name || null,
           jobType: (c.type || {}).name || null, trade: tvTradeOf((c.businessUnit || {}).name), job: c.jobNumber || null,
         })
       }

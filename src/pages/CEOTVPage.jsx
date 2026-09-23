@@ -283,8 +283,8 @@ export default function CEOTVPage() {
   }, [csrs])
   const stream = useMemo(() => [
     ...(ceo?.booked || []).map(b => ({ id: b.id, kind: 'booked', at: b.at,
-      line: `${b.csr || 'A CSR'} booked ${b.customer || 'a customer'}`,
-      sub: [b.jobType, b.trade ? TRADE_SHORT[b.trade] : null, b.job ? `#${b.job}` : null].filter(Boolean).join(' · ') })),
+      line: `${b.csr || 'A CSR'} booked a call`,
+      sub: [b.jobType, b.job ? `#${b.job}` : null].filter(Boolean).join(' · ') })),
     ...sales.map(x => ({ id: x.id, kind: 'sale', at: x.soldOn, line: `${x.tech} sold ${fmtMoney(x.amount)}`, sub: x.what, big: x.amount >= 5000 })),
     ...wins.reviews.map(x => ({ id: x.id, kind: 'review', at: x.at, line: `${x.tech || 'The team'} earned a 5★ review`, sub: `${x.author} on ${x.platform}` })),
     ...wins.memberships.map(x => ({ id: x.id, kind: 'membership', at: x.at, line: `${x.seller} sold a membership`, sub: x.type })),

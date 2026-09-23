@@ -90,6 +90,7 @@ const FEED_STYLE = {
   review:     { tag:'5★',   color:C.amber },
   membership: { tag:'CLUB', color:C.purple },
   invoice:    { tag:'REV',  color:C.blue },
+  booked:     { tag:'BOOKED', color:'#22D3EE' },
 }
 
 export default function DeptTVPage() {
@@ -334,6 +335,7 @@ export default function DeptTVPage() {
                         {f.kind === 'review' && `${(f.who || 'The team').split(' ')[0]} got a 5★`}
                         {f.kind === 'membership' && `${(f.who || 'The team').split(' ')[0]} sold a club`}
                         {f.kind === 'invoice' && `${(f.who || 'The team').split(' ')[0]} closed ${fmtMoney(f.amount)}`}
+                        {f.kind === 'booked' && `${(f.who || 'A CSR').split(' ')[0]} booked a call`}
                       </span>
                       <span style={{ fontSize:10, color:C.dim }}>{timeAgo(f.at)}</span>
                     </span>
@@ -361,6 +363,7 @@ export default function DeptTVPage() {
                       {f.kind === 'review' && `${f.who || 'The team'} earned a 5★ review`}
                       {f.kind === 'membership' && `${f.who || 'The team'} sold a membership`}
                       {f.kind === 'invoice' && `${f.who || 'The team'} closed ${fmtMoney(f.amount)} in revenue`}
+                      {f.kind === 'booked' && `${f.who || 'A CSR'} booked a call`}
                     </div>
                     <div style={{ fontSize:11, color:C.dim }}>{[f.text, timeAgo(f.at)].filter(Boolean).join(' · ')}</div>
                   </div>
