@@ -77,6 +77,7 @@ export default function WarRoomPage() {
   const [sales, setSales] = useState([])     // estimates SOLD today (tech wins)
   const [csrMonth, setCsrMonth] = useState(null)   // month-to-date CSR ranking (booking % · clubs · QA)
   const [wins, setWins] = useState({ reviews: [], memberships: [], bonus: null })   // 5★ / club sales / 🎯 unlock
+  const [booked, setBooked] = useState([])   // today's booked calls, from ServiceTitan (same feed as the CEO board)
   const rootRef = useRef(null)
   // Wall look survives reloads; the page updates itself when a build lands.
   const { isFull, toggleFull } = useWallboard(rootRef)
@@ -108,13 +109,15 @@ export default function WarRoomPage() {
     const loadSales = () => fetch('/api/tv/sales-today').then(r => r.json()).then(d => setSales(d.sales || [])).catch(() => {})
     const loadWins = () => fetch('/api/tv/wins-today').then(r => r.json()).then(d => setWins({ reviews: d.reviews || [], memberships: d.memberships || [], bonus: d.bonus || null })).catch(() => {})
     const loadMonth = () => fetch('/api/tv/csr-month').then(r => r.json()).then(d => setCsrMonth(d)).catch(() => {})
-    loadSales(); loadWins(); loadMonth()
+    const loadBooked = () => fetch('/api/tv/booked-today').then(r => r.json()).then(d => setBooked(d.booked || [])).catch(() => {})
+    loadSales(); loadWins(); loadMonth(); loadBooked()
+    const tb = setInterval(loadBooked, 60_000)
     const tm = setInterval(loadMonth, 5 * 60_000)
     const ts = setInterval(loadSales, 2 * 60_000)
     const tw = setInterval(loadWins, 5 * 60_000)
     load()
     const t = setInterval(load, 90_000)
-    return () => { clearInterval(t); clearInterval(ts); clearInterval(tw); clearInterval(tm) }
+    return () => { clearInterval(t); clearInterval(ts); clearInterval(tw); clearInterval(tm); clearInterval(tb) }
   }, [])
 
 
@@ -223,6 +226,7 @@ export default function WarRoomPage() {
   // One stream, two kinds of wins: CSR call outcomes and tech SALES.
   const feed = [
     ...logs.map(l => ({ kind: 'call', at: l.created_at, ...l })),
+    ...booked.map(b => ({ kind: 'booked', ...b })),
     ...sales.map(x => ({ kind: 'sale', at: x.soldOn, ...x })),
     ...wins.reviews.map(x => ({ kind: 'review', ...x })),
     ...wins.memberships.map(x => ({ kind: 'membership', ...x })),
@@ -516,6 +520,25 @@ export default function WarRoomPage() {
                       </div>
                     </div>
                     <span style={{ fontSize:12, fontWeight:700, color:C.amber, flexShrink:0 }}>★★★★★</span>
+                  </div>
+                )
+              }
+              if (l.kind === 'booked') {
+                const blue = C.blue || '#60A5FA'
+                const sub = [l.jobType, l.trade, l.job ? `#${l.job}` : null].filter(Boolean).join(' · ')
+                return (
+                  <div key={l.id} style={{ padding: narrow ? '6px 10px' : '11px 16px', borderBottom:`1px solid ${C.panel2}`, display:'flex', alignItems:'center', gap: narrow ? 8 : 11,
+                    opacity: i > 9 ? 0.45 : 1, background:`${blue}12` }}>
+                    <div style={{ width:9, height:9, borderRadius:'50%', background:blue, flexShrink:0, boxShadow:`0 0 10px ${blue}` }} />
+                    <div style={{ flex:1, minWidth:0 }}>
+                      <div style={{ fontSize: narrow ? 12 : 14, fontWeight:700, color:blue, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
+                        📞 {l.csr || 'A CSR'} booked {l.customer || 'a customer'}
+                      </div>
+                      <div style={{ fontSize: narrow ? 9 : 11, color:C.muted, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
+                        {sub}{sub ? ' · ' : ''}{t(l.at)}
+                      </div>
+                    </div>
+                    <span style={{ fontSize:12, fontWeight:700, color:blue, flexShrink:0 }}>BOOKED</span>
                   </div>
                 )
               }

@@ -3068,7 +3068,9 @@ async function buildCsrMonth() {
       if (r) { r.qa = Math.round(list.reduce((a, b) => a + b, 0) / list.length); r.evals = list.length }
     }
   } catch (e) { console.warn('csr month evals:', e.message) }
-  const list = [...rows.values()].filter(r => r.leadCalls > 0)
+  // Deactivated Andi users are off the board even though their ST calls
+  // this month still exist (Shelly, Sep 23 — Brandyn).
+  const list = [...rows.values()].filter(r => r.leadCalls > 0 && !(r.profileId && profById.get(r.profileId)?.active === false))
   for (const r of list) r.bookingPct = r.leadCalls ? Math.round(100 * r.booked / r.leadCalls) : null
   const ranked = list.filter(r => r.leadCalls >= 10)
   const maxClubs = Math.max(1, ...ranked.map(r => r.clubs))
@@ -3090,6 +3092,15 @@ app.get('/api/tv/csr-month', async (req, res) => {
     if (_tvCsrMonth) return res.json(_tvCsrMonth.data)
     res.status(500).json({ error: err.message })
   }
+})
+
+// Today's booked calls for the Call Center TV's activity feed — the same
+// ServiceTitan source the CEO board uses (Brandyn, Sep 23).
+app.get('/api/tv/booked-today', async (req, res) => {
+  try {
+    const booked = await Promise.race([ceoBookedToday(), new Promise(r => setTimeout(() => r(_ceoBooked.data), 8_000))])
+    res.json({ booked, generatedAt: new Date().toISOString() })
+  } catch (err) { res.status(500).json({ error: err.message }) }
 })
 
 app.get('/api/tv/wins-today', async (req, res) => {
