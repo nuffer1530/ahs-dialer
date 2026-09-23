@@ -1276,6 +1276,7 @@ export default function AdminPage() {
                       {commissionHistory.filter(c => !isAdmin ? c.profile_id === profile?.id : true).map(c => {
                         const isAdj = c.event_type === 'adjustment'
                         const isMem = c.event_type === 'membership'
+                        const isRev = c.event_type === 'reversal'   // clawbacks + corrections — never label them "Booking"
                         const amt = parseFloat(c.amount)
                         const updaterProfile = c.updated_by ? profiles.find(p => p.id === c.updated_by) : null
                         const madeBy = c._updaterName || updaterProfile?.name || updaterProfile?.email || (isAdj ? 'Admin' : null)
@@ -1284,13 +1285,13 @@ export default function AdminPage() {
                             {isAdmin && <td style={{padding:'10px 12px', fontWeight:500}}>{c.profiles?.name || c.rep_name}</td>}
                             <td style={{padding:'10px 12px'}}>
                               <span style={{ padding:'2px 8px', borderRadius:99, fontSize:11, fontWeight:600,
-                                background: isAdj ? (amt < 0 ? 'var(--danger-bg)' : 'var(--warning-bg)') : isMem ? '#EFF6FF' : '#DCFCE7',
-                                color: isAdj ? (amt < 0 ? 'var(--danger)' : 'var(--warning)') : isMem ? '#3b82f6' : '#16A34A' }}>
-                                {isAdj ? 'Adjustment' : isMem ? 'Membership' : 'Booking'}
+                                background: isRev ? 'var(--danger-bg)' : isAdj ? (amt < 0 ? 'var(--danger-bg)' : 'var(--warning-bg)') : isMem ? '#EFF6FF' : '#DCFCE7',
+                                color: isRev ? 'var(--danger)' : isAdj ? (amt < 0 ? 'var(--danger)' : 'var(--warning)') : isMem ? '#3b82f6' : '#16A34A' }}>
+                                {isRev ? 'Reversal' : isAdj ? 'Adjustment' : isMem ? 'Membership' : 'Booking'}
                               </span>
                             </td>
                             <td style={{padding:'10px 12px', color:'var(--text-secondary)', fontSize:12}}>
-                              {isAdj ? (c.notes || 'Manual adjustment') : c.contact_name}
+                              {isAdj ? (c.notes || 'Manual adjustment') : isRev ? (c.notes || `Reversed${c.contact_name ? ` — ${c.contact_name}` : ''}`) : c.contact_name}
                             </td>
                             <td style={{padding:'10px 12px', textAlign:'right', fontWeight:700, color: amt < 0 ? 'var(--danger)' : '#16A34A'}}>
                               {amt >= 0 ? '+' : ''}{'$'}{amt.toFixed(2)}
