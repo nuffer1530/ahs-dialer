@@ -45,7 +45,7 @@ export default function WinCelebration() {
       const latest = data[data.length - 1]
       markSeen(pid, latest.synced_at)
       triggerCelebration({
-        repName: latest.rep_name, contactName: latest.contact_name,
+        repName: latest.rep_name, contactName: latest.contact_name, notes: latest.notes,
         amount: Number(latest.amount || 0), eventType: latest.event_type,
         alsoMembership: latest.also_membership, membershipAmount: latest.membership_amount,
         extraCount: data.length - 1,
@@ -56,17 +56,17 @@ export default function WinCelebration() {
   useEffect(() => {
     channelRef.current = sb.channel('win-celebrations')
       .on('postgres_changes', { event:'INSERT', schema:'public', table:'commissions' }, payload => {
-        const { profile_id, amount, event_type, contact_name, rep_name, also_membership, membership_amount, synced_at } = payload.new
+        const { profile_id, amount, event_type, contact_name, rep_name, also_membership, membership_amount, synced_at, notes } = payload.new
         if (!profile_id || profile_id !== myIdRef.current) return   // someone else's win
         if (!(Number(amount) > 0)) return                            // reversals don't confetti
         markSeen(profile_id, synced_at)
-        triggerCelebration({ repName: rep_name, contactName: contact_name, amount, eventType: event_type, alsoMembership: also_membership, membershipAmount: membership_amount })
+        triggerCelebration({ repName: rep_name, contactName: contact_name, notes, amount, eventType: event_type, alsoMembership: also_membership, membershipAmount: membership_amount })
       })
       .subscribe()
     return () => { if (channelRef.current) sb.removeChannel(channelRef.current) }
   }, [])
 
-  const triggerCelebration = ({ repName, contactName, amount, eventType, alsoMembership, membershipAmount }) => {
+  const triggerCelebration = ({ repName, contactName, notes, amount, eventType, alsoMembership, membershipAmount }) => {
     const colors = ['#ff751f','#16A34A','#FFC107','#E91E63','#9C27B0','#3b82f6','#00BCD4']
     const newParticles = Array.from({ length:80 }, (_, i) => ({
       id: i, left:`${Math.random()*100}%`, top:`-${Math.random()*20+10}px`,
@@ -76,7 +76,7 @@ export default function WinCelebration() {
       transform:`rotate(${Math.random()*360}deg)`,
     }))
     setParticles(newParticles)
-    setCelebration({ repName, contactName, amount, eventType, alsoMembership, membershipAmount })
+    setCelebration({ repName, contactName, notes, amount, eventType, alsoMembership, membershipAmount })
     clearTimeout(timeoutRef.current)
     timeoutRef.current = setTimeout(() => { setCelebration(null); setParticles([]) }, 6000)
   }
@@ -98,11 +98,22 @@ export default function WinCelebration() {
       ))}
 
       <div style={{ position:'fixed', top:'50%', left:'50%', zIndex:10000, animation:'popIn 0.5s cubic-bezier(0.175,0.885,0.32,1.275) forwards', background:'#fff', borderRadius:24, padding:'36px 48px', boxShadow:'0 24px 64px rgba(0,0,0,.35)', textAlign:'center', border:'3px solid #16A34A', minWidth:360 }}>
-        <div style={{ fontSize:64, marginBottom:4, lineHeight:1 }}>🎉</div>
-        <div style={{ fontSize:30, fontWeight:800, color:'#16A34A', marginBottom:6, letterSpacing:-.5 }}>BOOKED!</div>
-        <div style={{ fontSize:17, fontWeight:600, color:'#1C1B19', marginBottom:2 }}>{celebration.contactName}</div>
+        {/* A bonus / adjustment isn't a booking — say what it actually is. */}
+        {(() => {
+          const adj = celebration.eventType === 'adjustment'
+          const opp = adj && /opportunity watch/i.test(celebration.notes || '')
+          return <>
+            <div style={{ fontSize:64, marginBottom:4, lineHeight:1 }}>{opp ? '🎯' : adj ? '💵' : '🎉'}</div>
+            <div style={{ fontSize:30, fontWeight:800, color:'#16A34A', marginBottom:6, letterSpacing:-.5 }}>{opp ? 'BONUS!' : adj ? 'PAY ADJUSTMENT' : 'BOOKED!'}</div>
+            <div style={{ fontSize:17, fontWeight:600, color:'#1C1B19', marginBottom:2 }}>
+              {opp ? 'Opportunity Watch bonus' : adj ? String(celebration.notes || '').replace(/^\W+/, '') : celebration.contactName}
+            </div>
+          </>
+        })()}
         <div style={{ fontSize:13, color:'#6B6760', marginBottom:20 }}>
-          {celebration.repName} just closed one! 🔥
+          {celebration.eventType === 'adjustment'
+            ? (/opportunity watch/i.test(celebration.notes || '') ? 'Every trade’s board filled — your share of the pool 🔥' : '')
+            : `${celebration.repName} just closed one! 🔥`}
           {celebration.extraCount > 0 && <span> (+{celebration.extraCount} more payout{celebration.extraCount === 1 ? '' : 's'} while you were away — see My Page)</span>}
         </div>
 

@@ -8119,6 +8119,9 @@ async function settleOppBonusDay(day, entry, log, { force = false, hm = '23:59' 
       st_job_id: null, job_number: null,
       notes: `🎯 Opportunity Watch Bonus — board full across every trade before ${cutoff}, $${(cents / 100).toFixed(0)} pool split ${recipients.length} ways among everyone who worked ${day}`,
       earned_at: entry.at || new Date().toISOString(),   // the unlock moment, so it lands in the right pay week
+      // Paid after hours: synced_at lets the You-Got-Paid pop catch up on the
+      // rep's next login (the catch-up keys on synced_at).
+      synced_at: new Date().toISOString(),
       also_membership: false,
     }
   })
