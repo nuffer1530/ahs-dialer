@@ -2,7 +2,8 @@ import { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } fr
 import { useNavigate } from 'react-router-dom'
 import { sb } from '../lib/supabase'
 import { useWallboard } from '../lib/useDailyReload'
-import { fmtTime, fmtDate } from '../lib/denver'
+import { fmtTime, fmtDate, denverStartOfToday } from '../lib/denver'
+import { useData } from '../lib/DataContext'
 import WeatherStrip from '../components/WeatherStrip'
 
 // CEO board (/tv/ceo) — Brandyn's office TV, in the same visual language as
@@ -85,12 +86,15 @@ function PeriodPanel({ title, d, accent }) {
   )
 }
 
-// Company-board feed kinds, plus the two "left on the table" kinds.
+// Live-stream kinds (same sources as the Call Center board), plus the two
+// "left on the table" kinds pinned above them.
 const FEED_STYLE = {
+  booked:     { tag:'BOOKED', color:C.blue },
+  bonus:      { tag:'BONUS',  color:'#F0B429' },
   sale:       { tag:'SALE',   color:C.green },
   review:     { tag:'5★',     color:C.amber },
   membership: { tag:'CLUB',   color:C.purple },
-  invoice:    { tag:'REV',    color:C.blue },
+  invoice:    { tag:'REV',    color:'#39C5CF' },
   missed:     { tag:'MISSED', color:C.red },
   quote:      { tag:'QUOTE',  color:C.amber },
 }
@@ -207,6 +211,14 @@ export default function CEOTVPage() {
   const [ceo, setCeo] = useState(null)
   const [err, setErr] = useState(null)
   const [denied, setDenied] = useState(false)
+  // Today's Activity stream — the Call Center board's sources: Andi bookings
+  // live over realtime, ServiceTitan sales every 2 min, reviews/clubs every 5.
+  const { contacts } = useData() || {}
+  const [logs, setLogs] = useState([])
+  const [sales, setSales] = useState([])
+  const [wins, setWins] = useState({ reviews: [], memberships: [], bonus: null })
+  const seenRef = useRef(new Map())
+  const mountedAt = useRef(Date.now())
   const [time, setTime] = useState(new Date())
   const [vp, setVp] = useState(() => ({ w: window.innerWidth, h: window.innerHeight }))
   useEffect(() => {
@@ -242,6 +254,28 @@ export default function CEOTVPage() {
     } catch {}
   }, [])
   useEffect(() => {
+    const since = denverStartOfToday().toISOString()
+    // select('*'): naming a column that isn't there yet 400s the whole query.
+    const loadLogs = () => sb.from('call_logs').select('*').gte('created_at', since).eq('outcome', 'Booked')
+      .order('created_at', { ascending: false }).limit(200).then(({ data }) => { if (data) setLogs(data) })
+    const loadSales = () => fetch('/api/tv/sales-today').then(r => r.json()).then(d => setSales(d.sales || [])).catch(() => {})
+    const loadWins = () => fetch('/api/tv/wins-today').then(r => r.json())
+      .then(d => setWins({ reviews: d.reviews || [], memberships: d.memberships || [], bonus: d.bonus || null })).catch(() => {})
+    loadLogs(); loadSales(); loadWins()
+    const ch = sb.channel('ceo-activity')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'call_logs' }, p => {
+        if (p.new?.outcome === 'Booked') setLogs(prev => prev.some(x => x.id === p.new.id) ? prev : [p.new, ...prev])
+      })
+      .subscribe()
+    // Realtime is the fast path; on a 24/7 wall the socket can die silently,
+    // so the poll is the floor.
+    const tl = setInterval(loadLogs, 60_000)
+    const ts = setInterval(loadSales, 2 * 60_000)
+    const tw = setInterval(loadWins, 5 * 60_000)
+    return () => { clearInterval(tl); clearInterval(ts); clearInterval(tw); sb.removeChannel(ch) }
+  }, [])
+
+  useEffect(() => {
     load(); loadCsr()
     const t1 = setInterval(load, 60_000)
     const t2 = setInterval(loadCsr, 5 * 60_000)
@@ -270,6 +304,24 @@ export default function CEOTVPage() {
     return m
   }, [csrs])
   const leaks = fast?.leaks
+  const nameById = useMemo(() => new Map((contacts || []).map(c => [c.id, c.name])), [contacts])
+  const stream = useMemo(() => [
+    ...logs.map(l => ({ id: `log-${l.id}`, kind: 'booked', at: l.created_at,
+      line: `${l.rep || 'A CSR'} booked ${nameById.get(l.contact_id) || l.contact_name || 'a customer'}`, sub: 'Call center' })),
+    ...sales.map(x => ({ id: x.id, kind: 'sale', at: x.soldOn, line: `${x.tech} sold ${fmtMoney(x.amount)}`, sub: x.what, big: x.amount >= 5000 })),
+    ...wins.reviews.map(x => ({ id: x.id, kind: 'review', at: x.at, line: `${x.tech || 'The team'} earned a 5★ review`, sub: `${x.author} on ${x.platform}` })),
+    ...wins.memberships.map(x => ({ id: x.id, kind: 'membership', at: x.at, line: `${x.seller} sold a membership`, sub: x.type })),
+    ...(wins.bonus ? [{ id: wins.bonus.id, kind: 'bonus', at: wins.bonus.at, line: 'Opportunity Watch bonus unlocked', sub: `$${Number(wins.bonus.pool).toFixed(0)} pool split ${wins.bonus.n} ways` }] : []),
+    // Closed revenue has no faster source than the company board's day tier.
+    ...(co?.feed || []).filter(f => f.kind === 'invoice').map(f => ({ id: `inv-${f.at}-${f.amount}`, kind: 'invoice', at: f.at,
+      line: `${f.who || 'The team'} closed ${fmtMoney(f.amount)} in revenue`, sub: f.text || '' })),
+  ].filter(x => x.at).sort((a, b) => Date.parse(b.at) - Date.parse(a.at)).slice(0, 40), [logs, sales, wins, co, nameById])
+  // Anything that arrives after the first load gets a brief highlight.
+  for (const it of stream) if (!seenRef.current.has(it.id)) seenRef.current.set(it.id, Date.now())
+  const isFresh = (id) => {
+    const t = seenRef.current.get(id)
+    return t - mountedAt.current > 20_000 && Date.now() - t < 45_000
+  }
   const oppGoal = goals?.oppsToday ?? 33
   const oppTotal = fast?.opps?.total
   const oppPct = oppGoal > 0 && oppTotal != null ? Math.min(100, Math.round(oppTotal / oppGoal * 100)) : 0
@@ -295,10 +347,11 @@ export default function CEOTVPage() {
   const th = (label, right = true) => (
     <th style={{ padding:'4px 7px', textAlign: right ? 'right' : 'left', fontSize:10, fontWeight:700, letterSpacing:1, color:C.dim, textTransform:'uppercase', whiteSpace:'nowrap' }}>{label}</th>
   )
-  const feedRow = (key, kind, line, sub) => {
+  const feedRow = (key, kind, line, sub, fresh) => {
     const st = FEED_STYLE[kind] || FEED_STYLE.sale
     return (
-      <div key={key} style={{ display:'flex', alignItems:'center', gap:12, padding:'10px 18px', borderBottom:`1px solid ${C.border}55` }}>
+      <div key={key} style={{ display:'flex', alignItems:'center', gap:12, padding:'10px 18px', borderBottom:`1px solid ${C.border}55`,
+        background: fresh ? `${st.color}1A` : 'transparent', boxShadow: fresh ? `inset 3px 0 0 ${st.color}` : 'none', animation: fresh ? 'ceo-pop .8s ease-out' : 'none' }}>
         <span style={{ fontSize:10, fontWeight:800, letterSpacing:.8, color:st.color, background:`${st.color}1A`, border:`1px solid ${st.color}55`, borderRadius:6, padding:'3px 7px', flexShrink:0 }}>{st.tag}</span>
         <div style={{ minWidth:0, flex:1 }}>
           <div style={{ fontSize:14, fontWeight:700, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{line}</div>
@@ -504,8 +557,10 @@ export default function CEOTVPage() {
           <div style={{ flex:1, position:'relative', minHeight:0 }}>
             <div style={{ position:'absolute', inset:0, background:C.panel, border:`1px solid ${C.border}`, borderRadius:14, overflow:'hidden', display:'flex', flexDirection:'column' }}>
               <div style={{ padding:'13px 18px', borderBottom:`1px solid ${C.border}`, display:'flex', alignItems:'center', gap:8, flexShrink:0 }}>
-                <span style={{ fontSize:13, fontWeight:700, letterSpacing:.5 }}>Today in Company</span>
-                <div style={{ marginLeft:'auto', width:7, height:7, borderRadius:'50%', background:C.green, animation:'wr-pulse 1.5s infinite' }} />
+                <span style={{ fontSize:15, fontWeight:800, letterSpacing:.5 }}>Today's Activity</span>
+                <span style={{ marginLeft:'auto', display:'flex', alignItems:'center', gap:6, fontSize:10, fontWeight:800, letterSpacing:1.2, color:C.green }}>
+                  <span style={{ width:8, height:8, borderRadius:'50%', background:C.green, animation:'wr-pulse 1.5s infinite' }} />LIVE
+                </span>
               </div>
               <div style={{ flex:1, overflow:'hidden', padding:'4px 0 8px' }}>
                 {leaks && (leaks.missedCount > 0 || leaks.quoteCount > 0) && (
@@ -521,15 +576,8 @@ export default function CEOTVPage() {
                       [q.trade ? TRADE_SHORT[q.trade] : null, q.job ? `#${q.job}` : null, timeAgo(q.at)].filter(Boolean).join(' · ')))}
                   </div>
                 )}
-                {(co?.feed || []).map((f, i) => feedRow(`f${i}`, f.kind,
-                  <>
-                    {f.kind === 'sale' && `${f.who || 'The team'} sold ${fmtMoney(f.amount)}`}
-                    {f.kind === 'review' && `${f.who || 'The team'} earned a 5★ review`}
-                    {f.kind === 'membership' && `${f.who || 'The team'} sold a membership`}
-                    {f.kind === 'invoice' && `${f.who || 'The team'} closed ${fmtMoney(f.amount)} in revenue`}
-                  </>,
-                  [f.text, timeAgo(f.at)].filter(Boolean).join(' · ')))}
-                {!(co?.feed || []).length && !leaks?.missedCount && (
+                {stream.map(it => feedRow(it.id, it.kind, it.line, [it.sub, timeAgo(it.at)].filter(Boolean).join(' · '), isFresh(it.id)))}
+                {!stream.length && !leaks?.missedCount && (
                   <div style={{ padding:24, textAlign:'center', color:C.dim, fontSize:13 }}>Nothing yet today — first win lands here.</div>
                 )}
               </div>
@@ -538,7 +586,10 @@ export default function CEOTVPage() {
 
         </div>
       </div>
-      <style>{`@keyframes wr-pulse { 0%,100%{opacity:1} 50%{opacity:.25} }`}</style>
+      <style>{`
+        @keyframes wr-pulse { 0%,100%{opacity:1} 50%{opacity:.25} }
+        @keyframes ceo-pop { from { transform: translateX(14px); opacity: 0 } to { transform: none; opacity: 1 } }
+      `}</style>
     </div>
     </div>
   )
