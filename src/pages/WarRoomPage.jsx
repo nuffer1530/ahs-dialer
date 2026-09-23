@@ -500,7 +500,7 @@ export default function WarRoomPage() {
                       <div style={{ fontSize: narrow ? 12 : 14, fontWeight:800, color:g, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
                         🎯 OPPORTUNITY WATCH BONUS UNLOCKED
                       </div>
-                      <div style={{ fontSize: narrow ? 9 : 11, color:C.muted }}>${Number(l.pool).toFixed(0)} pool split {l.n} ways · {t(l.at)}</div>
+                      <div style={{ fontSize: narrow ? 9 : 11, color:C.muted }}>${Number(l.pool).toFixed(0)} pool {l.n != null ? `split ${l.n} ways` : '— pays tonight to everyone working today'} · {t(l.at)}</div>
                     </div>
                     <span style={{ fontSize:12, fontWeight:800, color:g, flexShrink:0 }}>💰🎉</span>
                   </div>

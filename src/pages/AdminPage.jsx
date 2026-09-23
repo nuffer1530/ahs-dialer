@@ -1153,9 +1153,10 @@ export default function AdminPage() {
                   <div className="card-body" style={{ display:'flex', flexDirection:'column', gap:12 }}>
                     <div style={{ fontSize:12, color:'var(--text-secondary)', lineHeight:1.6 }}>
                       Mon–Fri: if <strong>every trade with capacity</strong> hits Opportunity Watch (board full) before the
-                      cutoff, the pool splits equally among all reps and dispatchers scheduled to work that day — paid
-                      straight into commissions with the You-Got-Paid pop, plus a floor-wide unlock announcement.
-                      Pays at most once per day; skips company holidays.
+                      cutoff, the floor gets an unlock announcement and the pool is paid that evening, once the last
+                      shift ends — split equally among the reps and dispatchers who were scheduled <strong>and actually
+                      worked</strong> (handled at least one ServiceTitan call that day). Someone on the schedule who didn't
+                      work gets nothing. Pays at most once per day; skips company holidays.
                     </div>
                     <div style={{ display:'flex', gap:16, alignItems:'stretch', flexWrap: isMobile ? 'wrap' : undefined }}>
                       <div className="form-field" style={{ display:'flex', flexDirection:'column', width:110, flexShrink:0 }}>

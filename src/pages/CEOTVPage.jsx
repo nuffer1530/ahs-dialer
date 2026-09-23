@@ -288,7 +288,7 @@ export default function CEOTVPage() {
     ...sales.map(x => ({ id: x.id, kind: 'sale', at: x.soldOn, line: `${x.tech} sold ${fmtMoney(x.amount)}`, sub: x.what, big: x.amount >= 5000 })),
     ...wins.reviews.map(x => ({ id: x.id, kind: 'review', at: x.at, line: `${x.tech || 'The team'} earned a 5★ review`, sub: `${x.author} on ${x.platform}` })),
     ...wins.memberships.map(x => ({ id: x.id, kind: 'membership', at: x.at, line: `${x.seller} sold a membership`, sub: x.type })),
-    ...(wins.bonus ? [{ id: wins.bonus.id, kind: 'bonus', at: wins.bonus.at, line: 'Opportunity Watch bonus unlocked', sub: `$${Number(wins.bonus.pool).toFixed(0)} pool split ${wins.bonus.n} ways` }] : []),
+    ...(wins.bonus ? [{ id: wins.bonus.id, kind: 'bonus', at: wins.bonus.at, line: 'Opportunity Watch bonus unlocked', sub: `$${Number(wins.bonus.pool).toFixed(0)} pool ${wins.bonus.n != null ? `split ${wins.bonus.n} ways` : '— pays tonight to everyone working today'}` }] : []),
     // Closed revenue has no faster source than the company board's day tier.
     ...(co?.feed || []).filter(f => f.kind === 'invoice').map(f => ({ id: `inv-${f.at}-${f.amount}`, kind: 'invoice', at: f.at,
       line: `${f.who || 'The team'} closed ${fmtMoney(f.amount)} in revenue`, sub: f.text || '' })),
