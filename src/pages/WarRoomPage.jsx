@@ -127,7 +127,7 @@ export default function WarRoomPage() {
     const tb = setInterval(loadBooked, 60_000)
     const tm = setInterval(loadMonth, 5 * 60_000)
     const ts = setInterval(loadSales, 2 * 60_000)
-    const tw = setInterval(loadWins, 5 * 60_000)
+    const tw = setInterval(loadWins, 60_000)
     load()
     const t = setInterval(load, 90_000)
     return () => { clearInterval(t); clearInterval(ts); clearInterval(tw); clearInterval(tm); clearInterval(tb) }
@@ -243,7 +243,6 @@ export default function WarRoomPage() {
     ...sales.map(x => ({ kind: 'sale', at: x.soldOn, ...x })),
     ...wins.reviews.map(x => ({ kind: 'review', ...x })),
     ...wins.memberships.map(x => ({ kind: 'membership', ...x })),
-    ...(wins.bonus ? [{ kind: 'bonus', ...wins.bonus }] : []),
   ].sort((a, b) => Date.parse(b.at || 0) - Date.parse(a.at || 0)).slice(0, 40)
 
   const slColor = inbound.serviceLevel == null ? C.dim : inbound.serviceLevel >= SERVICE_LEVEL_TARGET ? C.green : inbound.serviceLevel >= 60 ? C.amber : C.red
@@ -345,6 +344,28 @@ export default function WarRoomPage() {
           </div>
         </div>
       </div>
+
+      {/* 🎯 Opportunity Watch — pinned for the rest of the day once it unlocks
+          (Brandyn, Sep 24: the floor has to SEE it, not catch a 25 s popup). */}
+      {wins.bonus && (() => {
+        const g = '#F0B429'
+        const when = wins.bonus.at ? fmtTime(wins.bonus.at, { hour:'numeric', minute:'2-digit' }) : null
+        return (
+          <div style={{ flexShrink:0, display:'flex', alignItems:'center', gap: narrow ? 10 : 16, padding: narrow ? '6px 14px' : '10px 20px', borderRadius:14,
+            background:`linear-gradient(90deg, ${g}33, ${g}14 60%, ${g}26)`, border:`2px solid ${g}`, boxShadow:`0 0 22px ${g}40`, animation:'wr-glow 2.4s ease-in-out infinite' }}>
+            <span style={{ fontSize: narrow ? 22 : 30, lineHeight:1 }}>🎯</span>
+            <div style={{ flex:1, minWidth:0 }}>
+              <div style={{ fontSize: narrow ? 15 : 21, fontWeight:900, letterSpacing:.8, color:g, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
+                OPPORTUNITY WATCH BONUS UNLOCKED{when ? ` · ${when}` : ''}
+              </div>
+              <div style={{ fontSize: narrow ? 11 : 14, color:C.text, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
+                Every trade's board filled{wins.bonus.cutoff ? ` before ${wins.bonus.cutoff}` : ''} — ${Number(wins.bonus.pool || 0).toFixed(0)} pool {wins.bonus.n != null ? `split ${wins.bonus.n} ways` : 'paid tonight to everyone working today'}. Keep booking strong calls!
+              </div>
+            </div>
+            <span style={{ fontSize: narrow ? 18 : 26, flexShrink:0 }}>💰🎉</span>
+          </div>
+        )
+      })()}
 
       {/* KPI strip */}
       <div style={{ display:'grid', gridTemplateColumns:'repeat(8, 1fr)', gap: narrow ? 8 : 12, flexShrink:0 }}>
@@ -615,6 +636,7 @@ export default function WarRoomPage() {
 
       <style>{`
         @keyframes wr-pulse { 0%,100%{opacity:1} 50%{opacity:.25} }
+        @keyframes wr-glow { 0%,100%{box-shadow:0 0 14px #F0B42940} 50%{box-shadow:0 0 30px #F0B42999} }
         @keyframes wr-marquee { from{transform:translateX(0)} to{transform:translateX(-100%)} }
       `}</style>
     </div>

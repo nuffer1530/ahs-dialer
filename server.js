@@ -8129,6 +8129,7 @@ async function settleOppBonusDay(day, entry, log, { force = false, hm = '23:59' 
   log[day] = { at: entry.at, pool, cutoff, n: recipients.length, settledAt: new Date().toISOString(),
     paid: recipients.map(pid => eligible.get(pid)?.name || pid), skipped }
   await supabase.from('app_settings').upsert({ key: OPP_BONUS_LOG, value: JSON.stringify(log) }, { onConflict: 'key' })
+  _tvWinsCache = null
   if (!recipients.length || !(pool > 0)) { console.warn(`opp bonus ${day}: nobody scheduled actually worked — nothing paid`); return true }
 
   // Split to exact cents — the pool must land exactly, remainder pennies to the first few.
@@ -8207,6 +8208,7 @@ async function checkOppWatchBonus() {
   log[today] = { at: new Date().toISOString(), pool, cutoff: String(cfg.cutoff || '15:00'), pending: true }
   for (const k of Object.keys(log)) if (Date.now() - Date.parse(k) > 90 * 864e5) delete log[k]
   await supabase.from('app_settings').upsert({ key: OPP_BONUS_LOG, value: JSON.stringify(log) }, { onConflict: 'key' })
+  _tvWinsCache = null   // TVs + catch-up popups see the unlock on their next poll, not in 5 min
   console.log(`OPP WATCH BONUS unlocked ${today}: $${pool} pool, pays tonight`)
   await sendFloorAnnounce({
     to: 'all', from: 'Andi', fromId: null, kind: 'oppwatch',

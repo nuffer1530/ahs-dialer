@@ -201,10 +201,11 @@ export default function ScheduleAlerts() {
   // that had Andi open at that exact moment (25 s, nothing stored), and the
   // money now pays out in the evening — so a rep who stepped away never heard
   // the board filled (Deanna, Sep 24). Once per person per day, on load and
-  // whenever the tab comes back, show it if today is unlocked. Wall TVs skip.
+  // whenever the tab comes back, show it if today is unlocked. Department
+  // TVs skip; the Call Center TV shows it (plus a pinned banner there).
   useEffect(() => {
     if (!profile?.id) return
-    if (/^\/(tv\/|warroom|callboard)/.test(window.location.pathname)) return
+    if (/^\/(tv\/|callboard)/.test(window.location.pathname)) return   // the Call Center TV (/warroom) shows it too
     let stop = false
     const check = async () => {
       try {
