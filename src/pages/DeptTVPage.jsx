@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { sb } from '../lib/supabase'
 import { useWallboard } from '../lib/useDailyReload'
 import { fmtTime, fmtDate, bookedForLabel } from '../lib/denver'
+import { shortName } from '../lib/utils'
 import WeatherStrip from '../components/WeatherStrip'
 
 // Department TV board — one per trade, hung in each manager's office.
@@ -204,26 +205,34 @@ export default function DeptTVPage() {
   const feed = useMemo(() => (data?.feed || []).map(f => ({
     ...f,
     key: f.id || `${f.kind}-${f.at}-${f.who || ''}-${f.amount ?? f.text ?? ''}`,
-    line: f.kind === 'sale' ? `${f.who || 'The team'} sold ${fmtMoney(f.amount)}`
-      : f.kind === 'review' ? `${f.who || 'The team'} earned a 5★ review`
-      : f.kind === 'membership' ? `${f.who || 'The team'} sold a membership`
-      : f.kind === 'invoice' ? `${f.who || 'The team'} closed ${fmtMoney(f.amount)} in revenue`
-      : f.kind === 'booked' ? `${f.who || 'A CSR'} booked a call ${bookedForLabel(f.apptStart, f.onHold)}`.trim()
+    line: f.kind === 'sale' ? `${shortName(f.who) || 'The team'} sold ${fmtMoney(f.amount)}`
+      : f.kind === 'review' ? `${shortName(f.who) || 'The team'} earned a 5★ review`
+      : f.kind === 'membership' ? `${shortName(f.who) || 'The team'} sold a membership`
+      : f.kind === 'invoice' ? `${shortName(f.who) || 'The team'} closed ${fmtMoney(f.amount)} in revenue`
+      : f.kind === 'booked' ? `${shortName(f.who) || 'A CSR'} booked a call ${bookedForLabel(f.apptStart, f.onHold)}`.trim()
       : (f.text || ''),
   })), [data])
   // Ranking rows: split the panel evenly; type grows with the row (capped so
   // the 11 columns still fit the width).
   const TH_H = 44, BASE_ROW = 52
   const rowH = techs.length && tableH ? Math.max(44, Math.min(118, (tableH - TH_H) / techs.length)) : BASE_ROW
-  const k = Math.max(0.85, Math.min(1.35, rowH / BASE_ROW))
+  // …and never wider than the panel: if the 11 columns overflow, step the
+  // type down until they fit (re-checked whenever the board resizes).
+  const [kW, setKW] = useState(1.35)
+  useEffect(() => { setKW(1.35) }, [trade.key, box.w, box.h])
+  const k = Math.max(0.85, Math.min(kW, rowH / BASE_ROW))
+  useEffect(() => {
+    const wrap = tableRef.current, t = wrap?.querySelector('table')
+    if (wrap && t && t.scrollWidth > wrap.clientWidth + 1) setKW(Math.max(0.8, +(k * wrap.clientWidth / t.scrollWidth - 0.01).toFixed(3)))
+  })
   // Feed rows: at the base height when the day is busy (show what fits);
   // when there are only a few, stretch them and their type to fill.
   const feedAtBase = feedH ? Math.max(1, Math.floor(feedH / FEED_ROW_H)) : 10
   const feedRowH = feed.length && feed.length <= feedAtBase && feedH ? Math.min(148, Math.floor(feedH / feed.length)) : FEED_ROW_H
   const feedFits = feed.length <= feedAtBase ? feed.length : feedAtBase
-  const fk = Math.max(1, Math.min(1.35, feedRowH / FEED_ROW_H))
-  // Tall rows let the headline wrap to two lines, so "…booked a call for
-  // Wed 10/28" never loses the date to an ellipsis.
+  const fk = Math.max(1, Math.min(1.25, feedRowH / FEED_ROW_H))
+  // The headline stays on ONE line (short names keep "…booked a call for
+  // Wed 10/28" whole); tall rows let the detail line wrap to two.
   const feedLines = feedRowH >= 90 ? 2 : 1
 
   // Anything that arrives after the board loads gets a brief highlight.
@@ -347,7 +356,7 @@ export default function DeptTVPage() {
           </div>
         </div>
 
-        <div style={{ width:500, flexShrink:0, background:C.panel, border:`1px solid ${C.border}`, borderRadius:14, overflow:'hidden', display:'flex', flexDirection:'column' }}>
+        <div style={{ width:560, flexShrink:0, background:C.panel, border:`1px solid ${C.border}`, borderRadius:14, overflow:'hidden', display:'flex', flexDirection:'column' }}>
           <div style={{ padding:'13px 18px', borderBottom:`1px solid ${C.border}`, display:'flex', alignItems:'center', gap:8, flexShrink:0 }}>
             <span style={{ fontSize:16 }}>⚡</span>
             <span style={{ fontSize:15, fontWeight:800, letterSpacing:.6 }}>LIVE ACTIVITY</span>
@@ -359,13 +368,11 @@ export default function DeptTVPage() {
               const st = FEED_STYLE[f.kind] || FEED_STYLE.sale
               const fresh = isFresh(f.key)
               return (
-                <div key={f.key} style={{ height:feedRowH, boxSizing:'border-box', display:'flex', alignItems:'center', gap:12 * fk, padding:'0 18px', borderBottom:`1px solid ${C.border}55`,
+                <div key={f.key} style={{ height:feedRowH, boxSizing:'border-box', overflow:'hidden', display:'flex', alignItems:'center', gap:12 * fk, padding:'0 18px', borderBottom:`1px solid ${C.border}55`,
                   background: fresh ? `${st.color}1A` : 'transparent', boxShadow: fresh ? `inset 3px 0 0 ${st.color}` : 'none', animation: fresh ? 'dept-pop .8s ease-out' : 'none' }}>
                   <span style={{ fontSize:11 * fk, fontWeight:800, letterSpacing:.8, color:st.color, background:`${st.color}1A`, border:`1px solid ${st.color}55`, borderRadius:6, padding:`${3 * fk}px ${7 * fk}px`, flexShrink:0 }}>{st.tag}</span>
                   <div style={{ minWidth:0, flex:1 }}>
-                    <div style={feedLines > 1
-                      ? { fontSize:16 * fk, fontWeight:700, lineHeight:1.2, display:'-webkit-box', WebkitLineClamp:2, WebkitBoxOrient:'vertical', overflow:'hidden' }
-                      : { fontSize:16 * fk, fontWeight:700, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{f.line}</div>
+                    <div style={{ fontSize:16 * fk, fontWeight:700, lineHeight:1.2, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{f.line}</div>
                     <div style={feedLines > 1
                       ? { fontSize:13 * fk, color:C.dim, lineHeight:1.25, display:'-webkit-box', WebkitLineClamp:2, WebkitBoxOrient:'vertical', overflow:'hidden', marginTop:2 * fk }
                       : { fontSize:13 * fk, color:C.dim, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', marginTop:2 * fk }}>{[f.text, timeAgo(f.at)].filter(Boolean).join(' · ')}</div>

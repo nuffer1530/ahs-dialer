@@ -7,6 +7,7 @@ import { INTERACTION_COLORS } from '../lib/constants'
 import Avatar from '../components/Avatar'
 import { useWallboard } from '../lib/useDailyReload'
 import { bookedForLabel } from '../lib/denver'
+import { shortName } from '../lib/utils'
 import { fmtTime, fmtDate, denverStartOfToday } from '../lib/denver'
 
 // Call-centre wallboard — a modern "Simon board" for the floor TV. Everything
@@ -527,7 +528,7 @@ export default function WarRoomPage() {
                     <div style={{ width:9, height:9, borderRadius:'50%', background:C.amber, flexShrink:0 }} />
                     <div style={{ flex:1, minWidth:0 }}>
                       <div style={{ fontSize: narrow ? 12 : 14, fontWeight:700, color:C.amber, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
-                        ⭐ {l.tech || 'The team'} got a 5-star review
+                        ⭐ {shortName(l.tech) || 'The team'} got a 5-star review
                       </div>
                       <div style={{ fontSize: narrow ? 9 : 11, color:C.muted, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
                         {l.author} on {l.platform} · {t(l.at)}
@@ -546,7 +547,7 @@ export default function WarRoomPage() {
                     <div style={{ width:9, height:9, borderRadius:'50%', background:blue, flexShrink:0, boxShadow:`0 0 10px ${blue}` }} />
                     <div style={{ flex:1, minWidth:0 }}>
                       <div style={{ fontSize: narrow ? 12 : 14, fontWeight:700, color:blue, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
-                        📞 {l.csr || 'A CSR'} booked a call {bookedForLabel(l.apptStart, l.onHold)}
+                        📞 {shortName(l.csr) || 'A CSR'} booked a call {bookedForLabel(l.apptStart, l.onHold)}
                       </div>
                       <div style={{ fontSize: narrow ? 9 : 11, color:C.muted, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
                         {sub}{sub ? ' · ' : ''}{t(l.at)}
@@ -563,7 +564,7 @@ export default function WarRoomPage() {
                     <div style={{ width:9, height:9, borderRadius:'50%', background:C.purple, flexShrink:0 }} />
                     <div style={{ flex:1, minWidth:0 }}>
                       <div style={{ fontSize: narrow ? 12 : 14, fontWeight:700, color:C.purple, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
-                        🏅 {l.seller} sold a membership
+                        🏅 {shortName(l.seller)} sold a membership
                       </div>
                       <div style={{ fontSize: narrow ? 9 : 11, color:C.muted, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
                         {l.type} · {t(l.at)}
@@ -581,7 +582,7 @@ export default function WarRoomPage() {
                     <div style={{ width:9, height:9, borderRadius:'50%', background: big ? '#F59E0B' : C.green, flexShrink:0, boxShadow: big ? '0 0 10px #F59E0B' : 'none' }} />
                     <div style={{ flex:1, minWidth:0 }}>
                       <div style={{ fontSize: narrow ? 12 : 14, fontWeight:700, color: big ? '#F59E0B' : C.green, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
-                        💰 {l.tech} sold ${l.amount.toLocaleString()}
+                        💰 {shortName(l.tech)} sold ${l.amount.toLocaleString()}
                       </div>
                       <div style={{ fontSize: narrow ? 9 : 11, color:C.muted, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
                         {l.what} · {l.at ? fmtTime(l.at, { hour:'2-digit', minute:'2-digit' }) : ''}

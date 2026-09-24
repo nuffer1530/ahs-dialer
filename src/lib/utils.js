@@ -172,3 +172,14 @@ export function shiftChanged(existing, payload) {
   ]
   return fields.some(([k, f]) => k in payload && f(existing[k]) !== f(payload[k]))
 }
+
+// "Jenell Strauss" → "Jenell S." for wall-TV feeds, where full names pushed
+// the booked-for date onto its own line (Brandyn, Sep 24). Single names stay
+// as-is, and so do names ending in an acronym ("Revin AI").
+export function shortName(name) {
+  const parts = String(name || '').trim().split(/\s+/).filter(Boolean)
+  if (parts.length < 2) return parts[0] || ''
+  const last = parts[parts.length - 1]
+  if (/^[A-Z0-9]{2,4}$/.test(last)) return parts.join(' ')
+  return `${parts[0]} ${last[0].toUpperCase()}.`
+}

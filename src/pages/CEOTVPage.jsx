@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { sb } from '../lib/supabase'
 import { useWallboard } from '../lib/useDailyReload'
 import { fmtTime, fmtDate, bookedForLabel } from '../lib/denver'
+import { shortName } from '../lib/utils'
 import WeatherStrip from '../components/WeatherStrip'
 
 // CEO board (/tv/ceo) — Brandyn's office TV, in the same visual language as
@@ -283,15 +284,15 @@ export default function CEOTVPage() {
   }, [csrs])
   const stream = useMemo(() => [
     ...(ceo?.booked || []).map(b => ({ id: b.id, kind: 'booked', at: b.at,
-      line: `${b.csr || 'A CSR'} booked a call ${bookedForLabel(b.apptStart, b.onHold)}`.trim(),
+      line: `${shortName(b.csr) || 'A CSR'} booked a call ${bookedForLabel(b.apptStart, b.onHold)}`.trim(),
       sub: [b.jobType, b.job ? `#${b.job}` : null].filter(Boolean).join(' · ') })),
-    ...sales.map(x => ({ id: x.id, kind: 'sale', at: x.soldOn, line: `${x.tech} sold ${fmtMoney(x.amount)}`, sub: x.what, big: x.amount >= 5000 })),
-    ...wins.reviews.map(x => ({ id: x.id, kind: 'review', at: x.at, line: `${x.tech || 'The team'} earned a 5★ review`, sub: `${x.author} on ${x.platform}` })),
-    ...wins.memberships.map(x => ({ id: x.id, kind: 'membership', at: x.at, line: `${x.seller} sold a membership`, sub: x.type })),
+    ...sales.map(x => ({ id: x.id, kind: 'sale', at: x.soldOn, line: `${shortName(x.tech)} sold ${fmtMoney(x.amount)}`, sub: x.what, big: x.amount >= 5000 })),
+    ...wins.reviews.map(x => ({ id: x.id, kind: 'review', at: x.at, line: `${shortName(x.tech) || 'The team'} earned a 5★ review`, sub: `${x.author} on ${x.platform}` })),
+    ...wins.memberships.map(x => ({ id: x.id, kind: 'membership', at: x.at, line: `${shortName(x.seller)} sold a membership`, sub: x.type })),
     ...(wins.bonus ? [{ id: wins.bonus.id, kind: 'bonus', at: wins.bonus.at, line: 'Opportunity Watch bonus unlocked', sub: `$${Number(wins.bonus.pool).toFixed(0)} pool ${wins.bonus.n != null ? `split ${wins.bonus.n} ways` : '— pays tonight to everyone working today'}` }] : []),
     // Closed revenue has no faster source than the company board's day tier.
     ...(co?.feed || []).filter(f => f.kind === 'invoice').map(f => ({ id: `inv-${f.at}-${f.amount}`, kind: 'invoice', at: f.at,
-      line: `${f.who || 'The team'} closed ${fmtMoney(f.amount)} in revenue`, sub: f.text || '' })),
+      line: `${shortName(f.who) || 'The team'} closed ${fmtMoney(f.amount)} in revenue`, sub: f.text || '' })),
   ].filter(x => x.at).sort((a, b) => Date.parse(b.at) - Date.parse(a.at)).slice(0, 40), [ceo, sales, wins, co])
   // Anything that arrives after the first load gets a brief highlight.
   for (const it of stream) if (!seenRef.current.has(it.id)) seenRef.current.set(it.id, Date.now())
