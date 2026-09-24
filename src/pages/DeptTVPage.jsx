@@ -91,6 +91,10 @@ function PeriodPanel({ title, d, accent, compact }) {
 // used to force a one-line ticker for the feed; on the canvas the ranking and
 // a full Live Activity panel sit side by side on every screen (Brandyn, Sep 24).
 const DESIGN_W = 1920, DESIGN_H = 1080
+// Shared wall TVs: the TV on one board's link cycles through these boards,
+// one minute each (Brandyn, Sep 24: the Electrical TV also shows Garage Doors).
+const ROTATIONS = { electrical: ['electrical', 'garage'] }
+const ROTATE_MS = 60_000
 const FEED_ROW_H = 64
 
 const FEED_STYLE = {
@@ -104,10 +108,13 @@ const FEED_STYLE = {
 export default function DeptTVPage() {
   const { trade: tradeParam } = useParams()
   const navigate = useNavigate()
-  const trade = TRADES.find(t => t.key === tradeParam) || TRADES[0]
+  const baseTrade = TRADES.find(t => t.key === tradeParam) || TRADES[0]
 
-  const [data, setData] = useState(null)
+  // One cached payload per board, so a rotation swap shows the other trade's
+  // numbers instantly instead of flashing "Loading…".
+  const [dataBy, setDataBy] = useState({})
   const [err, setErr] = useState(null)
+  const [rotIdx, setRotIdx] = useState(0)
   const [time, setTime] = useState(new Date())
   const rootRef = useRef(null)
   // Scale the 1920×1080 canvas to whatever box the page actually has (the
@@ -123,6 +130,17 @@ export default function DeptTVPage() {
   const scale = Math.max(0.2, Math.min(box.w / DESIGN_W, box.h / DESIGN_H))
   // Wall look survives reloads; the page updates itself when a build lands.
   const { isFull, toggleFull } = useWallboard(rootRef)
+  // Rotation runs only in the wall look (the TV), never while someone is
+  // browsing the board on a desktop and using the trade buttons.
+  const rotateKeys = isFull ? (ROTATIONS[baseTrade.key] || null) : null
+  const trade = rotateKeys ? (TRADES.find(t => t.key === rotateKeys[rotIdx % rotateKeys.length]) || baseTrade) : baseTrade
+  const data = dataBy[trade.key] || null
+  const rotSig = rotateKeys ? rotateKeys.join(',') : ''
+  useEffect(() => {
+    if (!rotSig) return
+    const id = setInterval(() => setRotIdx(i => i + 1), ROTATE_MS)
+    return () => clearInterval(id)
+  }, [rotSig])
 
   // Live Activity shows exactly the rows that fit — nobody scrolls a wall TV.
   const feedRef = useRef(null)
@@ -146,20 +164,25 @@ export default function DeptTVPage() {
     return () => ro.disconnect()
   }, [])
 
+  // Every board this screen shows (one, or the rotation's set).
+  const loadKeys = rotSig || baseTrade.key
   const load = useCallback(async () => {
     try {
       // useAuth exposes user/profile but not the session — get the token here.
       const { data: { session } } = await sb.auth.getSession()
       if (!session?.access_token) throw new Error('no session')
-      const r = await fetch(`/api/tv/department/${trade.key}`, { headers: { Authorization: `Bearer ${session.access_token}` } })
-      if (!r.ok) throw new Error(`HTTP ${r.status}`)
-      const j = await r.json()
-      setData(j); setErr(null)
-      return j
+      const got = await Promise.all(loadKeys.split(',').map(async (key) => {
+        const r = await fetch(`/api/tv/department/${key}`, { headers: { Authorization: `Bearer ${session.access_token}` } })
+        if (!r.ok) throw new Error(`HTTP ${r.status}`)
+        return [key, await r.json()]
+      }))
+      setDataBy(prev => ({ ...prev, ...Object.fromEntries(got) })); setErr(null)
+      // "Whole" (slow poll) only once every board has all three tiers.
+      return got.every(([, j]) => j && j.daily && j.monthly && j.yearly) ? got[0][1] : { partial: true }
     } catch (e) { setErr(e.message); return null }
-  }, [trade.key])
+  }, [loadKeys])
 
-  useEffect(() => { setData(null); load() }, [load])
+  useEffect(() => { load() }, [load])
   useEffect(() => {
     let t
     const tick = async () => {
@@ -257,7 +280,20 @@ export default function DeptTVPage() {
             </svg>
           </span>
           <span style={{ fontSize:26, fontWeight:800, letterSpacing:.3, whiteSpace:'nowrap' }}>{trade.label}</span>
-          <span style={{ fontSize:12, color:C.muted, letterSpacing:1, textTransform:'uppercase' }}>Department board</span>
+          {rotateKeys ? (
+            <span style={{ display:'flex', gap:6, marginLeft:4 }}>
+              {rotateKeys.map(key => {
+                const t2 = TRADES.find(t => t.key === key)
+                const on = key === trade.key
+                return (
+                  <span key={key} style={{ fontSize:11, fontWeight:800, letterSpacing:1, textTransform:'uppercase', padding:'3px 9px', borderRadius:999,
+                    border:`1px solid ${on ? t2?.color : C.border}`, color: on ? C.text : C.dim, background: on ? `${t2?.color}22` : 'transparent' }}>{t2?.label}</span>
+                )
+              })}
+            </span>
+          ) : (
+            <span style={{ fontSize:12, color:C.muted, letterSpacing:1, textTransform:'uppercase' }}>Department board</span>
+          )}
           {/* Fullscreen is wall-TV mode: just the department, time, and date. */}
           {!isFull && (
             <div style={{ display:'flex', gap:6, marginLeft:10 }}>
