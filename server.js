@@ -4965,7 +4965,10 @@ async function ceoBuildSlow() {
     await ceoLoadPersisted()
     const adp = await ceoAdpActuals()
     const latestAdp = Object.keys(adp).sort().pop() || null
-    if (_ceoSlow.data?.gm && Date.now() - _ceoSlow.at < 12 * 3600_000 && _ceoSlow.data.gm.laborThrough === latestAdp) return
+    // Any upload — a new week, a backfilled older week or a re-upload — changes
+    // this signature, so the labor shares rebuild right away.
+    const adpSig = Object.keys(adp).sort().map(k => `${k}@${adp[k]?.uploadedAt || ''}`).join('|')
+    if (_ceoSlow.data?.gm && Date.now() - _ceoSlow.at < 12 * 3600_000 && _ceoSlow.data.gm.laborSig === adpSig) return
     const today = tvDenverDate()
     const curY = Number(today.slice(0, 4)), curM = Number(today.slice(5, 7))
     const curYm = today.slice(0, 7)
@@ -5007,7 +5010,7 @@ async function ceoBuildSlow() {
     const labor = await ceoLaborPct(adp, _ceoSlow.data?.laborWeeks)
     const gm = {
       month: curYm, byTrade: {}, company: null,
-      laborThrough: latestAdp, laborWeeks: labor.ends.length,
+      laborThrough: latestAdp, laborWeeks: labor.ends.length, laborSig: adpSig,
       laborPct: Object.fromEntries(Object.entries(labor.pct).map(([t, v]) => [t, Math.round(v * 1000) / 10])),
       laborBasis: labor.basis,
     }
