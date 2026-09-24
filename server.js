@@ -4822,7 +4822,7 @@ app.get('/api/tv/department/:trade', async (req, res) => {
 let _ceoFast = { at: 0, data: null }, _ceoSlow = { at: 0, data: null }, _ceoTrend = { at: 0, weeks: {} }
 let _ceoDaily = { at: 0, days: {}, ly: {} }
 let _ceoFastBusy = false, _ceoSlowBusy = false, _ceoTrendBusy = false, _ceoDailyBusy = false, _ceoLoaded = false
-const CEO_SLOW_V = 3
+const CEO_SLOW_V = 4
 // Fallback burdened field labor share by trade (July 2026 ADP reconciliation);
 // the board prefers actual uploaded payroll — see ceoLaborPct.
 const CEO_LABOR = { 'HVAC': 0.273, 'Plumbing': 0.25, 'Electrical': 0.223, 'Garage Doors': 0.248 }
@@ -4923,7 +4923,10 @@ async function ceoReps() {
 // Burdened field labor as a share of each trade's revenue, from the actual ADP
 // payroll Brandyn uploads weekly (register → app_settings.adp_payroll_actuals;
 // cost = gross + fees/taxes + ER adj + benefits) over the latest 6 pay weeks,
-// against that pay period's invoices (Mon–Sun). Closed weeks' revenue is
+// against the work COMPLETED in that pay period (job totals by completion
+// date). Invoice date would mis-time installs billed up front: Electrical
+// invoiced job #31949 ($30.5k) in July and finished it 9/19, which read that
+// week as 57% labor instead of 25% (Cedric, Sep 24). Closed weeks' revenue is
 // cached. A trade without enough data falls back to CEO_LABOR.
 async function ceoAdpActuals() {
   try {
@@ -4936,18 +4939,20 @@ async function ceoLaborPct(adp, prevWeeks) {
   const ends = Object.keys(adp).filter(k => adp[k]?.byTrade).sort().slice(-6)
   const weeks = {}
   for (const we of ends) {
-    let rev = prevWeeks?.[we]?.rev
+    let rev = prevWeeks?.[we]?.basis === 'completed' ? prevWeeks[we].rev : null
     if (!rev) {
       rev = {}
+      await ceoLoadBuNames()
       const start = ceoAddDays(we, -6), next = ceoAddDays(we, 1)
-      await ceoEachPage(pg => `/accounting/v2/tenant/${ST_TENANT_ID}/invoices?invoicedOnOrAfter=${start}T00:00:00Z&invoicedOnBefore=${next}T00:00:00Z&pageSize=500&page=${pg}`, rows => {
-        for (const i of rows) {
-          const t = tvTradeOf((i.businessUnit || {}).name)
-          if (t) rev[t] = (rev[t] || 0) + (Number(i.subTotal) || 0)
+      await ceoEachPage(pg => `/jpm/v2/tenant/${ST_TENANT_ID}/jobs?completedOnOrAfter=${tvBounds(start)}&completedBefore=${tvBounds(next)}&pageSize=500&page=${pg}`, rows => {
+        for (const j of rows) {
+          if (j.jobStatus === 'Canceled') continue
+          const t = tvTradeOf(TV_BU_NAME.get(String(j.businessUnitId)))
+          if (t) rev[t] = (rev[t] || 0) + (Number(j.total) || 0)
         }
       })
     }
-    weeks[we] = { rev, cost: Object.fromEntries(Object.entries(adp[we].byTrade).map(([t, v]) => [t, Number(v?.cost) || 0])) }
+    weeks[we] = { basis: 'completed', rev, cost: Object.fromEntries(Object.entries(adp[we].byTrade).map(([t, v]) => [t, Number(v?.cost) || 0])) }
   }
   const pct = {}, basis = {}
   for (const t of Object.values(TV_TRADES)) {
