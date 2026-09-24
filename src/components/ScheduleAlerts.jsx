@@ -188,7 +188,11 @@ export default function ScheduleAlerts() {
         const from = isSender && !forMe
           ? `Sent ✓${payload.toNames ? ' → ' + payload.toNames : ''}`
           : (payload.from || 'Admin')
-        if (payload.kind === 'oppwatch') { try { localStorage.setItem(oppSeenKey(profile.id), '1') } catch {} }
+        if (payload.kind === 'oppwatch') {
+          try { localStorage.setItem(oppSeenKey(profile.id), '1') } catch {}
+          // The Call Center TV shows its pinned banner; no popup over the board.
+          if (/^\/warroom/.test(window.location.pathname)) return
+        }
         setAlerts(prev => [...prev, { id, kind: payload.kind === 'oppwatch' ? 'oppwatch' : 'announce', from, message: String(payload.message).slice(0, 300) }])
         playChime()
         setTimeout(() => setAlerts(prev => prev.filter(a => a.id !== id)), 25000)
@@ -201,11 +205,11 @@ export default function ScheduleAlerts() {
   // that had Andi open at that exact moment (25 s, nothing stored), and the
   // money now pays out in the evening — so a rep who stepped away never heard
   // the board filled (Deanna, Sep 24). Once per person per day, on load and
-  // whenever the tab comes back, show it if today is unlocked. Department
-  // TVs skip; the Call Center TV shows it (plus a pinned banner there).
+  // whenever the tab comes back, show it if today is unlocked. Wall TVs skip
+  // — the Call Center TV pins a banner instead (Brandyn: banner yes, popup no).
   useEffect(() => {
     if (!profile?.id) return
-    if (/^\/(tv\/|callboard)/.test(window.location.pathname)) return   // the Call Center TV (/warroom) shows it too
+    if (/^\/(tv\/|warroom|callboard)/.test(window.location.pathname)) return   // wall TVs: the Call Center TV has a pinned banner instead
     let stop = false
     const check = async () => {
       try {
