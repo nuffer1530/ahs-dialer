@@ -54,12 +54,12 @@ function Stat({ label, value, color = C.text, big }) {
 
 // Gold / silver / bronze chips for the podium; plain dim number below that.
 const MEDALS = ['#F0B429', '#B8BEC7', '#CD7F32']
-function RankBadge({ i }) {
+function RankBadge({ i, k = 1 }) {
   const medal = MEDALS[i]
-  if (!medal) return <span style={{ color:C.dim, fontWeight:800, fontSize:15 }}>{i + 1}</span>
+  if (!medal) return <span style={{ color:C.dim, fontWeight:800, fontSize:15 * k }}>{i + 1}</span>
   return (
-    <span style={{ display:'inline-flex', alignItems:'center', justifyContent:'center', width:26, height:26, borderRadius:'50%',
-      background:`${medal}1F`, border:`1.5px solid ${medal}`, color:medal, fontWeight:800, fontSize:13, boxShadow:`0 0 10px ${medal}33` }}>
+    <span style={{ display:'inline-flex', alignItems:'center', justifyContent:'center', width:26 * k, height:26 * k, borderRadius:'50%',
+      background:`${medal}1F`, border:`1.5px solid ${medal}`, color:medal, fontWeight:800, fontSize:13 * k, boxShadow:`0 0 10px ${medal}33` }}>
       {i + 1}
     </span>
   )
@@ -133,7 +133,17 @@ export default function DeptTVPage() {
     ro.observe(el)
     return () => ro.disconnect()
   }, [])
-  const feedFits = feedH ? Math.max(1, Math.floor(feedH / FEED_ROW_H)) : 10
+  // Both panels size their rows to FILL their space (Brandyn, Sep 24: a
+  // 7-tech roster and a short morning feed left half the TV blank).
+  const tableRef = useRef(null)
+  const [tableH, setTableH] = useState(0)
+  useEffect(() => {
+    const el = tableRef.current
+    if (!el || typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(([e]) => setTableH(e.contentRect.height))
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
 
   const load = useCallback(async () => {
     try {
@@ -181,13 +191,13 @@ export default function DeptTVPage() {
     return m
   }, [techs])
   const cell = (v, isMax, fmt = fmtN, color) => (
-    <td style={{ padding:'11px 12px', textAlign:'right', fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap',
-      fontWeight: isMax ? 800 : 500, color: isMax ? (color || C.text) : C.muted, fontSize: isMax ? 19 : 17 }}>
+    <td style={{ padding:`0 ${Math.round(12 * k)}px`, textAlign:'right', fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap',
+      fontWeight: isMax ? 800 : 500, color: isMax ? (color || C.text) : C.muted, fontSize: (isMax ? 19 : 17) * k }}>
       {fmt(v)}
     </td>
   )
   const th = (label, right = true) => (
-    <th style={{ padding:'10px 12px', textAlign: right ? 'right' : 'left', fontSize:11.5, fontWeight:700, letterSpacing:1, color:C.dim, textTransform:'uppercase', whiteSpace:'nowrap' }}>{label}</th>
+    <th style={{ height:TH_H, boxSizing:'border-box', padding:`0 ${Math.round(12 * k)}px`, textAlign: right ? 'right' : 'left', fontSize:11.5 * Math.min(k, 1.2), fontWeight:700, letterSpacing:1, color:C.dim, textTransform:'uppercase', whiteSpace:'nowrap' }}>{label}</th>
   )
 
   // Live Activity — the CEO / Call Center treatment: tag, one line, detail.
@@ -201,6 +211,21 @@ export default function DeptTVPage() {
       : f.kind === 'booked' ? `${f.who || 'A CSR'} booked a call ${bookedForLabel(f.apptStart, f.onHold)}`.trim()
       : (f.text || ''),
   })), [data])
+  // Ranking rows: split the panel evenly; type grows with the row (capped so
+  // the 11 columns still fit the width).
+  const TH_H = 44, BASE_ROW = 52
+  const rowH = techs.length && tableH ? Math.max(44, Math.min(118, (tableH - TH_H) / techs.length)) : BASE_ROW
+  const k = Math.max(0.85, Math.min(1.35, rowH / BASE_ROW))
+  // Feed rows: at the base height when the day is busy (show what fits);
+  // when there are only a few, stretch them and their type to fill.
+  const feedAtBase = feedH ? Math.max(1, Math.floor(feedH / FEED_ROW_H)) : 10
+  const feedRowH = feed.length && feed.length <= feedAtBase && feedH ? Math.min(148, Math.floor(feedH / feed.length)) : FEED_ROW_H
+  const feedFits = feed.length <= feedAtBase ? feed.length : feedAtBase
+  const fk = Math.max(1, Math.min(1.35, feedRowH / FEED_ROW_H))
+  // Tall rows let the headline wrap to two lines, so "…booked a call for
+  // Wed 10/28" never loses the date to an ellipsis.
+  const feedLines = feedRowH >= 90 ? 2 : 1
+
   // Anything that arrives after the board loads gets a brief highlight.
   const seenRef = useRef(new Map())
   const mountedAt = useRef(Date.now())
@@ -276,7 +301,7 @@ export default function DeptTVPage() {
             </span>
             <span style={{ fontSize:12, color:C.dim }}>ranked by composite score · bold = best in column</span>
           </div>
-          <div style={{ flex:1, overflow:'hidden' }}>
+          <div ref={tableRef} style={{ flex:1, minHeight:0, overflow:'hidden' }}>
             <table style={{ width:'100%', borderCollapse:'collapse' }}>
               <thead>
                 <tr style={{ borderBottom:`1px solid ${C.border}`, background:C.panel }}>
@@ -295,11 +320,11 @@ export default function DeptTVPage() {
               </thead>
               <tbody>
                 {techs.map((x, i) => (
-                  <tr key={x.id} style={{ borderBottom:`1px solid ${C.border}`, background: i === 0 ? `${trade.color}14` : 'transparent' }}>
-                    <td style={{ padding:'9px 14px' }}><RankBadge i={i} /></td>
-                    <td style={{ padding:'11px 12px', fontWeight:700, fontSize:20, whiteSpace:'nowrap' }}>
+                  <tr key={x.id} style={{ height:rowH, borderBottom:`1px solid ${C.border}`, background: i === 0 ? `${trade.color}14` : 'transparent' }}>
+                    <td style={{ padding:`0 ${Math.round(14 * k)}px` }}><RankBadge i={i} k={k} /></td>
+                    <td style={{ padding:`0 ${Math.round(12 * k)}px`, fontWeight:700, fontSize:20 * k, whiteSpace:'nowrap' }}>
                       {x.name}
-                      {x.trade && <span style={{ marginLeft:8, fontSize:11, fontWeight:800, letterSpacing:.8, color:C.dim }}>{TRADE_SHORT[x.trade] || x.trade}</span>}
+                      {x.trade && <span style={{ marginLeft:8, fontSize:11 * k, fontWeight:800, letterSpacing:.8, color:C.dim }}>{TRADE_SHORT[x.trade] || x.trade}</span>}
                     </td>
                     {cell(x.score, x.score === maxes.score && maxes.score > 0, fmtN, trade.color)}
                     {cell(x.sold, x.sold === maxes.sold && maxes.sold > 0, fmtMoney, C.green)}
@@ -334,12 +359,16 @@ export default function DeptTVPage() {
               const st = FEED_STYLE[f.kind] || FEED_STYLE.sale
               const fresh = isFresh(f.key)
               return (
-                <div key={f.key} style={{ height:FEED_ROW_H, boxSizing:'border-box', display:'flex', alignItems:'center', gap:12, padding:'0 18px', borderBottom:`1px solid ${C.border}55`,
+                <div key={f.key} style={{ height:feedRowH, boxSizing:'border-box', display:'flex', alignItems:'center', gap:12 * fk, padding:'0 18px', borderBottom:`1px solid ${C.border}55`,
                   background: fresh ? `${st.color}1A` : 'transparent', boxShadow: fresh ? `inset 3px 0 0 ${st.color}` : 'none', animation: fresh ? 'dept-pop .8s ease-out' : 'none' }}>
-                  <span style={{ fontSize:11, fontWeight:800, letterSpacing:.8, color:st.color, background:`${st.color}1A`, border:`1px solid ${st.color}55`, borderRadius:6, padding:'3px 7px', flexShrink:0 }}>{st.tag}</span>
+                  <span style={{ fontSize:11 * fk, fontWeight:800, letterSpacing:.8, color:st.color, background:`${st.color}1A`, border:`1px solid ${st.color}55`, borderRadius:6, padding:`${3 * fk}px ${7 * fk}px`, flexShrink:0 }}>{st.tag}</span>
                   <div style={{ minWidth:0, flex:1 }}>
-                    <div style={{ fontSize:16, fontWeight:700, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{f.line}</div>
-                    <div style={{ fontSize:13, color:C.dim, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', marginTop:2 }}>{[f.text, timeAgo(f.at)].filter(Boolean).join(' · ')}</div>
+                    <div style={feedLines > 1
+                      ? { fontSize:16 * fk, fontWeight:700, lineHeight:1.2, display:'-webkit-box', WebkitLineClamp:2, WebkitBoxOrient:'vertical', overflow:'hidden' }
+                      : { fontSize:16 * fk, fontWeight:700, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{f.line}</div>
+                    <div style={feedLines > 1
+                      ? { fontSize:13 * fk, color:C.dim, lineHeight:1.25, display:'-webkit-box', WebkitLineClamp:2, WebkitBoxOrient:'vertical', overflow:'hidden', marginTop:2 * fk }
+                      : { fontSize:13 * fk, color:C.dim, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', marginTop:2 * fk }}>{[f.text, timeAgo(f.at)].filter(Boolean).join(' · ')}</div>
                   </div>
                 </div>
               )
