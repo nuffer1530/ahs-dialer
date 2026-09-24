@@ -4822,9 +4822,9 @@ app.get('/api/tv/department/:trade', async (req, res) => {
 let _ceoFast = { at: 0, data: null }, _ceoSlow = { at: 0, data: null }, _ceoTrend = { at: 0, weeks: {} }
 let _ceoDaily = { at: 0, days: {}, ly: {} }
 let _ceoFastBusy = false, _ceoSlowBusy = false, _ceoTrendBusy = false, _ceoDailyBusy = false, _ceoLoaded = false
-const CEO_SLOW_V = 2
-// Burdened field labor as a share of each trade's revenue — the ADP-validated
-// July 2026 reconciliation (Pro Pay + unattached pool × TotalSource burden).
+const CEO_SLOW_V = 3
+// Fallback burdened field labor share by trade (July 2026 ADP reconciliation);
+// the board prefers actual uploaded payroll — see ceoLaborPct.
 const CEO_LABOR = { 'HVAC': 0.273, 'Plumbing': 0.25, 'Electrical': 0.223, 'Garage Doors': 0.248 }
 const CEO_TREND_WEEKS = 13
 const CEO_OPP_TRADES = ['HVAC', 'Plumbing', 'Electrical']   // the 2027 plan is ex-garage
@@ -4855,7 +4855,7 @@ async function ceoLoadPersisted() {
     for (const row of data || []) {
       const v = JSON.parse(row.value || 'null'); if (!v) continue
       // An older slow-cache shape keeps its month history but recomputes the rest.
-      if (row.key === 'ceo_slow_cache') _ceoSlow = v.v === CEO_SLOW_V ? v : { at: 0, data: v.data ? { months: v.data.months } : null }
+      if (row.key === 'ceo_slow_cache') _ceoSlow = v.v === CEO_SLOW_V ? v : { at: 0, data: v.data ? { months: v.data.months, laborWeeks: v.data.laborWeeks } : null }
       if (row.key === 'ceo_trend_cache' && v.weeks) _ceoTrend = v
       if (row.key === 'ceo_daily_cache' && v.days) _ceoDaily = { ...v, at: 0 }
     }
@@ -4920,12 +4920,52 @@ async function ceoReps() {
   return _ceoReps
 }
 
+// Burdened field labor as a share of each trade's revenue, from the actual ADP
+// payroll Brandyn uploads weekly (register → app_settings.adp_payroll_actuals;
+// cost = gross + fees/taxes + ER adj + benefits) over the latest 6 pay weeks,
+// against that pay period's invoices (Mon–Sun). Closed weeks' revenue is
+// cached. A trade without enough data falls back to CEO_LABOR.
+async function ceoAdpActuals() {
+  try {
+    const { data } = await supabase.from('app_settings').select('value').eq('key', 'adp_payroll_actuals').maybeSingle()
+    return JSON.parse(data?.value || '{}')
+  } catch { return {} }
+}
+
+async function ceoLaborPct(adp, prevWeeks) {
+  const ends = Object.keys(adp).filter(k => adp[k]?.byTrade).sort().slice(-6)
+  const weeks = {}
+  for (const we of ends) {
+    let rev = prevWeeks?.[we]?.rev
+    if (!rev) {
+      rev = {}
+      const start = ceoAddDays(we, -6), next = ceoAddDays(we, 1)
+      await ceoEachPage(pg => `/accounting/v2/tenant/${ST_TENANT_ID}/invoices?invoicedOnOrAfter=${start}T00:00:00Z&invoicedOnBefore=${next}T00:00:00Z&pageSize=500&page=${pg}`, rows => {
+        for (const i of rows) {
+          const t = tvTradeOf((i.businessUnit || {}).name)
+          if (t) rev[t] = (rev[t] || 0) + (Number(i.subTotal) || 0)
+        }
+      })
+    }
+    weeks[we] = { rev, cost: Object.fromEntries(Object.entries(adp[we].byTrade).map(([t, v]) => [t, Number(v?.cost) || 0])) }
+  }
+  const pct = {}, basis = {}
+  for (const t of Object.values(TV_TRADES)) {
+    let c = 0, r = 0
+    for (const we of ends) { c += weeks[we].cost[t] || 0; r += weeks[we].rev[t] || 0 }
+    if (r > 5000 && c > 0) { pct[t] = c / r; basis[t] = 'adp' } else { pct[t] = CEO_LABOR[t] || 0.25; basis[t] = 'model' }
+  }
+  return { pct, basis, weeks, ends }
+}
+
 async function ceoBuildSlow() {
   if (_ceoSlowBusy) return
   _ceoSlowBusy = true
   try {
     await ceoLoadPersisted()
-    if (_ceoSlow.data?.gm && Date.now() - _ceoSlow.at < 12 * 3600_000) return
+    const adp = await ceoAdpActuals()
+    const latestAdp = Object.keys(adp).sort().pop() || null
+    if (_ceoSlow.data?.gm && Date.now() - _ceoSlow.at < 12 * 3600_000 && _ceoSlow.data.gm.laborThrough === latestAdp) return
     const today = tvDenverDate()
     const curY = Number(today.slice(0, 4)), curM = Number(today.slice(5, 7))
     const curYm = today.slice(0, 7)
@@ -4943,8 +4983,9 @@ async function ceoBuildSlow() {
 
     // True GM, job-matched: this month's invoiced jobs, less every PO on those
     // jobs (POs are cut days or weeks before the invoice, so look back 120 d),
-    // less burdened field labor at the trade's ADP rate. Company is the same
-    // math summed, so it can never read below every trade.
+    // less burdened field labor at the trade's actual payroll share
+    // (ceoLaborPct). Company is the same math summed, so it can never read
+    // below every trade.
     const mFrom = `${today.slice(0, 8)}01T00:00:00Z`
     const poFrom = new Date(Date.now() - 120 * 86400_000).toISOString()
     const mtd = {}, jobTrade = new Map(), mat = {}
@@ -4963,12 +5004,18 @@ async function ceoBuildSlow() {
         mat[t] = (mat[t] || 0) + (Number(p.total) || 0)
       }
     }, 12000)
-    const gm = { month: curYm, byTrade: {}, company: null }
+    const labor = await ceoLaborPct(adp, _ceoSlow.data?.laborWeeks)
+    const gm = {
+      month: curYm, byTrade: {}, company: null,
+      laborThrough: latestAdp, laborWeeks: labor.ends.length,
+      laborPct: Object.fromEntries(Object.entries(labor.pct).map(([t, v]) => [t, Math.round(v * 1000) / 10])),
+      laborBasis: labor.basis,
+    }
     let gRev = 0, gGp = 0
     for (const t of Object.values(TV_TRADES)) {
       const rev = mtd[t] || 0
       if (rev <= 500) { gm.byTrade[t] = null; continue }
-      const gp = rev - (mat[t] || 0) - rev * (CEO_LABOR[t] || 0.25)
+      const gp = rev - (mat[t] || 0) - rev * labor.pct[t]
       gm.byTrade[t] = Math.round(gp / rev * 1000) / 10
       gRev += rev; gGp += gp
     }
@@ -4998,7 +5045,7 @@ async function ceoBuildSlow() {
 
     _ceoSlow = {
       v: CEO_SLOW_V, at: Date.now(), refreshedFor: curYm,
-      data: { months, pacing: { yearProj: Math.round(yearProj), yoy: Math.round((yoy - 1) * 100), monthProj: Math.round(monthProj), prevYearTotal: Math.round(prevYearTotal) }, gm },
+      data: { months, laborWeeks: labor.weeks, pacing: { yearProj: Math.round(yearProj), yoy: Math.round((yoy - 1) * 100), monthProj: Math.round(monthProj), prevYearTotal: Math.round(prevYearTotal) }, gm },
     }
     try { await supabase.from('app_settings').upsert({ key: 'ceo_slow_cache', value: JSON.stringify(_ceoSlow) }, { onConflict: 'key' }) }
     catch (e) { console.warn('ceo cache save:', e.message) }

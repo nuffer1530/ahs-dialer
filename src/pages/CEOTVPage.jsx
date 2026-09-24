@@ -425,6 +425,11 @@ export default function CEOTVPage() {
               <Stat key={t} label={t === 'Garage Doors' ? 'Garage' : t} value={gm?.byTrade?.[t] != null ? gm.byTrade[t] + '%' : '—'} color={gmCol(gm?.byTrade?.[t])} />
             ))}
           </div>
+          {gm?.laborWeeks ? (
+            <div style={{ fontSize:10, color:C.dim, marginTop:'auto', paddingTop:6 }}>
+              Labor = actual ADP payroll, last {gm.laborWeeks} pay weeks through {fmtDate(`${gm.laborThrough}T12:00:00Z`, { month:'numeric', day:'numeric' })}
+            </div>
+          ) : null}
         </Panel>
         <Panel title="Call center — today" accent={C.green}>
           <div style={{ display:'grid', gridTemplateColumns:'repeat(2, 1fr)', gap:'10px 8px' }}>
