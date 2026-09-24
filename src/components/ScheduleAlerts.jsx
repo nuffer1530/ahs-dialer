@@ -54,6 +54,9 @@ function playChime() {
   } catch {}
 }
 
+// One Opportunity Watch popup per person per Denver day (live or catch-up).
+const oppSeenKey = (pid) => `andi_oppwatch_seen:${pid}:${new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Denver' }).format(new Date())}`
+
 export default function ScheduleAlerts() {
   const { profile } = useAuth()
   const [alerts, setAlerts] = useState([])
@@ -185,12 +188,46 @@ export default function ScheduleAlerts() {
         const from = isSender && !forMe
           ? `Sent ✓${payload.toNames ? ' → ' + payload.toNames : ''}`
           : (payload.from || 'Admin')
+        if (payload.kind === 'oppwatch') { try { localStorage.setItem(oppSeenKey(profile.id), '1') } catch {} }
         setAlerts(prev => [...prev, { id, kind: payload.kind === 'oppwatch' ? 'oppwatch' : 'announce', from, message: String(payload.message).slice(0, 300) }])
         playChime()
         setTimeout(() => setAlerts(prev => prev.filter(a => a.id !== id)), 25000)
       })
       .subscribe()
     return () => sb.removeChannel(ch)
+  }, [profile?.id])
+
+  // 🎯 Opportunity Watch catch-up. The unlock broadcast only reaches screens
+  // that had Andi open at that exact moment (25 s, nothing stored), and the
+  // money now pays out in the evening — so a rep who stepped away never heard
+  // the board filled (Deanna, Sep 24). Once per person per day, on load and
+  // whenever the tab comes back, show it if today is unlocked. Wall TVs skip.
+  useEffect(() => {
+    if (!profile?.id) return
+    if (/^\/(tv\/|warroom|callboard)/.test(window.location.pathname)) return
+    let stop = false
+    const check = async () => {
+      try {
+        const key = oppSeenKey(profile.id)
+        if (localStorage.getItem(key)) return
+        const d = await fetch('/api/tv/wins-today').then(r => r.json())
+        const b = d?.bonus
+        if (stop || !b) return
+        localStorage.setItem(key, '1')
+        const when = b.at ? new Date(b.at).toLocaleTimeString('en-US', { timeZone: 'America/Denver', hour: 'numeric', minute: '2-digit' }) : null
+        const id = `ann:opp:${key}`
+        const message = `Every trade's board filled${b.cutoff ? ` before ${b.cutoff}` : ''}${when ? ` (unlocked at ${when})` : ''}. $${Number(b.pool || 0).toFixed(0)} pool — ` +
+          (b.n != null ? `paid out, split ${b.n} ways.` : 'paid tonight to everyone who works today. Keep booking strong calls!')
+        setAlerts(prev => prev.some(a => a.id === id) ? prev : [...prev, { id, kind: 'oppwatch', from: 'Andi', message }])
+        playChime()
+        setTimeout(() => setAlerts(prev => prev.filter(a => a.id !== id)), 25000)
+      } catch {}
+    }
+    check()
+    const onVis = () => { if (document.visibilityState === 'visible') check() }
+    document.addEventListener('visibilitychange', onVis)
+    const t = setInterval(check, 5 * 60_000)
+    return () => { stop = true; document.removeEventListener('visibilitychange', onVis); clearInterval(t) }
   }, [profile?.id])
 
   // "You Got Paid!" — pops when the commission sync records a new payout for

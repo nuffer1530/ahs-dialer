@@ -3141,7 +3141,7 @@ app.get('/api/tv/wins-today', async (req, res) => {
     let bonus = null
     try {
       const log = JSON.parse(bonusRow?.value || '{}')
-      if (log[denverToday]) bonus = { id: `bonus-${denverToday}`, at: log[denverToday].at, pool: log[denverToday].pool, n: log[denverToday].pending ? null : log[denverToday].n, pending: !!log[denverToday].pending }
+      if (log[denverToday]) bonus = { id: `bonus-${denverToday}`, at: log[denverToday].at, pool: log[denverToday].pool, cutoff: log[denverToday].cutoff || null, n: log[denverToday].pending ? null : log[denverToday].n, pending: !!log[denverToday].pending }
     } catch {}
 
     const data = { generatedAt: new Date().toISOString(), reviews: reviews.slice(0, 20), memberships: memberships.slice(0, 20), bonus }
