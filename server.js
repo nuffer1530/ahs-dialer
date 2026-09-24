@@ -4241,12 +4241,26 @@ async function tvSalesClose(startIso, endIso, { primary = true, capMul = 1 } = {
     groupOfTech: (tech, job) => meta.get(String(tech))?.trade || buTrade.get(String(job?.businessUnitId)) || null,
     groupOfJob: (job) => buTrade.get(String(job?.businessUnitId)) || null,
   })
-  return { result, byTrade }
+  // JOBS RAN (Brandyn, Sep 24): closed-out jobs only — status Completed,
+  // completed inside the window — one count per job however many techs were
+  // on it, credited to the JOB's business unit (so a job never lands on two
+  // boards or twice in the company total), administrative types out
+  // (phone call only, vehicle, permitting, quality inspection, truck audit).
+  const jtNames = await tvJobTypeNames()
+  const jobsRan = {}; for (const t of Object.values(TV_TRADES)) jobsRan[t] = 0
+  for (const j of result.jobs.values()) {
+    if (j.jobStatus !== 'Completed' || !j.completedOn || j.completedOn < startIso || j.completedOn >= endIso) continue
+    if (TV_EXCLUDE_RAN.test(jtNames.get(String(j.jobTypeId)) || '')) continue
+    const t = buTrade.get(String(j.businessUnitId))
+    if (t) jobsRan[t]++
+  }
+  return { result, byTrade, jobsRan }
 }
-const tvApplyClose = (dept, byTrade) => {
+const tvApplyClose = (dept, byTrade, jobsRan) => {
   for (const t of Object.values(TV_TRADES)) {
     const c = byTrade[t] || { opps: 0, closed: 0, rate: null }
     dept[t].closeRate = c.rate; dept[t].presented = c.opps; dept[t].soldJobs = c.closed
+    if (jobsRan) dept[t].jobsRan = jobsRan[t] || 0
   }
 }
 async function tvJobTypes(jobIds) {
@@ -4263,7 +4277,7 @@ async function tvJobTypes(jobIds) {
 // Administrative job types are not truck rolls — they never count as "jobs
 // ran" on the boards (Brandyn: "not phone calls only or truck audits etc.").
 // Warranty/callback/follow-up visits DO count: a truck goes to a customer.
-const TV_EXCLUDE_RAN = /phone call|permitting|vehicle inspection|quality inspection|truck audit/i
+const TV_EXCLUDE_RAN = /phone call|permitting|vehicle|quality inspection|truck audit/i
 let _tvJtNames = { at: 0, map: new Map() }
 async function tvJobTypeNames() {
   if (Date.now() - _tvJtNames.at < 6 * 3600_000 && _tvJtNames.map.size) return _tvJtNames.map
@@ -4512,13 +4526,12 @@ async function tvBuildDay() {
         const jobTypeOf = await tvJobTypes(new Set(Object.values(byTradeJobs).flatMap(s => [...s])))
         const jtNames = await tvJobTypeNames()
         tvDropAdminRan(byTradeJobs, jobTypeOf, jtNames)
-        for (const t of Object.values(TV_TRADES)) w.dept[t].jobsRan = byTradeJobs[t].size
       } catch (e) { console.warn('tv day jobs:', e.message) }
       // Close rate = ServiceTitan's Sales close for today (lib/salesClose.js).
       try {
         const dayStartIso = tvBounds(today)
-        const { byTrade } = await tvSalesClose(dayStartIso, new Date(Date.parse(dayStartIso) + 86400_000).toISOString())
-        tvApplyClose(w.dept, byTrade)
+        const { byTrade, jobsRan } = await tvSalesClose(dayStartIso, new Date(Date.parse(dayStartIso) + 86400_000).toISOString())
+        tvApplyClose(w.dept, byTrade, jobsRan)
       } catch (e) { console.warn('tv day close:', e.message) }
       // Live feed: today's wins, per trade.
       const feed = {}; for (const t of Object.values(TV_TRADES)) feed[t] = []
@@ -4598,7 +4611,6 @@ async function tvBuildSlow() {
         mJobTypeOf = await tvJobTypes(new Set(Object.values(jobsByTrade).flatMap(s => [...s])))
         mJtNames = await tvJobTypeNames()
         tvDropAdminRan(jobsByTrade, mJobTypeOf, mJtNames)
-        for (const t of Object.values(TV_TRADES)) w.dept[t].jobsRan = jobsByTrade[t].size
       } catch (e) { console.warn('tv month jobs:', e.message) }
       // Close rate = ServiceTitan's Sales close, month to date — the dept strip
       // and every tech's row come from the same result (lib/salesClose.js).
@@ -4606,7 +4618,7 @@ async function tvBuildSlow() {
       try {
         const monthEndIso = new Date(Date.parse(tvBounds(today)) + 86400_000).toISOString()
         mClose = await tvSalesClose(tvBounds(monthStart), monthEndIso)
-        tvApplyClose(w.dept, mClose.byTrade)
+        tvApplyClose(w.dept, mClose.byTrade, mClose.jobsRan)
         // A tech with opportunities but no sale/review/club this month still
         // belongs on the table.
         for (const id of mClose.result.byTech.keys()) {
@@ -4666,20 +4678,8 @@ async function tvBuildSlow() {
       // are in hand.
       try {
         const yStart = tvBounds(yearStart), yEnd = new Date(Date.parse(tvBounds(today)) + 86400_000).toISOString()
-        const { result, byTrade } = await tvSalesClose(yStart, yEnd, { primary: false, capMul: 5 })
-        const bus = await stGet(`/settings/v2/tenant/${ST_TENANT_ID}/business-units?pageSize=200`).then(d => d?.data || [])
-        const buTradeY = new Map(bus.map(b => [String(b.id), tvTradeOf(b.name)]))
-        const ranByTrade = {}; for (const t of Object.values(TV_TRADES)) ranByTrade[t] = new Set()
-        const jobTypeOf = new Map()
-        for (const j of result.jobs.values()) {
-          if (j.jobStatus !== 'Completed' || !j.completedOn || j.completedOn < yStart) continue
-          jobTypeOf.set(j.id, { t: String(j.jobTypeId), total: Number(j.total) || 0 })
-          const t = buTradeY.get(String(j.businessUnitId))
-          if (t) ranByTrade[t].add(j.id)
-        }
-        tvDropAdminRan(ranByTrade, jobTypeOf, await tvJobTypeNames())
-        for (const t of Object.values(TV_TRADES)) w.dept[t].jobsRan = ranByTrade[t].size
-        tvApplyClose(w.dept, byTrade)
+        const { byTrade, jobsRan } = await tvSalesClose(yStart, yEnd, { primary: false, capMul: 5 })
+        tvApplyClose(w.dept, byTrade, jobsRan)
       } catch (e) { console.warn('tv year close:', e.message) }
       console.log(`tv year built: ${w.reviews.length} reviews, ${w.memberships.length} memberships, ${w.soldRows.length} sold estimates`)
       _tvYear = { at: Date.now(), data: { dept: w.dept, ytdTech } }
