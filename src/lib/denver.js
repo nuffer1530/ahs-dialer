@@ -11,6 +11,18 @@ const parts = (d) => {
   const get = (t) => Number(p.find(x => x.type === t)?.value || 0)
   return { hour: get('hour') % 24, minute: get('minute'), second: get('second') }
 }
+// "for today" / "for tomorrow" / "for Thu 9/25" — the day a booked call was
+// scheduled for (Brandyn, Sep 24). On-hold jobs have a placeholder date.
+const denverYmd = (d) => new Intl.DateTimeFormat('en-CA', { timeZone: DENVER }).format(new Date(d))
+export function bookedForLabel(apptStart, onHold, now = new Date()) {
+  if (onHold) return 'on hold'
+  if (!apptStart) return ''
+  const days = Math.round((Date.parse(denverYmd(apptStart)) - Date.parse(denverYmd(now))) / 864e5)
+  if (days === 0) return 'for today'
+  if (days === 1) return 'for tomorrow'
+  return `for ${fmtDate(apptStart, { weekday: 'short' })} ${fmtDate(apptStart, { month: 'numeric', day: 'numeric' })}`
+}
+
 // Midnight Denver today, as an absolute Date.
 export function denverStartOfToday(now = new Date()) {
   const { hour, minute, second } = parts(now)

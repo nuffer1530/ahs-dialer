@@ -4768,7 +4768,7 @@ app.get('/api/tv/department/:trade', async (req, res) => {
     try {
       const bookedAll = await Promise.race([ceoBookedToday(), new Promise(r => setTimeout(() => r(_ceoBooked.data), 3_000))])
       const bk = (bookedAll || []).filter(b => isCompany || b.trade === trade).map(b => ({
-        kind: 'booked', at: b.at, who: b.csr || null,
+        kind: 'booked', at: b.at, who: b.csr || null, id: b.id, apptStart: b.apptStart || null, onHold: !!b.onHold,
         text: [b.jobType, b.job ? `#${b.job}` : null].filter(Boolean).join(' · '),
       }))
       if (bk.length) feed = [...feed, ...bk].sort((a, b) => String(b.at || '').localeCompare(String(a.at || ''))).slice(0, 40)
@@ -5132,7 +5132,21 @@ function ceoBookedToday() {
   if (_ceoBookedP) return _ceoBookedP
   _ceoBookedP = (async () => {
     try {
-      const calls = await stPageAll(pg => `/telecom/v2/tenant/${ST_TENANT_ID}/calls?createdOnOrAfter=${tvBounds(tvDenverDate())}&pageSize=500&page=${pg}`, 5000)
+      const dayStart = tvBounds(tvDenverDate())
+      const [calls, appts] = await Promise.all([
+        stPageAll(pg => `/telecom/v2/tenant/${ST_TENANT_ID}/calls?createdOnOrAfter=${dayStart}&pageSize=500&page=${pg}`, 5000),
+        // The day each booked job is scheduled for (Brandyn, Sep 24): a job
+        // booked today got its first appointment today; appointmentNumber is
+        // "<job number>-<n>".
+        stPageAll(pg => `/jpm/v2/tenant/${ST_TENANT_ID}/appointments?createdOnOrAfter=${dayStart}&pageSize=500&page=${pg}`, 3000).catch(() => []),
+      ])
+      const apptByJob = new Map()
+      for (const a of appts) {
+        const [jn, seq] = String(a.appointmentNumber || '').split('-')
+        if (!jn) continue
+        const n = Number(seq) || 1, cur = apptByJob.get(jn)
+        if (!cur || n < cur.n) apptByJob.set(jn, { n, start: a.start || a.arrivalWindowStart || null, hold: a.status === 'Hold' })
+      }
       const out = []
       for (const c of calls) {
         const lc = c.leadCall || c
@@ -5142,6 +5156,8 @@ function ceoBookedToday() {
           // No customer name — these rows go on wall TVs (Brandyn, Sep 23).
           csr: (lc.agent || lc.createdBy || {}).name || null,
           jobType: (c.type || {}).name || null, trade: tvTradeOf((c.businessUnit || {}).name), job: c.jobNumber || null,
+          apptStart: apptByJob.get(String(c.jobNumber || ''))?.start || null,
+          onHold: !!apptByJob.get(String(c.jobNumber || ''))?.hold,
         })
       }
       out.sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')))

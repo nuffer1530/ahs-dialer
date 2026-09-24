@@ -6,6 +6,7 @@ import { inboundStats, outboundStats, fmtSecs, SERVICE_LEVEL_SECONDS, SERVICE_LE
 import { INTERACTION_COLORS } from '../lib/constants'
 import Avatar from '../components/Avatar'
 import { useWallboard } from '../lib/useDailyReload'
+import { bookedForLabel } from '../lib/denver'
 import { fmtTime, fmtDate, denverStartOfToday } from '../lib/denver'
 
 // Call-centre wallboard — a modern "Simon board" for the floor TV. Everything
@@ -545,7 +546,7 @@ export default function WarRoomPage() {
                     <div style={{ width:9, height:9, borderRadius:'50%', background:blue, flexShrink:0, boxShadow:`0 0 10px ${blue}` }} />
                     <div style={{ flex:1, minWidth:0 }}>
                       <div style={{ fontSize: narrow ? 12 : 14, fontWeight:700, color:blue, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
-                        📞 {l.csr || 'A CSR'} booked a call
+                        📞 {l.csr || 'A CSR'} booked a call {bookedForLabel(l.apptStart, l.onHold)}
                       </div>
                       <div style={{ fontSize: narrow ? 9 : 11, color:C.muted, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
                         {sub}{sub ? ' · ' : ''}{t(l.at)}
