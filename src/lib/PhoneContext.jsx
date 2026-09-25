@@ -6,6 +6,7 @@ import { loadOpsConfig } from './opsConfig'
 import { useAuth } from './AuthContext'
 import { useData } from './DataContext'
 import { syncWorkerActivity } from './utils'
+import { startRingback, stopRingback } from './ringback'
 
 // The softphone. This MUST live above the router: it used to be created inside
 // DialerPage, so navigating to any other page unmounted it and destroyed the
@@ -142,8 +143,15 @@ export function PhoneProvider({ children }) {
   }, [profile?.id, enterWrapUp])
 
   const wireCallEvents = useCallback((call) => {
-    call.on('ringing', () => setCallStatus('ringing'))
-    call.on('accept', () => { setCallStatus('connected'); startCallTimer() })
+    // Outbound only. The dial asks Twilio for a ringtone, which arrives as
+    // early media; if none came through, ring locally so the rep never sits
+    // in silence wondering whether the call went out.
+    call.on('ringing', (hasEarlyMedia) => {
+      setCallStatus('ringing')
+      if (hasEarlyMedia) stopRingback()   // Twilio's ring is coming through — never both
+      else startRingback()
+    })
+    call.on('accept', () => { stopRingback(); setCallStatus('connected'); startCallTimer() })
     // Live network-quality telemetry: the SDK raises warnings (high-jitter,
     // high-packet-loss, high-rtt, low-mos) when THIS browser's connection
     // degrades. Shown as a chip and breadcrumbed to the server so "calls are
@@ -156,10 +164,12 @@ export function PhoneProvider({ children }) {
     })
     call.on('warning-cleared', () => setNetWarning(null))
     call.on('disconnect', () => {
+      stopRingback()
       callRef.current = null; setCallStatus('ended'); stopCallTimer(); setNetWarning(null)
       setTimeout(() => setCallStatus(null), 3000); enterWrapUp()
     })
     call.on('error', () => {
+      stopRingback()
       callRef.current = null; setCallStatus('ended'); stopCallTimer()
       setTimeout(() => setCallStatus(null), 2000)
     })
@@ -183,6 +193,7 @@ export function PhoneProvider({ children }) {
     const t = setInterval(() => {
       const c = callRef.current
       if (!c || c.status?.() === 'closed') {
+        stopRingback()
         callRef.current = null
         setCallStatus('ended'); stopCallTimer()
         setTimeout(() => setCallStatus(null), 2000)
@@ -281,6 +292,7 @@ export function PhoneProvider({ children }) {
     // the entire point of hoisting this out of the page.
     return () => {
       cancelled = true
+      stopRingback()
       if (deviceRef.current) { deviceRef.current.destroy(); deviceRef.current = null }
       stopCallTimer()
       cancelAutoWrap()
@@ -391,6 +403,7 @@ export function PhoneProvider({ children }) {
   }, [incomingCall])
 
   const hangUp = useCallback(() => {
+    stopRingback()
     if (callRef.current) { callRef.current.disconnect(); callRef.current = null }
     setCallStatus('ended'); stopCallTimer()
     setTimeout(() => setCallStatus(null), 2000)

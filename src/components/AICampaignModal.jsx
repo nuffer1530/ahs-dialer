@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { sb } from '../lib/supabase'
+import { useData } from '../lib/DataContext'
 import Modal from './Modal'
 
 // AI Campaign builder. Three steps in one modal:
@@ -35,7 +36,11 @@ async function authFetch(path, body) {
 }
 
 export default function AICampaignModal({ onClose, onCreated }) {
+  const { campaigns } = useData()
   const [request, setRequest] = useState('')
+  // '' = a new campaign; otherwise fill an existing one (e.g. a "Memberships"
+  // campaign that was set up by hand and never had contacts).
+  const [targetId, setTargetId] = useState('')
   const [plan, setPlan] = useState(null)
   const [preview, setPreview] = useState(null)
   const [name, setName] = useState('')
@@ -65,7 +70,7 @@ export default function AICampaignModal({ onClose, onCreated }) {
   const doCommit = async () => {
     setBusy('commit'); setErr('')
     try {
-      const data = await authFetch('/api/st/audience/build', { plan, commit: true, campaign_name: name })
+      const data = await authFetch('/api/st/audience/build', { plan, commit: true, campaign_name: name, target_campaign_id: targetId || undefined })
       onCreated?.(data)
     } catch (e) { setErr(e.message) } finally { setBusy('') }
   }
@@ -129,7 +134,7 @@ export default function AICampaignModal({ onClose, onCreated }) {
               {!preview && (
                 <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
                   <button className="btn primary" onClick={doPreview} disabled={busy === 'preview'}>
-                    {busy === 'preview' ? 'Searching ServiceTitan…' : 'Preview audience'}
+                    {busy === 'preview' ? 'Searching ServiceTitan — can take a minute…' : 'Preview audience'}
                   </button>
                 </div>
               )}
@@ -176,13 +181,26 @@ export default function AICampaignModal({ onClose, onCreated }) {
                 </table>
               </div>
               <div className="form-field">
-                <label className="form-label">Campaign name</label>
-                <input className="form-input" value={name} onChange={e => setName(e.target.value)} placeholder="Name this campaign" />
+                <label className="form-label">Add these contacts to</label>
+                <select className="form-input" value={targetId} onChange={e => setTargetId(e.target.value)}>
+                  <option value="">A new campaign</option>
+                  {campaigns.filter(c => c.name !== 'Leads').map(c => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </select>
               </div>
+              {!targetId && (
+                <div className="form-field">
+                  <label className="form-label">Campaign name</label>
+                  <input className="form-input" value={name} onChange={e => setName(e.target.value)} placeholder="Name this campaign" />
+                </div>
+              )}
               <div className="modal-actions">
                 <button className="btn" onClick={onClose}>Cancel</button>
-                <button className="btn primary" onClick={doCommit} disabled={busy === 'commit' || !name.trim()}>
-                  {busy === 'commit' ? 'Creating…' : `Create campaign & add ${preview.stats.dialable} contacts`}
+                <button className="btn primary" onClick={doCommit} disabled={busy === 'commit' || (!targetId && !name.trim())}>
+                  {busy === 'commit' ? 'Saving…'
+                    : targetId ? `Add ${preview.stats.dialable} contacts to ${campaigns.find(c => c.id === targetId)?.name || 'campaign'}`
+                    : `Create campaign & add ${preview.stats.dialable} contacts`}
                 </button>
               </div>
             </>

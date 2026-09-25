@@ -11,6 +11,7 @@ import QueueSelector from '../components/QueueSelector'
 import LeadsRail from '../components/LeadsRail'
 import { useOpenLeads } from '../lib/useOpenLeads'
 import { OUTCOMES, INBOUND_OUTCOMES, MAX_ATTEMPTS, DONE_OUTCOMES } from '../lib/constants'
+import { useOpsConfig } from '../lib/opsConfig'
 import { RichText } from '../components/RichTextEditor'
 
 const PAGE_SIZE = 50
@@ -429,8 +430,26 @@ export default function DialerPage() {
 
   // Next lead under skills routing: today's callbacks first, then the oldest
   // unclaimed lead from the highest-priority active campaign.
-  const nextSkillLead = useCallback(() => {
-    const workable = c => !isDone(c) && c.status !== 'Max Attempts' && !c.claimed_by
+  //
+  // A lead dialed within the retry gap sits out. Without that, a Voicemail'd
+  // lead went straight back to the top — it's still the oldest unclaimed one —
+  // and "Serve me the next lead" handed the rep the customer she'd just called
+  // (Deanna, Sep 24). workedRef covers this session even if the
+  // last_attempt_at write lags; `skip` lets a caller exclude candidates it
+  // just lost a claim race on.
+  const { ops: opsCfg } = useOpsConfig()
+  const workedRef = useRef(new Map())   // contactId -> ms of this rep's last disposition
+  const nextSkillLead = useCallback((skip) => {
+    const now = Date.now()
+    const gapMs = Math.max(0, Number(opsCfg.retryGapHours) || 0) * 3600_000
+    const triedRecently = (c) => {
+      const last = Math.max(c.last_attempt_at ? Date.parse(c.last_attempt_at) : 0, workedRef.current.get(c.id) || 0)
+      if (!last || now - last >= gapMs) return false
+      // A callback set for after that attempt, and now due, still comes first.
+      const cb = c.callback_at ? Date.parse(c.callback_at) : 0
+      return !(cb > last && cb <= now)
+    }
+    const workable = c => !isDone(c) && c.status !== 'Max Attempts' && !c.claimed_by && !skip?.has(c.id) && !triedRecently(c)
     const byOldest = (a, b) => new Date(a.created_at) - new Date(b.created_at)
     const inActive = contacts.filter(c => activeCampOrder.includes(c.campaign_id) && workable(c))
     const cb = inActive.filter(c => isCallbackDueToday(c)).sort(byOldest)
@@ -440,7 +459,7 @@ export default function DialerPage() {
       if (lead) return lead
     }
     return null
-  }, [contacts, activeCampOrder])
+  }, [contacts, activeCampOrder, opsCfg.retryGapHours])
 
   // Load ST job types + business units + campaigns on mount
   useEffect(() => {
@@ -688,13 +707,26 @@ export default function DialerPage() {
   // Claim a lead AND release any others this rep still holds — a CSR works one
   // outbound lead at a time, so being auto-served the next one drops the last.
   // Without this, auto-claim accumulates locked leads the rep isn't working.
+  //
+  // The claim only lands if the lead is still free IN THE DATABASE. Local
+  // state can trail other reps' claims, and an unconditional update let two
+  // reps take — and dial — the same lead. Returns false if someone beat us.
   const claimExclusive = async (id) => {
     const now = new Date().toISOString()
+    const { data, error } = await sb.from('contacts').update({ claimed_by: currentRep, claimed_at: now })
+      .eq('id', id).is('claimed_by', null).select()
+    if (error) { console.warn('claim failed:', error.message); return false }
+    let row = data?.[0]
+    if (!row) {
+      const { data: cur } = await sb.from('contacts').select('*').eq('id', id).maybeSingle()
+      if (cur) setContacts(prev => prev.map(c => c.id === id ? cur : c))
+      if (cur?.claimed_by !== currentRep) return false
+      row = cur
+    }
     setContacts(prev => prev.map(c =>
-      c.id === id ? { ...c, claimed_by: currentRep, claimed_at: now }
-      : (c.claimed_by === currentRep ? { ...c, claimed_by: null, claimed_at: null } : c)))
-    await sb.from('contacts').update({ claimed_by: currentRep, claimed_at: now }).eq('id', id)
+      c.id === id ? row : (c.claimed_by === currentRep ? { ...c, claimed_by: null, claimed_at: null } : c)))
     await sb.from('contacts').update({ claimed_by: null, claimed_at: null }).eq('claimed_by', currentRep).neq('id', id)
+    return true
   }
 
 
@@ -858,7 +890,7 @@ export default function DialerPage() {
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Failed to send note')
-      setStNoteResult({ ok: true })
+      setStNoteResult({ ok: true, deduped: !!data.deduped })
       setTimeout(() => setStNoteResult(null), 2500)
     } catch (e) {
       setStNoteResult({ ok: false, error: e.message })
@@ -916,12 +948,29 @@ export default function DialerPage() {
   const selectContact = (id) => openTab(id)
   // Serve a lead and, when it was routed to the rep by skills, claim it to them
   // automatically — an auto-served outbound lead is theirs, no Claim click.
-  const serveLead = (contact, claim) => {
+  // Exclusive: claiming the served lead releases any the rep was still holding.
+  const serveLead = async (contact, claim) => {
     if (!contact) return false
+    if (claim && !(await claimExclusive(contact.id))) return false
     navigateActiveTo(contact.id)
-    // Exclusive: claiming the served lead releases any the rep was still holding.
-    if (claim && contact.claimed_by !== currentRep) claimExclusive(contact.id)
     return true
+  }
+  // Next skills-routed lead, claimed atomically. Losing a claim race to
+  // another rep just moves on to the next candidate. One serve at a time —
+  // the idle auto-advance effect re-fires on every contacts change.
+  const servingRef = useRef(false)
+  const serveNextSkill = async (skip = new Set()) => {
+    if (servingRef.current) return false
+    servingRef.current = true
+    try {
+      for (let i = 0; i < 5; i++) {
+        const lead = nextSkillLead(skip)
+        if (!lead) return false
+        if (await serveLead(lead, true)) return true
+        skip.add(lead.id)
+      }
+      return false
+    } finally { servingRef.current = false }
   }
 
   // Open a contact that was just created server-side (promoted from a lead).
@@ -969,7 +1018,7 @@ export default function DialerPage() {
     // work while the rep waits, and flipping them On Call there would make
     // every idle rep permanently invisible to inbound routing.)
     if (skillsMode) {
-      if (serveLead(nextSkillLead(), true)) startInteraction?.('Outbound')
+      if (await serveNextSkill()) startInteraction?.('Outbound')
       return
     }
     if (repCampPriority.length || Array.isArray(profile?.active_campaign_ids)) return   // nothing switched on — no outbound
@@ -986,10 +1035,11 @@ export default function DialerPage() {
   useEffect(() => { setAutoServePaused(false) }, [profile?.status, skillsMode, activeCampOrder])
   useEffect(() => {
     if (autoServePaused) return
+    if (saving) return   // logOutcome is mid-flight and serves the next lead itself
     if (incomingCall || callStatus) return
     if (profile?.status !== 'Available') return
     if (selectedContact && !isDone(selectedContact)) return
-    if (skillsMode) { serveLead(nextSkillLead(), true); return }
+    if (skillsMode) { serveNextSkill(); return }
     // Outbound only flows from campaigns the rep has switched ON. A rep with
     // grants toggled off, OR one with no grants at all (Brittany: admin, no
     // csr_campaigns rows, still getting RMC pops), gets nothing. The blended
@@ -999,7 +1049,7 @@ export default function DialerPage() {
     const next = filtered.find(x => !isDone(x) && x.status !== 'Max Attempts' && !x.claimed_by)
     if (next) navigateActiveTo(next.id)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoServePaused, skillsMode, incomingCall, callStatus, profile?.status, selectedContact, nextSkillLead])
+  }, [autoServePaused, saving, skillsMode, incomingCall, callStatus, profile?.status, selectedContact, nextSkillLead])
 
   const claimContact = async () => {
     if (!selectedContact || selectedContact.claimed_by) return
@@ -1113,8 +1163,14 @@ export default function DialerPage() {
     try {
       await sb.from('call_logs').insert({ contact_id: c.id, campaign_id: c.campaign_id, rep: currentRep, outcome: selectedOutcome, notes })
       const upd = { status: newStatus, attempts: newAttempts }
+      // Stamps the attempt so the lead sits out the retry gap for every rep.
+      if (isCampaignContact) { upd.last_attempt_at = new Date().toISOString(); workedRef.current.set(c.id, Date.now()) }
       if (isFinal) { upd.claimed_by = null; if (c.callback_at) { upd.callback_at = null; upd.callback_note = null } }
-      const { data: updated } = await sb.from('contacts').update(upd).eq('id', c.id).select().single()
+      let { data: updated, error: updErr } = await sb.from('contacts').update(upd).eq('id', c.id).select().single()
+      if (updErr && /last_attempt_at/.test(updErr.message)) {   // column not migrated yet — never block the outcome
+        delete upd.last_attempt_at
+        ;({ data: updated } = await sb.from('contacts').update(upd).eq('id', c.id).select().single())
+      }
       if (updated) setContacts(prev => prev.map(x => x.id === c.id ? updated : x))
 
       if (selectedOutcome === 'DNC' && c.phone) {
@@ -1132,7 +1188,7 @@ export default function DialerPage() {
       if (notes && c.external_id && selectedOutcome !== 'Booked') {
         fetch('/api/st/note', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ customerId: c.external_id, note: `${selectedOutcome}: ${notes}`, repName: currentRep })
+          body: JSON.stringify({ customerId: c.external_id, note: notes, outcome: selectedOutcome, repName: currentRep })
         }).catch(err => console.warn('ST note sync failed:', err))
       }
 
@@ -1151,11 +1207,12 @@ export default function DialerPage() {
       setContactLogs(logs || [])
 
       if (!stay) {
-        const nextContact = skillsMode
-          ? nextSkillLead()
-          : filtered.slice(selectedIdx + 1).find(x => !isDone(x) && x.status !== 'Max Attempts')
-        if (nextContact) serveLead(nextContact, skillsMode)   // claim only under skills routing
-        else { closeTab(selectedId) }
+        // Never the lead just dispositioned — local state may not show the
+        // update yet. Claim only under skills routing.
+        const served = skillsMode
+          ? await serveNextSkill(new Set([c.id]))
+          : await serveLead(filtered.slice(selectedIdx + 1).find(x => !isDone(x) && x.status !== 'Max Attempts'), false)
+        if (!served) closeTab(selectedId)
       }
     } finally { setSaving(false) }
   }
@@ -1997,7 +2054,7 @@ export default function DialerPage() {
                               <div style={{ display:'flex', alignItems:'center', gap:8 }}>
                                 {stNoteResult && (
                                   <span style={{ fontSize:11, fontWeight:600, color: stNoteResult.ok ? 'var(--success)' : '#DC2626' }}>
-                                    {stNoteResult.ok ? 'Sent to ST' : stNoteResult.error}
+                                    {stNoteResult.ok ? (stNoteResult.deduped ? 'Already in ST' : 'Sent to ST') : stNoteResult.error}
                                   </span>
                                 )}
                                 <button onClick={sendNoteToST} disabled={!c.external_id || !notesVal.trim() || stNoteSending}

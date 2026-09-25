@@ -11,6 +11,7 @@ export const OPS_DEFAULTS = {
   abandonGraceSeconds: 10,   // hangups faster than this aren't abandons
   wrapUpSeconds: 60,         // wrap-up before auto-Available
   maxAttempts: 3,            // dial attempts before Max Attempts
+  retryGapHours: 20,         // a No Answer / Voicemail lead sits out this long before it's served again
 }
 export const ATTENDANCE_DEFAULTS = {
   points: { late: 0.5, absence: 1.0, early_departure: 0.5, no_call: 1.0 },

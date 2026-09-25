@@ -281,24 +281,56 @@ async function stDelete(path, _retry = true) {
 }
 
 // ── ST: Add note to customer record (via primary location)
+//
+// One note per interaction. The same notes used to land in ST two and three
+// times: "Send note to ST" posted them, logging the outcome posted them again,
+// and a re-served lead added a third copy (Deanna, Sep 24). ST's note API is
+// create + delete only — nothing can be edited in place — so the guard lives
+// here: skip when an Andi note ending in the same text already landed on this
+// location within the hour. (endsWith, because the outcome prefix differs
+// between the two paths and reps sometimes add a line on top in ST.)
+const ANDI_NOTE_DEDUP_MS = 60 * 60_000
+const normNoteText = (s) => String(s || '').replace(/\s+/g, ' ').trim()
+async function findRecentAndiNote(locationId, body) {
+  const want = normNoteText(body)
+  if (!want) return null
+  const d = await stGet(`/crm/v2/tenant/${ST_TENANT_ID}/locations/${locationId}/notes?pageSize=20`)
+  const cutoff = Date.now() - ANDI_NOTE_DEDUP_MS
+  return (d?.data || []).find(n => /\(via Andi\)/.test(n.text || '')
+    && new Date(n.createdOn).getTime() >= cutoff
+    && normNoteText(n.text).endsWith(want)) || null
+}
+
 app.post('/api/st/note', async (req, res) => {
   try {
-    const { customerId, note, repName } = req.body
+    const { customerId, note, outcome, repName } = req.body
     if (!customerId || !note) return res.status(400).json({ error: 'customerId and note required' })
     // The note AUTHOR in ST is always the API account (ST offers no
     // impersonation), so the rep's name leads the text where eyes land.
-    const noteText = `${repName || 'CSR'} (via Andi): ${note}`
+    const body = String(note).trim()
+    const noteText = `${repName || 'CSR'} (via Andi): ${outcome ? `${outcome}: ` : ''}${body}`
 
     // Step 1: Get customer's primary location ID
     const locData = await stGet(`/crm/v2/tenant/${ST_TENANT_ID}/locations?customerId=${customerId}&pageSize=1`)
     const locationId = locData?.data?.[0]?.id
     if (!locationId) throw new Error(`No location found for customer ${customerId}`)
 
-    // Step 2: Post note to the location
-    const data = await stPost(`/crm/v2/tenant/${ST_TENANT_ID}/locations/${locationId}/notes`, {
-      text: noteText,
-      pinToTop: false,
-    })
+    // Step 2: already there? A failed check just means we post.
+    const dup = await findRecentAndiNote(locationId, body).catch(() => null)
+    if (dup) return res.json({ ok: true, deduped: true, locationId })
+
+    // Step 3: Post note to the location. No blind retry — a POST that timed
+    // out but landed would post twice. Check first, then retry once.
+    const path = `/crm/v2/tenant/${ST_TENANT_ID}/locations/${locationId}/notes`
+    let data
+    try {
+      data = await stPost(path, { text: noteText, pinToTop: false }, false)
+    } catch (e) {
+      if (!/timed out|network error/.test(e.message)) throw e
+      await new Promise(r => setTimeout(r, 5000))   // a slow ST may still be committing it
+      const landed = await findRecentAndiNote(locationId, body).catch(() => null)
+      data = landed || await stPost(path, { text: noteText, pinToTop: false }, false)
+    }
 
     res.json({ ok: true, locationId, data })
   } catch (err) {
@@ -3363,15 +3395,22 @@ app.post('/api/twilio/twiml/outbound', (req, res) => {
   // NOT recorded or transcribed and never touch active_calls — they're not
   // customer calls and shouldn't show on boards or in recordings.
   if (String(to || '').startsWith('client:')) {
-    const idial = twiml.dial({ callerId: `client:${p.identity || 'Andi'}`, timeout: 25 })
+    const idial = twiml.dial({ callerId: `client:${p.identity || 'Andi'}`, timeout: 25, answerOnBridge: true, ringTone: 'us' })
     idial.client(String(to).slice(7))
     res.type('text/xml')
     return res.send(twiml.toString())
   }
 
+  // Ringback: ringTone defaults to "the carrier's ringtone", and many carriers
+  // send none — reps heard dead air until voicemail picked up (Deanna, Sep 24).
+  // ringTone makes Twilio play a US ring itself; answerOnBridge keeps the
+  // rep's leg ringing (the SDK's 'ringing' state) until the customer — or
+  // their voicemail — actually answers, so the call timer starts on answer.
   const dial = twiml.dial({
     callerId: twilioPhone,
     timeout: 30,
+    answerOnBridge: true,
+    ringTone: 'us',
     record: 'record-from-answer-dual',
     recordingStatusCallback: `${appUrl}/api/twilio/recording`,
     recordingStatusCallbackEvent: 'completed',
@@ -3405,25 +3444,57 @@ const pruneCallNotes = () => {
   for (const [k, v] of _callNotes) if (v.at < cutoff) _callNotes.delete(k)
 }
 
+// What an outbound call was about, for the no-contact note: the campaign the
+// contact was dialed from plus why they're on the list (import_notes, e.g.
+// "HVAC maintenance due ~2026-10-15"). Cached — the live draft re-runs ~20s.
+const _outboundCtx = new Map()   // contactId -> { at, text }
+async function outboundContext(contactId) {
+  if (!contactId) return ''
+  const hit = _outboundCtx.get(contactId)
+  if (hit && Date.now() - hit.at < 10 * 60_000) return hit.text
+  let text = ''
+  try {
+    const { data: c } = await supabase.from('contacts').select('campaign_id, import_notes').eq('id', contactId).maybeSingle()
+    let camp = null
+    if (c?.campaign_id) ({ data: camp } = await supabase.from('campaigns').select('name, description').eq('id', c.campaign_id).maybeSingle())
+    text = [camp?.name && `Campaign: ${camp.name}`, camp?.description && `Campaign audience: ${camp.description}`,
+      c?.import_notes && `Why this customer is on the list: ${c.import_notes}`].filter(Boolean).join('\n')
+  } catch {}
+  _outboundCtx.set(contactId, { at: Date.now(), text })
+  if (_outboundCtx.size > 500) _outboundCtx.delete(_outboundCtx.keys().next().value)
+  return text
+}
+
 // Claude turns a transcript (partial or full) into the house-format note.
-async function draftNotesFromTranscript(transcript) {
+// Outbound calls that never reached a person get a one-liner instead of the
+// booking template — "Can Go Early: Not asked / Dispatch Fee: Unquoted" on a
+// voicemail is noise in ST (Deanna, Sep 24).
+async function draftNotesFromTranscript(transcript, { direction, contactId } = {}) {
   if (!ANTHROPIC_KEY) return null
 
   if (String(transcript || "").trim().length < 40) return null
 
+  const outbound = direction === 'outbound'
+  const ctx = outbound ? await outboundContext(contactId) : ''
   const today = new Date().toLocaleDateString('en-US', { timeZone: 'America/Denver', weekday: 'short', month: 'short', day: 'numeric' })
+  const outboundProps = outbound ? {
+    reached_customer: { type: 'boolean', description: 'true only if the CSR actually spoke with a live person at this number. false if the call went to voicemail, an automated system, or nobody picked up.' },
+    left_voicemail: { type: 'boolean', description: 'true if the CSR left a voicemail message' },
+    call_purpose: { type: 'string', description: "What the CSR was calling about, as a short phrase that completes 'left a voicemail about …' — e.g. 'scheduling their plumbing and electrical maintenance visits'. Use the CSR's own words first; fall back to the campaign context." },
+  } : {}
   const cRes = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: { 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
     body: JSON.stringify({
       model: 'claude-haiku-4-5-20251001', max_tokens: 800,
-      system: `You extract job-booking notes from a home-services call transcript (HVAC/plumbing/electrical/garage door company in Colorado Springs). Today is ${today}. Extract ONLY what was actually said — never invent details. Amounts, dates and windows must come from the transcript.`,
+      system: `You extract job-booking notes from a home-services call transcript (HVAC/plumbing/electrical/garage door company in Colorado Springs). Today is ${today}. Extract ONLY what was actually said — never invent details. Amounts, dates and windows must come from the transcript.${outbound ? `\n\nThis is an OUTBOUND call: the CSR called the customer.${ctx ? `\n${ctx}` : ''}` : ''}`,
       tools: [{
         name: 'submit_notes',
         description: 'Submit the extracted call notes',
         input_schema: {
           type: 'object',
           properties: {
+            ...outboundProps,
             booked_window: { type: ['string', 'null'], description: "Date and time window agreed on the call, e.g. 'Thu, Jul 24 · 10-2' or 'tomorrow 8-12'. null if nothing was booked/agreed." },
             can_go_early: { type: 'string', enum: ['Yes', 'No', 'Not asked'], description: 'Did the customer say the tech may come earlier than the window?' },
             reason: { type: 'string', description: 'Reason for the call / the issue, one short line' },
@@ -3433,7 +3504,7 @@ async function draftNotesFromTranscript(transcript) {
             age_info: { type: ['string', 'null'], description: "Age of the home or equipment if mentioned, e.g. '~20 yr old system', 'home built 2005'. null if not mentioned." },
             synopsis: { type: 'string', description: "One to two sentence plain-English summary of anything NOT already captured by the other fields — how the call went, customer mood, follow-ups promised. Do NOT restate the window, fee, issue, or equipment age; those print right above the synopsis." },
           },
-          required: ['can_go_early', 'reason', 'fee_quoted', 'synopsis'],
+          required: [...Object.keys(outboundProps), 'can_go_early', 'reason', 'fee_quoted', 'synopsis'],
         },
       }],
       tool_choice: { type: 'tool', name: 'submit_notes' },
@@ -3442,6 +3513,13 @@ async function draftNotesFromTranscript(transcript) {
   })
   if (!cRes.ok) throw new Error(`claude ${cRes.status}: ${(await cRes.text()).slice(0, 160)}`)
   const n = ((await cRes.json()).content || []).find(b => b.type === 'tool_use')?.input
+  if (outbound && n && n.reached_customer === false) {
+    let about = String(n.call_purpose || '').trim().replace(/[.\s]+$/, '')
+    if (about && !/^[A-Z]{2,}/.test(about)) about = about.charAt(0).toLowerCase() + about.slice(1)
+    return n.left_voicemail
+      ? `No interaction with customer — left a voicemail${about ? ` about ${about}` : ''}.`
+      : `No interaction with customer — no voicemail left.${about ? ` Calling about ${about}.` : ''}`
+  }
   if (!n?.synopsis) return
 
   // The house format techs and dispatch already read every day.
@@ -3465,7 +3543,7 @@ const _wu = (sid, msg) => { _wuTrace.push({ at: new Date().toISOString(), sid: S
 // Post-call pass: Whisper on the finished recording — the final, highest-
 // quality draft (overwrites any live draft for the same call).
 const _whispered = new Set()
-async function transcribeAndDraftNotes({ callSid, contactId, phone, mp3Url, duration }) {
+async function transcribeAndDraftNotes({ callSid, contactId, phone, mp3Url, duration, direction }) {
   if (!OPENAI_KEY || !ANTHROPIC_KEY) { _wu(callSid, 'skipped: key missing'); return }
   if (duration != null && duration < 15) { _wu(callSid, `skipped: ${duration}s too short`); return }   // too short to be a conversation
   if (_whispered.has(callSid)) { _wu(callSid, 'skipped: already transcribed'); return }
@@ -3486,7 +3564,7 @@ async function transcribeAndDraftNotes({ callSid, contactId, phone, mp3Url, dura
   if (!wRes.ok) { const t = (await wRes.text()).slice(0, 160); _wu(callSid, `whisper ${wRes.status}: ${t}`); throw new Error(`whisper ${wRes.status}: ${t}`) }
   const transcript = (await wRes.json())?.text || ''
   _wu(callSid, `whisper ok, ${transcript.length} chars`)
-  const text = await draftNotesFromTranscript(transcript)
+  const text = await draftNotesFromTranscript(transcript, { direction, contactId })
   if (!text) { _wu(callSid, 'no draft (transcript too thin)'); return }
   pruneCallNotes()
   _callNotes.set(callSid, { contactId, phone: last10(phone), text, at: Date.now() })
@@ -3640,7 +3718,7 @@ async function runLiveDraft(callSid, entry) {
   e.running = true; e.lastRun = Date.now()
   if (e.line !== 'dispatch') classifyBooking(callSid, e).catch(() => {})   // dropdowns fill alongside the notes
   try {
-    const draft = await draftNotesFromTranscript(text)
+    const draft = await draftNotesFromTranscript(text, { direction: e.direction, contactId: e.contactId })
     if (draft) {
       pruneCallNotes()
       _callNotes.set(callSid, { contactId: e.contactId, phone: e.phone, text: draft, at: Date.now() })
@@ -3777,7 +3855,7 @@ async function finalPassFromRest(callSid, e) {
       .order('created_at', { ascending: false }).limit(1).maybeSingle()
     if (recentLog) await supabase.from('call_logs').update({ recording_url: mp3, recording_duration: dur, call_sid: callSid }).eq('id', recentLog.id)
   }
-  await transcribeAndDraftNotes({ callSid, contactId: e.contactId, phone: e.phone, mp3Url: mp3, duration: dur })
+  await transcribeAndDraftNotes({ callSid, contactId: e.contactId, phone: e.phone, mp3Url: mp3, duration: dur, direction: e.direction })
 }
 
 app.post('/api/twilio/live-transcript', async (req, res) => {
@@ -6403,7 +6481,8 @@ app.post('/api/twilio/recording', async (req, res) => {
       const lt = _liveTx.get(CallSid)
       if (lt) { if (!lt.contactId) lt.contactId = ac.contact_id; if (!lt.phone) lt.phone = last10(ac.from_number) }
       transcribeAndDraftNotes({
-        callSid: CallSid, contactId: ac.contact_id, phone: ac.from_number, mp3Url: mp3,
+        callSid: CallSid, contactId: ac.contact_id, mp3Url: mp3, direction: ac.direction,
+        phone: ac.direction === 'outbound' ? ac.to_number : ac.from_number,
         duration: RecordingDuration ? parseInt(RecordingDuration) : null,
       }).catch(e => { _wu(CallSid, `error: ${e.message}`.slice(0, 200)); console.warn('wrap-up autopilot:', e.message) })
     }
@@ -12751,6 +12830,26 @@ app.post('/api/st/audience/plan', async (req, res) => {
   }
 })
 
+// The preview already did the slow part — ServiceTitan recipe + one contact
+// lookup per customer. Create used to redo all of it, so the button sat on
+// "Creating…" for minutes and the campaign looked like it never saved
+// (Deanna, Sep 24). Keep the resolved rows briefly and reuse them.
+const _audiencePreview = new Map()   // JSON(plan) -> { at, rows, truncated, total }
+const AUDIENCE_PREVIEW_TTL = 30 * 60_000
+
+// Every phone in Andi, paged — a plain select stops at 1,000 rows, which let
+// DNC'd and already-queued numbers past the 1,000th contact back into new
+// campaigns.
+async function allContactPhones() {
+  const out = []
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await supabase.from('contacts').select('phone, status').order('created_at').range(from, from + 999)
+    if (error) throw new Error('contacts read: ' + error.message)
+    out.push(...(data || []))
+    if (!data || data.length < 1000) return out
+  }
+}
+
 app.post('/api/st/audience/build', async (req, res) => {
   if (!(await requireAdmin(req, res))) return
   try {
@@ -12758,26 +12857,35 @@ app.post('/api/st/audience/build', async (req, res) => {
     const commit = req.body?.commit === true
     if (!plan || !RECIPES[plan.recipe]) return res.status(400).json({ error: 'No runnable plan.' })
 
-    const matched = await RECIPES[plan.recipe](plan)
-    const { rows, truncated, total } = await enrichAudience(matched)
+    const key = JSON.stringify(plan)
+    for (const [k, v] of _audiencePreview) if (Date.now() - v.at > AUDIENCE_PREVIEW_TTL) _audiencePreview.delete(k)
+    let built = commit ? _audiencePreview.get(key) : null
+    if (!built) {
+      const matched = await RECIPES[plan.recipe](plan)
+      built = { at: Date.now(), ...(await enrichAudience(matched)) }
+      _audiencePreview.set(key, built)
+    }
+    const { rows, truncated, total } = built
 
     // DNC = any contact already marked DNC in Andi (the app's DNC cascade is by
     // normalized phone). Also skip anything already in the contacts table.
-    const { data: existing } = await supabase.from('contacts').select('phone, status')
+    // Always re-read at commit — the list can change between preview and create.
+    const existing = await allContactPhones()
     const dnc = new Set(), have = new Set()
-    for (const c of (existing || [])) {
+    for (const c of existing) {
       const p = normPhone10(c.phone); if (!p) continue
       have.add(p)
       if (c.status === 'DNC') dnc.add(p)
     }
 
     let noPhone = 0, dncSkipped = 0, dupSkipped = 0
-    const keep = []
+    const keep = [], seen = new Set()
     for (const r of rows) {
       const p = normPhone10(r.phone)
       if (!p) { noPhone++; continue }
       if (dnc.has(p)) { dncSkipped++; continue }
-      if (have.has(p)) { dupSkipped++; continue }
+      if (have.has(p) || seen.has(p)) { dupSkipped++; continue }
+      seen.add(p)
       keep.push(r)
     }
 
@@ -12787,11 +12895,25 @@ app.post('/api/st/audience/build', async (req, res) => {
       return res.json({ stats, sample: keep.slice(0, 25).map(r => ({ name: r.name, phone: r.phone, reason: r.reason })) })
     }
 
-    // Commit — create the campaign, then insert the dialable contacts.
-    const name = (req.body?.campaign_name || plan.campaign_name || 'AI Campaign').toString().slice(0, 120)
-    const { data: camp, error: ce } = await supabase.from('campaigns')
-      .insert({ name, description: plan.readback || '', status: 'Active', source_query: plan }).select().single()
-    if (ce) throw new Error('campaign create: ' + ce.message)
+    // Commit — into an existing campaign (e.g. an empty "Memberships" that was
+    // set up by hand) or a new one, then insert the dialable contacts.
+    let camp
+    const targetId = req.body?.target_campaign_id
+    if (targetId) {
+      const { data: t, error: te } = await supabase.from('campaigns').select('*').eq('id', targetId).maybeSingle()
+      if (te || !t) throw new Error('That campaign no longer exists.')
+      camp = t
+      if (!t.source_query) {
+        const { data: u } = await supabase.from('campaigns').update({ source_query: plan }).eq('id', t.id).select().single()
+        if (u) camp = u
+      }
+    } else {
+      const name = (req.body?.campaign_name || plan.campaign_name || 'AI Campaign').toString().slice(0, 120)
+      const { data: c, error: ce } = await supabase.from('campaigns')
+        .insert({ name, description: plan.readback || '', status: 'Active', source_query: plan }).select().single()
+      if (ce) throw new Error('campaign create: ' + ce.message)
+      camp = c
+    }
 
     const contactRows = keep.map(r => ({
       name: r.name || 'Unknown', phone: r.phone, email: r.email || null,
@@ -12806,7 +12928,8 @@ app.post('/api/st/audience/build', async (req, res) => {
       if (error) throw new Error('contact insert: ' + error.message)
       created += data?.length || 0
     }
-    res.json({ stats, campaignId: camp.id, campaignName: name, created })
+    _audiencePreview.delete(key)
+    res.json({ stats, campaignId: camp.id, campaignName: camp.name, campaign: camp, created, addedToExisting: !!targetId })
   } catch (err) {
     console.error('audience/build error:', err.message)
     res.status(500).json({ error: err.message })

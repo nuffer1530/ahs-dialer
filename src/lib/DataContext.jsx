@@ -40,35 +40,51 @@ export function DataProvider({ children }) {
     return all
   }
 
-  // Real-time subscription
+  // Real-time subscription.
+  //
+  // Changes are queued and applied in one render per ~250ms: a CSV import or
+  // an AI campaign lands hundreds of contact rows at once, and a render per
+  // row froze every open dialer. INSERTs merge by id — pages often add the
+  // row they just created themselves before the event arrives.
+  const queueRef = useRef({ contacts: [], campaigns: [], timer: null })
+  const applyChanges = (prev, changes) => {
+    if (!changes.length) return prev
+    const byId = new Map(prev.map(r => [r.id, r]))
+    for (const p of changes) {
+      if (p.eventType === 'DELETE') byId.delete(p.old?.id)
+      else if (p.new?.id) byId.set(p.new.id, p.new)
+    }
+    return [...byId.values()]
+  }
+  const flush = useCallback(() => {
+    const q = queueRef.current
+    q.timer = null
+    const cs = q.contacts, ps = q.campaigns
+    q.contacts = []; q.campaigns = []
+    if (cs.length) setContacts(prev => applyChanges(prev, cs))
+    if (ps.length) setCampaigns(prev => applyChanges(prev, ps))
+  }, [])
+  const enqueue = useCallback((kind, payload) => {
+    const q = queueRef.current
+    q[kind].push(payload)
+    if (!q.timer) q.timer = setTimeout(flush, 250)
+  }, [flush])
+
   const subscribeRealtime = useCallback(() => {
     if (channelRef.current) sb.removeChannel(channelRef.current)
     channelRef.current = sb.channel('db-changes')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'contacts' }, payload => {
-        if (payload.eventType === 'INSERT') {
-          setContacts(prev => [...prev, payload.new])
-        } else if (payload.eventType === 'UPDATE') {
-          setContacts(prev => prev.map(c => c.id === payload.new.id ? payload.new : c))
-        } else if (payload.eventType === 'DELETE') {
-          setContacts(prev => prev.filter(c => c.id !== payload.old.id))
-        }
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'campaigns' }, payload => {
-        if (payload.eventType === 'INSERT') {
-          setCampaigns(prev => [...prev, payload.new])
-        } else if (payload.eventType === 'UPDATE') {
-          setCampaigns(prev => prev.map(c => c.id === payload.new.id ? payload.new : c))
-        } else if (payload.eventType === 'DELETE') {
-          setCampaigns(prev => prev.filter(c => c.id !== payload.old.id))
-        }
-      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'contacts' }, payload => enqueue('contacts', payload))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'campaigns' }, payload => enqueue('campaigns', payload))
       .subscribe()
-  }, [])
+  }, [enqueue])
 
   useEffect(() => {
     loadAll()
     subscribeRealtime()
-    return () => { if (channelRef.current) sb.removeChannel(channelRef.current) }
+    return () => {
+      if (channelRef.current) sb.removeChannel(channelRef.current)
+      clearTimeout(queueRef.current.timer)
+    }
   }, [loadAll, subscribeRealtime])
 
   const dncSet = buildDNCSet(contacts)

@@ -212,10 +212,27 @@ export default function CampaignsPage() {
       {showAI && (
         <AICampaignModal
           onClose={() => setShowAI(false)}
-          onCreated={(data) => {
+          onCreated={async (data) => {
             setShowAI(false)
-            setImportProgress(`✓ Created "${data.campaignName}" with ${data.created} contacts.`)
+            setImportProgress(data.addedToExisting
+              ? `✓ Added ${data.created} contacts to "${data.campaignName}".`
+              : `✓ Created "${data.campaignName}" with ${data.created} contacts.`)
             setTimeout(() => setImportProgress(''), 5000)
+            // Show it now rather than waiting on realtime (the campaign used to
+            // appear only after a reload — "it won't save", Deanna, Sep 24).
+            const camp = data.campaign
+            if (camp) setCampaigns(prev => prev.some(c => c.id === camp.id) ? prev.map(c => c.id === camp.id ? camp : c) : [...prev, camp])
+            const rows = []
+            for (let from = 0; ; from += 1000) {
+              const { data: page, error } = await sb.from('contacts').select('*').eq('campaign_id', data.campaignId).order('created_at').range(from, from + 999)
+              if (error) break
+              rows.push(...(page || []))
+              if (!page || page.length < 1000) break
+            }
+            if (rows.length) setContacts(prev => {
+              const have = new Set(prev.map(c => c.id))
+              return [...prev, ...rows.filter(r => !have.has(r.id))]
+            })
           }}
         />
       )}

@@ -839,3 +839,29 @@ CREATE TABLE IF NOT EXISTS dispatch_dismissals (
 );
 ALTER TABLE dispatch_dismissals ENABLE ROW LEVEL SECURITY;
 CREATE INDEX IF NOT EXISTS idx_dispatch_dismissals_day ON dispatch_dismissals (day, card_key);
+
+-- ── Outbound retry gap + live contacts/campaigns (Sep 25, 2026) ─────────────
+-- When a campaign contact was last dialed. The dialer won't serve a No Answer /
+-- Voicemail lead again until ops_config.retryGapHours (default 20) has passed —
+-- before this, a just-called lead went straight back to the top of the queue.
+alter table contacts add column if not exists last_attempt_at timestamptz;
+update contacts x set last_attempt_at = l.last_at
+from (
+  select contact_id, max(created_at) as last_at
+  from call_logs
+  where contact_id is not null and outcome in ('No Answer', 'Voicemail')
+  group by contact_id
+) l
+where l.contact_id = x.id and x.last_attempt_at is null and x.campaign_id is not null;
+
+-- DataContext has always subscribed to contacts + campaigns, but neither table
+-- was ever in the publication, so no event arrived: new campaigns showed only
+-- after a reload, and one rep's browser never saw another rep's claims.
+do $$ begin
+  if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and tablename = 'contacts') then
+    alter publication supabase_realtime add table contacts;
+  end if;
+  if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and tablename = 'campaigns') then
+    alter publication supabase_realtime add table campaigns;
+  end if;
+end $$;

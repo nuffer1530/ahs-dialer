@@ -1352,6 +1352,7 @@ export default function AdminPage() {
                     ['abandonGraceSeconds', 'Abandon grace (sec)', 'Hangups faster than this are misdials, not abandons'],
                     ['wrapUpSeconds', 'Wrap-up length (sec)', 'After an interaction, before auto-Available'],
                     ['maxAttempts', 'Max dial attempts', 'Contact goes to Max Attempts after this many'],
+                    ['retryGapHours', 'Hours before re-dialing', 'A No Answer / Voicemail lead isn’t served again until this passes (20 = next day, a bit earlier)'],
                   ].map(([k, label, hint]) => (
                     <div key={k} className="form-field">
                       <label className="form-label">{label}</label>
