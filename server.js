@@ -4165,16 +4165,23 @@ function tvCarryReviews(w, prev, label) {
   return carried > 0
 }
 
-// Membership types that are given away ("Complimentary … with Install") —
-// never a tech's sale. Name-matched like the leadership report; 6 h cache.
-let _tvCompTypes = { at: 0, ids: new Set() }
-async function tvComplimentaryTypes() {
-  if (Date.now() - _tvCompTypes.at < 6 * 3600_000 && _tvCompTypes.at) return _tvCompTypes.ids
+// Membership types a TECH gets no club credit for (name-matched, 6 h cache):
+// - comp: given away ("Complimentary … with Install") — never anyone's sale.
+// - hvacOnly: the HVAC-only club ("Annual/Monthly HVAC Awesome Club
+//   Membership", not the ADD-ON) — no credit for HVAC techs (Brandyn, Sep 25).
+let _tvClubTypes = { at: 0, comp: new Set(), hvacOnly: new Set() }
+async function tvClubTypeSets() {
+  if (Date.now() - _tvClubTypes.at < 6 * 3600_000 && _tvClubTypes.at) return _tvClubTypes
   try {
     const d = await stGet(`/memberships/v2/tenant/${ST_TENANT_ID}/membership-types?pageSize=200`)
-    _tvCompTypes = { at: Date.now(), ids: new Set((d?.data || []).filter(t => /complimentary/i.test(t.name || '')).map(t => String(t.id))) }
-  } catch (e) { console.warn('tv comp membership types:', e.message) }
-  return _tvCompTypes.ids
+    const types = d?.data || []
+    _tvClubTypes = {
+      at: Date.now(),
+      comp: new Set(types.filter(t => /complimentary/i.test(t.name || '')).map(t => String(t.id))),
+      hvacOnly: new Set(types.filter(t => /\bhvac\b/i.test(t.name || '') && !/add-?on/i.test(t.name || '') && !/complimentary/i.test(t.name || '')).map(t => String(t.id))),
+    }
+  } catch (e) { console.warn('tv club membership types:', e.message) }
+  return _tvClubTypes
 }
 
 // One window's pulls, aggregated per trade (+ per tech when asked).
@@ -4221,17 +4228,22 @@ async function tvWindow({ fromIso, invFrom, invTo, revFrom, perTech, capMul = 1 
   // Memberships attribute by BU; seller's home trade as fallback. The
   // department and company counts include every club; a TECH gets credit only
   // for clubs actually sold — never the complimentary club that comes free
-  // with an install (Brandyn, Sep 25).
+  // with an install, and HVAC techs get none for the HVAC-only club
+  // (Brandyn, Sep 25).
   try {
-    const [bus, compTypes] = await Promise.all([
+    const [bus, clubTypes] = await Promise.all([
       stGet(`/settings/v2/tenant/${ST_TENANT_ID}/business-units?pageSize=200`).then(d => d?.data || []),
-      tvComplimentaryTypes(),
+      tvClubTypeSets(),
     ])
     const buTrade = new Map(bus.map(b => [String(b.id), tvTradeOf(b.name)]))
     for (const m2 of memberships) {
       const t = buTrade.get(String(m2.businessUnitId)) || meta.get(String(m2.soldById))?.trade
       if (t) dept[t].memberships++
-      if (perTech && m2.soldById && !compTypes.has(String(m2.membershipTypeId))) tr(m2.soldById).memberships++
+      if (!perTech || !m2.soldById) continue
+      const typeId = String(m2.membershipTypeId)
+      if (clubTypes.comp.has(typeId)) continue
+      if (clubTypes.hvacOnly.has(typeId) && meta.get(String(m2.soldById))?.trade === 'HVAC') continue
+      tr(m2.soldById).memberships++
     }
   } catch {}
   for (const t of Object.values(TV_TRADES)) {
