@@ -10,6 +10,9 @@ export const scoreTone = (p) => p == null ? 'gray' : p >= 90 ? 'green' : p >= 75
 export const monthShort = (ym) => (ym ? new Date(`${ym}-15T12:00:00Z`).toLocaleString('en-US', { month: 'short', timeZone: 'UTC' }) : '')
 const initials = (n) => String(n || '?').trim().split(/\s+/).map(w => w[0]).slice(0, 2).join('').toUpperCase()
 export const sectionShort = (name) => (/soft/i.test(name) ? 'Soft skills' : /accura|procedure/i.test(name) ? 'Procedure' : name)
+// Rubric names carry their points ("Offered in-house plan (5 pts)") — noise on
+// a card, and it was clipping the useful part of the name.
+export const critName = (s) => String(s || '').replace(/\s*\(\s*\d+(\.\d+)?\s*pts?\s*\)\s*$/i, '')
 const num = { fontVariantNumeric: 'tabular-nums' }
 const eyebrow = { fontSize: 10.5, fontWeight: 700, letterSpacing: '.07em', textTransform: 'uppercase', color: 'var(--text-muted)' }
 
@@ -118,7 +121,7 @@ function GapRow({ g }) {
   const missRate = Math.round((g.missedOn / Math.max(1, g.of)) * 100)
   return (
     <div className="mgrid" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 76px 58px', alignItems: 'center', gap: 10, fontSize: 12.5 }}>
-      <span title={g.criterion} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text-primary)' }}>{g.criterion}</span>
+      <span title={g.criterion} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text-primary)' }}>{critName(g.criterion)}</span>
       <Bar pct={missRate} t={missTone(missRate)} />
       <span style={{ ...num, textAlign: 'right', color: 'var(--text-secondary)' }}>{g.missedOn}/{g.of}</span>
     </div>
@@ -203,17 +206,20 @@ function CsrCard({ c, vs, onOpen }) {
         </div>
       )}
 
-      {c.drill && (
-        <div style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 10, padding: '10px 12px' }}>
-          <div style={{ ...eyebrow, display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5, color: 'var(--accent)' }}>
-            <TargetIcon /> Drill for the next 1:1
+      {/* Cards share a row height; the drill and the link sit on the bottom
+          edge so they line up across the grid. */}
+      <div style={{ marginTop: 'auto', display: 'flex', flexDirection: 'column', gap: 15 }}>
+        {c.drill && (
+          <div style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 10, padding: '10px 12px' }}>
+            <div style={{ ...eyebrow, display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5, color: 'var(--accent)' }}>
+              <TargetIcon /> Drill for the next 1:1
+            </div>
+            <div style={{ fontSize: 12.5, lineHeight: 1.55, color: 'var(--text-primary)' }}>{c.drill}</div>
           </div>
-          <div style={{ fontSize: 12.5, lineHeight: 1.55, color: 'var(--text-primary)' }}>{c.drill}</div>
+        )}
+        <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--accent)' }}>
+          Open {c.evals} evaluation{c.evals === 1 ? '' : 's'} →
         </div>
-      )}
-
-      <div style={{ marginTop: 'auto', fontSize: 12, fontWeight: 600, color: 'var(--accent)' }}>
-        Open {c.evals} evaluation{c.evals === 1 ? '' : 's'} →
       </div>
     </div>
   )
@@ -250,7 +256,7 @@ function TeamPanel({ team, generatedAt, busy, onRegenerate, onPrint, isMobile })
               return (
                 <div key={f.criterion} className="mgrid" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(70px, 150px) 88px', gap: 14, alignItems: 'center' }}>
                   <div style={{ minWidth: 0 }}>
-                    <div style={{ fontSize: 13, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={f.criterion}>{f.criterion}</div>
+                    <div style={{ fontSize: 13, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={f.criterion}>{critName(f.criterion)}</div>
                     <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
                       {f.csrs ? `A top gap for ${f.csrs} of ${team.csrs} CSRs` : sectionShort(f.section || '')}
                     </div>
@@ -338,7 +344,7 @@ export default function CoachingSnapshots({ snap, busy, error, search, isMobile,
           <Segmented value={sort} onChange={setSort} options={SORTS} fill={isMobile} />
         </div>
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))', gap: 16, alignItems: 'start' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))', gap: 16, gridAutoRows: isMobile ? undefined : '1fr' }}>
         {cards.map(c => <CsrCard key={c.profileId || c.name} c={c} vs={vs} onOpen={onOpen} />)}
       </div>
     </div>

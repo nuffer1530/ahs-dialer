@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { sb } from '../lib/supabase'
 import { useIsMobile } from '../lib/useIsMobile'
 import EvalModal, { ScoreChip } from './EvalModal'
-import CoachingSnapshots, { Segmented, monthShort, sectionShort } from './CoachingSnapshots'
+import CoachingSnapshots, { Segmented, monthShort, sectionShort, critName } from './CoachingSnapshots'
 
 // My Page → Call Evals. Reps see their own scored inbound calls; admins see
 // the whole team with rep + month filters. Every row opens the full breakdown.
@@ -71,11 +71,11 @@ export default function CallEvalsTab({ profile, isAdmin, defaultView }) {
       <div class="sub">${tm.evals ?? snap.evalCount} evaluated calls · ${snap.cards.length} CSRs · printed ${new Date().toLocaleDateString()}</div>
       <div class="team"><div><div class="eb">Team QA</div><div class="big">${tm.qa ?? '—'}%</div>${delta(tm.qa, tm.prevQa)}</div>
         <div style="flex:1"><div class="eb">Where the team loses the most points</div>
-          ${(tm.focus || []).map(f => `<div class="gap"><span>${esc(f.criterion)}</span><span>missed ${f.missedOn}/${f.of}</span></div>`).join('')}</div></div>
+          ${(tm.focus || []).map(f => `<div class="gap"><span>${esc(critName(f.criterion))}</span><span>missed ${f.missedOn}/${f.of}</span></div>`).join('')}</div></div>
       ${snap.cards.map(c => `<div class="card"><div class="hd"><span class="nm">${esc(c.name)}</span><span class="qa">${c.qa}%</span></div>
         <div class="sub">${c.evals} evaluated call${c.evals === 1 ? '' : 's'}${delta(c.qa, c.prevQa)}</div>
         ${(c.sections || []).length ? `<div class="row">${c.sections.map(x => `<span>${esc(sectionShort(x.name))} <b>${x.rate}%</b></span>`).join('')}</div>` : ''}
-        ${(c.gaps || []).map(g => `<div class="gap"><span>${esc(g.criterion)}</span><span>missed ${g.missedOn}/${g.of}</span></div>`).join('')}
+        ${(c.gaps || []).map(g => `<div class="gap"><span>${esc(critName(g.criterion))}</span><span>missed ${g.missedOn}/${g.of}</span></div>`).join('')}
         ${(c.working || []).length || (c.coach || []).length ? `<ul>${(c.working || []).map(w => `<li>✓ ${esc(w)}</li>`).join('')}${(c.coach || []).map(w => `<li>→ ${esc(w)}</li>`).join('')}</ul>` : ''}
         ${c.drill ? `<div class="d"><b>Drill for the next 1:1:</b> ${esc(c.drill)}</div>` : ''}
       </div>`).join('')}</body></html>`

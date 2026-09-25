@@ -76,9 +76,10 @@ const fmtKpi = (kpi, v) => {
 }
 const fmtThr = (kpi, v) => (kpi.unit === '%' ? `${v}%` : kpi.unit === 'pts' ? `${v} pt${Number(v) === 1 ? '' : 's'}` : `${v}`)
 
-function LevelChip({ level, small }) {
+function LevelChip({ level, small, short }) {
   if (!level) return <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>No data</span>
-  const { label, tone } = LEVELS[level]
+  const { tone } = LEVELS[level]
+  const label = short && level === 2 ? 'Needs impr.' : LEVELS[level].label
   return (
     <span style={{ fontSize: small ? 10.5 : 11.5, fontWeight: 700, whiteSpace: 'nowrap', borderRadius: 99, padding: small ? '1px 7px' : '2px 9px',
       color: `var(--tone-${tone}-tx)`, background: `var(--tone-${tone}-bg)`, border: `1px solid var(--tone-${tone}-bd)` }}>
@@ -191,7 +192,7 @@ function RepCard({ rep, actuals, score, prevScore, vs, thresholds, onOpen }) {
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 15.5, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{rep.name || rep.email}</div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 5, flexWrap: 'wrap' }}>
-            <LevelChip level={lv} small />
+            <LevelChip level={lv} small short />
             <ScoreDelta now={score} prev={prevScore} vs={vs} />
           </div>
         </div>
@@ -628,7 +629,7 @@ export default function ScorecardsPanel() {
               <Segmented value={sort} onChange={setSort} options={[['score', 'Top score'], ['improve', 'Most improved'], ['name', 'A–Z']]} fill={isMobile} />
             </div>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))', gap: 16, alignItems: 'start' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))', gap: 16, gridAutoRows: isMobile ? undefined : '1fr' }}>
             {cards.map(p => (
               <RepCard key={p.id} rep={p} actuals={data.actuals(p.id)} score={data.score(p.id)} prevScore={data.prevScore(p.id)}
                 vs={vs} thresholds={thresholds} onOpen={() => setSelected(p.id)} />
