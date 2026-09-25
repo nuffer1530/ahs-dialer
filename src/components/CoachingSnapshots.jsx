@@ -1,4 +1,8 @@
 import { useMemo, useState } from 'react'
+import { Segmented, Ring } from './ui'
+
+// Moved to the shared kit (ui.jsx); re-exported so existing imports keep working.
+export { Segmented, Ring }
 
 // Team → Coaching. A team panel (QA, where points are lost, section balance)
 // over one card per CSR. The numbers — QA, weekly trend, section scores,
@@ -15,42 +19,6 @@ export const sectionShort = (name) => (/soft/i.test(name) ? 'Soft skills' : /acc
 export const critName = (s) => String(s || '').replace(/\s*\(\s*\d+(\.\d+)?\s*pts?\s*\)\s*$/i, '')
 const num = { fontVariantNumeric: 'tabular-nums' }
 const eyebrow = { fontSize: 10.5, fontWeight: 700, letterSpacing: '.07em', textTransform: 'uppercase', color: 'var(--text-muted)' }
-
-// Pill-style segmented control — shared with the All evals / Coaching toggle.
-export function Segmented({ value, onChange, options, fill }) {
-  return (
-    <div role="tablist" style={{ display: 'flex', background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 99, padding: 3, gap: 2 }}>
-      {options.map(([k, label]) => {
-        const on = value === k
-        return (
-          <button key={k} role="tab" aria-selected={on} onClick={() => onChange(k)}
-            style={{ flex: fill ? 1 : undefined, border: 'none', cursor: 'pointer', borderRadius: 99, padding: '6px 14px', fontSize: 12.5, fontWeight: 600, whiteSpace: 'nowrap',
-              background: on ? 'var(--surface)' : 'transparent', color: on ? 'var(--text-primary)' : 'var(--text-secondary)',
-              boxShadow: on ? '0 1px 3px rgba(15,20,40,.14)' : 'none', transition: 'background .12s, color .12s' }}>
-            {label}
-          </button>
-        )
-      })}
-    </div>
-  )
-}
-
-// `tone` overrides the QA-threshold color (scorecards color by rating level).
-export function Ring({ pct, size, stroke, children, tone }) {
-  const r = (size - stroke) / 2
-  const c = 2 * Math.PI * r
-  const v = Math.max(0, Math.min(100, Number(pct) || 0))
-  return (
-    <div style={{ position: 'relative', width: size, height: size, flexShrink: 0 }}>
-      <svg width={size} height={size} style={{ transform: 'rotate(-90deg)', display: 'block' }} aria-hidden="true">
-        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--surface-2)" strokeWidth={stroke} />
-        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={`var(--tone-${tone || scoreTone(pct)}-tx)`} strokeWidth={stroke}
-          strokeLinecap="round" strokeDasharray={`${(c * v) / 100} ${c}`} />
-      </svg>
-      <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{children}</div>
-    </div>
-  )
-}
 
 // Weekly QA across the month — line, soft area, emphasized latest week.
 function Spark({ points, width = 84, height = 26 }) {

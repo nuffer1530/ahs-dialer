@@ -236,3 +236,31 @@ textarea.form-input { resize: vertical; min-height: 72px; }
 .eval-row { transition: background .12s ease; }
 .eval-row:hover { background: var(--surface-2) !important; }
 .eval-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+/* ── Andi look, app-wide (Sep 2026) ────────────────────────────────────────
+   The shared classes restyled to match Team → Coaching / Scorecards: 16px
+   panels, eyebrow labels, softer focus rings, tabular numbers. Pages built
+   from ui.jsx match by construction; older pages inherit this through the
+   classes. Wall TVs don't use these classes and are untouched. */
+:root { --radius-xl: 16px; }
+.card { border-radius: var(--radius-xl); }
+.card-header { padding: 14px 20px; gap: 10px; }
+.card-title { font-size: 10.5px; font-weight: 700; letter-spacing: .07em; color: var(--text-muted); }
+.card-body { padding: 16px 20px; }
+.btn { border-radius: 10px; font-weight: 600; transition: background .12s, border-color .12s, color .12s, transform .1s; }
+.btn.sm { border-radius: 8px; }
+.form-input { border-radius: 10px; transition: border-color .12s, box-shadow .12s; }
+.form-input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-bg); }
+.modal { border-radius: 18px; box-shadow: 0 24px 60px -20px rgba(15, 20, 40, .35); }
+.modal-title { font-size: 17px; font-weight: 700; letter-spacing: -.01em; }
+.data-table th { font-size: 10.5px; font-weight: 700; letter-spacing: .07em; padding: 10px 14px; }
+.data-table td { padding: 11px 14px; font-variant-numeric: tabular-nums; }
+.stat-card { border-radius: var(--radius-xl); padding: 16px 18px; }
+.stat-label { font-size: 10.5px; font-weight: 700; letter-spacing: .07em; }
+.stat-value { font-size: 26px; font-weight: 800; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.page-tab { transition: background .12s, color .12s; }
+.page-tab:not([aria-selected="true"]):hover { background: var(--surface-2) !important; color: var(--text-primary) !important; }
+.page-tab:focus-visible, .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.lift-hover { transition: border-color .15s ease, box-shadow .15s ease; }
+.lift-hover:hover { border-color: var(--border-strong) !important; box-shadow: 0 10px 24px -14px rgba(15, 20, 40, .28); }
+@media (prefers-reduced-motion: reduce) { .btn, .page-tab, .lift-hover { transition: none; } }

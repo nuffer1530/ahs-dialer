@@ -4,6 +4,7 @@ import { useIsMobile } from '../lib/useIsMobile'
 import CallEvalsTab from '../components/CallEvalsTab'
 import ScorecardsPanel from '../components/ScorecardsPanel'
 import CommissionReport from '../components/CommissionReport'
+import { PageTabs } from '../components/ui'
 
 // Team — the manager's home: coaching, evals, scorecards, commissions for
 // the team(s) you lead. Built as a frame: today's only tenant is the call
@@ -45,18 +46,9 @@ export default function TeamPage() {
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-      {/* Phone: the tab strip scrolls sideways instead of wrapping. */}
-      <div style={{ background: 'var(--surface)', borderBottom: '1px solid var(--border)', flexShrink: 0, padding: isMobile ? '0 12px' : '0 24px', display: 'flex', gap: 4, alignItems: 'center', overflowX: isMobile ? 'auto' : undefined }}>
-        {TABS.map(([id, label]) => (
-          <button key={id} onClick={() => setTab(id)}
-            style={{ padding: '12px 14px', border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 13,
-              fontWeight: tab === id ? 700 : 500, color: tab === id ? 'var(--accent)' : 'var(--text-muted)',
-              borderBottom: `2px solid ${tab === id ? 'var(--accent)' : 'transparent'}`,
-              whiteSpace: isMobile ? 'nowrap' : undefined, flexShrink: isMobile ? 0 : undefined }}>
-            {label}
-          </button>
-        ))}
-        <span style={{ marginLeft: 'auto', fontSize: 11, fontWeight: 700, letterSpacing: .5, textTransform: 'uppercase', color: 'var(--text-muted)', whiteSpace: isMobile ? 'nowrap' : undefined, flexShrink: isMobile ? 0 : undefined, paddingLeft: isMobile ? 12 : undefined }}>
+      <div style={{ background: 'var(--surface)', borderBottom: '1px solid var(--border)', flexShrink: 0, padding: isMobile ? '0 12px' : '0 24px', display: 'flex', gap: 12, alignItems: 'center' }}>
+        <PageTabs tabs={TABS} value={tab} onChange={setTab} />
+        <span style={{ marginLeft: 'auto', fontSize: 11, fontWeight: 700, letterSpacing: '.07em', textTransform: 'uppercase', color: 'var(--text-muted)', whiteSpace: 'nowrap', flexShrink: 0 }}>
           {TEAMS.find(t => t.id === team)?.label}
         </span>
       </div>

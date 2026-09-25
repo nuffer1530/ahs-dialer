@@ -8,6 +8,7 @@ import { ATTENDANCE_DEFAULTS, invalidateOpsConfig, loadOpsConfig } from '../lib/
 import Modal from '../components/Modal'
 import GraphicalSchedule from '../components/GraphicalSchedule'
 import Avatar from '../components/Avatar'
+import { PageTabs, PillNav, SummaryPanel, Stat, Ring, ToneChip, Bar, Face, eyebrow, num, panel } from '../components/ui'
 
 const DAYS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun']
 const GRACE = 5
@@ -153,7 +154,6 @@ export default function AttendancePage() {
     const u = new URL(window.location)
     if (u.searchParams.get('tab') !== tab) { u.searchParams.set('tab', tab); window.history.replaceState({}, '', u) }
   }, [tab])
-  const [hoveredTab, setHoveredTab] = useState(null)
   const [profiles, setProfiles] = useState([])
   const [schedules, setSchedules] = useState([])
   const [statusEvents, setStatusEvents] = useState([])
@@ -652,98 +652,20 @@ export default function AttendancePage() {
   return (
     <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden' }}>
 
-      {/* ── HEADER BAR ── */}
-      <div style={{ background:'var(--surface)', borderBottom:'1px solid var(--border)', flexShrink:0 }}>
-        {/* Title + week nav row */}
-        <div style={{ padding: isMobile ? '12px 12px 0' : '16px 24px 0', display:'flex', alignItems:'flex-start', justifyContent: isMobile ? 'center' : 'flex-end', gap:16 }}>
-          {(tab === 'schedule' || tab === 'adherence') && (
-            <div style={{ display:'flex', alignItems:'center', gap:10, marginTop:2 }}>
-              <button onClick={prevWeek}
-                style={{ width:32, height:32, border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface-2)', cursor:'pointer', fontSize:16, color:'var(--text-secondary)', display:'flex', alignItems:'center', justifyContent:'center' }}
-                onMouseEnter={e => e.currentTarget.style.background='var(--surface)'}
-                onMouseLeave={e => e.currentTarget.style.background='var(--surface-2)'}>‹</button>
-              <span style={{ fontSize:13, fontWeight:500, color:'var(--text-primary)', minWidth:200, textAlign:'center' }}>{weekLabel}</span>
-              {!weekDates.includes(today) && (
-                <button onClick={() => setWeekBase(localYMD())}
-                  style={{ padding:'6px 12px', fontSize:12, fontWeight:600, border:'1px solid var(--accent)', borderRadius:'var(--radius)', background:'var(--accent-bg)', color:'var(--accent)', cursor:'pointer' }}>
-                  Today
-                </button>
-              )}
-              <button onClick={nextWeek}
-                style={{ width:32, height:32, border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface-2)', cursor:'pointer', fontSize:16, color:'var(--text-secondary)', display:'flex', alignItems:'center', justifyContent:'center' }}
-                onMouseEnter={e => e.currentTarget.style.background='var(--surface)'}
-                onMouseLeave={e => e.currentTarget.style.background='var(--surface-2)'}>›</button>
-            </div>
-          )}
-        </div>
-
-        {/* Tab bar + schedule actions */}
-        {/* Phone: tabs scroll sideways; the schedule actions drop to their own wrapping row. */}
-        <div style={{ display:'flex', alignItems: isMobile ? 'stretch' : 'center', justifyContent:'space-between', padding: isMobile ? '0 12px' : '0 24px', marginTop:10, flexDirection: isMobile ? 'column' : 'row' }}>
-          <div style={{ display:'flex', gap:0, overflowX: isMobile ? 'auto' : undefined }}>
-            {TABS.map(t => {
-              const isActive = tab === t.id
-              const isHovered = hoveredTab === t.id && !isActive
-              return (
-                <button key={t.id}
-                  onClick={() => setTab(t.id)}
-                  onMouseEnter={() => setHoveredTab(t.id)}
-                  onMouseLeave={() => setHoveredTab(null)}
-                  style={{ padding:'10px 16px', fontSize:13, fontWeight: isActive ? 600 : 400, border:'none', cursor:'pointer',
-                    borderRadius:'var(--radius) var(--radius) 0 0',
-                    background: isHovered ? 'var(--surface-2)' : 'transparent',
-                    color: isActive ? 'var(--accent)' : isHovered ? 'var(--text-primary)' : 'var(--text-muted)',
-                    borderBottom: isActive ? '2px solid var(--accent)' : '2px solid transparent',
-                    transition:'color .1s, background .1s',
-                    whiteSpace: isMobile ? 'nowrap' : undefined, flexShrink: isMobile ? 0 : undefined }}>
-                  {t.label}
-                </button>
-              )
-            })}
+      {/* ── HEADER BAR ── tabs on the left, week navigation on the right. The
+          schedule actions live in the Schedule tab's own toolbar. */}
+      <div style={{ background:'var(--surface)', borderBottom:'1px solid var(--border)', flexShrink:0, padding: isMobile ? '0 12px' : '0 24px',
+        display:'flex', alignItems:'center', gap:12, flexWrap:'wrap' }}>
+        <PageTabs value={tab} onChange={setTab}
+          tabs={TABS.map(t => [t.id, t.label, t.id === 'schedule' && isAdmin && draftCount ? draftCount : null])} />
+        {(tab === 'schedule' || tab === 'adherence') && (
+          <div style={{ marginLeft: isMobile ? 0 : 'auto', display:'flex', alignItems:'center', gap:8, paddingBottom: isMobile ? 8 : 0 }}>
+            {!weekDates.includes(today) && (
+              <button className="btn sm" onClick={() => setWeekBase(localYMD())} style={{ borderRadius:99 }}>This week</button>
+            )}
+            <PillNav label={weekLabel} onPrev={prevWeek} onNext={nextWeek} minWidth={isMobile ? 150 : 190} />
           </div>
-
-          {/* Action buttons — only on schedule tab */}
-          {tab === 'schedule' && isAdmin && (
-            <div style={{ display:'flex', gap:8, alignItems:'center', flexWrap: isMobile ? 'wrap' : undefined, padding: isMobile ? '8px 0 12px' : undefined }}>
-              <button onClick={() => setBulkModal(true)}
-                style={{ ...mBtn, padding:'6px 14px', fontSize:12, fontWeight:500, border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface)', color:'var(--text-secondary)', cursor:'pointer', transition:'all .1s' }}
-                onMouseEnter={e => { e.currentTarget.style.background='var(--surface-2)'; e.currentTarget.style.color='var(--text-primary)' }}
-                onMouseLeave={e => { e.currentTarget.style.background='var(--surface)'; e.currentTarget.style.color='var(--text-secondary)' }}>
-                Bulk Schedule
-              </button>
-              <button onClick={() => setTemplateModal(true)}
-                style={{ ...mBtn, padding:'6px 14px', fontSize:12, fontWeight:500, border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface)', color:'var(--text-secondary)', cursor:'pointer', transition:'all .1s' }}
-                onMouseEnter={e => { e.currentTarget.style.background='var(--surface-2)'; e.currentTarget.style.color='var(--text-primary)' }}
-                onMouseLeave={e => { e.currentTarget.style.background='var(--surface)'; e.currentTarget.style.color='var(--text-secondary)' }}>
-                Templates
-              </button>
-              <button onClick={() => setCopyModal(true)}
-                style={{ ...mBtn, padding:'6px 14px', fontSize:12, fontWeight:500, border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface)', color:'var(--text-secondary)', cursor:'pointer', transition:'all .1s' }}
-                onMouseEnter={e => { e.currentTarget.style.background='var(--surface-2)'; e.currentTarget.style.color='var(--text-primary)' }}
-                onMouseLeave={e => { e.currentTarget.style.background='var(--surface)'; e.currentTarget.style.color='var(--text-secondary)' }}>
-                Copy Week
-              </button>
-              <button onClick={() => staggerBreaks()} disabled={staggering}
-                title={conflictCount ? `${conflictCount} people share a break slot this week — spread them out` : 'Spread overlapping breaks so no two people are off the phones at once'}
-                style={{ ...mBtn, padding:'6px 14px', fontSize:12, fontWeight:500, border:`1px solid ${conflictCount ? 'var(--tone-amber-bd)' : 'var(--border)'}`, borderRadius:'var(--radius)', background: conflictCount ? 'var(--tone-amber-bg)' : 'var(--surface)', color: conflictCount ? 'var(--tone-amber-tx)' : 'var(--text-secondary)', cursor:'pointer', display:'flex', alignItems:'center', gap:6 }}>
-                {staggering ? 'Moving…' : 'Stagger breaks'}
-                {conflictCount > 0 && <span style={{ background:'var(--tone-amber-tx)', color:'#fff', borderRadius:99, padding:'0 7px', fontSize:10.5, fontWeight:800 }}>{conflictCount}</span>}
-              </button>
-              <button onClick={() => setPublishModal(true)}
-                style={{ ...mBtn, padding:'6px 16px', fontSize:12, fontWeight:600, border:'none', borderRadius:'var(--radius)', background:'var(--accent)', color:'#fff', cursor:'pointer', transition:'opacity .1s', display:'flex', alignItems:'center', gap:7 }}
-                onMouseEnter={e => e.currentTarget.style.opacity='.9'}
-                onMouseLeave={e => e.currentTarget.style.opacity='1'}>
-                Publish + Email
-                {draftCount > 0 && (
-                  <span title={`${draftCount} upcoming shift${draftCount === 1 ? '' : 's'} not yet published`}
-                    style={{ background:'rgba(255,255,255,.25)', borderRadius:99, padding:'1px 8px', fontSize:11, fontWeight:800 }}>
-                    {draftCount} draft{draftCount === 1 ? '' : 's'}
-                  </span>
-                )}
-              </button>
-            </div>
-          )}
-        </div>
+        )}
       </div>
 
       {/* ── CONTENT AREA ── */}
@@ -752,11 +674,55 @@ export default function AttendancePage() {
         {/* ── SCHEDULE TAB ── */}
         {tab === 'schedule' && (
           <div style={{ padding: isMobile ? 12 : 24 }}>
+            {/* Week at a glance, then the actions, then the grid. */}
+            {(() => {
+              const totalH = schedProfiles.reduce((a, p) => a + weekHours(p.id), 0)
+              const weekShifts = schedules.filter(x => weekDates.includes(x.date) && schedProfiles.some(p => p.id === x.profile_id))
+              const workShifts = weekShifts.filter(x => !['pto','sick','holiday','off'].includes(x.day_type)).length
+              const todayRows = schedProfiles.map(p => getSchedule(p.id, today)).filter(Boolean)
+              const onToday = todayRows.filter(x => !['pto','sick','holiday','off'].includes(x.day_type)).length
+              const offToday = todayRows.length - onToday
+              return (
+                <SummaryPanel isMobile={isMobile}>
+                  <Stat label="Scheduled this week" value={`${fmtH(totalH)}h`}
+                    sub={`${workShifts} shift${workShifts === 1 ? '' : 's'} · ${schedProfiles.length} people`} />
+                  <Stat label={weekDates.includes(today) ? 'On today' : 'On today (this week)'} value={onToday}
+                    sub={offToday ? `${offToday} off, PTO or sick` : 'Nobody out today'} />
+                  <Stat label="Unpublished shifts" value={draftCount} tone={draftCount ? 'amber' : 'green'}
+                    sub={draftCount ? 'Publish + Email sends them to the team' : 'Everything upcoming is published'} />
+                  <Stat label="Break overlaps" value={conflictCount} tone={conflictCount ? 'amber' : 'green'}
+                    sub={conflictCount ? 'Stagger breaks spreads them out' : 'No one shares a break slot'} />
+                </SummaryPanel>
+              )
+            })()}
+
+            {isAdmin && (
+              <div style={{ display:'flex', gap:8, alignItems:'center', flexWrap:'wrap', marginBottom:14 }}>
+                <button className="btn" onClick={() => setBulkModal(true)} style={{ ...mBtn, borderRadius:99 }}>Bulk schedule</button>
+                <button className="btn" onClick={() => setTemplateModal(true)} style={{ ...mBtn, borderRadius:99 }}>Templates</button>
+                <button className="btn" onClick={() => setCopyModal(true)} style={{ ...mBtn, borderRadius:99 }}>Copy week</button>
+                <button className="btn" onClick={() => staggerBreaks()} disabled={staggering}
+                  title={conflictCount ? `${conflictCount} people share a break slot this week — spread them out` : 'Spread overlapping breaks so no two people are off the phones at once'}
+                  style={{ ...mBtn, borderRadius:99, ...(conflictCount ? { background:'var(--tone-amber-bg)', borderColor:'var(--tone-amber-bd)', color:'var(--tone-amber-tx)' } : {}) }}>
+                  {staggering ? 'Moving…' : 'Stagger breaks'}
+                  {conflictCount > 0 && <span style={{ ...num, background:'var(--tone-amber-tx)', color:'var(--surface)', borderRadius:99, padding:'0 7px', fontSize:10.5, fontWeight:800 }}>{conflictCount}</span>}
+                </button>
+                <button className="btn primary" onClick={() => setPublishModal(true)} style={{ ...mBtn, borderRadius:99, marginLeft: isMobile ? 0 : 'auto' }}>
+                  Publish + email
+                  {draftCount > 0 && (
+                    <span title={`${draftCount} upcoming shift${draftCount === 1 ? '' : 's'} not yet published`}
+                      style={{ ...num, background:'rgba(255,255,255,.25)', borderRadius:99, padding:'0 8px', fontSize:11, fontWeight:800 }}>
+                      {draftCount} draft{draftCount === 1 ? '' : 's'}
+                    </span>
+                  )}
+                </button>
+              </div>
+            )}
             {/* Phone: today's shifts first, one line per person, so nobody has to
                 scroll the week grid sideways just to see who's on right now. */}
             {isMobile && weekDates.includes(today) && (
-              <div style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius-lg)', padding:'12px 14px', marginBottom:12 }}>
-                <div style={{ fontSize:11, fontWeight:600, textTransform:'uppercase', letterSpacing:.5, color:'var(--text-muted)', marginBottom:4 }}>Today · {fmtDate(today)}</div>
+              <div style={{ ...panel, padding:'12px 14px', marginBottom:12 }}>
+                <div style={{ ...eyebrow, marginBottom:4 }}>Today · {fmtDate(today)}</div>
                 {schedProfiles.map(p => {
                   const sched = getSchedule(p.id, today)
                   const isOff = sched && ['pto','sick','holiday','off'].includes(sched.day_type)
@@ -774,21 +740,25 @@ export default function AttendancePage() {
                 })}
               </div>
             )}
-            <div style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius-lg)', overflow:'hidden' }}>
+            <div style={{ ...panel, overflow:'hidden' }}>
               <div style={{ overflowX:'auto' }}>
                 <table style={{ width:'100%', borderCollapse:'collapse', minWidth:900 }}>
                   <thead>
                     <tr style={{ background:'var(--surface-2)' }}>
-                      <th style={{ padding:'12px 16px', textAlign:'left', fontSize:11, fontWeight:600, textTransform:'uppercase', letterSpacing:.5, color:'var(--text-muted)', width:180, borderBottom:'1px solid var(--border)' }}>
+                      <th style={{ ...eyebrow, padding:'12px 18px', textAlign:'left', width:200, borderBottom:'1px solid var(--border)' }}>
                         Agent
                         {(() => { const t = schedProfiles.reduce((a, p) => a + weekHours(p.id), 0); return t > 0 ? <span style={{ textTransform:'none', letterSpacing:0, fontWeight:700, color:'var(--text-secondary)' }}> · {fmtH(t)}h total</span> : null })()}
                       </th>
                       {weekDates.map((date, i) => {
                         const isToday = date === today
                         return (
-                          <th key={date} style={{ padding:'10px 8px', textAlign:'center', fontSize:11, fontWeight:600, textTransform:'uppercase', letterSpacing:.5, color: isToday ? 'var(--accent)' : 'var(--text-muted)', borderBottom:'1px solid var(--border)', borderLeft:'1px solid var(--border)', minWidth:110 }}>
+                          <th key={date} style={{ ...eyebrow, padding:'10px 8px', textAlign:'center', color: isToday ? 'var(--accent)' : 'var(--text-muted)', borderBottom:'1px solid var(--border)', borderLeft:'1px solid var(--border)', minWidth:112 }}>
                             <div>{DAYS[i]}</div>
-                            <div style={{ fontSize:13, fontWeight: isToday ? 700 : 500, color: isToday ? 'var(--accent)' : 'var(--text-primary)', marginTop:2 }}>{new Date(date + 'T12:00:00').getDate()}</div>
+                            <div style={{ ...num, display:'inline-flex', alignItems:'center', justifyContent:'center', minWidth:26, height:26, borderRadius:99, marginTop:4, padding:'0 6px',
+                              fontSize:13, fontWeight: isToday ? 800 : 600, letterSpacing:0,
+                              background: isToday ? 'var(--accent)' : 'transparent', color: isToday ? '#fff' : 'var(--text-primary)' }}>
+                              {new Date(date + 'T12:00:00').getDate()}
+                            </div>
                           </th>
                         )
                       })}
@@ -797,16 +767,14 @@ export default function AttendancePage() {
                   <tbody>
                     {schedProfiles.map((p, pi) => (
                       <tr key={p.id} style={{ borderBottom:'1px solid var(--border)' }}>
-                        <td style={{ padding:'12px 16px', borderRight:'1px solid var(--border)' }}>
-                          <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-                            <div style={{ width:30, height:30, borderRadius:'50%', background:'var(--accent-bg)', color:'var(--accent)', display:'flex', alignItems:'center', justifyContent:'center', fontSize: p.avatar ? 18 : 11, fontWeight:600, flexShrink:0 }}>
-                              <Avatar avatar={p.avatar} name={p.name || p.email} />
-                            </div>
+                        <td style={{ padding:'12px 18px', borderRight:'1px solid var(--border)' }}>
+                          <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+                            <Face avatar={p.avatar} name={p.name || p.email} size={32} />
                             <div>
-                              <div style={{ fontSize:13, fontWeight:500, color:'var(--text-primary)' }}>{p.name || p.email}</div>
-                              <div style={{ fontSize:10, color:'var(--text-muted)', marginTop:1 }}>
-                                {yearPoints(p.id).toFixed(1)} pts YTD
-                                {weekHours(p.id) > 0 && <span style={{ fontWeight:700, color:'var(--text-secondary)' }}> · {fmtH(weekHours(p.id))}h this wk</span>}
+                              <div style={{ fontSize:13.5, fontWeight:650, color:'var(--text-primary)' }}>{p.name || p.email}</div>
+                              <div style={{ ...num, fontSize:11, color:'var(--text-muted)', marginTop:1, whiteSpace:'nowrap' }} title="Attendance points this year · hours scheduled this week">
+                                {yearPoints(p.id).toFixed(1)} pts
+                                {weekHours(p.id) > 0 && <span style={{ fontWeight:700, color:'var(--text-secondary)' }}> · {fmtH(weekHours(p.id))}h wk</span>}
                               </div>
                             </div>
                           </div>
@@ -827,16 +795,16 @@ export default function AttendancePage() {
                           // "colors do not populate for shifts").
                           const tc = !isOff ? sched?.template_color : null
                           return (
-                            <td key={date} style={{ padding:6, borderLeft:'1px solid var(--border)', background: isToday ? 'var(--accent-bg)' : 'transparent', verticalAlign:'top' }}>
+                            <td key={date} style={{ padding:6, borderLeft:'1px solid var(--border)', background: isToday ? 'color-mix(in srgb, var(--accent-bg) 60%, transparent)' : 'transparent', verticalAlign:'top' }}>
                               {sched && !isOff ? (
                                 <div onClick={() => isAdmin && openEdit(p.id, date)}
                                   title={isDraft ? 'Draft — not published or emailed yet' : undefined}
-                                  style={{ padding:'8px 10px', borderRadius:'var(--radius)', background: tc ? `${tc}26` : 'var(--success-bg)', border:`1px solid ${tc || 'var(--success)'}`, cursor: isAdmin ? 'pointer' : 'default', transition:'all .1s', ...hatch }}
+                                  style={{ padding:'8px 10px', borderRadius:10, background: tc ? `${tc}24` : 'var(--tone-green-bg)', border:`1px solid ${tc || 'var(--tone-green-bd)'}`, cursor: isAdmin ? 'pointer' : 'default', transition:'opacity .1s', ...hatch }}
                                   onMouseEnter={e => { if(isAdmin) e.currentTarget.style.opacity='.8' }}
                                   onMouseLeave={e => e.currentTarget.style.opacity='1'}>
-                                  <div style={{ fontSize:11, fontWeight:600, color: tc || 'var(--success)' }}>{fmt(sched.shift_start)} – {fmt(sched.shift_end)}</div>
+                                  <div style={{ ...num, fontSize:11.5, fontWeight:700, color: tc || 'var(--tone-green-tx)' }}>{fmt(sched.shift_start)} – {fmt(sched.shift_end)}</div>
                                   {sched.lunch_start && <div style={{ fontSize:10, color:'var(--text-muted)', marginTop:2 }}>Lunch {fmt(sched.lunch_start)}</div>}
-                                  {sched.day_type === 'half' && <div style={{ fontSize:9, fontWeight:800, letterSpacing:.5, color:'#d97706', marginTop:2 }}>½ DAY — off after</div>}
+                                  {sched.day_type === 'half' && <div style={{ fontSize:9, fontWeight:800, letterSpacing:.5, color:'var(--tone-amber-tx)', marginTop:2 }}>½ DAY — off after</div>}
                                   {breakConflicts.get(date)?.has(p.id) && (
                                     <div title="A break or lunch here overlaps someone else's on the same day — use Stagger breaks"
                                       style={{ fontSize:9.5, fontWeight:700, color:'var(--tone-amber-tx)', marginTop:2 }}>⚠ break overlap</div>
@@ -846,13 +814,13 @@ export default function AttendancePage() {
                               ) : sched && isOff ? (
                                 <div onClick={() => isAdmin && openEdit(p.id, date)}
                                   title={isDraft ? 'Draft — not published or emailed yet' : undefined}
-                                  style={{ padding:'8px 10px', borderRadius:'var(--radius)', background: typeColor + '18', border:`1px solid ${typeColor}`, cursor: isAdmin ? 'pointer' : 'default', ...hatch }}>
+                                  style={{ padding:'8px 10px', borderRadius:10, background: typeColor + '1c', border:`1px solid ${typeColor}66`, cursor: isAdmin ? 'pointer' : 'default', ...hatch }}>
                                   <div style={{ fontSize:11, fontWeight:600, color: typeColor }}>{DAY_TYPE_LABELS[sched.day_type]}</div>
                                   {isDraft && <div style={{ fontSize:9, fontWeight:800, letterSpacing:.5, color:'var(--text-muted)', marginTop:2 }}>DRAFT</div>}
                                 </div>
                               ) : isAdmin ? (
                                 <button onClick={() => openEdit(p.id, date)}
-                                  style={{ width:'100%', padding:'8px 4px', border:'1px dashed var(--border)', borderRadius:'var(--radius)', background:'transparent', color:'var(--text-muted)', cursor:'pointer', fontSize:11, transition:'all .1s' }}
+                                  style={{ width:'100%', padding:'8px 4px', border:'1px dashed var(--border-strong)', borderRadius:10, background:'transparent', color:'var(--text-muted)', cursor:'pointer', fontSize:11.5, fontWeight:600, transition:'all .1s' }}
                                   onMouseEnter={e => { e.currentTarget.style.borderColor='var(--accent)'; e.currentTarget.style.color='var(--accent)' }}
                                   onMouseLeave={e => { e.currentTarget.style.borderColor='var(--border)'; e.currentTarget.style.color='var(--text-muted)' }}>
                                   + Add
@@ -883,185 +851,206 @@ export default function AttendancePage() {
         )}
 
         {/* ── ADHERENCE TAB ── */}
-        {tab === 'adherence' && (
-          <div style={{ padding: isMobile ? 12 : 24, display:'flex', flexDirection:'column', gap:16 }}>
-            {schedProfiles.map(p => {
-              const pScheds = schedules.filter(s => s.profile_id === p.id)
-              const pEvents = statusEvents.filter(e => e.profile_id === p.id)
-              if (pScheds.length === 0 && pEvents.length === 0) return null
-              // Average only over days with a valid schedule; a null day must
-              // not count as 100 (the old `|| 100` also turned a real 0 into 100).
-              const dayPcts = pScheds
-                .map(s => adherencePct(s, pEvents.filter(e => e.started_at?.startsWith(s.date))))
-                .filter(v => v != null)
-              const avgAdh = dayPcts.length ? Math.round(dayPcts.reduce((a, b) => a + b, 0) / dayPcts.length) : null
-
-              return (
-                <div key={p.id} style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius-lg)', overflow:'hidden' }}>
-                  <div style={{ padding:'14px 18px', borderBottom:'1px solid var(--border)', display:'flex', alignItems:'center', justifyContent:'space-between', background:'var(--surface-2)' }}>
-                    <div style={{ display:'flex', alignItems:'center', gap:10 }}>
-                      <div style={{ width:32, height:32, borderRadius:'50%', background:'var(--accent-bg)', display:'flex', alignItems:'center', justifyContent:'center', fontSize: p.avatar ? 20 : 12, fontWeight:600 }}>
-                        <Avatar avatar={p.avatar} name={p.name || p.email} />
-                      </div>
-                      <span style={{ fontSize:14, fontWeight:600 }}>{p.name || p.email}</span>
-                    </div>
-                    {avgAdh != null && (
-                      <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-                        <div style={{ width: isMobile ? 64 : 120, height:6, background:'var(--border)', borderRadius:99, overflow:'hidden' }}>
-                          <div style={{ height:'100%', width:`${avgAdh}%`, background: avgAdh >= attCfg.adherenceGood ? 'var(--success)' : avgAdh >= attCfg.adherenceWarn ? '#f59e0b' : 'var(--danger)', borderRadius:99 }} />
-                        </div>
-                        <span style={{ fontSize:14, fontWeight:700, color: avgAdh >= attCfg.adherenceGood ? 'var(--success)' : avgAdh >= attCfg.adherenceWarn ? '#f59e0b' : 'var(--danger)' }}>{avgAdh}%</span>
-                      </div>
-                    )}
-                  </div>
-                  <div style={{ overflowX:'auto' }}>
-                    <table className="data-table">
-                      <thead><tr><th>Date</th><th>Scheduled</th><th>Login</th><th>Break 1</th><th>Lunch</th><th>Break 2</th><th>Logout</th><th style={{textAlign:'right'}}>Adherence</th></tr></thead>
-                      <tbody>
-                        {weekDates.map(date => {
-                          const sched = getSchedule(p.id, date)
-                          const dayEvents = getEvents(p.id, date)
-                          const loginEvent = dayEvents.find(e => e.status === 'Available' || e.status === 'On Call')
-                          const breakEvents = dayEvents.filter(e => e.status === 'Break')
-                          const lunchEvent = dayEvents.find(e => e.status === 'Lunch')
-                          const offlineEvent = [...dayEvents].reverse().find(e => e.status === 'Offline')
-                          if (!sched && dayEvents.length === 0) return null
-                          const pct = adherencePct(sched, dayEvents)
-                          const bv = (ev, limit) => ev && ev.duration_seconds > (limit + GRACE) * 60
-                          return (
-                            <tr key={date}>
-                              <td style={{ padding:'10px 12px', fontSize:12, fontWeight:500 }}>{fmtDate(date)}</td>
-                              <td style={{ padding:'10px 12px', fontSize:12 }}>{sched ? `${fmt(sched.shift_start)} – ${fmt(sched.shift_end)}` : <span style={{ color:'var(--text-muted)' }}>—</span>}</td>
-                              <td style={{ padding:'10px 12px', fontSize:12 }}>{loginEvent ? <span style={{ color:'var(--success)', fontWeight:500 }}>{fmtTime(loginEvent.started_at)}</span> : <span style={{ color:'var(--danger)' }}>No login</span>}</td>
-                              <td style={{ padding:'10px 12px', fontSize:12 }}>{breakEvents[0] ? <span style={{ color: bv(breakEvents[0], sched?.break1_duration || 15) ? 'var(--danger)' : 'var(--text-secondary)' }}>{fmtTime(breakEvents[0].started_at)} ({fmtDuration(breakEvents[0].duration_seconds)}){bv(breakEvents[0], sched?.break1_duration || 15) ? ' !' : ''}</span> : <span style={{ color:'var(--text-muted)' }}>—</span>}</td>
-                              <td style={{ padding:'10px 12px', fontSize:12 }}>{lunchEvent ? <span style={{ color: bv(lunchEvent, sched?.lunch_duration || 30) ? 'var(--danger)' : 'var(--text-secondary)' }}>{fmtTime(lunchEvent.started_at)} ({fmtDuration(lunchEvent.duration_seconds)}){bv(lunchEvent, sched?.lunch_duration || 30) ? ' !' : ''}</span> : <span style={{ color:'var(--text-muted)' }}>—</span>}</td>
-                              <td style={{ padding:'10px 12px', fontSize:12 }}>{breakEvents[1] ? <span style={{ color: bv(breakEvents[1], sched?.break2_duration || 15) ? 'var(--danger)' : 'var(--text-secondary)' }}>{fmtTime(breakEvents[1].started_at)} ({fmtDuration(breakEvents[1].duration_seconds)}){bv(breakEvents[1], sched?.break2_duration || 15) ? ' !' : ''}</span> : <span style={{ color:'var(--text-muted)' }}>—</span>}</td>
-                              <td style={{ padding:'10px 12px', fontSize:12 }}>{offlineEvent ? <span>{fmtTime(offlineEvent.started_at)}</span> : <span style={{ color:'var(--text-muted)' }}>—</span>}</td>
-                              <td style={{ padding:'10px 12px', textAlign:'right' }}>{pct != null ? <span style={{ fontSize:13, fontWeight:700, color: pct >= attCfg.adherenceGood ? 'var(--success)' : pct >= attCfg.adherenceWarn ? '#f59e0b' : 'var(--danger)' }}>{pct}%</span> : <span style={{ color:'var(--text-muted)' }}>—</span>}</td>
-                            </tr>
-                          )
-                        })}
-                      </tbody>
-                    </table>
+        {tab === 'adherence' && (() => {
+          const adhTone = (v) => v == null ? 'gray' : v >= attCfg.adherenceGood ? 'green' : v >= attCfg.adherenceWarn ? 'amber' : 'red'
+          const people = schedProfiles.map(p => {
+            const pScheds = schedules.filter(s => s.profile_id === p.id && weekDates.includes(s.date))
+            const pEvents = statusEvents.filter(e => e.profile_id === p.id)
+            // Average only over days with a valid schedule; a null day must
+            // not count as 100 (the old `|| 100` also turned a real 0 into 100).
+            // Days still ahead have no events yet — they'd score 0%, so they wait.
+            const dayPcts = pScheds.filter(s => s.date <= today)
+              .map(s => adherencePct(s, pEvents.filter(e => e.started_at?.startsWith(s.date))))
+              .filter(v => v != null)
+            const avgAdh = dayPcts.length ? Math.round(dayPcts.reduce((a, b) => a + b, 0) / dayPcts.length) : null
+            const noLogin = pScheds.filter(s => !['pto','sick','holiday','off'].includes(s.day_type) && s.date <= today
+              && !pEvents.some(e => e.started_at?.startsWith(s.date) && (e.status === 'Available' || e.status === 'On Call'))).length
+            return { p, pScheds, pEvents, dayPcts, avgAdh, noLogin }
+          }).filter(x => x.pScheds.length || x.pEvents.length)
+          const all = people.flatMap(x => x.dayPcts)
+          const teamAvg = all.length ? Math.round(all.reduce((a, b) => a + b, 0) / all.length) : null
+          const band = (t) => people.filter(x => adhTone(x.avgAdh) === t).length
+          const missed = people.reduce((a, x) => a + x.noLogin, 0)
+          return (
+            <div style={{ padding: isMobile ? 12 : 24, display:'flex', flexDirection:'column', gap:16 }}>
+              <SummaryPanel isMobile={isMobile} style={{ marginBottom:0 }} columns="minmax(250px, 290px) repeat(3, minmax(0, 1fr))">
+                <div style={{ display:'flex', alignItems:'center', gap:16 }}>
+                  <Ring pct={teamAvg || 0} size={76} stroke={7} tone={adhTone(teamAvg)}>
+                    <div style={{ ...num, fontSize:19, fontWeight:800, color:`var(--tone-${adhTone(teamAvg)}-tx)` }}>{teamAvg == null ? '—' : teamAvg}<span style={{ fontSize:11 }}>%</span></div>
+                  </Ring>
+                  <div>
+                    <div style={eyebrow}>Team adherence</div>
+                    <div style={{ fontSize:12.5, color:'var(--text-secondary)', marginTop:4 }}>This week · target {attCfg.adherenceGood}%</div>
                   </div>
                 </div>
-              )
-            })}
-          </div>
-        )}
+                <Stat label="On target" value={band('green')} tone="green" sub={`At or above ${attCfg.adherenceGood}%`} />
+                <Stat label="Needs attention" value={band('amber') + band('red')} tone={band('red') ? 'red' : band('amber') ? 'amber' : 'green'}
+                  sub={`${band('red')} below ${attCfg.adherenceWarn}%`} />
+                <Stat label="Days without a login" value={missed} tone={missed ? 'red' : 'green'} sub="Scheduled work days so far" />
+              </SummaryPanel>
 
-        {/* ── POINTS TAB ── */}
-        {tab === 'points' && (
-          <div style={{ padding: isMobile ? 12 : 24, display:'flex', flexDirection:'column', gap:16 }}>
-            <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', flexWrap: isMobile ? 'wrap' : undefined, gap: isMobile ? 6 : undefined }}>
-              <span style={{ fontSize:12, color:'var(--text-muted)' }}>Calendar year {new Date().getFullYear()} · Points reset Jan 1</span>
-              <div style={{ display:'flex', gap:10, fontSize:11, color:'var(--text-muted)', flexWrap: isMobile ? 'wrap' : undefined }}>
-                <span style={{ display:'flex', alignItems:'center', gap:4 }}><span style={{ width:10, height:10, borderRadius:'50%', background:'var(--success)', display:'inline-block' }}></span> {`0–${(attCfg.pointsWarn - 0.1).toFixed(1)} Good`}</span>
-                <span style={{ display:'flex', alignItems:'center', gap:4 }}><span style={{ width:10, height:10, borderRadius:'50%', background:'#f59e0b', display:'inline-block' }}></span> {`${attCfg.pointsWarn}–${(attCfg.pointsCritical - 0.1).toFixed(1)} Warning`}</span>
-                <span style={{ display:'flex', alignItems:'center', gap:4 }}><span style={{ width:10, height:10, borderRadius:'50%', background:'var(--danger)', display:'inline-block' }}></span> {`${attCfg.pointsCritical}+ Critical`}</span>
-              </div>
-            </div>
-            {(() => {
-              // Phone: people and their points come first; the settings card drops to the bottom.
-              const wfmCard = isAdmin && wfmCfg && (
-                <div style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius-lg)', padding:16 }}>
-                  <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:12 }}>
-                    <span style={{ fontSize:13, fontWeight:700 }}>WFM settings</span>
-                    <div style={{ display:'flex', alignItems:'center', gap:10 }}>
-                      {wfmMsg && <span style={{ fontSize:12, color: wfmMsg.startsWith('Error') ? 'var(--danger)' : 'var(--success)' }}>{wfmMsg}</span>}
-                      <button className="btn sm primary" onClick={saveWfmCfg}>Save</button>
-                    </div>
-                  </div>
-                  <div className={isMobile ? 'mgrid' : undefined} style={{ display:'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : 'repeat(auto-fit, minmax(150px, 1fr))', gap:12, alignItems:'end' }}>
-                    {[
-                      ['late', 'Late arrival (pts)'],
-                      ['absence', 'Unexcused absence (pts)'],
-                      ['early_departure', 'Early departure (pts)'],
-                      ['no_call', 'No call / no show (pts)'],
-                    ].map(([k, label]) => (
-                      <div key={k} className="form-field" style={{ marginBottom:0 }}>
-                        <label className="form-label" style={{ fontSize:11 }}>{label}</label>
-                        <input className="form-input" type="number" step="0.5" min="0" value={wfmCfg.points[k]}
-                          onChange={e => setWfmCfg(f => ({ ...f, points: { ...f.points, [k]: Number(e.target.value) } }))} />
-                      </div>
-                    ))}
-                    {[
-                      ['pointsWarn', 'Points → Warning at'],
-                      ['pointsCritical', 'Points → Critical at'],
-                      ['adherenceGood', 'Adherence green ≥ (%)'],
-                      ['adherenceWarn', 'Adherence amber ≥ (%)'],
-                    ].map(([k, label]) => (
-                      <div key={k} className="form-field" style={{ marginBottom:0 }}>
-                        <label className="form-label" style={{ fontSize:11 }}>{label}</label>
-                        <input className="form-input" type="number" min="0" value={wfmCfg[k]}
-                          onChange={e => setWfmCfg(f => ({ ...f, [k]: Number(e.target.value) }))} />
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )
-              const people = schedProfiles.map(p => {
-                const pts = attendancePoints.filter(ap => ap.profile_id === p.id)
-                const total = pts.reduce((sum, ap) => sum + parseFloat(ap.points), 0)
-                const statusColor = total >= attCfg.pointsCritical ? 'var(--danger)' : total >= attCfg.pointsWarn ? '#f59e0b' : 'var(--success)'
+              {people.map(({ p, avgAdh }) => {
+                const t = adhTone(avgAdh)
                 return (
-                  <div key={p.id} style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius-lg)', overflow:'hidden' }}>
-                    <div style={{ padding: isMobile ? '12px 14px' : '14px 18px', borderBottom: pts.length > 0 ? '1px solid var(--border)' : 'none', display:'flex', alignItems:'center', justifyContent:'space-between', background:'var(--surface-2)', flexWrap: isMobile ? 'wrap' : undefined, gap: isMobile ? 8 : undefined }}>
-                      <div style={{ display:'flex', alignItems:'center', gap:10 }}>
-                        <div style={{ width:32, height:32, borderRadius:'50%', background:'var(--accent-bg)', display:'flex', alignItems:'center', justifyContent:'center', fontSize: p.avatar ? 20 : 12, fontWeight:600 }}>
-                          <Avatar avatar={p.avatar} name={p.name || p.email} />
+                  <div key={p.id} style={{ ...panel, overflow:'hidden' }}>
+                    <div style={{ padding:'14px 20px', borderBottom:'1px solid var(--border)', display:'flex', alignItems:'center', gap:12 }}>
+                      <Face avatar={p.avatar} name={p.name || p.email} size={34} />
+                      <span style={{ fontSize:14.5, fontWeight:700, flex:1, minWidth:0 }}>{p.name || p.email}</span>
+                      {avgAdh != null && (
+                        <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+                          <div style={{ width: isMobile ? 64 : 140 }}><Bar pct={avgAdh} tone={t} /></div>
+                          <ToneChip tone={t}>{avgAdh}%</ToneChip>
                         </div>
-                        <span style={{ fontSize:14, fontWeight:600 }}>{p.name || p.email}</span>
-                      </div>
-                      <div style={{ display:'flex', alignItems:'center', gap:12, flex: isMobile ? '1 1 100%' : undefined, justifyContent: isMobile ? 'space-between' : undefined }}>
-                        <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-                          <div style={{ width:80, height:6, background:'var(--border)', borderRadius:99, overflow:'hidden' }}>
-                            <div style={{ height:'100%', width:`${Math.min((total/8)*100, 100)}%`, background:statusColor, borderRadius:99 }} />
-                          </div>
-                          <span style={{ fontSize:16, fontWeight:800, color:statusColor }}>{total.toFixed(1)}</span>
-                          <span style={{ fontSize:11, color:'var(--text-muted)' }}>/ 8 pts</span>
-                        </div>
-                        {isAdmin && (
-                          <button className="btn sm primary" onClick={() => { setPointModal(p); setPointData({ reason:'late', points:0.5, notes:'', date:today }) }}>
-                            + Add Point
-                          </button>
-                        )}
-                      </div>
+                      )}
                     </div>
-                    {pts.length > 0 && scrollX(
+                    <div style={{ overflowX:'auto' }}>
                       <table className="data-table">
-                        <thead><tr><th>Date</th><th>Reason</th><th style={{textAlign:'center'}}>Points</th><th>Notes</th>{isAdmin && <th></th>}</tr></thead>
+                        <thead><tr><th>Date</th><th>Scheduled</th><th>Login</th><th>Break 1</th><th>Lunch</th><th>Break 2</th><th>Logout</th><th style={{textAlign:'right'}}>Adherence</th></tr></thead>
                         <tbody>
-                          {pts.map(pt => (
-                            <tr key={pt.id}>
-                              <td style={{ padding:'8px 12px', fontSize:12, whiteSpace:'nowrap' }}>{new Date(pt.date + 'T12:00:00').toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' })}</td>
-                              <td style={{ padding:'8px 12px', fontSize:12 }}>{POINT_REASONS.find(r => r.value === pt.reason)?.label || pt.reason}</td>
-                              <td style={{ padding:'8px 12px', fontSize:13, fontWeight:700, textAlign:'center', color: parseFloat(pt.points) >= 1 ? 'var(--danger)' : '#f59e0b' }}>{parseFloat(pt.points).toFixed(1)}</td>
-                              <td style={{ padding:'8px 12px', fontSize:11, color:'var(--text-muted)' }}>{pt.notes || '—'}</td>
-                              {isAdmin && (
-                                <td style={{ padding:'8px 12px', whiteSpace:'nowrap', textAlign:'right' }}>
-                                  <button className="btn sm" style={{ marginRight:6 }} onClick={() => editPoint(pt)}>Edit</button>
-                                  <button className="btn sm danger" onClick={() => deletePoint(pt.id)}>Remove</button>
-                                </td>
-                              )}
-                            </tr>
-                          ))}
+                          {weekDates.map(date => {
+                            const sched = getSchedule(p.id, date)
+                            const dayEvents = getEvents(p.id, date)
+                            const loginEvent = dayEvents.find(e => e.status === 'Available' || e.status === 'On Call')
+                            const breakEvents = dayEvents.filter(e => e.status === 'Break')
+                            const lunchEvent = dayEvents.find(e => e.status === 'Lunch')
+                            const offlineEvent = [...dayEvents].reverse().find(e => e.status === 'Offline')
+                            if (!sched && dayEvents.length === 0) return null
+                            const pct = adherencePct(sched, dayEvents)
+                            const bv = (ev, limit) => ev && ev.duration_seconds > (limit + GRACE) * 60
+                            const brk = (ev, limit) => ev
+                              ? <span style={{ color: bv(ev, limit) ? 'var(--tone-red-tx)' : 'var(--text-secondary)', fontWeight: bv(ev, limit) ? 700 : 400 }}>{fmtTime(ev.started_at)} ({fmtDuration(ev.duration_seconds)}){bv(ev, limit) ? ' · over' : ''}</span>
+                              : <span style={{ color:'var(--text-muted)' }}>—</span>
+                            return (
+                              <tr key={date}>
+                                <td style={{ fontWeight:600 }}>{fmtDate(date)}</td>
+                                <td>{sched ? `${fmt(sched.shift_start)} – ${fmt(sched.shift_end)}` : <span style={{ color:'var(--text-muted)' }}>—</span>}</td>
+                                <td>{loginEvent ? <span style={{ color:'var(--tone-green-tx)', fontWeight:600 }}>{fmtTime(loginEvent.started_at)}</span> : <span style={{ color:'var(--tone-red-tx)', fontWeight:600 }}>No login</span>}</td>
+                                <td>{brk(breakEvents[0], sched?.break1_duration || 15)}</td>
+                                <td>{brk(lunchEvent, sched?.lunch_duration || 30)}</td>
+                                <td>{brk(breakEvents[1], sched?.break2_duration || 15)}</td>
+                                <td>{offlineEvent ? fmtTime(offlineEvent.started_at) : <span style={{ color:'var(--text-muted)' }}>—</span>}</td>
+                                <td style={{ textAlign:'right' }}>{pct != null ? <ToneChip tone={adhTone(pct)} small>{pct}%</ToneChip> : <span style={{ color:'var(--text-muted)' }}>—</span>}</td>
+                              </tr>
+                            )
+                          })}
                         </tbody>
                       </table>
-                    )}
+                    </div>
                   </div>
                 )
-              })
-              return isMobile ? <>{people}{wfmCard}</> : <>{wfmCard}{people}</>
-            })()}
-          </div>
-        )}
+              })}
+            </div>
+          )
+        })()}
+
+        {/* ── POINTS TAB ── */}
+        {tab === 'points' && (() => {
+          const ptsTone = (v) => v >= attCfg.pointsCritical ? 'red' : v >= attCfg.pointsWarn ? 'amber' : 'green'
+          const people = schedProfiles.map(p => {
+            const pts = attendancePoints.filter(ap => ap.profile_id === p.id)
+            return { p, pts, total: pts.reduce((sum, ap) => sum + parseFloat(ap.points), 0) }
+          })
+          const count = (t) => people.filter(x => ptsTone(x.total) === t).length
+          // Phone: people and their points come first; the settings card drops to the bottom.
+          const wfmCard = isAdmin && wfmCfg && (
+            <div style={{ ...panel, padding:'16px 20px' }}>
+              <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:12 }}>
+                <span style={{ fontSize:14, fontWeight:700 }}>WFM settings</span>
+                <span style={{ fontSize:12, color:'var(--text-muted)' }}>Points per incident and the color thresholds</span>
+                <div style={{ marginLeft:'auto', display:'flex', alignItems:'center', gap:10 }}>
+                  {wfmMsg && <span style={{ fontSize:12, color: wfmMsg.startsWith('Error') ? 'var(--danger)' : 'var(--tone-green-tx)' }}>{wfmMsg}</span>}
+                  <button className="btn sm primary" onClick={saveWfmCfg}>Save</button>
+                </div>
+              </div>
+              <div className={isMobile ? 'mgrid' : undefined} style={{ display:'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : 'repeat(auto-fit, minmax(150px, 1fr))', gap:12, alignItems:'end' }}>
+                {[
+                  ['late', 'Late arrival (pts)'],
+                  ['absence', 'Unexcused absence (pts)'],
+                  ['early_departure', 'Early departure (pts)'],
+                  ['no_call', 'No call / no show (pts)'],
+                ].map(([k, label]) => (
+                  <div key={k} className="form-field" style={{ marginBottom:0 }}>
+                    <label className="form-label" style={{ fontSize:11 }}>{label}</label>
+                    <input className="form-input" type="number" step="0.5" min="0" value={wfmCfg.points[k]}
+                      onChange={e => setWfmCfg(f => ({ ...f, points: { ...f.points, [k]: Number(e.target.value) } }))} />
+                  </div>
+                ))}
+                {[
+                  ['pointsWarn', 'Points → Warning at'],
+                  ['pointsCritical', 'Points → Critical at'],
+                  ['adherenceGood', 'Adherence green ≥ (%)'],
+                  ['adherenceWarn', 'Adherence amber ≥ (%)'],
+                ].map(([k, label]) => (
+                  <div key={k} className="form-field" style={{ marginBottom:0 }}>
+                    <label className="form-label" style={{ fontSize:11 }}>{label}</label>
+                    <input className="form-input" type="number" min="0" value={wfmCfg[k]}
+                      onChange={e => setWfmCfg(f => ({ ...f, [k]: Number(e.target.value) }))} />
+                  </div>
+                ))}
+              </div>
+            </div>
+          )
+          const cards = people.map(({ p, pts, total }) => {
+            const t = ptsTone(total)
+            return (
+              <div key={p.id} style={{ ...panel, overflow:'hidden' }}>
+                <div style={{ padding: isMobile ? '12px 14px' : '14px 20px', borderBottom: pts.length > 0 ? '1px solid var(--border)' : 'none', display:'flex', alignItems:'center', gap:12, flexWrap: isMobile ? 'wrap' : undefined }}>
+                  <Face avatar={p.avatar} name={p.name || p.email} size={34} />
+                  <span style={{ fontSize:14.5, fontWeight:700, flex:1, minWidth:0 }}>{p.name || p.email}</span>
+                  <div style={{ display:'flex', alignItems:'center', gap:10, flex: isMobile ? '1 1 100%' : undefined }}>
+                    <div style={{ width: isMobile ? undefined : 110, flex: isMobile ? 1 : undefined }}><Bar pct={Math.min((total / 8) * 100, 100)} tone={t} /></div>
+                    <span style={{ ...num, fontSize:17, fontWeight:800, color:`var(--tone-${t}-tx)` }}>{total.toFixed(1)}</span>
+                    <span style={{ fontSize:11.5, color:'var(--text-muted)' }}>/ 8 pts</span>
+                    {isAdmin && (
+                      <button className="btn sm" style={{ borderRadius:99 }} onClick={() => { setPointModal(p); setPointData({ reason:'late', points:0.5, notes:'', date:today }) }}>
+                        + Add point
+                      </button>
+                    )}
+                  </div>
+                </div>
+                {pts.length > 0 && scrollX(
+                  <table className="data-table">
+                    <thead><tr><th>Date</th><th>Reason</th><th style={{textAlign:'center'}}>Points</th><th>Notes</th>{isAdmin && <th></th>}</tr></thead>
+                    <tbody>
+                      {pts.map(pt => (
+                        <tr key={pt.id}>
+                          <td style={{ whiteSpace:'nowrap', fontWeight:600 }}>{new Date(pt.date + 'T12:00:00').toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' })}</td>
+                          <td>{POINT_REASONS.find(r => r.value === pt.reason)?.label || pt.reason}</td>
+                          <td style={{ textAlign:'center' }}><ToneChip tone={parseFloat(pt.points) >= 1 ? 'red' : 'amber'} small>{parseFloat(pt.points).toFixed(1)}</ToneChip></td>
+                          <td style={{ color:'var(--text-muted)' }}>{pt.notes || '—'}</td>
+                          {isAdmin && (
+                            <td style={{ whiteSpace:'nowrap', textAlign:'right' }}>
+                              <button className="btn sm" style={{ marginRight:6 }} onClick={() => editPoint(pt)}>Edit</button>
+                              <button className="btn sm danger" onClick={() => deletePoint(pt.id)}>Remove</button>
+                            </td>
+                          )}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            )
+          })
+          return (
+            <div style={{ padding: isMobile ? 12 : 24, display:'flex', flexDirection:'column', gap:16 }}>
+              <SummaryPanel isMobile={isMobile} style={{ marginBottom:0 }}>
+                <Stat label="Good" value={count('green')} tone="green" sub={`Under ${attCfg.pointsWarn} points`} />
+                <Stat label="Warning" value={count('amber')} tone={count('amber') ? 'amber' : 'green'} sub={`${attCfg.pointsWarn} to ${(attCfg.pointsCritical - 0.1).toFixed(1)} points`} />
+                <Stat label="Critical" value={count('red')} tone={count('red') ? 'red' : 'green'} sub={`${attCfg.pointsCritical}+ points`} />
+                <Stat label="Points this year" value={people.reduce((a, x) => a + x.total, 0).toFixed(1)}
+                  sub={`Calendar ${new Date().getFullYear()} · resets Jan 1`} />
+              </SummaryPanel>
+              {isMobile ? <>{cards}{wfmCard}</> : <>{wfmCard}{cards}</>}
+            </div>
+          )
+        })()}
 
         {/* ── REPORTS TAB ── */}
         {tab === 'reports' && (
           <div style={{ padding: isMobile ? 12 : 24, display:'flex', flexDirection:'column', gap:16 }}>
-            <div style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius-lg)', padding:20 }}>
-              <div style={{ fontSize:11, fontWeight:600, textTransform:'uppercase', letterSpacing:.5, color:'var(--text-muted)', marginBottom:14 }}>Generate Report</div>
+            <div style={{ ...panel, padding:'16px 20px' }}>
+              <div style={{ ...eyebrow, marginBottom:12 }}>Attendance report</div>
               <div style={{ display:'flex', gap:12, alignItems: isMobile ? 'stretch' : 'flex-end', flexWrap:'wrap', flexDirection: isMobile ? 'column' : undefined }}>
                 <div className="form-field" style={{ margin:0 }}>
                   <label className="form-label">Start date</label>
@@ -1071,57 +1060,66 @@ export default function AttendancePage() {
                   <label className="form-label">End date</label>
                   <input type="date" className="form-input" value={reportRange.end} onChange={e => setReportRange(p => ({ ...p, end: e.target.value }))} />
                 </div>
-                <button className="btn primary" onClick={runReport} disabled={!reportRange.start || !reportRange.end} style={{ minHeight: isMobile ? 40 : undefined }}>Run report</button>
-                {reportData && <button className="btn" onClick={exportReport} style={{ minHeight: isMobile ? 40 : undefined }}>Export CSV</button>}
+                <button className="btn primary" onClick={runReport} disabled={!reportRange.start || !reportRange.end} style={{ minHeight: isMobile ? 40 : undefined, borderRadius:99 }}>Run report</button>
+                {reportData && <button className="btn" onClick={exportReport} style={{ minHeight: isMobile ? 40 : undefined, borderRadius:99 }}>Export CSV</button>}
               </div>
             </div>
 
-            {reportData && (
-              <div style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius-lg)', overflow:'hidden' }}>
-                <div style={{ padding:'14px 18px', borderBottom:'1px solid var(--border)', background:'var(--surface-2)' }}>
-                  <div style={{ fontSize:11, fontWeight:600, textTransform:'uppercase', letterSpacing:.5, color:'var(--text-muted)' }}>
-                    Summary — {reportRange.start} to {reportRange.end}
+            {reportData && (() => {
+              const adhTone = (v) => v == null ? 'gray' : v >= attCfg.adherenceGood ? 'green' : v >= attCfg.adherenceWarn ? 'amber' : 'red'
+              const ptsTone = (v) => v >= attCfg.pointsCritical ? 'red' : v >= attCfg.pointsWarn ? 'amber' : 'green'
+              const withAdh = reportData.filter(r => r.avgAdherence != null)
+              const teamAdh = withAdh.length ? Math.round(withAdh.reduce((a, r) => a + r.avgAdherence, 0) / withAdh.length) : null
+              const pts = reportData.reduce((a, r) => a + r.totalPoints, 0)
+              const brk = reportData.reduce((a, r) => a + r.breakViolations, 0)
+              const lun = reportData.reduce((a, r) => a + r.lunchViolations, 0)
+              const range = `${fmtDate(reportRange.start)} – ${fmtDate(reportRange.end)}`
+              return (
+                <>
+                  <SummaryPanel isMobile={isMobile} style={{ marginBottom:0 }}>
+                    <Stat label="Average adherence" value={teamAdh == null ? '—' : `${teamAdh}%`} tone={adhTone(teamAdh)} sub={range} />
+                    <Stat label="Attendance points" value={pts.toFixed(1)} tone={pts ? 'amber' : 'green'} sub="Added in this range" />
+                    <Stat label="Long breaks" value={brk} tone={brk ? 'red' : 'green'} sub={`Over 15 min + ${GRACE} grace`} />
+                    <Stat label="Long lunches" value={lun} tone={lun ? 'red' : 'green'} sub={`Over 30 min + ${GRACE} grace`} />
+                  </SummaryPanel>
+                  <div style={{ ...panel, overflow:'hidden' }}>
+                    {scrollX(
+                    <table className="data-table">
+                      <thead>
+                        <tr>
+                          <th>Agent</th>
+                          <th style={{textAlign:'center'}}>Days sched.</th>
+                          <th style={{textAlign:'center'}}>Att. points</th>
+                          <th style={{textAlign:'center'}}>Avg adherence</th>
+                          <th style={{textAlign:'center'}}>Long breaks</th>
+                          <th style={{textAlign:'center'}}>Long lunches</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {reportData.map(r => (
+                          <tr key={r.profile.id}>
+                            <td>
+                              <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+                                <Face avatar={r.profile.avatar} name={r.profile.name || r.profile.email} size={28} />
+                                <span style={{ fontWeight:650 }}>{r.profile.name || r.profile.email}</span>
+                              </div>
+                            </td>
+                            <td style={{ textAlign:'center', fontWeight:600 }}>{r.daysScheduled}</td>
+                            <td style={{ textAlign:'center' }}><ToneChip tone={ptsTone(r.totalPoints)} small>{r.totalPoints.toFixed(1)}</ToneChip></td>
+                            <td style={{ textAlign:'center' }}>
+                              {r.avgAdherence != null ? <ToneChip tone={adhTone(r.avgAdherence)} small>{r.avgAdherence}%</ToneChip> : <span style={{ color:'var(--text-muted)' }}>—</span>}
+                            </td>
+                            <td style={{ textAlign:'center', color: r.breakViolations > 0 ? 'var(--tone-red-tx)' : 'var(--text-secondary)', fontWeight: r.breakViolations > 0 ? 700 : 400 }}>{r.breakViolations}</td>
+                            <td style={{ textAlign:'center', color: r.lunchViolations > 0 ? 'var(--tone-red-tx)' : 'var(--text-secondary)', fontWeight: r.lunchViolations > 0 ? 700 : 400 }}>{r.lunchViolations}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    )}
                   </div>
-                </div>
-                {scrollX(
-                <table className="data-table">
-                  <thead>
-                    <tr>
-                      <th>Agent</th>
-                      <th style={{textAlign:'center'}}>Days Sched.</th>
-                      <th style={{textAlign:'center'}}>Att. Points</th>
-                      <th style={{textAlign:'center'}}>Avg Adherence</th>
-                      <th style={{textAlign:'center'}}>Break Viol.</th>
-                      <th style={{textAlign:'center'}}>Lunch Viol.</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {reportData.map(r => (
-                      <tr key={r.profile.id}>
-                        <td style={{ padding:'12px 14px', fontWeight:500 }}>
-                          <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-                            <div style={{ width:26, height:26, borderRadius:'50%', background:'var(--accent-bg)', display:'flex', alignItems:'center', justifyContent:'center', fontSize: r.profile.avatar ? 16 : 10, fontWeight:600 }}>
-                              <Avatar avatar={r.profile.avatar} name={r.profile.name || r.profile.email} />
-                            </div>
-                            {r.profile.name || r.profile.email}
-                          </div>
-                        </td>
-                        <td style={{ padding:'12px 14px', textAlign:'center', fontWeight:500 }}>{r.daysScheduled}</td>
-                        <td style={{ padding:'12px 14px', textAlign:'center', fontWeight:700, color: r.totalPoints >= 6 ? 'var(--danger)' : r.totalPoints >= 3 ? '#f59e0b' : 'var(--success)' }}>{r.totalPoints.toFixed(1)}</td>
-                        <td style={{ padding:'12px 14px', textAlign:'center' }}>
-                          {r.avgAdherence != null ? (
-                            <span style={{ fontWeight:700, color: r.avgAdherence >= attCfg.adherenceGood ? 'var(--success)' : r.avgAdherence >= attCfg.adherenceWarn ? '#f59e0b' : 'var(--danger)' }}>{r.avgAdherence}%</span>
-                          ) : <span style={{ color:'var(--text-muted)' }}>—</span>}
-                        </td>
-                        <td style={{ padding:'12px 14px', textAlign:'center', color: r.breakViolations > 0 ? 'var(--danger)' : 'var(--text-secondary)', fontWeight: r.breakViolations > 0 ? 700 : 400 }}>{r.breakViolations}</td>
-                        <td style={{ padding:'12px 14px', textAlign:'center', color: r.lunchViolations > 0 ? 'var(--danger)' : 'var(--text-secondary)', fontWeight: r.lunchViolations > 0 ? 700 : 400 }}>{r.lunchViolations}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                )}
-              </div>
-            )}
+                </>
+              )
+            })()}
           </div>
         )}
       </div>
