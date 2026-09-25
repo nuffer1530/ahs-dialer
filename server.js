@@ -4668,9 +4668,9 @@ async function tvBuildSlow() {
         const maxFive = Math.max(1, ...byTrade[t].map(x => x.fiveStar))
         for (const x of byTrade[t]) {
           x.score = Math.round(100 * (
-            // Brandyn, Sep 25 2026: sold 45 · close 25 · clubs 15 · 5★ 15.
-            0.45 * (x.sold / maxSold) + 0.25 * ((x.closeRate || 0) / maxClose)
-            + 0.15 * (x.memberships / maxMem) + 0.15 * (x.fiveStar / maxFive)))
+            // Brandyn, Sep 25 2026: sold 40 · close 30 · clubs 20 · 5★ 10.
+            0.40 * (x.sold / maxSold) + 0.30 * ((x.closeRate || 0) / maxClose)
+            + 0.20 * (x.memberships / maxMem) + 0.10 * (x.fiveStar / maxFive)))
         }
         byTrade[t].sort((a, b) => b.score - a.score)
       }
@@ -4760,8 +4760,8 @@ app.get('/api/tv/department/:trade', async (req, res) => {
       const maxMem = Math.max(1, ...techs.map(x => x.memberships))
       const maxFive = Math.max(1, ...techs.map(x => x.fiveStar))
       for (const x of techs) {
-        x.score = Math.round(100 * (0.45 * (x.sold / maxSold) + 0.25 * ((x.closeRate || 0) / maxClose)
-          + 0.15 * (x.memberships / maxMem) + 0.15 * (x.fiveStar / maxFive)))
+        x.score = Math.round(100 * (0.40 * (x.sold / maxSold) + 0.30 * ((x.closeRate || 0) / maxClose)
+          + 0.20 * (x.memberships / maxMem) + 0.10 * (x.fiveStar / maxFive)))
       }
       techs.sort((a, b) => b.score - a.score)
       installers = Object.entries(month?.installersByTrade || {}).flatMap(([t, rows]) => rows.map(x => ({ ...x, trade: t })))
