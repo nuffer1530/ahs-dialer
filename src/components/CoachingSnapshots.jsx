@@ -32,7 +32,8 @@ export function Segmented({ value, onChange, options, fill }) {
   )
 }
 
-function Ring({ pct, size, stroke, children }) {
+// `tone` overrides the QA-threshold color (scorecards color by rating level).
+export function Ring({ pct, size, stroke, children, tone }) {
   const r = (size - stroke) / 2
   const c = 2 * Math.PI * r
   const v = Math.max(0, Math.min(100, Number(pct) || 0))
@@ -40,7 +41,7 @@ function Ring({ pct, size, stroke, children }) {
     <div style={{ position: 'relative', width: size, height: size, flexShrink: 0 }}>
       <svg width={size} height={size} style={{ transform: 'rotate(-90deg)', display: 'block' }} aria-hidden="true">
         <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--surface-2)" strokeWidth={stroke} />
-        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={`var(--tone-${scoreTone(pct)}-tx)`} strokeWidth={stroke}
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={`var(--tone-${tone || scoreTone(pct)}-tx)`} strokeWidth={stroke}
           strokeLinecap="round" strokeDasharray={`${(c * v) / 100} ${c}`} />
       </svg>
       <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{children}</div>
