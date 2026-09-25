@@ -4165,6 +4165,18 @@ function tvCarryReviews(w, prev, label) {
   return carried > 0
 }
 
+// Membership types that are given away ("Complimentary … with Install") —
+// never a tech's sale. Name-matched like the leadership report; 6 h cache.
+let _tvCompTypes = { at: 0, ids: new Set() }
+async function tvComplimentaryTypes() {
+  if (Date.now() - _tvCompTypes.at < 6 * 3600_000 && _tvCompTypes.at) return _tvCompTypes.ids
+  try {
+    const d = await stGet(`/memberships/v2/tenant/${ST_TENANT_ID}/membership-types?pageSize=200`)
+    _tvCompTypes = { at: Date.now(), ids: new Set((d?.data || []).filter(t => /complimentary/i.test(t.name || '')).map(t => String(t.id))) }
+  } catch (e) { console.warn('tv comp membership types:', e.message) }
+  return _tvCompTypes.ids
+}
+
 // One window's pulls, aggregated per trade (+ per tech when asked).
 async function tvWindow({ fromIso, invFrom, invTo, revFrom, perTech, capMul = 1 }) {
   const [sold, created, invoices, reviews, memberships] = await Promise.all([
@@ -4206,14 +4218,20 @@ async function tvWindow({ fromIso, invFrom, invTo, revFrom, perTech, capMul = 1 
     const m = meta.get(String(r.technicianId))
     if (m?.trade) { dept[m.trade].fiveStar++; if (perTech) tr(r.technicianId).fiveStar++ }
   }
-  // Memberships attribute by BU; seller's home trade as fallback.
+  // Memberships attribute by BU; seller's home trade as fallback. The
+  // department and company counts include every club; a TECH gets credit only
+  // for clubs actually sold — never the complimentary club that comes free
+  // with an install (Brandyn, Sep 25).
   try {
-    const bus = await stGet(`/settings/v2/tenant/${ST_TENANT_ID}/business-units?pageSize=200`).then(d => d?.data || [])
+    const [bus, compTypes] = await Promise.all([
+      stGet(`/settings/v2/tenant/${ST_TENANT_ID}/business-units?pageSize=200`).then(d => d?.data || []),
+      tvComplimentaryTypes(),
+    ])
     const buTrade = new Map(bus.map(b => [String(b.id), tvTradeOf(b.name)]))
     for (const m2 of memberships) {
       const t = buTrade.get(String(m2.businessUnitId)) || meta.get(String(m2.soldById))?.trade
       if (t) dept[t].memberships++
-      if (perTech && m2.soldById) tr(m2.soldById).memberships++
+      if (perTech && m2.soldById && !compTypes.has(String(m2.membershipTypeId))) tr(m2.soldById).memberships++
     }
   } catch {}
   for (const t of Object.values(TV_TRADES)) {
@@ -4650,9 +4668,9 @@ async function tvBuildSlow() {
         const maxFive = Math.max(1, ...byTrade[t].map(x => x.fiveStar))
         for (const x of byTrade[t]) {
           x.score = Math.round(100 * (
-            // Brandyn, Sep 24 2026: sold 40 · close 30 · clubs 20 · 5★ 10.
+            // Brandyn, Sep 25 2026: sold 40 · close 30 · clubs 15 · 5★ 15.
             0.40 * (x.sold / maxSold) + 0.30 * ((x.closeRate || 0) / maxClose)
-            + 0.20 * (x.memberships / maxMem) + 0.10 * (x.fiveStar / maxFive)))
+            + 0.15 * (x.memberships / maxMem) + 0.15 * (x.fiveStar / maxFive)))
         }
         byTrade[t].sort((a, b) => b.score - a.score)
       }
@@ -4743,7 +4761,7 @@ app.get('/api/tv/department/:trade', async (req, res) => {
       const maxFive = Math.max(1, ...techs.map(x => x.fiveStar))
       for (const x of techs) {
         x.score = Math.round(100 * (0.40 * (x.sold / maxSold) + 0.30 * ((x.closeRate || 0) / maxClose)
-          + 0.20 * (x.memberships / maxMem) + 0.10 * (x.fiveStar / maxFive)))
+          + 0.15 * (x.memberships / maxMem) + 0.15 * (x.fiveStar / maxFive)))
       }
       techs.sort((a, b) => b.score - a.score)
       installers = Object.entries(month?.installersByTrade || {}).flatMap(([t, rows]) => rows.map(x => ({ ...x, trade: t })))
