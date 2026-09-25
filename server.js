@@ -5554,6 +5554,23 @@ app.get('/api/tv/ceo', async (req, res) => {
   }
 })
 
+// Every eval in a window, paged — a plain select stops at 1,000 rows.
+async function evalsBetween(startIso, endIso, cols) {
+  const out = []
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await supabase.from('call_evaluations').select(cols)
+      .gte('call_at', startIso).lt('call_at', endIso).order('call_at').range(from, from + 999)
+    if (error) throw new Error('evals read: ' + error.message)
+    out.push(...(data || []))
+    if (!data || data.length < 1000) return out
+  }
+}
+
+// The numbers on every card (QA, trend, sections, gaps) are computed fresh on
+// each load; only the AI-written coaching text is cached. So a deactivated rep
+// drops off the moment they're deactivated (Brandyn: "remove departed users
+// immediately, such as Shelly"), and the page opens instantly instead of
+// re-running the AI every time one more call gets scored.
 app.get('/api/admin/csr-coaching', async (req, res) => {
   const prof = await requireAdmin(req, res)
   if (!prof) return
@@ -5563,26 +5580,26 @@ app.get('/api/admin/csr-coaching', async (req, res) => {
       return `${p2.year}-${p2.month}`
     })()
     const [y, m] = month.split('-').map(Number)
-    const startIso = new Date(Date.UTC(y, m - 1, 1)).toISOString()
-    const endIso = new Date(Date.UTC(y, m, 1)).toISOString()
-    const { data: evals } = await supabase.from('call_evaluations')
-      .select('rep, profile_id, pct, scores, created_at').gte('call_at', startIso).lt('call_at', endIso).limit(3000)
+    const ym = (yy, mm) => { const d = new Date(Date.UTC(yy, mm - 1, 1)); return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}` }
+    const prevMonth = ym(y, m - 1)
+    // Denver month boundaries — UTC midnight put Aug 31's evening calls in September.
+    const startIso = tvBounds(`${month}-01`)
+    const endIso = tvBounds(`${ym(y, m + 1)}-01`)
+    const prevStartIso = tvBounds(`${prevMonth}-01`)
+    const [evals, prevEvals, admins, { data: profRows }] = await Promise.all([
+      evalsBetween(startIso, endIso, 'rep, profile_id, pct, scores, call_at'),
+      evalsBetween(prevStartIso, startIso, 'rep, profile_id, pct'),
+      loadAdminAgents(supabase),
+      supabase.from('profiles').select('id, name, email, active'),
+    ])
     // Admins and the shared "Awesome Account" login aren't coached CSRs.
-    const admins = await loadAdminAgents(supabase)
-    const rows = (evals || []).filter(e => e.pct != null && !admins.isAdminProfile(e.profile_id) && !admins.isAdminName(e.rep))
-    const cacheKey = `csr_coaching_${month}`
-    if (req.query.refresh !== '1') {
-      try {
-        const { data: c } = await supabase.from('app_settings').select('value').eq('key', cacheKey).maybeSingle()
-        const cached = c?.value ? JSON.parse(c.value) : null
-        if (cached && cached.evalCount === rows.length) return res.json(cached)
-      } catch {}
-    }
+    const notAdmin = (e) => e.pct != null && !admins.isAdminProfile(e.profile_id) && !admins.isAdminName(e.rep)
+    const rows = evals.filter(notAdmin)
+    const prevRows = prevEvals.filter(notAdmin)
 
-    // Aggregate per CSR, grouped by PROFILE where linked — rep name strings
-    // drifted over the month (mapping fixes renamed people), which split one
-    // person into 2-3 cards. Unlinked evals fall back to a normalized name.
-    const { data: profRows } = await supabase.from('profiles').select('id, name, email, active')
+    // Group by PROFILE where linked — rep name strings drifted over a month
+    // (mapping fixes renamed people), which split one person into 2-3 cards.
+    // Unlinked evals fall back to a normalized name.
     const profById = new Map((profRows || []).map(x => [x.id, x]))
     const normKey = (n) => String(n || '').toLowerCase().replace(/[^a-z0-9]/g, '')
     const profByKey = new Map()
@@ -5590,49 +5607,123 @@ app.get('/api/admin/csr-coaching', async (req, res) => {
       if (x.name) profByKey.set(normKey(x.name), x)
       if (x.email) profByKey.set(normKey(x.email.split('@')[0]), x)
     }
-    const perCsr = new Map()
-    for (const e of rows) {
-      const prof2 = (e.profile_id && profById.get(e.profile_id)) || profByKey.get(normKey(e.rep)) || null
-      const gkey = prof2 ? `p:${prof2.id}` : `n:${normKey(e.rep || 'unknown')}`
-      const name = prof2 ? `${prof2.name || prof2.email}${prof2.active === false ? ' (departed)' : ''}` : (e.rep || 'Unknown')
-      const cur = perCsr.get(gkey) || { name, profileId: prof2?.id || null, scores: [], crit: new Map() }
-      cur.scores.push(Number(e.pct))
-      for (const it of ((e.scores || {}).items || [])) {
-        if (!it.applicable) continue
-        const c = cur.crit.get(it.criterion) || { criterion: it.criterion, section: it.section, earned: 0, max: 0, misses: 0, n: 0 }
-        c.earned += Number(it.earned) || 0; c.max += Number(it.max) || 0; c.n++
-        if ((Number(it.earned) || 0) < (Number(it.max) || 0)) c.misses++
-        cur.crit.set(it.criterion, c)
-      }
-      perCsr.set(gkey, cur)
-    }
     // People who answer a stray call but aren't coached CSRs (Sarah in HR)
-    // stay out of the snapshot. List lives in app_settings so it's editable
-    // without a deploy.
+    // stay out. List lives in app_settings so it's editable without a deploy.
     let excludeKeys = new Set()
     try {
       const { data: ex } = await supabase.from('app_settings').select('value').eq('key', 'csr_coaching_exclude').maybeSingle()
       excludeKeys = new Set((JSON.parse(ex?.value || '[]') || []).map(normKey))
     } catch {}
-    const aggregates = [...perCsr.values()].filter(c => !excludeKeys.has(normKey(String(c.name).replace(' (departed)', '')))).map(c => {
-      const crits = [...c.crit.values()].filter(x => x.max > 0).map(x => ({ ...x, rate: Math.round(x.earned / x.max * 100) }))
+    const groupOf = (e) => {
+      const prof2 = (e.profile_id && profById.get(e.profile_id)) || profByKey.get(normKey(e.rep)) || null
+      if (prof2?.active === false) return null   // deactivated → off the page
+      const name = prof2 ? (prof2.name || prof2.email) : (e.rep || 'Unknown')
+      if (excludeKeys.has(normKey(name))) return null
+      return { key: prof2 ? `p:${prof2.id}` : `n:${normKey(e.rep || 'unknown')}`, name, profileId: prof2?.id || null }
+    }
+    const dayOf = (iso) => Number(new Intl.DateTimeFormat('en-US', { timeZone: 'America/Denver', day: 'numeric' }).format(new Date(iso)))
+
+    const perCsr = new Map()
+    const teamCrit = new Map(), teamSec = new Map()
+    let teamSum = 0, teamN = 0
+    const addItem = (map, key, it, extra) => {
+      const c = map.get(key) || { ...extra, earned: 0, max: 0, misses: 0, n: 0 }
+      c.earned += Number(it.earned) || 0; c.max += Number(it.max) || 0; c.n++
+      if ((Number(it.earned) || 0) < (Number(it.max) || 0)) c.misses++
+      map.set(key, c)
+    }
+    for (const e of rows) {
+      const g = groupOf(e)
+      if (!g) continue
+      const cur = perCsr.get(g.key) || { name: g.name, profileId: g.profileId, scores: [], crit: new Map(), sec: new Map(), weeks: [] }
+      const pct = Number(e.pct)
+      cur.scores.push(pct); teamSum += pct; teamN++
+      const w = Math.min(4, Math.floor((dayOf(e.call_at) - 1) / 7))
+      cur.weeks[w] = cur.weeks[w] || { sum: 0, n: 0 }
+      cur.weeks[w].sum += pct; cur.weeks[w].n++
+      for (const it of ((e.scores || {}).items || [])) {
+        if (!it.applicable) continue
+        addItem(cur.crit, it.criterion, it, { criterion: it.criterion, section: it.section })
+        addItem(teamCrit, it.criterion, it, { criterion: it.criterion, section: it.section })
+        if (it.section) { addItem(cur.sec, it.section, it, { name: it.section }); addItem(teamSec, it.section, it, { name: it.section }) }
+      }
+      perCsr.set(g.key, cur)
+    }
+    // Last month, same people, same rules — for the "▲ 3 vs Aug" deltas.
+    const prevBy = new Map()
+    let prevSum = 0, prevN = 0
+    for (const e of prevRows) {
+      const g = groupOf(e)
+      if (!g) continue
+      const p = prevBy.get(g.key) || { sum: 0, n: 0 }
+      p.sum += Number(e.pct); p.n++; prevBy.set(g.key, p)
+      prevSum += Number(e.pct); prevN++
+    }
+    const rate = (x) => x.max > 0 ? Math.round(x.earned / x.max * 100) : null
+    const sectionsOf = (map) => [...map.values()].filter(x => x.max > 0).map(x => ({ name: x.name, rate: rate(x) }))
+      .sort((a, b) => a.name.localeCompare(b.name))
+
+    const aggregates = [...perCsr.entries()].map(([key, c]) => {
+      const crits = [...c.crit.values()].filter(x => x.max > 0).map(x => ({ ...x, rate: rate(x) }))
+      const prev = prevBy.get(key)
       return {
         name: c.name,
         profileId: c.profileId,
         qa: Math.round(c.scores.reduce((a, b) => a + b, 0) / c.scores.length),
         evals: c.scores.length,
+        prevQa: prev?.n ? Math.round(prev.sum / prev.n) : null,
+        trend: c.weeks.map(w => (w ? Math.round(w.sum / w.n) : null)),
+        sections: sectionsOf(c.sec),
+        // Biggest gaps by POINTS lost — a 10-pt miss on 40 calls matters more
+        // than a rare 5-pt one missed 3 of 3 times.
+        gaps: crits.filter(x => x.misses > 0).map(x => ({ ...x, lost: x.max - x.earned }))
+          .sort((a, b) => b.lost - a.lost).slice(0, 3)
+          .map(x => ({ criterion: x.criterion, rate: x.rate, missedOn: x.misses, of: x.n })),
         weakest: crits.filter(x => x.rate < 100).sort((a, b) => a.rate - b.rate).slice(0, 5)
           .map(x => ({ criterion: x.criterion, rate: x.rate, missedOn: x.misses, of: x.n })),
         strengths: crits.filter(x => x.rate === 100 && x.n >= 3).slice(0, 4).map(x => x.criterion),
       }
     }).sort((a, b) => b.qa - a.qa)
 
-    // One AI pass writes every card — grounded in the aggregates only. A
-    // hiccup here used to save and cache BARE cards (September read as a
-    // different page from August): now it retries, matches names loosely,
-    // and falls back to the last good text for anyone it can't write.
+    const team = {
+      qa: teamN ? Math.round(teamSum / teamN) : null,
+      prevQa: prevN ? Math.round(prevSum / prevN) : null,
+      prevMonth,
+      evals: teamN,
+      csrs: aggregates.length,
+      sections: sectionsOf(teamSec),
+      focus: [...teamCrit.values()].filter(x => x.max > 0 && x.misses > 0)
+        .map(x => ({ criterion: x.criterion, section: x.section, rate: rate(x), missedOn: x.misses, of: x.n, lost: x.max - x.earned,
+          csrs: aggregates.filter(a => a.gaps.some(g => g.criterion === x.criterion)).length }))
+        .sort((a, b) => b.lost - a.lost).slice(0, 4),
+    }
+
+    // AI coaching text: reuse the cached write-up unless it's stale — the
+    // month's volume moved 5%+, a CSR has no write-up yet, it's 12h+ old on
+    // the current month, or a coach hit Regenerate.
+    const cacheKey = `csr_coaching_${month}`
+    const stripDeparted = (n) => String(n || '').replace(' (departed)', '')
+    let cached = null
+    try {
+      const { data: c } = await supabase.from('app_settings').select('value').eq('key', cacheKey).maybeSingle()
+      cached = c?.value ? JSON.parse(c.value) : null
+    } catch {}
+    const prevText = new Map((cached?.cards || []).filter(c => c.drill)
+      .map(c => [normKey(stripDeparted(c.name)), { working: c.working, coach: c.coach, drill: c.drill }]))
+    const nowMonth = (() => {
+      const p2 = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: 'America/Denver', year: 'numeric', month: '2-digit' }).formatToParts(new Date()).map(x => [x.type, x.value]))
+      return `${p2.year}-${p2.month}`
+    })()
+    const ageH = cached?.generatedAt ? (Date.now() - Date.parse(cached.generatedAt)) / 36e5 : Infinity
+    const moved = cached ? Math.abs(rows.length - (cached.evalCount || 0)) / Math.max(1, cached.evalCount || 0) : 1
+    const needAi = req.query.refresh === '1' || !cached || moved >= 0.05
+      || aggregates.some(a => !prevText.has(normKey(a.name)))
+      || (month === nowMonth && ageH >= 12)
+
     let coached = new Map()
-    if (ANTHROPIC_KEY && aggregates.length) {
+    let generatedAt = cached?.generatedAt || null
+    if (needAi && ANTHROPIC_KEY && aggregates.length) {
+      const aiInput = aggregates.map(({ name, profileId, qa, evals: n, weakest, strengths }) => ({ name, profileId, qa, evals: n, weakest, strengths }))
       for (let attempt = 0; attempt < 2 && !coached.size; attempt++) {
         try {
           if (attempt) await new Promise(r => setTimeout(r, 2500))
@@ -5653,7 +5744,7 @@ app.get('/api/admin/csr-coaching', async (req, res) => {
                 }, required: ['name', 'working', 'coach', 'drill'] } } }, required: ['csrs'] },
               }],
               tool_choice: { type: 'tool', name: 'submit_snapshots' },
-              messages: [{ role: 'user', content: `Month: ${month}. Per-CSR eval aggregates:\n${JSON.stringify(aggregates)}` }],
+              messages: [{ role: 'user', content: `Month: ${month}. Per-CSR eval aggregates:\n${JSON.stringify(aiInput)}` }],
             }),
           })
           const body = await r.json()
@@ -5661,30 +5752,26 @@ app.get('/api/admin/csr-coaching', async (req, res) => {
           const out = body?.content?.find(c => c.type === 'tool_use')?.input
           for (const c of (out?.csrs || [])) if (c?.name) coached.set(normKey(c.name), c)
           if (!coached.size) throw new Error('no snapshots in the response')
+          generatedAt = new Date().toISOString()
         } catch (e) { console.warn(`csr coaching ai (attempt ${attempt + 1}):`, e.message) }
       }
     }
-    // Last good text per CSR, so a bad AI minute never blanks a card.
-    let prevText = new Map()
-    try {
-      const { data: c } = await supabase.from('app_settings').select('value').eq('key', cacheKey).maybeSingle()
-      for (const card of (c?.value ? JSON.parse(c.value)?.cards || [] : [])) if (card.drill) prevText.set(normKey(String(card.name).replace(' (departed)', '')), { working: card.working, coach: card.coach, drill: card.drill })
-    } catch {}
+    // A bad AI minute never blanks a card — fall back to the last good text.
     const textFor = (a) => {
-      const k = normKey(String(a.name).replace(' (departed)', ''))
-      const c = coached.get(k) || coached.get(normKey(a.name))
+      const c = coached.get(normKey(a.name))
       if (c) return { working: c.working || [], coach: c.coach || [], drill: c.drill || '' }
-      return prevText.get(k) || {}
+      return prevText.get(normKey(a.name)) || {}
     }
-
-    const payload = {
-      month, evalCount: rows.length, generatedAt: new Date().toISOString(),
-      cards: aggregates.map(a => ({ ...a, ...textFor(a) })),
+    const cards = aggregates.map(a => ({ ...a, ...textFor(a) }))
+    if (coached.size) {
+      try {
+        await supabase.from('app_settings').upsert({ key: cacheKey, value: JSON.stringify({
+          month, evalCount: rows.length, generatedAt,
+          cards: cards.map(({ name, working, coach, drill }) => ({ name, working, coach, drill })),
+        }) }, { onConflict: 'key' })
+      } catch {}
     }
-    try {
-      await supabase.from('app_settings').upsert({ key: cacheKey, value: JSON.stringify(payload) }, { onConflict: 'key' })
-    } catch {}
-    res.json(payload)
+    res.json({ month, evalCount: teamN, generatedAt: generatedAt || new Date().toISOString(), team, cards })
   } catch (e) { res.status(500).json({ error: e.message }) }
 })
 

@@ -222,3 +222,14 @@ textarea.form-input { resize: vertical; min-height: 72px; }
   .card { padding-left: 12px; padding-right: 12px; }
   .mobile-hide { display: none !important; }
 }
+
+/* ── Coaching cards (Team → Coaching) ── */
+.coach-card { transition: border-color .15s ease, box-shadow .15s ease, transform .15s ease; }
+.coach-card:hover { border-color: var(--border-strong) !important; box-shadow: 0 12px 28px -14px rgba(15, 20, 40, .28); transform: translateY(-1px); }
+.coach-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.skel { border-radius: 8px; background: linear-gradient(90deg, var(--surface-2) 30%, var(--border) 50%, var(--surface-2) 70%); background-size: 300% 100%; animation: skel 1.4s ease-in-out infinite; }
+@keyframes skel { from { background-position: 100% 0; } to { background-position: 0 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .coach-card, .coach-card:hover { transition: none; transform: none; }
+  .skel { animation: none; }
+}
