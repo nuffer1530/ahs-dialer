@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react'
 import { sb } from '../lib/supabase'
 import { useIsMobile } from '../lib/useIsMobile'
-import EvalModal, { ScoreChip } from './EvalModal'
+import EvalModal from './EvalModal'
 import CoachingSnapshots, { Segmented, monthShort, sectionShort, critName } from './CoachingSnapshots'
+import EvalList, { EvalSummary } from './EvalList'
 
 // My Page → Call Evals. Reps see their own scored inbound calls; admins see
 // the whole team with rep + month filters. Every row opens the full breakdown.
@@ -150,8 +151,6 @@ export default function CallEvalsTab({ profile, isAdmin, defaultView }) {
   const linkedIds = new Set(liveRows.map(r => r.profile_id).filter(Boolean))
   const unlinkedNames = [...new Set(liveRows.filter(r => !r.profile_id && r.rep).map(r => r.rep))].sort()
   const evalCountFor = (pid) => liveRows.filter(r => r.profile_id === pid).length
-  const avg = searched.length ? Math.round(searched.reduce((s, r) => s + Number(r.pct || 0), 0) / searched.length) : null
-  const avgTone = avg == null ? 'gray' : avg >= 90 ? 'green' : avg >= 75 ? 'amber' : 'red'
 
   return (
     <div>
@@ -192,21 +191,10 @@ export default function CallEvalsTab({ profile, isAdmin, defaultView }) {
             placeholder={coachingView ? 'Find a CSR…' : 'Caller, rep, phone, or summary…'} style={{ minWidth: isMobile ? 0 : 200, ...tap }} />
         </div>
         {!coachingView && (
-          <div style={isMobile ? { flex: '1 1 45%' } : undefined}>
+          <div style={isMobile ? { flex: '1 1 100%' } : undefined}>
             <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: .6, color: 'var(--text-muted)', marginBottom: 4 }}>Sort</div>
-            <select className="form-input" value={sortBy} onChange={e => setSortBy(e.target.value)} style={{ minWidth: isMobile ? 0 : 150, ...tap }}>
-              <option value="newest">Newest first</option>
-              <option value="lowest">Lowest score first</option>
-              <option value="highest">Highest score first</option>
-            </select>
-          </div>
-        )}
-        {!coachingView && (
-          <div style={isMobile ? { flex: '1 1 100%', display: 'flex', alignItems: 'baseline', gap: 8 } : { marginLeft: 'auto', textAlign: 'right' }}>
-            <div style={{ fontSize: 26, fontWeight: 900, color: `var(--tone-${avgTone}-tx)`, lineHeight: 1 }}>{avg == null ? '—' : `${avg}%`}</div>
-            <div style={{ fontSize: 10.5, color: 'var(--text-muted)', marginTop: 3 }}>
-              avg of {searched.length} evaluated call{searched.length === 1 ? '' : 's'} · feeds the Call Quality KPI
-            </div>
+            <Segmented value={sortBy} onChange={setSortBy} fill={isMobile}
+              options={[['newest', 'Newest'], ['lowest', 'Lowest score'], ['highest', 'Highest score']]} />
           </div>
         )}
       </div>
@@ -215,43 +203,14 @@ export default function CallEvalsTab({ profile, isAdmin, defaultView }) {
         <CoachingSnapshots snap={snap} busy={snapBusy} error={snapErr} search={search} isMobile={isMobile}
           onRegenerate={() => loadSnapshots(true)} onPrint={printSnapshots} onOpen={openCsrEvals} />
       ) : sorted.length === 0 ? (
-        <div style={{ padding: '40px 20px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>
-          No evaluated calls this month yet. Inbound calls over a minute are scored automatically a few minutes after they end.
+        <div style={{ padding: '40px 20px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 14 }}>
+          {rows?.length ? 'No evaluated calls match these filters.' : 'No evaluated calls this month yet. Inbound calls over a minute are scored automatically a few minutes after they end.'}
         </div>
       ) : (
-        <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden' }}>
-          {sorted.map((r, i) => {
-            // The summary shares the name column on desktop (one line, clipped);
-            // on a phone it takes its own full-width line under score, name and
-            // time, allowed two lines before it's clipped.
-            const summary = r.summary && (
-              <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: isMobile ? 'normal' : 'nowrap',
-                ...(isMobile ? { flex: '1 1 100%', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' } : {}) }}>
-                {r.summary}
-              </div>
-            )
-            return (
-            <div key={r.id} onClick={() => setOpen(r)}
-              style={{ display: 'flex', alignItems: 'center', gap: isMobile ? '4px 12px' : 12, padding: '10px 14px', cursor: 'pointer', flexWrap: isMobile ? 'wrap' : undefined,
-                borderBottom: i < sorted.length - 1 ? '1px solid var(--border)' : 'none' }}
-              onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
-              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-              <ScoreChip pct={r.pct} size="md" />
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 13, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {r.contact_name || (r.phone ? `(${String(r.phone).slice(0,3)}) ${String(r.phone).slice(3,6)}-${String(r.phone).slice(6)}` : 'Unknown caller')}
-                  {isAdmin && <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}> · {r.rep || '—'}</span>}
-                </div>
-                {!isMobile && summary}
-              </div>
-              <div style={{ fontSize: 11, color: 'var(--text-muted)', flexShrink: 0 }}>
-                {new Date(r.call_at || r.created_at).toLocaleString('en-US', { timeZone: 'America/Denver', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
-              </div>
-              {isMobile && summary}
-            </div>
-            )
-          })}
-        </div>
+        <>
+          <EvalSummary rows={sorted} isMobile={isMobile} />
+          <EvalList rows={sorted} grouped={sortBy === 'newest'} isAdmin={isAdmin} isMobile={isMobile} onOpen={setOpen} />
+        </>
       )}
 
       {open && <EvalModal evalRow={open} onClose={() => setOpen(null)} />}

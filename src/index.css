@@ -233,3 +233,6 @@ textarea.form-input { resize: vertical; min-height: 72px; }
   .coach-card, .coach-card:hover { transition: none; transform: none; }
   .skel { animation: none; }
 }
+.eval-row { transition: background .12s ease; }
+.eval-row:hover { background: var(--surface-2) !important; }
+.eval-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
