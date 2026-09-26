@@ -376,6 +376,7 @@ function LeadershipPageInner() {
   const aiChallenges = Array.isArray(ai?.challenges) ? ai.challenges : []
   const aiHighlights = (aiWins.length || aiChallenges.length) ? [] : ([ai?.highlights, ai?.summary].map(v => (Array.isArray(v) ? v : [])).find(v => v.length) || [])
   const aiActions = Array.isArray(ai?.actionsByDept) ? ai.actionsByDept.filter(d => d && Array.isArray(d.actions)) : []
+  const aiCoach = Array.isArray(ai?.coachingFocus) ? ai.coachingFocus.filter(d => d && typeof d === 'object' && d.focus) : []
   const aiItems = Array.isArray(ai?.actionItems) ? ai.actionItems : []
   const weekLabel = f ? `${f.weekStart} → ${f.weekEnd}` : week
 
@@ -607,6 +608,22 @@ function LeadershipPageInner() {
                 {aiHighlights.map((s, i) => (
                   <div key={i} style={{ fontSize: 13, lineHeight: 1.7, color: 'var(--text-primary)' }}>• {String(s)}</div>
                 ))}
+              </>}
+              {aiCoach.length > 0 && <>
+                <Title style={{ marginTop: 14 }}>Coaching focus — biggest upside first</Title>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {aiCoach.map((d, i) => (
+                    <div key={i} style={{ breakInside: 'avoid', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, padding: '9px 12px' }}>
+                      <div style={{ fontSize: 13, lineHeight: 1.5, color: 'var(--text-primary)' }}>
+                        <b style={{ color: 'var(--accent)' }}>{String(d.dept)}:</b> <b>{String(d.focus)}</b>
+                        {d.upside && <span style={{ color: 'var(--tone-green-tx)', fontWeight: 700 }}> · {String(d.upside)}</span>}
+                      </div>
+                      {d.evidence && <div style={{ fontSize: 12, lineHeight: 1.5, color: 'var(--text-muted)', marginTop: 2 }}>{String(d.evidence)}</div>}
+                      {d.who && <div style={{ fontSize: 12.5, lineHeight: 1.5, color: 'var(--text-primary)', marginTop: 3 }}><b>Coach first:</b> {String(d.who)}</div>}
+                      {d.drill && <div style={{ fontSize: 12.5, lineHeight: 1.5, color: 'var(--text-primary)' }}><b>Drill:</b> {String(d.drill)}</div>}
+                    </div>
+                  ))}
+                </div>
               </>}
               {aiActions.length > 0 && <>
                 <Title style={{ marginTop: 14 }}>Action items by department</Title>

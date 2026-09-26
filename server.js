@@ -11896,6 +11896,7 @@ async function requireLeadership(req, res) {
 
 const leadershipDeps = (weekEnd) => ({
   stGet, stPageAll, stPost, supabase, tenantId: ST_TENANT_ID, anthropicKey: ANTHROPIC_KEY, weekEnd,
+  getFieldCoaching: (ym) => fieldPro.coachingEvidence(ym),   // Field Pro evidence for the coaching focus
 })
 
 async function loadLeadershipRow(weekEnd) {
