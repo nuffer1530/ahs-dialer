@@ -935,3 +935,14 @@ alter policy "Admins manage status options" on public.status_options
 alter table public.profiles drop constraint if exists profiles_role_check;
 alter table public.profiles add constraint profiles_role_check
   check (role = any (array['rep'::text, 'admin'::text, 'dispatcher'::text, 'ops_manager'::text, 'call_center_manager'::text]));
+
+-- ── Home morning briefs (Sep 26, 2026) — lib/homeBrief.js ────────────────────
+-- Server-only (RLS on, no policies). Applied via migration home_briefs.
+create table if not exists public.home_briefs (
+  date date not null,
+  scope text not null,
+  brief jsonb not null,
+  created_at timestamptz not null default now(),
+  primary key (date, scope)
+);
+alter table public.home_briefs enable row level security;

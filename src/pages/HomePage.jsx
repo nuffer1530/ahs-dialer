@@ -7,6 +7,7 @@ import { Segmented, eyebrow, panel } from '../components/ui'
 import { Icon } from '../components/shell/icons'
 import { useAuth } from '../lib/AuthContext'
 import MyDayHome from '../components/home/MyDayHome'
+import { briefFor, BriefBody } from '../components/home/MorningBrief'
 
 // Home (redesign stage 2): the landing page for owners, admins and
 // operations managers (CSRs and dispatchers get components/home/MyDayHome).
@@ -211,6 +212,15 @@ function BusinessHome() {
   const paceGood = view.sold >= view.pacedPlan
   const showCallCenter = !!data.floor && scope === 'all'
   const leverTo = data.isOwner ? '/leadership' : '/team'
+  // Morning brief for what's on screen: the company (owner, all trades), the
+  // ops manager's set, or the one trade picked in the scope switch.
+  const briefKey = scope === 'all' ? (data.allTrades ? 'company' : `trades:${[...data.trades].sort().join('+')}`) : `trades:${scope}`
+  const { brief: morningBrief, pending: briefPending } = briefFor(data.morning, briefKey)
+  const inScope = (t) => (scope === 'all' ? data.trades.includes(t) : t === scope)
+  const coachRows = (data.coach || []).filter(c => inScope(c.trade))
+  const glanceTrades = (scope === 'all' ? data.trades : [scope]).filter(t => data.glance?.[t]?.count)
+  const TV_SLUG = { HVAC: 'hvac', Plumbing: 'plumbing', Electrical: 'electrical', 'Garage Doors': 'garage' }
+  const co = data.company
   const kpis = [
     { label: 'Sold this month', value: kMoney(view.sold), delta: view.plan ? `${Math.round(view.sold / view.plan * 100)}%` : null, good: paceGood, sub: `of the ${kMoney(view.plan)} plan · day ${data.dayOfMonth} of ${data.daysInMonth}`, bar: view.plan ? view.sold / view.plan * 100 : null },
     { label: 'Close rate', value: pct(view.closeRate), delta: view.closeRate != null ? `${view.closeRate >= data.goals.close ? '+' : '−'}${Math.abs(Math.round((view.closeRate - data.goals.close) * 100))} pts` : null, good: (view.closeRate ?? 0) >= data.goals.close, sub: `${view.closed} of ${view.opps} opportunities · goal ${pct(data.goals.close)}`, bar: view.closeRate != null ? view.closeRate * 100 : null },
@@ -237,12 +247,17 @@ function BusinessHome() {
           <div style={{ padding: isMobile ? '18px 18px' : '22px 26px', display: 'flex', flexDirection: 'column', gap: 10 }}>
             <div style={{ ...eyebrow, display: 'flex', alignItems: 'center', gap: 7 }}>
               <span style={{ width: 7, height: 7, borderRadius: 99, background: 'var(--signal)' }} />
-              {new Date(`${data.today}T12:00:00Z`).toLocaleDateString('en-US', { weekday: 'long', timeZone: 'UTC' })} brief · {updated}
+              {morningBrief
+                ? <>Morning brief · {new Date(`${data.morning.date}T12:00:00Z`).toLocaleDateString('en-US', { weekday: 'long', timeZone: 'UTC' })}’s results</>
+                : <>{new Date(`${data.today}T12:00:00Z`).toLocaleDateString('en-US', { weekday: 'long', timeZone: 'UTC' })} brief · {updated}</>}
             </div>
-            <h2 className="disp" style={{ margin: 0, fontSize: isMobile ? 24 : 30, lineHeight: 1.14, fontWeight: 700, letterSpacing: '-.025em', maxWidth: 640, textWrap: 'balance' }}>
-              {scope === 'all' ? data.brief.headline : `${scope} is ${kMoney(Math.abs(view.sold - view.pacedPlan))} ${view.sold >= view.pacedPlan ? 'ahead of' : 'behind'} its plan for ${data.monthName}.`}
+            <h2 className="disp" style={{ margin: 0, fontSize: isMobile ? 24 : 30, lineHeight: 1.14, fontWeight: 700, letterSpacing: '-.025em', maxWidth: 680, textWrap: 'balance' }}>
+              {morningBrief ? morningBrief.headline : scope === 'all' ? data.brief.headline : `${scope} is ${kMoney(Math.abs(view.sold - view.pacedPlan))} ${view.sold >= view.pacedPlan ? 'ahead of' : 'behind'} its plan for ${data.monthName}.`}
             </h2>
-            <p style={{ margin: 0, fontSize: 14.5, lineHeight: 1.6, color: 'var(--text-secondary)', maxWidth: 620 }}>
+            {morningBrief ? <BriefBody brief={morningBrief} coachTo={leverTo} onGo={navigate} isMobile={isMobile} /> : briefPending && (
+              <div style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>Writing this morning’s brief from yesterday’s numbers…</div>
+            )}
+            <p style={{ margin: 0, fontSize: 14.5, lineHeight: 1.6, color: 'var(--text-secondary)', maxWidth: 620, display: morningBrief ? 'none' : undefined }}>
               {scope === 'all' ? data.brief.body : (() => {
                 const r = view.rows[0]
                 return r ? `Sold ${kMoney(r.sold)} of ${kMoney(r.plan)}. Closing ${pct(r.closeRate)} of ${r.opps} opportunities against ${pct(r.closeGoal)}${r.fieldPro?.lowestStep ? `; the lowest Field Pro step is ${r.fieldPro.lowestStep.step} (${r.fieldPro.lowestStep.score}/100)` : ''}.` : ''
@@ -266,6 +281,28 @@ function BusinessHome() {
         <section aria-label="Month to date" style={{ ...panel, borderRadius: 18, display: 'grid', gridTemplateColumns: isMobile ? 'minmax(0, 1fr)' : `repeat(${kpis.length}, minmax(0, 1fr))` }}>
           {kpis.map((k, i) => <Kpi key={k.label} {...k} first={i === 0} isMobile={isMobile} />)}
         </section>
+
+        {/* The company, for context — ops managers see their own trades above. */}
+        {!data.allTrades && co && (
+          <section aria-label="Company" style={{ ...panel, borderRadius: 18, padding: isMobile ? '12px 16px' : '12px 20px', display: 'flex', alignItems: 'center', gap: isMobile ? 10 : 22, flexWrap: 'wrap' }}>
+            <span style={{ ...eyebrow }}>Company · {data.monthName}</span>
+            <span style={{ fontSize: 13.5 }}>
+              <span style={{ ...mono, fontWeight: 600 }}>{kMoney(co.sold)}</span> sold of {kMoney(co.plan)}
+              <span style={{ ...mono, marginLeft: 6, fontWeight: 600, color: co.sold >= co.pacedPlan ? 'var(--tone-green-tx)' : 'var(--tone-red-tx)' }}>
+                {co.sold >= co.pacedPlan ? '+' : '−'}{kMoney(Math.abs(co.sold - co.pacedPlan))} vs pace
+              </span>
+            </span>
+            <span style={{ fontSize: 13.5 }}>
+              Close <span style={{ ...mono, fontWeight: 600, color: (co.closeRate ?? 0) >= co.closeGoal ? 'var(--tone-green-tx)' : 'var(--tone-red-tx)' }}>{pct(co.closeRate)}</span>
+              <span style={{ color: 'var(--text-muted)' }}> · goal {pct(co.closeGoal)}</span>
+            </span>
+            {co.oppsPerDay != null && (
+              <span style={{ fontSize: 13.5 }}>
+                <span style={{ ...mono, fontWeight: 600 }}>{co.oppsPerDay.toFixed(1)}</span> opps/day<span style={{ color: 'var(--text-muted)' }}>{co.oppsGoal ? ` · goal ${co.oppsGoal}` : ''}</span>
+              </span>
+            )}
+          </section>
+        )}
 
         {/* Departments + Needs you */}
         <div style={{ display: 'grid', gridTemplateColumns: wide && !isMobile ? 'minmax(0, 1fr) 320px' : 'minmax(0, 1fr)', gap: 16, alignItems: 'start' }}>
@@ -343,6 +380,69 @@ function BusinessHome() {
             )}
           </section>
         </div>
+
+        {/* Coach this week + the techs at a glance */}
+        {(coachRows.length > 0 || glanceTrades.length > 0) && (
+          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'minmax(0, 1fr)' : 'minmax(0, 1fr) minmax(0, 1fr)', gap: 16, alignItems: 'start' }}>
+            <section style={{ ...panel, borderRadius: 18, padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
+                <h3 className="disp" style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>Coach this week</h3>
+                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>below goal close, biggest gap first</span>
+                <a href="/team" onClick={(e) => { e.preventDefault(); navigate('/team') }} style={{ marginLeft: 'auto', fontSize: 12.5, fontWeight: 600, color: 'var(--accent)', textDecoration: 'none' }}>Coaching & evals →</a>
+              </div>
+              {coachRows.length ? coachRows.map((c, i) => (
+                <a key={c.id} href="/team" onClick={(e) => { e.preventDefault(); navigate('/team') }} className="lift-hover"
+                  style={{ display: 'flex', flexDirection: 'column', gap: 3, padding: '10px 12px', borderRadius: 12, border: '1px solid var(--border)', color: 'inherit', textDecoration: 'none' }}>
+                  <span style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                    <span style={{ fontSize: 14, fontWeight: 600 }}>{c.name}</span>
+                    {data.trades.length > 1 && <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>{c.trade}</span>}
+                    <span style={{ ...mono, marginLeft: 'auto', fontSize: 12.5, fontWeight: 600, color: 'var(--tone-red-tx)' }}>≈ {kMoney(c.gap)} left</span>
+                  </span>
+                  <span style={{ fontSize: 12.5, color: 'var(--text-secondary)' }}>
+                    Closing <b style={{ ...mono, fontWeight: 600 }}>{pct(c.closeRate)}</b> of {c.opps} opportunities vs {pct(c.closeGoal)} · avg ticket {kMoney(c.avgTicket)}
+                  </span>
+                  {(c.steps?.length > 0 || c.fieldPro != null) && (
+                    <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                      Field Pro {c.fieldPro != null ? <b style={{ ...mono, fontWeight: 600, color: fpTone(c.fieldPro) }}>{c.fieldPro}</b> : '—'}
+                      {c.steps?.length ? ` · weakest: ${c.steps.map(s => `${s.step} ${s.score}`).join(', ')}` : c.fieldProCalls === 0 ? ' · no recordings this month' : ''}
+                    </span>
+                  )}
+                </a>
+              )) : <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>Every tech with 5+ opportunities is at or above their close goal this month.</div>}
+            </section>
+
+            <section style={{ ...panel, borderRadius: 18, padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
+                <h3 className="disp" style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>Your techs</h3>
+                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>this month · top 3 and the lowest</span>
+              </div>
+              {glanceTrades.map(t => {
+                const g = data.glance[t]
+                const row = (x, rank, low) => (
+                  <div key={x.id} style={{ display: 'grid', gridTemplateColumns: '22px minmax(0, 1fr) 58px 52px 44px', gap: 8, alignItems: 'center', fontSize: 13, padding: '5px 0', borderTop: low ? '1px dashed var(--border)' : 'none', marginTop: low ? 4 : 0 }}>
+                    <span style={{ ...mono, fontSize: 11.5, color: low ? 'var(--tone-red-tx)' : 'var(--text-muted)' }}>{low ? 'low' : rank}</span>
+                    <span style={{ fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{x.name}</span>
+                    <span style={{ ...mono, textAlign: 'right' }}>{kMoney(x.sold)}</span>
+                    <span style={{ ...mono, textAlign: 'right', color: 'var(--text-secondary)' }}>{pct(x.closeRate)}</span>
+                    <span style={{ ...mono, textAlign: 'right', color: fpTone(x.fieldPro) }}>{x.fieldPro ?? '—'}</span>
+                  </div>
+                )
+                return (
+                  <div key={t}>
+                    <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 2 }}>
+                      <span style={{ fontSize: 13, fontWeight: 700 }}>{t}</span>
+                      <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>{g.count} techs · sold · close · Field Pro</span>
+                      <a href={`/tv/${TV_SLUG[t]}`} onClick={(e) => { e.preventDefault(); navigate(`/tv/${TV_SLUG[t]}`) }} style={{ marginLeft: 'auto', fontSize: 12, fontWeight: 600, color: 'var(--accent)', textDecoration: 'none' }}>TV →</a>
+                    </div>
+                    {g.top.map((x, i) => row(x, i + 1, false))}
+                    {g.low && row(g.low, null, true)}
+                  </div>
+                )
+              })}
+              <a href="/team" onClick={(e) => { e.preventDefault(); navigate('/team') }} style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--accent)', textDecoration: 'none' }}>All scorecards →</a>
+            </section>
+          </div>
+        )}
 
         {/* Live floor */}
         {data.floor && (

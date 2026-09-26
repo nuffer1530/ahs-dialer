@@ -8,6 +8,7 @@ import { useOpenLeads } from '../../lib/useOpenLeads'
 import { isDone, isCallbackDueToday } from '../../lib/utils'
 import { panel, eyebrow, mono, ToneChip, Ring } from '../ui'
 import { Icon } from '../shell/icons'
+import MorningBrief from './MorningBrief'
 import { scoreMonth, rateKpi, fmtKpi, LevelChip, LevelPips, LEVELS } from '../ScorecardsPanel'
 
 // Home for the phones and the board (Sep 2026). CSRs get "your day": shift,
@@ -328,6 +329,8 @@ export default function MyDayHome({ dispatcher, manager }) {
           <section aria-label="Today" style={{ ...panel, borderRadius: 18, display: 'grid', gridTemplateColumns: isMobile ? 'minmax(0, 1fr)' : `repeat(${kpis.length}, minmax(0, 1fr))` }}>
             {kpis.map((k, i) => <Kpi key={k.label} {...k} first={i === 0} isMobile={isMobile} />)}
           </section>
+
+          <MorningBrief morning={m.morning} scopeKey="call_center" coachTo="/team" onGo={go} isMobile={isMobile} />
 
           <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'minmax(0, 1fr)' : 'minmax(0, 1.25fr) minmax(0, 1fr)', gap: 16, alignItems: 'start' }}>
             <Section title="The floor today" sub="ServiceTitan lead calls" link={['Live', '/live']} onGo={go}>

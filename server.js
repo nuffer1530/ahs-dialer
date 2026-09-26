@@ -9,7 +9,8 @@ import crypto from 'crypto'
 import { renderBoardEmail, boardEmailSubject } from './lib/boardEmail.js'
 import { computeBattingOrder, computeZipValue, computeJobTypeOrder, DEFAULT_WEIGHTS, NON_DISPATCH_TEAM } from './lib/dispatchMetrics.js'
 import { driveTimes, straightLine, pairKey, driveTimeEnabled, geocode, suggestAddresses } from './lib/driveTime.js'
-import { buildDailyDigest } from './lib/dailyDigest.js'
+import { buildDailyDigest, gatherDigestFacts } from './lib/dailyDigest.js'
+import { createHomeBriefs, scopeKey, BRIEF_TRADES } from './lib/homeBrief.js'
 import { loadAdminAgents } from './lib/adminAgents.js'
 import { buildDepartmentBrief, buildTechnicianPerformance, buildOpenEstimates, buildPeriodSummary, buildTrend, buildLeadSources, buildRecentJobs, buildCompanyOverview, buildReceivables, buildDailyMetrics, normalizeDept } from './lib/departmentBrief.js'
 import { gatherWeeklyFacts, generateAgendaAI, renderLeadershipHtml, latestCompletedSunday, upcomingSunday, DEFAULT_BUDGETS as LT_DEFAULT_BUDGETS } from './lib/leadershipReport.js'
@@ -11685,6 +11686,91 @@ function digestYesterday() {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Denver' }).format(now)
 }
 
+// Yesterday's digest facts, gathered once per date and shared by the 7 AM
+// email and the Home morning briefs — it's a heavy ServiceTitan pull.
+const _digestFacts = new Map()   // date → Promise<facts>
+function digestFactsFor(dateStr) {
+  if (!_digestFacts.has(dateStr)) {
+    const p = gatherDigestFacts(digestDeps(dateStr)).catch(e => { _digestFacts.delete(dateStr); throw e })
+    _digestFacts.set(dateStr, p)
+    while (_digestFacts.size > 3) _digestFacts.delete(_digestFacts.keys().next().value)
+  }
+  return _digestFacts.get(dateStr)
+}
+
+// ── Home morning briefs (lib/homeBrief.js) ──────────────────────────────────
+// Which day a brief covers: yesterday — until 5 AM Denver, when the overnight
+// sweeps (dispositions 1 AM, ST evals 2 AM) haven't finished yesterday yet,
+// so the day before's brief keeps showing.
+function briefDate() {
+  const h = Number(new Intl.DateTimeFormat('en-US', { timeZone: 'America/Denver', hour: '2-digit', hour12: false }).format(new Date())) % 24
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Denver' }).format(new Date(Date.now() - (h < 5 ? 48 : 24) * 3600_000))
+}
+let _briefTechMeta = new Map()
+let _homeDept = null   // leadership budgets' dept block, refreshed by /api/home
+function homeMonthByTrade() {
+  const md = _tvMonth.data?.dept
+  if (!md) return null
+  const dept = { ...LT_DEFAULT_BUDGETS.dept, ...(_homeDept || {}) }
+  const today = tvDenverDate()
+  const eff = homeEffDays(today.slice(0, 8) + '01', today)
+  return Object.fromEntries(BRIEF_TRADES.map(t => {
+    const d = md[t] || {}
+    return [t, { sold: Math.round(d.sales || 0), closeRate: d.closeRate ?? null, closeGoal: Number(dept[t]?.conv) || 0.7,
+      opps: d.presented || 0, oppsPerDay: eff ? Math.round(((d.presented || 0) / eff) * 10) / 10 : null, oppsGoal: Number(dept[t]?.oppsPerDay) || null, clubs: d.memberships || 0 }]
+  }))
+}
+const homeBriefs = createHomeBriefs({
+  supabase, anthropicKey: ANTHROPIC_KEY,
+  gatherFacts: async (d) => { try { _briefTechMeta = await tvTechMeta() } catch {} return digestFactsFor(d) },
+  techTradeOf: (id) => _briefTechMeta.get(String(id))?.trade || null,
+  monthByTrade: () => homeMonthByTrade(),
+  coaching: (ym) => fieldPro.coachingEvidence(ym),
+})
+// Every scope someone lands on: the company, the call center, each trade,
+// and each ops manager's set when they run more than one (Cedric).
+async function homeBriefKeys() {
+  const keys = ['company', 'call_center', ...BRIEF_TRADES.map(t => scopeKey({ kind: 'trades', trades: [t] }))]
+  try {
+    const { data } = await supabase.from('app_settings').select('value').eq('key', 'field_ops_managers').maybeSingle()
+    const by = {}
+    for (const [t, v] of Object.entries(JSON.parse(data?.value || '{}'))) {
+      const e = String(v?.email || '').toLowerCase()
+      if (e && BRIEF_TRADES.includes(t)) (by[e] = by[e] || []).push(t)
+    }
+    for (const ts of Object.values(by)) if (ts.length > 1) keys.push(scopeKey({ kind: 'trades', trades: ts }))
+  } catch {}
+  return [...new Set(keys)]
+}
+// 5 AM–noon Denver: write any missing briefs, one replica at a time (a
+// 20-minute claim in app_settings). Home also writes a missing one on demand.
+async function maybeWarmHomeBriefs() {
+  if (!ANTHROPIC_KEY) return
+  const h = Number(new Intl.DateTimeFormat('en-US', { timeZone: 'America/Denver', hour: '2-digit', hour12: false }).format(new Date())) % 24
+  if (h < 5 || h >= 12) return
+  try {
+    const d = briefDate()
+    const keys = await homeBriefKeys()
+    const have = await homeBriefs.read(d, keys)
+    const missing = keys.filter(k => !have[k])
+    if (!missing.length) return
+    const { data: row } = await supabase.from('app_settings').select('value').eq('key', 'home_briefs_warm').maybeSingle()
+    const prev = row?.value ?? null
+    let cur = {}; try { cur = JSON.parse(prev || '{}') } catch {}
+    if (cur.date === d && Date.now() - (cur.at || 0) < 20 * 60_000) return
+    const next = JSON.stringify({ date: d, at: Date.now() })
+    if (row) {
+      const { data: ok } = await supabase.from('app_settings').update({ value: next }).eq('key', 'home_briefs_warm').eq('value', prev).select()
+      if (!ok?.length) return
+    } else {
+      const { error } = await supabase.from('app_settings').insert({ key: 'home_briefs_warm', value: next })
+      if (error) return
+    }
+    await homeBriefs.warm(d, missing)
+  } catch (e) { console.warn('home briefs warm:', e.message) }
+}
+setTimeout(() => { maybeWarmHomeBriefs(); setInterval(maybeWarmHomeBriefs, 10 * 60_000) }, 90_000)
+
 async function maybeSendDailyDigest() {
   const to = await digestRecipients()
   if (!to || !RESEND_KEY) return
@@ -11707,7 +11793,8 @@ async function maybeSendDailyDigest() {
       const { error } = await supabase.from('app_settings').insert({ key: DIGEST_SENT_KEY, value: localDate })
       if (error) return
     }
-    const { subject, html } = await buildDailyDigest(digestDeps(digestYesterday()))
+    const d = digestYesterday()
+    const { subject, html } = await buildDailyDigest({ ...digestDeps(d), facts: await digestFactsFor(d) })
     await sendResend({ to, subject, html })
     console.log(`DIGEST: sent to ${to} — ${subject}`)
   } catch (err) {
@@ -13432,6 +13519,7 @@ app.get('/api/home/me', async (req, res) => {
           queued: (queued || []).length, longestWaitSec: waits.length ? Math.round(Math.max(...waits) / 1000) : 0,
         },
         pto: (ptoMine || []).map(r => ({ ...r, name: nameOf.get(String(r.profile_id)) || 'Someone' })),
+        morning: ANTHROPIC_KEY ? await homeBriefs.forScopes(briefDate(), ['call_center']).catch(() => null) : null,
       }
     }
 
@@ -13523,6 +13611,7 @@ app.get('/api/home', async (req, res) => {
     const monthPlan = Number(ltRow?.notes?.budgets?.monthSales) || Number(lb.monthlySalesTarget) || B.monthlySalesTarget
     const weeklyAll = ALL.reduce((a, t) => a + (Number(dept[t]?.budget) || 0), 0) || 1
     const planOf = (t) => Math.round(monthPlan * (Number(dept[t]?.budget) || 0) / weeklyAll)
+    _homeDept = dept
 
     const md = _tvMonth.data?.dept || {}
     const tech = _tvMonth.data?.techsByTrade || {}
@@ -13579,6 +13668,46 @@ app.get('/api/home', async (req, res) => {
       if (tmr && tmr.needed > 0 && tmr.capacity > 0) needs.push({ kind: 'capacity', title: `${r.trade} is ${tmr.needed} call${tmr.needed === 1 ? '' : 's'} short for ${tmr.label === 'Today' ? 'today' : tmr.label}`, sub: `${tmr.calls} booked of ${Math.round(tmr.capacity)} · ${tmr.pct ?? 0}% full`, to: '/callboard' })
     }
 
+    // The whole company, for context on a department-scoped Home.
+    const round1 = (x) => Math.round(x * 10) / 10
+    const cRows = ALL.map(t => ({ d: md[t] || {}, goal: Number(dept[t]?.oppsPerDay) || 0 }))
+    const cOpps = cRows.reduce((a, r) => a + (r.d.presented || 0), 0), cClosed = cRows.reduce((a, r) => a + (r.d.soldJobs || 0), 0)
+    const company = {
+      sold: cRows.reduce((a, r) => a + Math.max(0, Math.round(r.d.sales || 0)), 0), plan: monthPlan,
+      pacedPlan: Math.round(monthPlan * Number(today.slice(8, 10)) / daysInMonth),
+      closeRate: cOpps ? cClosed / cOpps : null, closeGoal: B.kpi.close || 0.7, opps: cOpps,
+      oppsPerDay: effNow ? round1(cOpps / effNow) : null, oppsGoal: cRows.reduce((a, r) => a + r.goal, 0) || null,
+    }
+
+    // Coach this week: techs in scope below their trade's close goal, ranked by
+    // what that gap cost this month — (goal − close) × opportunities × avg
+    // ticket — with their weakest Field Pro steps (the leadership report's lens).
+    const nk = (n) => String(n || '').toLowerCase().replace(/[^a-z0-9]/g, '')
+    const coach = []
+    for (const t of trades) for (const x of (tech[t] || [])) {
+      const goal = Number(dept[t]?.conv) || 0.7
+      if (x.closeRate == null || (x.opps || 0) < 5 || x.closeRate >= goal) continue
+      const ev = fpEv?.techs?.[nk(x.name)] || null
+      coach.push({ id: x.id, name: x.name, trade: t, closeRate: x.closeRate, closeGoal: goal, opps: x.opps, soldJobs: x.soldJobs,
+        avgTicket: x.avgTicket, sold: x.sold, gap: Math.round((goal - x.closeRate) * x.opps * (x.avgTicket || 0)),
+        fieldPro: x.fieldPro ?? null, fieldProCalls: x.fieldProCalls || 0, steps: (ev?.lowestSteps || []).slice(0, 2) })
+    }
+    coach.sort((a, b) => b.gap - a.gap)
+    coach.splice(4)
+
+    // Tech glance: top 3 + the lowest per trade (the leadership report's rule).
+    const glance = Object.fromEntries(trades.map(t => {
+      const rows = (tech[t] || []).map(x => ({ id: x.id, name: x.name, score: x.score ?? null, sold: x.sold, closeRate: x.closeRate, opps: x.opps || 0, fieldPro: x.fieldPro ?? null }))
+      return [t, { top: rows.slice(0, 3), low: rows.length > 3 ? rows[rows.length - 1] : null, count: rows.length }]
+    }))
+
+    // Morning briefs for what this Home can show: the ops manager's set (and
+    // each trade in it), or the company and every trade.
+    const briefKeys = isOps
+      ? [scopeKey({ kind: 'trades', trades }), ...(trades.length > 1 ? trades.map(t => scopeKey({ kind: 'trades', trades: [t] })) : [])]
+      : ['company', ...ALL.map(t => scopeKey({ kind: 'trades', trades: [t] }))]
+    const morning = ANTHROPIC_KEY ? await homeBriefs.forScopes(briefDate(), briefKeys).catch(() => null) : null
+
     // Brief: pace + the biggest lever, in plain words.
     const monthName = new Date(`${today}T12:00:00Z`).toLocaleString('en-US', { month: 'long', timeZone: 'UTC' })
     const soldAll = tradeRows.reduce((a, r) => a + r.sold, 0)
@@ -13618,6 +13747,7 @@ app.get('/api/home', async (req, res) => {
       role: prof.role, isOwner, trades, allTrades: trades.length === ALL.length,
       plan: { month: planAll, byTrade: Object.fromEntries(tradeRows.map(r => [r.trade, r.plan])) },
       pace, tradeRows, needs, brief: { headline, body, lever }, floor,
+      company, coach, glance, morning,
       goals: { close: B.kpi.close || 0.7, booking: Number(lb?.kpi?.booking) || B.kpi.booking || 0.8, oppsPerDay: tradeRows.reduce((a, r) => a + (r.oppsGoal || 0), 0), clubsPerWeek: Number(lb?.kpi?.clubs) || B.kpi.clubs || null },
       effDays: effNow,
       tvBuiltAt: _tvMonth.at || null,
