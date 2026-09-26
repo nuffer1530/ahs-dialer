@@ -10,6 +10,7 @@ import { useAuth } from '../lib/AuthContext'
 import { useIsMobile } from '../lib/useIsMobile'
 import { inboundStats, outboundStats, acwStats, ahtOf, fmtSecs, fmtPct, SERVICE_LEVEL_SECONDS, SERVICE_LEVEL_TARGET } from '../lib/analytics'
 import { PageTabs, PillNav, Segmented, Ring, ToneChip, SummaryPanel, Stat, EmptyState, Face, eyebrow, num, panel } from '../components/ui'
+import { levelOf } from '../components/ScorecardsPanel'
 
 const DAYS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun']
 
@@ -922,7 +923,7 @@ export default function MyPage() {
               const wSum = rated.reduce((s, r) => s + r.w, 0)
               const score = wSum && rows.some(r => r.kpi.id !== 'attendance' && r.actual != null)
                 ? rated.reduce((s, r) => s + r.rating * r.w, 0) / wSum : null
-              const lv = score == null ? null : score >= 3.5 ? 4 : score >= 2.5 ? 3 : score >= 1.5 ? 2 : 1
+              const lv = levelOf(score)
               const lvTone = lv ? RATING_TONES[lv] : 'gray'
               return (
                 <div style={stack}>

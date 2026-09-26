@@ -67,7 +67,10 @@ function overallScore(actuals, weights, thresholds) {
   }
   return tw ? sum / tw : null
 }
-export const levelOf = (score) => (score == null ? null : score >= 3.5 ? 4 : score >= 2.5 ? 3 : score >= 1.5 ? 2 : 1)
+// Overall score → level. 3.00 and up meets (Brandyn, Sep 2026 — was 2.5);
+// anything under 3.00 does not. The one place the cut lives: Team, Technicians,
+// the printed review and My Page all read it from here.
+export const levelOf = (score) => (score == null ? null : score >= 3.5 ? 4 : score >= 3 ? 3 : score >= 1.5 ? 2 : 1)
 const money = (n) => (Math.abs(n) >= 10000 ? `$${Math.round(n / 1000)}k` : `$${Math.round(n).toLocaleString('en-US')}`)
 export const fmtKpi = (kpi, v) => {
   const n = toNum(v)
@@ -330,7 +333,7 @@ function printReview({ rep, monthLabel, actuals, weights, thresholds, notes }) {
   const overall = score == null ? null : score.toFixed(2)
   const ratingColors = { 4: { bg: '#d4edda', text: '#2E7D52' }, 3: { bg: '#d4edda', text: '#2E7D52' }, 2: { bg: '#FBF3E0', text: '#8A5A00' }, 1: { bg: '#FBEEEA', text: '#B5341A' } }
   const ratingLabels = { 4: 'Exceeds', 3: 'Meets', 2: 'Needs Improvement', 1: 'Poor Performance' }
-  const scoreColor = overall ? (score >= 3.5 ? '#2E7D52' : score >= 2.5 ? '#8A5A00' : '#B5341A') : '#1C1B19'
+  const scoreColor = overall ? ratingColors[levelOf(score)].text : '#1C1B19'
   const esc = (t) => String(t ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;')
   const rows = KPIS.map(kpi => {
     const w = Number(weights[kpi.id]) || 0
