@@ -931,3 +931,7 @@ alter policy "Admins read all status events" on public.status_events
   using (exists (select 1 from public.profiles where profiles.id = auth.uid() and profiles.role in ('admin', 'call_center_manager')));
 alter policy "Admins manage status options" on public.status_options
   using (exists (select 1 from public.profiles where profiles.id = auth.uid() and profiles.role in ('admin', 'call_center_manager')));
+-- The role list itself (migration profiles_role_call_center_manager):
+alter table public.profiles drop constraint if exists profiles_role_check;
+alter table public.profiles add constraint profiles_role_check
+  check (role = any (array['rep'::text, 'admin'::text, 'dispatcher'::text, 'ops_manager'::text, 'call_center_manager'::text]));
