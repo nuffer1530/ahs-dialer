@@ -5,6 +5,12 @@
 
 export const HUBS = [
   {
+    // Stage 2: the landing page for people who run the business (CSRs keep
+    // landing on the dialer until their "my day" Home ships).
+    id: 'home', label: 'Home', icon: 'home',
+    tabs: [{ to: '/home', label: 'Home', gate: c => c.isAdmin || c.isOpsManager || c.canDispatch }],
+  },
+  {
     id: 'phones', label: 'Phones', icon: 'phone',
     tabs: [
       // A phone is for looking, not dialing — the dialer is desktop-only.

@@ -28,6 +28,7 @@ import RecordingsPage from './RecordingsPage'
 import MyPage from './MyPage'
 import LeadershipPage from './LeadershipPage'
 import TeamPage from './TeamPage'
+import HomePage from './HomePage'
 import WinCelebration from '../components/WinCelebration'
 import ScheduleAlerts from '../components/ScheduleAlerts'
 import Sidebar from '../components/shell/Sidebar'
@@ -153,6 +154,11 @@ function DialerLayoutInner() {
   // (app_settings 'leadership_viewers') — this just controls nav visibility.
   const isLeader = isAdmin && ['brandynnuffer@gmail.com', 'brandyn.nuffer@awesomeservice.com']
     .includes((profile?.email || '').toLowerCase())
+  // Home (redesign stage 2) is for people who run the business; the owner
+  // and operations managers land on it. Everyone else still lands on the
+  // dialer, and Phones is one click away for all.
+  const homeAllowed = isAdmin || isOpsManager || canDispatch
+  const landOnHome = isLeader || isOpsManager
   const { contacts, syncStatus, reload } = useData()
   const { cancelAutoWrap, callStatus, callDuration, incomingCall } = usePhone()
   const navigate = useNavigate()
@@ -370,6 +376,15 @@ function DialerLayoutInner() {
   }
 
   const currentStatusObj = statusOptions.find(s => s.value === agentStatus) || statusOptions[statusOptions.length - 1]
+  // First load only: the owner and ops managers start on Home. Later clicks on
+  // Phones ('/') must still open the dialer, so this runs once.
+  const landedRef = useRef(false)
+  useEffect(() => {
+    if (landedRef.current || !profile?.id) return
+    landedRef.current = true
+    if (landOnHome && location.pathname === '/' && !location.search) navigate('/home', { replace: true })
+  }, [profile?.id])   // eslint-disable-line react-hooks/exhaustive-deps
+
   // Mobile: the sidebar becomes a slide-over drawer; navigating closes it.
   useEffect(() => { setMobileNav(false) }, [location.pathname])
 
@@ -408,8 +423,8 @@ function DialerLayoutInner() {
       return h ? { to: to && h.tabs.some(t => t.to === to) ? to : h.tabs[0].to, label: label || h.label, icon: h.icon, match: h.tabs.map(t => t.to) } : null
     }
     const list = isOpsManager
-      ? [hubItem('team'), hubItem('dispatch'), boards[0] && { to: boards.find(b => b.to !== '/warroom')?.to || boards[0].to, label: 'TV', icon: 'tv', match: ['/tv'] }]
-      : [hubItem('calls', '/analytics'), hubItem('dispatch'), hubItem('team'), isLeader ? hubItem('leadership') : null,
+      ? [hubItem('home'), hubItem('team'), hubItem('dispatch'), boards[0] && { to: boards.find(b => b.to !== '/warroom')?.to || boards[0].to, label: 'TV', icon: 'tv', match: ['/tv'] }]
+      : [hubItem('home'), hubItem('calls', '/analytics'), hubItem('dispatch'), hubItem('team'), isLeader ? hubItem('leadership') : null,
          { to: '/mypage', label: 'Me', icon: 'user' }]
     return list.filter(Boolean).slice(0, 4)
   })()
@@ -460,7 +475,8 @@ function DialerLayoutInner() {
         <div style={isMobile && !isWall ? { flex:1, minHeight:0, display:'flex', flexDirection:'column', overflow:'hidden' } : { display:'contents' }}>
         <Routes>
           {/* A phone is for looking, not dialing — the dialer is desktop-only. */}
-          <Route path="/" element={isHandheld ? <Navigate to={isOpsManager ? '/team' : '/analytics'} replace /> : <DialerPage />} />
+          <Route path="/" element={isHandheld ? <Navigate to={homeAllowed ? '/home' : '/analytics'} replace /> : <DialerPage />} />
+          {homeAllowed && <Route path="/home" element={<HomePage />} />}
           {/* Operations managers are field-side: call-center pages bounce home. */}
           <Route path="/live" element={isOpsManager ? <Navigate to="/" replace /> : <LivePage />} />
           <Route path="/callboard" element={<CallBoardPage />} />

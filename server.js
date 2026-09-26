@@ -12,7 +12,7 @@ import { driveTimes, straightLine, pairKey, driveTimeEnabled, geocode, suggestAd
 import { buildDailyDigest } from './lib/dailyDigest.js'
 import { loadAdminAgents } from './lib/adminAgents.js'
 import { buildDepartmentBrief, buildTechnicianPerformance, buildOpenEstimates, buildPeriodSummary, buildTrend, buildLeadSources, buildRecentJobs, buildCompanyOverview, buildReceivables, buildDailyMetrics, normalizeDept } from './lib/departmentBrief.js'
-import { gatherWeeklyFacts, generateAgendaAI, renderLeadershipHtml, latestCompletedSunday, upcomingSunday } from './lib/leadershipReport.js'
+import { gatherWeeklyFacts, generateAgendaAI, renderLeadershipHtml, latestCompletedSunday, upcomingSunday, DEFAULT_BUDGETS as LT_DEFAULT_BUDGETS } from './lib/leadershipReport.js'
 import { parseAdpUpload, aggregateAdpActuals, REGISTER_BURDEN_DEFAULTS } from './lib/adpInvoice.js'
 import { fetchSalesCloseInputs, computeSalesClose, rollupSalesClose, techStats } from './lib/salesClose.js'
 import { createFieldPro } from './lib/fieldPro.js'
@@ -13226,6 +13226,209 @@ app.get('/api/admin/reengage-preview', async (req, res) => {
     const list = p.people.map(x => `<a href="?to=${encodeURIComponent(x.email)}">${esc(x.name || x.email)}</a> (${esc(x.role)}, ${x.leads})`).join(' · ')
     res.type('html').send(`<div style="font:13px -apple-system,Arial;color:#64748B;max-width:660px;margin:0 auto;padding:8px">Recipients: ${list}<br>To: <b>${esc(p.to)}</b> · Subject: <b>${esc(p.subject)}</b></div>${p.html}`)
   } catch (e) { res.status(500).send(e.message) }
+})
+
+// ═══════════════════════════════ Home (redesign stage 2) ═══════════════════
+// The landing page for owners, admins, dispatchers and operations managers:
+// the month's pace, departments, capacity, the live floor and what needs
+// you. Built only from data Andi already keeps — the TV month cache, the
+// 3-day board, the CEO board's live tier, Field Pro, PTO and the LT agenda.
+async function requireHomeUser(req, res) {
+  const token = (req.headers.authorization || '').replace(/^Bearer\s+/i, '')
+  if (!token) { res.status(401).json({ error: 'Not signed in' }); return null }
+  const { data: { user }, error } = await supabase.auth.getUser(token)
+  if (error || !user) { res.status(401).json({ error: 'Invalid session' }); return null }
+  const { data: prof } = await supabase.from('profiles').select('id, name, email, role, active').eq('id', user.id).maybeSingle()
+  if (!['admin', 'ops_manager', 'dispatcher'].includes(prof?.role) || prof?.active === false) {
+    res.status(403).json({ error: 'Home is for admins, dispatchers and operations managers' }); return null
+  }
+  return prof
+}
+
+// Sold estimates this month by Denver day and trade — the pace line.
+let _homeSales = { key: null, at: 0, data: null, inflight: null }
+async function homeSalesDaily(monthStart) {
+  if (_homeSales.key === monthStart && Date.now() - _homeSales.at < 20 * 60_000 && _homeSales.data) return _homeSales.data
+  if (_homeSales.inflight && _homeSales.key === monthStart) return _homeSales.inflight
+  _homeSales.key = monthStart
+  _homeSales.inflight = (async () => {
+    const rows = await stPageAll(pg => `/sales/v2/tenant/${ST_TENANT_ID}/estimates?soldAfter=${tvBounds(monthStart)}&pageSize=500&page=${pg}`, 6000)
+    const byDay = {}
+    for (const e of rows) {
+      if ((e.status || {}).name !== 'Sold' || !e.soldOn) continue
+      const t = tvTradeOf(e.businessUnitName)
+      if (!t) continue
+      const d = tvDenverDate(new Date(e.soldOn))
+      if (!d.startsWith(monthStart.slice(0, 7))) continue
+      const row = byDay[d] || (byDay[d] = {})
+      row[t] = (row[t] || 0) + (Number(e.subtotal) || 0)
+    }
+    _homeSales = { key: monthStart, at: Date.now(), data: byDay, inflight: null }
+    return byDay
+  })().catch(e => { _homeSales.inflight = null; throw e })
+  return _homeSales.inflight
+}
+
+// Effective selling days (Mon–Fri 1, Sat ½, Sun 0) — the $20M plan's unit.
+const homeEffDays = (fromYmd, toYmd) => {
+  let n = 0
+  for (let d = new Date(`${fromYmd}T12:00:00Z`); d <= new Date(`${toYmd}T12:00:00Z`); d.setUTCDate(d.getUTCDate() + 1)) {
+    const wd = d.getUTCDay(); n += wd === 0 ? 0 : wd === 6 ? 0.5 : 1
+  }
+  return n
+}
+
+app.get('/api/home', async (req, res) => {
+  const prof = await requireHomeUser(req, res)
+  if (!prof) return
+  try {
+    const ALL = ['HVAC', 'Plumbing', 'Electrical', 'Garage Doors']
+    const today = tvDenverDate()
+    const monthStart = today.slice(0, 8) + '01'
+    const [y, m] = today.split('-').map(Number)
+    const daysInMonth = new Date(Date.UTC(y, m, 0)).getUTCDate()
+    const lastDay = `${today.slice(0, 8)}${String(daysInMonth).padStart(2, '0')}`
+    const isOps = prof.role === 'ops_manager'
+    const isOwner = ['brandynnuffer@gmail.com', 'brandyn.nuffer@awesomeservice.com'].includes(String(prof.email || '').toLowerCase())
+
+    // Which trades this person sees (ops managers: theirs).
+    let trades = ALL
+    if (isOps) {
+      const { data: mg } = await supabase.from('app_settings').select('value').eq('key', 'field_ops_managers').maybeSingle()
+      let mgrs = {}; try { mgrs = JSON.parse(mg?.value || '{}') } catch {}
+      const mine = ALL.filter(t => String(mgrs[t]?.email || '').toLowerCase() === String(prof.email || '').toLowerCase())
+      if (mine.length) trades = mine
+    }
+
+    // Warm the shared caches the TVs use (their build is shared, one at a time).
+    _tvLastReq = Date.now()
+    await Promise.race([tvBuildAll().catch(() => {}), new Promise(r => setTimeout(r, 15_000))])
+    if (!isOps) await Promise.race([ceoBuildFast().catch(() => {}), new Promise(r => setTimeout(r, 6_000))])
+
+    const B = LT_DEFAULT_BUDGETS
+    const [sales, board, fpEv, lbRow, ltRow, fus, pto, floorProfs, queued] = await Promise.all([
+      homeSalesDaily(monthStart).catch(e => { console.warn('home sales:', e.message); return null }),
+      Promise.race([getBoard3Day().catch(() => null), new Promise(r => setTimeout(() => r(null), 12_000))]),
+      fieldPro.coachingEvidence(today.slice(0, 7)).catch(() => null),
+      supabase.from('app_settings').select('value').eq('key', 'leadership_budgets').maybeSingle().then(r => r.data).catch(() => null),
+      supabase.from('leadership_reports').select('week_ending, ai, notes').order('week_ending', { ascending: false }).limit(1).then(r => r.data?.[0] || null).catch(() => null),
+      supabase.from('siro_followups').select('score, status, trade, context, created_at').eq('status', 'TO_DO').gte('score', 3)
+        .gte('created_at', new Date(Date.now() - 7 * 86400_000).toISOString()).then(r => r.data || []).catch(() => []),
+      supabase.from('pto_requests').select('profile_id, date, end_date, kind').eq('manager_id', prof.id).eq('status', 'pending').order('date').limit(6).then(r => r.data || []).catch(() => []),
+      isOps ? [] : supabase.from('profiles').select('id, name, email, role, avatar, status, status_since').eq('active', true).neq('status', 'Offline').then(r => r.data || []).catch(() => []),
+      isOps ? [] : supabase.from('call_tasks').select('queued_at').eq('state', 'queued').is('ended_at', null).then(r => r.data || []).catch(() => []),
+    ])
+
+    // Plan: the LT agenda's month sales budget (edited on that page), split
+    // across trades by their weekly budgets.
+    let lb = {}; try { lb = JSON.parse(lbRow?.value || '{}') } catch {}
+    const dept = { ...B.dept, ...(lb.dept || {}) }
+    const monthPlan = Number(ltRow?.notes?.budgets?.monthSales) || Number(lb.monthlySalesTarget) || B.monthlySalesTarget
+    const weeklyAll = ALL.reduce((a, t) => a + (Number(dept[t]?.budget) || 0), 0) || 1
+    const planOf = (t) => Math.round(monthPlan * (Number(dept[t]?.budget) || 0) / weeklyAll)
+
+    const md = _tvMonth.data?.dept || {}
+    const tech = _tvMonth.data?.techsByTrade || {}
+    const effNow = homeEffDays(monthStart, today)
+    const b3 = new Map((board?.board || []).map(b => [b.trade === 'Garage Door' ? 'Garage Doors' : b.trade, b]))
+    const dayLabel = (ymd) => new Date(`${ymd}T12:00:00Z`).toLocaleDateString('en-US', { weekday: 'short', timeZone: 'UTC' })
+    const tradeRows = trades.map(t => {
+      const d = md[t] || {}
+      const fp = fpEv?.byTrade?.[t] || null
+      const cap = (b3.get(t)?.days || []).map((x, i) => ({ date: x.date, label: i === 0 ? 'Today' : dayLabel(x.date), pct: x.pct ?? null, needed: x.needed || 0, capacity: x.capacity || 0, calls: x.calls || 0, oppWatch: !!x.oppWatch }))
+      return {
+        trade: t, sold: Math.max(0, Math.round(d.sales || 0)), plan: planOf(t),
+        closeRate: d.closeRate ?? null, opps: d.presented || 0, closed: d.soldJobs || 0,
+        oppsPerDay: effNow ? Math.round(((d.presented || 0) / effNow) * 10) / 10 : null, oppsGoal: Number(dept[t]?.oppsPerDay) || null,
+        closeGoal: Number(dept[t]?.conv) || 0.7,
+        clubs: d.memberships || 0, fiveStar: d.fiveStar || 0, techs: (tech[t] || []).length,
+        fieldPro: fp ? { score: fp.score, calls: fp.scoredCalls, lowestStep: fp.lowestSteps?.[0] || null } : null,
+        capacity: cap,
+      }
+    })
+
+    // Pace: cumulative sold by day, per trade in scope.
+    const pace = []
+    let run = 0
+    const runBy = Object.fromEntries(trades.map(t => [t, 0]))
+    for (let day = 1; day <= Number(today.slice(8, 10)); day++) {
+      const ymd = `${today.slice(0, 8)}${String(day).padStart(2, '0')}`
+      const row = sales?.[ymd] || {}
+      for (const t of trades) { runBy[t] += row[t] || 0; }
+      run = trades.reduce((a, t) => a + runBy[t], 0)
+      pace.push({ day, total: Math.round(run), byTrade: Object.fromEntries(trades.map(t => [t, Math.round(runBy[t])])) })
+    }
+
+    // Needs you — only things this person can act on.
+    const needs = []
+    const focus = Array.isArray(ltRow?.ai?.coachingFocus) ? ltRow.ai.coachingFocus.filter(f => f && f.focus && (!isOps || trades.includes(f.dept))) : []
+    if (focus[0] && (prof.role === 'admin' || isOps)) {
+      needs.push({ kind: 'coaching', title: `${focus[0].dept} · ${focus[0].focus}`, sub: [focus[0].upside, focus[0].who ? `Coach first: ${focus[0].who}` : null].filter(Boolean).join(' · '), detail: focus[0].evidence || '', to: isOwner ? '/leadership' : '/team' })
+    }
+    const myFus = fus.filter(f => trades.includes(f.trade))
+    if (myFus.length) {
+      const quoted = myFus.reduce((a, f) => a + (Number(String(f.context?.overall_cost || '').replace(/[^0-9.]/g, '')) || 0), 0)
+      needs.push({ kind: 'reengage', title: `${myFus.length} Re-Engage lead${myFus.length === 1 ? '' : 's'}${quoted ? ` · $${Math.round(quoted / 100) / 10}k quoted` : ''}`, sub: `${myFus.filter(f => f.score >= 4).length} high priority · this week · sent in the 7 AM roundup`, to: '/team' })
+    }
+    if (pto.length) {
+      const ids = [...new Set(pto.map(p => p.profile_id))]
+      const { data: who } = await supabase.from('profiles').select('id, name, email').in('id', ids)
+      const nm = new Map((who || []).map(w => [w.id, String(w.name || w.email || '').split(/\s+/)[0]]))
+      const fmt = (d) => new Date(`${d}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })
+      needs.push({ kind: 'pto', title: `${pto.length} time-off request${pto.length === 1 ? '' : 's'}`, sub: pto.slice(0, 3).map(p => `${nm.get(p.profile_id) || 'Someone'} · ${fmt(p.date)}${p.end_date && p.end_date !== p.date ? `–${fmt(p.end_date)}` : ''}`).join(' · '), to: '/mypage?tab=time-off' })
+    }
+    for (const r of tradeRows) {
+      const tmr = r.capacity[1]
+      if (tmr && tmr.needed > 0 && tmr.capacity > 0) needs.push({ kind: 'capacity', title: `${r.trade} is ${tmr.needed} call${tmr.needed === 1 ? '' : 's'} short for ${tmr.label === 'Today' ? 'today' : tmr.label}`, sub: `${tmr.calls} booked of ${Math.round(tmr.capacity)} · ${tmr.pct ?? 0}% full`, to: '/callboard' })
+    }
+
+    // Brief: pace + the biggest lever, in plain words.
+    const monthName = new Date(`${today}T12:00:00Z`).toLocaleString('en-US', { month: 'long', timeZone: 'UTC' })
+    const soldAll = tradeRows.reduce((a, r) => a + r.sold, 0)
+    const planAll = trades.length === ALL.length ? monthPlan : tradeRows.reduce((a, r) => a + r.plan, 0)
+    const dayNum = Number(today.slice(8, 10))
+    const pacedPlan = Math.round(planAll * dayNum / daysInMonth)
+    const gap = soldAll - pacedPlan
+    // Selling days left, today included (Sat counts ½; rounded for the sentence).
+    const workdaysLeft = Math.max(0, Math.round(homeEffDays(today, lastDay)))
+    const k = (n) => (Math.abs(n) >= 1e6 ? `$${(Math.abs(n) / 1e6).toFixed(2)}M` : `$${Math.round(Math.abs(n) / 1000)}k`)
+    const scopeName = trades.length === ALL.length ? monthName : `${trades.join(' + ')} in ${monthName}`
+    const worst = [...tradeRows].filter(r => r.closeRate != null && r.opps >= 10).sort((a, b) => (a.closeRate - a.closeGoal) - (b.closeRate - b.closeGoal))[0]
+    const lever = focus[0] ? { dept: focus[0].dept, what: focus[0].focus } : worst && worst.closeRate < worst.closeGoal ? { dept: worst.trade, what: 'close rate' } : null
+    const headline = `${scopeName} is ${k(gap)} ${gap >= 0 ? 'ahead of' : 'behind'} plan.${lever ? ` ${lever.dept}’s ${lever.what} is the lever.` : ''}`
+    const leverRow = lever ? tradeRows.find(r => r.trade === lever.dept) : null
+    const body = [
+      `Sold ${k(soldAll)} of ${k(planAll)} with ${workdaysLeft} selling day${workdaysLeft === 1 ? '' : 's'} left.`,
+      leverRow && leverRow.closeRate != null ? `${leverRow.trade} closes ${Math.round(leverRow.closeRate * 100)}% against a ${Math.round(leverRow.closeGoal * 100)}% goal${leverRow.fieldPro?.lowestStep ? ` — its lowest Field Pro step is ${leverRow.fieldPro.lowestStep.step} (${leverRow.fieldPro.lowestStep.score}/100)` : ''}.` : null,
+      focus[0]?.who ? `Coach ${focus[0].who} first.` : null,
+    ].filter(Boolean).join(' ')
+
+    // The live floor (call center) — not for ops managers.
+    let floor = null
+    if (!isOps) {
+      const hide = new Set(['brandynnuffer@gmail.com', 'brandyn.nuffer@awesomeservice.com'])
+      const agents = floorProfs.filter(p => p.role !== 'ops_manager' && !hide.has(String(p.email || '').toLowerCase()))
+        .map(p => ({ id: p.id, name: p.name || p.email, avatar: p.avatar || null, status: p.status, since: p.status_since }))
+        .sort((a, b) => String(a.status).localeCompare(String(b.status)))
+      const waits = queued.map(q => Date.now() - Date.parse(q.queued_at)).filter(n => n > 0)
+      const cf = _ceoFast.data || {}
+      floor = { agents, queued: queued.length, longestWaitSec: waits.length ? Math.round(Math.max(...waits) / 1000) : 0,
+        booking: cf.booking || null, outbounds: cf.csrOutbounds ?? null, leadsToday: cf.leads ?? null }
+    }
+
+    res.json({
+      asOf: new Date().toISOString(), today, month: today.slice(0, 7), monthName, dayOfMonth: dayNum, daysInMonth, workdaysLeft,
+      role: prof.role, isOwner, trades, allTrades: trades.length === ALL.length,
+      plan: { month: planAll, byTrade: Object.fromEntries(tradeRows.map(r => [r.trade, r.plan])) },
+      pace, tradeRows, needs, brief: { headline, body, lever }, floor,
+      goals: { close: B.kpi.close || 0.7, booking: Number(lb?.kpi?.booking) || B.kpi.booking || 0.8, oppsPerDay: tradeRows.reduce((a, r) => a + (r.oppsGoal || 0), 0), clubsPerWeek: Number(lb?.kpi?.clubs) || B.kpi.clubs || null },
+      effDays: effNow,
+      tvBuiltAt: _tvMonth.at || null,
+    })
+  } catch (e) {
+    console.error('home:', e.message)
+    res.status(500).json({ error: e.message })
+  }
 })
 
 // ─────────────────────────────────────────────
