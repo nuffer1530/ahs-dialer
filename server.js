@@ -13214,23 +13214,16 @@ app.post('/api/admin/field-pro/sync', async (req, res) => {
     res.json({ recordings, scorecards })
   } catch (e) { res.status(500).json({ error: e.message }) }
 })
-// Admin: what a Re-Engage email looks like (?id=<followup id>, else newest).
+// Admin: what a person's Re-Engage morning roundup would look like right now
+// (?to=<email>; default = the owner copy). Lists everyone who'd get one.
 app.get('/api/admin/reengage-preview', async (req, res) => {
   if (!(await requireAdmin(req, res))) return
   try {
-    let q = supabase.from('siro_followups').select('*')
-    q = req.query.id ? q.eq('id', String(req.query.id)) : q.order('created_at', { ascending: false }).limit(1)
-    const { data } = await q
-    const f = data?.[0]
-    if (!f) return res.status(404).send('No follow-ups yet')
-    const [{ data: rec }, { data: m }] = await Promise.all([
-      supabase.from('siro_recordings').select('web_url').eq('id', f.recording_id).maybeSingle(),
-      supabase.from('app_settings').select('value').eq('key', 'field_ops_managers').maybeSingle(),
-    ])
-    let mgrs = {}
-    try { mgrs = JSON.parse(m?.value || '{}') } catch {}
-    const { subject, html } = fieldPro.reengageEmail(f, rec, { manager: mgrs[f.trade] || null })
-    res.type('html').send(`<p style="font:13px -apple-system,Arial;color:#64748B">Subject: <b>${String(subject).replace(/</g, '&lt;')}</b></p>${html}`)
+    const p = await fieldPro.previewRoundup(req.query.to)
+    if (!p) return res.status(404).send('No Re-Engage leads yet')
+    const esc = (t) => String(t ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    const list = p.people.map(x => `<a href="?to=${encodeURIComponent(x.email)}">${esc(x.name || x.email)}</a> (${esc(x.role)}, ${x.leads})`).join(' · ')
+    res.type('html').send(`<div style="font:13px -apple-system,Arial;color:#64748B;max-width:660px;margin:0 auto;padding:8px">Recipients: ${list}<br>To: <b>${esc(p.to)}</b> · Subject: <b>${esc(p.subject)}</b></div>${p.html}`)
   } catch (e) { res.status(500).send(e.message) }
 })
 
@@ -13262,15 +13255,15 @@ if (SYNC_INTERVAL_MIN > 0) {
   console.log('Commission sync disabled (COMMISSION_SYNC_MINUTES=0)')
 }
 
-// ── Field Pro (Siro): recordings + follow-ups every 10 min (Re-Engage
-// emails right after), per-rubric scorecards hourly (+ last month during the
+// ── Field Pro (Siro): recordings + follow-ups every 10 min (the 7 AM
+// Re-Engage roundup rides the same tick), per-rubric scorecards hourly (+ last month during the
 // first 3 days so its final numbers settle). Replica-safe: upserts and a
 // per-follow-up email claim.
 if (process.env.SIRO_API_TOKEN || process.env.SIRO_CLIENT_ID) {
   const fpTick = async () => {
     await fieldPro.syncRecordings()
     await fieldPro.refreshFollowupStatuses()   // a lead marked done in Siro never gets emailed
-    await fieldPro.sendReengageEmails().catch(e => console.warn('re-engage emails:', e.message))
+    await fieldPro.sendReengageRoundup()       // 7 AM Denver, once a day: one email per person
   }
   const fpScTick = async () => {
     const ym = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Denver' }).format(new Date())
