@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react'
 import { sb } from '../lib/supabase'
+import { useIsMobile } from '../lib/useIsMobile'
+import { ToneChip, eyebrow, panel } from './ui'
 
 // Settings → Call Routing: hours, holidays, greetings, after-hours behavior,
 // queue/hold settings, voicemail delivery — the whole inbound phone tree.
@@ -48,6 +50,21 @@ function federalHolidays(year) {
   ]
 }
 
+// A routing section: the kit's 16px panel with a header row (title + one-line
+// description) over a hairline divider. Module-level so the inputs inside
+// keep focus across renders.
+function Section({ title, desc, children, style, isMobile }) {
+  return (
+    <div style={{ ...panel, flexShrink: 0, ...style }}>
+      <div style={{ padding: isMobile ? '12px 14px' : '14px 20px', borderBottom: '1px solid var(--border)' }}>
+        <div style={{ fontSize: 14.5, fontWeight: 700, lineHeight: 1.3 }}>{title}</div>
+        {desc && <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2, lineHeight: 1.5 }}>{desc}</div>}
+      </div>
+      <div style={{ padding: isMobile ? 14 : '16px 20px' }}>{children}</div>
+    </div>
+  )
+}
+
 export default function CallRoutingTab() {
   const [cfg, setCfg] = useState(null)
   const [state, setState] = useState(null)
@@ -58,6 +75,7 @@ export default function CallRoutingTab() {
   const [saving, setSaving] = useState(false)
   const [savedMsg, setSavedMsg] = useState('')
   const [extraEmail, setExtraEmail] = useState('')
+  const isMobile = useIsMobile()
 
   useEffect(() => {
     authed('/api/admin/call-routing')
@@ -84,43 +102,51 @@ export default function CallRoutingTab() {
   const setDay = (day, patch) => setCfg(c => ({ ...c, hours: { ...c.hours, [day]: { ...c.hours[day], ...patch } } }))
   const setOverflow = (patch) => setCfg(c => ({ ...c, queue: { ...c.queue, overflow: { ...c.queue.overflow, ...patch } } }))
 
-  if (err && !cfg) return <div style={{ padding: 20, color: 'var(--danger)', fontSize: 13 }}>{err}</div>
-  if (!cfg) return <div className="spinner lg" style={{ margin: '60px auto' }} />
-
-  const overrideOn = cfg.override.active && !(cfg.override.until && Date.parse(cfg.override.until) < Date.now())
-  const input = { border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'7px 10px', fontSize:12.5, background:'var(--surface)', color:'var(--text-primary)' }
-  const lbl = { fontSize:10.5, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color:'var(--text-muted)', marginBottom:4 }
-  const cardTitle = (t, sub) => (
-    <div style={{ marginBottom: 12 }}>
-      <div style={{ fontSize: 13.5, fontWeight: 800 }}>{t}</div>
-      {sub && <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 2 }}>{sub}</div>}
+  const pad = isMobile ? 12 : 24
+  if (err && !cfg) return (
+    <div style={{ padding: pad }}>
+      <div style={{ padding: '10px 14px', borderRadius: 12, fontSize: 12.5, background: 'var(--tone-red-bg)', border: '1px solid var(--tone-red-bd)', color: 'var(--tone-red-tx)' }}>{err}</div>
+    </div>
+  )
+  if (!cfg) return (
+    <div style={{ flex: 1, overflowY: 'auto' }}>
+      <div style={{ padding: pad, maxWidth: 900, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <div className="skel" style={{ height: 50, borderRadius: 16 }} />
+        <div className="skel" style={{ height: 150, borderRadius: 16 }} />
+        <div className="skel" style={{ height: 260, borderRadius: 16 }} />
+      </div>
     </div>
   )
 
+  const overrideOn = cfg.override.active && !(cfg.override.until && Date.parse(cfg.override.until) < Date.now())
+  const input = { border:'1px solid var(--border-strong)', borderRadius:10, padding:'7px 10px', fontSize:12.5, fontFamily:'inherit', background:'var(--surface)', color:'var(--text-primary)' }
+  const lbl = { ...eyebrow, marginBottom:5 }
+  const hintStyle = { fontSize: 11.5, color: 'var(--text-muted)', marginTop: 4, lineHeight: 1.45 }
+
   return (
     <div style={{ flex: 1, overflowY: 'auto' }}>
-      <div style={{ padding: 24, maxWidth: 900, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 16, paddingBottom: 90 }}>
+      <div style={{ padding: pad, maxWidth: 900, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 16, paddingBottom: isMobile ? 16 : 90 }}>
 
         {/* Status line */}
         {state && (
-          <div style={{ fontSize: 12.5, color: 'var(--text-secondary)' }}>
-            Right now the phones are{' '}
-            <b style={{ color: state.open ? 'var(--tone-green-tx)' : 'var(--tone-red-tx)' }}>
-              {state.open ? 'OPEN' : 'CLOSED'}
-            </b>
-            {' '}({state.reason === 'override' ? 'emergency override' : state.reason === 'holiday' ? `holiday: ${state.holiday?.name || ''}` : state.reason === 'hours' ? 'outside business hours' : 'within business hours'} · {state.now} Denver)
+          <div style={{ ...panel, padding: isMobile ? '12px 14px' : '14px 20px', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <span style={eyebrow}>Right now</span>
+            <ToneChip tone={state.open ? 'green' : 'red'}>{state.open ? 'Phones open' : 'Phones closed'}</ToneChip>
+            <span style={{ fontSize: 12.5, color: 'var(--text-secondary)' }}>
+              {state.reason === 'override' ? 'emergency override' : state.reason === 'holiday' ? `holiday: ${state.holiday?.name || ''}` : state.reason === 'hours' ? 'outside business hours' : 'within business hours'} · {state.now} Denver
+            </span>
           </div>
         )}
 
         {/* Emergency override */}
-        <div className="card" style={{ padding: 16, border: overrideOn ? '2px solid var(--tone-red-bd)' : undefined, background: overrideOn ? 'var(--tone-red-bg)' : undefined }}>
-          {cardTitle('Emergency override', 'Close the phones right now — weather day, all-hands, outage. Overrides hours and holidays.')}
+        <Section isMobile={isMobile} title="Emergency override" desc="Close the phones right now — weather day, all-hands, outage. Overrides hours and holidays."
+          style={overrideOn ? { border: '2px solid var(--tone-red-bd)', background: 'var(--tone-red-bg)' } : undefined}>
           <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', flexWrap: 'wrap' }}>
             <button onClick={() => setIn('override', { active: !cfg.override.active })}
-              style={{ padding: '9px 18px', fontSize: 13, fontWeight: 800, borderRadius: 'var(--radius)', cursor: 'pointer',
+              style={{ padding: '9px 18px', fontSize: 13, fontWeight: 800, borderRadius: 99, cursor: 'pointer',
                 border: '1px solid var(--tone-red-bd)',
-                background: cfg.override.active ? 'var(--tone-red-bd)' : 'var(--surface)',
-                color: cfg.override.active ? '#fff' : 'var(--tone-red-tx)' }}>
+                background: cfg.override.active ? 'var(--tone-red-tx)' : 'var(--surface)',
+                color: cfg.override.active ? 'var(--surface)' : 'var(--tone-red-tx)' }}>
               {cfg.override.active ? 'PHONES CLOSED — click to reopen' : 'Close the phones'}
             </button>
             <div style={{ flex: 1, minWidth: 220 }}>
@@ -134,14 +160,13 @@ export default function CallRoutingTab() {
                 onChange={e => setIn('override', { until: e.target.value ? new Date(e.target.value).toISOString() : null })} />
             </div>
           </div>
-        </div>
+        </Section>
 
         {/* Hours */}
-        <div className="card" style={{ padding: 16 }}>
-          {cardTitle('Hours of operation', 'Denver time. Outside these hours, the after-hours handling below takes over.')}
+        <Section isMobile={isMobile} title="Hours of operation" desc="Denver time. Outside these hours, the after-hours handling below takes over.">
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             {DAYS.map(([k, label]) => (
-              <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
                 <span style={{ width: 90, fontSize: 12.5, fontWeight: 600 }}>{label}</span>
                 <label style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, color: 'var(--text-secondary)', cursor: 'pointer', width: 70 }}>
                   <input type="checkbox" checked={!cfg.hours[k].closed} onChange={e => setDay(k, { closed: !e.target.checked })} />
@@ -157,12 +182,11 @@ export default function CallRoutingTab() {
               </div>
             ))}
           </div>
-        </div>
+        </Section>
 
         {/* Holidays */}
-        <div className="card" style={{ padding: 16 }}>
-          {cardTitle('Holiday schedule', 'Closed all day on these dates. A custom message beats the standard closed greeting.')}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 10 }}>
+        <Section isMobile={isMobile} title="Holiday schedule" desc="Closed all day on these dates. A custom message beats the standard closed greeting.">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 12 }}>
             {(cfg.holidays || []).sort((a, b) => (a.date || '').localeCompare(b.date || '')).map((h, i) => (
               <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                 <input type="date" style={input} value={h.date || ''}
@@ -174,11 +198,11 @@ export default function CallRoutingTab() {
                 <button className="btn sm" onClick={() => set({ holidays: cfg.holidays.filter((_, xi) => xi !== i) })}>Remove</button>
               </div>
             ))}
-            {(cfg.holidays || []).length === 0 && <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>No holidays set.</div>}
+            {(cfg.holidays || []).length === 0 && <div style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>No holidays set.</div>}
           </div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button className="btn sm" onClick={() => set({ holidays: [...(cfg.holidays || []), { date: '', name: '', message: '' }] })}>+ Add date</button>
-            <button className="btn sm" onClick={() => {
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <button className="btn sm" style={{ borderRadius: 99 }} onClick={() => set({ holidays: [...(cfg.holidays || []), { date: '', name: '', message: '' }] })}>+ Add date</button>
+            <button className="btn sm" style={{ borderRadius: 99 }} onClick={() => {
               const yr = new Date().getFullYear()
               const candidates = [...federalHolidays(yr), ...federalHolidays(yr + 1)]
                 .filter(h => h.date >= new Date().toISOString().slice(0, 10))
@@ -187,12 +211,11 @@ export default function CallRoutingTab() {
               set({ holidays: [...(cfg.holidays || []), ...candidates.map(h => ({ ...h, message: '' }))] })
             }}>+ Add upcoming US holidays</button>
           </div>
-        </div>
+        </Section>
 
         {/* Greetings */}
-        <div className="card" style={{ padding: 16 }}>
-          {cardTitle('Greetings & voice', 'Type it, save it, and the very next caller hears it. All spoken with the voice below.')}
-          <div style={{ marginBottom: 12, maxWidth: 380 }}>
+        <Section isMobile={isMobile} title="Greetings & voice" desc="Type it, save it, and the very next caller hears it. All spoken with the voice below.">
+          <div style={{ marginBottom: 14, maxWidth: 380 }}>
             <div style={lbl}>Voice</div>
             <select style={{ ...input, width: '100%' }} value={cfg.voice} onChange={e => set({ voice: e.target.value })}>
               {voices.map(v => <option key={v} value={v}>{VOICE_LABELS[v] || v}</option>)}
@@ -203,19 +226,18 @@ export default function CallRoutingTab() {
             ['closed', 'Closed / after-hours greeting', 'Played when calling outside business hours.'],
             ['holiday', 'Holiday greeting (optional)', 'Blank = the closed greeting is used on holidays.'],
             ['voicemail', 'Voicemail prompt', 'Played right before the record beep.'],
-          ].map(([k, label, hint]) => (
-            <div key={k} style={{ marginBottom: 10 }}>
+          ].map(([k, label, hint], gi) => (
+            <div key={k} style={{ marginBottom: gi === 3 ? 0 : 12 }}>
               <div style={lbl}>{label}</div>
               <textarea rows={2} style={{ ...input, width: '100%', resize: 'vertical', fontFamily: 'inherit' }}
                 placeholder={hint} value={cfg.greetings[k]} onChange={e => setIn('greetings', { [k]: e.target.value })} />
-              <div style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>{hint}</div>
+              <div style={{ ...hintStyle, marginTop: 2 }}>{hint}</div>
             </div>
           ))}
-        </div>
+        </Section>
 
         {/* After hours */}
-        <div className="card" style={{ padding: 16 }}>
-          {cardTitle('After-hours & holiday handling', 'What happens once the closed greeting has played.')}
+        <Section isMobile={isMobile} title="After-hours & holiday handling" desc="What happens once the closed greeting has played.">
           <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end' }}>
             <div>
               <div style={lbl}>Action</div>
@@ -241,16 +263,15 @@ export default function CallRoutingTab() {
             )}
           </div>
           {cfg.afterHours.action === 'forward' && !cfg.afterHours.forwardNumber && (
-            <div style={{ fontSize: 11.5, color: 'var(--tone-amber-tx)', marginTop: 8 }}>
+            <div style={{ marginTop: 12, padding: '10px 14px', borderRadius: 12, fontSize: 12.5, background: 'var(--tone-amber-bg)', border: '1px solid var(--tone-amber-bd)', color: 'var(--tone-amber-tx)' }}>
               No on-call number set — callers will go to voicemail until one is entered.
             </div>
           )}
-        </div>
+        </Section>
 
         {/* Queue */}
-        <div className="card" style={{ padding: 16 }}>
-          {cardTitle('Queue & hold', 'What callers experience while waiting for a rep during open hours.')}
-          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 10 }}>
+        <Section isMobile={isMobile} title="Queue & hold" desc="What callers experience while waiting for a rep during open hours.">
+          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 12 }}>
             <div>
               <div style={lbl}>Hold music</div>
               <select style={{ ...input, minWidth: 180 }} value={cfg.queue.holdMusic} onChange={e => setIn('queue', { holdMusic: e.target.value })}>
@@ -265,7 +286,7 @@ export default function CallRoutingTab() {
               </div>
             )}
           </div>
-          <div style={{ marginBottom: 10 }}>
+          <div style={{ marginBottom: 12 }}>
             <div style={lbl}>Comfort message (repeats between music loops)</div>
             <input style={{ ...input, width: '100%' }} value={cfg.queue.comfortMessage}
               onChange={e => setIn('queue', { comfortMessage: e.target.value })} />
@@ -294,18 +315,18 @@ export default function CallRoutingTab() {
               </div>
             )}
           </div>
-        </div>
+        </Section>
 
         {/* Dispatch line */}
         {cfg.dispatchLine && (
-          <div className="card" style={{ padding: 16 }}>
-            {cardTitle('Dispatch line — (719) 259-2681', 'The technicians’ line. Always open, rings only workers with the Dispatch skill, voicemail after the max wait. Point the ST dispatch tracking number’s forwarding here.')}
-            <div style={{ marginBottom: 10 }}>
+          <Section isMobile={isMobile} title="Dispatch line — (719) 259-2681"
+            desc="The technicians’ line. Always open, rings only workers with the Dispatch skill, voicemail after the max wait. Point the ST dispatch tracking number’s forwarding here.">
+            <div style={{ marginBottom: 12 }}>
               <div style={lbl}>Greeting</div>
               <textarea rows={2} style={{ ...input, width: '100%', resize: 'vertical', fontFamily: 'inherit' }}
                 value={cfg.dispatchLine.greeting} onChange={e => setIn('dispatchLine', { greeting: e.target.value })} />
             </div>
-            <div style={{ marginBottom: 10 }}>
+            <div style={{ marginBottom: 12 }}>
               <div style={lbl}>Voicemail prompt (no dispatcher answered)</div>
               <textarea rows={2} style={{ ...input, width: '100%', resize: 'vertical', fontFamily: 'inherit' }}
                 value={cfg.dispatchLine.voicemail} onChange={e => setIn('dispatchLine', { voicemail: e.target.value })} />
@@ -315,13 +336,12 @@ export default function CallRoutingTab() {
               <input type="number" min="15" max="600" style={{ ...input, width: 90 }} value={cfg.dispatchLine.maxWaitSec}
                 onChange={e => setIn('dispatchLine', { maxWaitSec: parseInt(e.target.value) || 60 })} />
             </div>
-          </div>
+          </Section>
         )}
 
         {/* Voicemail */}
-        <div className="card" style={{ padding: 16 }}>
-          {cardTitle('Voicemail', 'Voicemails land in Recordings with a transcript, and email whoever is checked below.')}
-          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 12 }}>
+        <Section isMobile={isMobile} title="Voicemail" desc="Voicemails land in Recordings with a transcript, and email whoever is checked below.">
+          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 14 }}>
             <div>
               <div style={lbl}>Max length (sec)</div>
               <input type="number" min="30" max="600" style={{ ...input, width: 90 }} value={cfg.voicemail.maxSec}
@@ -334,12 +354,13 @@ export default function CallRoutingTab() {
             </label>
           </div>
           <div style={lbl}>Email a copy to</div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 8 }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
             {profiles.map(p => {
               const em = p.email
               const on = (cfg.voicemail.emails || []).includes(em)
               return (
-                <label key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, padding: '5px 10px', border: '1px solid var(--border)', borderRadius: 99, cursor: 'pointer', background: on ? 'var(--accent-bg)' : 'var(--surface)' }}>
+                <label key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, fontWeight: on ? 600 : 500, padding: '5px 11px', border: `1px solid ${on ? 'var(--accent)' : 'var(--border)'}`, borderRadius: 99, cursor: 'pointer',
+                  background: on ? 'var(--accent-bg)' : 'var(--surface)', color: on ? 'var(--accent-text)' : 'var(--text-primary)' }}>
                   <input type="checkbox" checked={on} onChange={e => setIn('voicemail', {
                     emails: e.target.checked ? [...(cfg.voicemail.emails || []), em] : (cfg.voicemail.emails || []).filter(x => x !== em),
                   })} />
@@ -348,29 +369,29 @@ export default function CallRoutingTab() {
               )
             })}
           </div>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
             <input style={{ ...input, width: 240 }} placeholder="Add another email…" value={extraEmail} onChange={e => setExtraEmail(e.target.value)} />
-            <button className="btn sm" onClick={() => {
+            <button className="btn sm" style={{ borderRadius: 99 }} onClick={() => {
               const em = extraEmail.trim()
               if (em && !(cfg.voicemail.emails || []).includes(em)) setIn('voicemail', { emails: [...(cfg.voicemail.emails || []), em] })
               setExtraEmail('')
             }}>Add</button>
             {(cfg.voicemail.emails || []).filter(em => !profiles.some(p => p.email === em)).map(em => (
-              <span key={em} style={{ fontSize: 11.5, padding: '4px 9px', border: '1px solid var(--border)', borderRadius: 99, background: 'var(--surface-2)' }}>
-                {em} <span style={{ cursor: 'pointer', marginLeft: 3 }} onClick={() => setIn('voicemail', { emails: cfg.voicemail.emails.filter(x => x !== em) })}>×</span>
+              <span key={em} style={{ fontSize: 11.5, padding: '4px 10px', border: '1px solid var(--border)', borderRadius: 99, background: 'var(--surface-2)' }}>
+                {em} <span style={{ cursor: 'pointer', marginLeft: 3, color: 'var(--text-muted)' }} onClick={() => setIn('voicemail', { emails: cfg.voicemail.emails.filter(x => x !== em) })}>×</span>
               </span>
             ))}
           </div>
-        </div>
+        </Section>
       </div>
 
       {/* Sticky save bar */}
-      <div style={{ position: 'sticky', bottom: 0, background: 'var(--surface)', borderTop: '1px solid var(--border)', padding: '12px 24px', display: 'flex', alignItems: 'center', gap: 12 }}>
-        <button className="btn primary" onClick={save} disabled={saving} style={{ padding: '9px 26px', fontWeight: 700 }}>
+      <div style={{ position: 'sticky', bottom: 0, background: 'var(--surface)', borderTop: '1px solid var(--border)', padding: isMobile ? '10px 12px' : '12px 24px', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+        <button className="btn primary" onClick={save} disabled={saving} style={{ padding: '9px 26px', fontWeight: 700, borderRadius: 99 }}>
           {saving ? 'Saving…' : 'Save call routing'}
         </button>
-        {savedMsg && <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--success)' }}>{savedMsg}</span>}
-        {err && <span style={{ fontSize: 12.5, color: 'var(--danger)' }}>{err}</span>}
+        {savedMsg && <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--tone-green-tx)' }}>{savedMsg}</span>}
+        {err && <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--tone-red-tx)' }}>{err}</span>}
         <span style={{ fontSize: 11.5, color: 'var(--text-muted)', marginLeft: 'auto' }}>Changes apply to the next inbound call.</span>
       </div>
     </div>

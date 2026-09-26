@@ -11,6 +11,7 @@ import { useState, useEffect, useRef, useCallback, Component } from 'react'
 import { sb } from '../lib/supabase'
 import { confirmDlg } from '../lib/dialogs'
 import { useIsMobile } from '../lib/useIsMobile'
+import { PageTabs, ToneChip, eyebrow, num, panel } from '../components/ui'
 
 const money = (n) => `$${Math.round(Number(n) || 0).toLocaleString()}`
 const pct = (n) => (n == null ? '—' : `${Math.round(Number(n) * 100)}%`)
@@ -19,27 +20,35 @@ const pct = (n) => (n == null ? '—' : `${Math.round(Number(n) * 100)}%`)
 // every week unless Brandyn types something else.
 const DEFAULT_POSITIVE = 'Everyone shares either personal or professional positive news from last week or the upcoming week'
 
+// Screen look = the app-wide kit (16px panels, eyebrow labels, tone tokens,
+// tabular numbers). The printed agenda keeps its own tuned compact look: every
+// printed element restyled here carries an lp-* class that the print sheet
+// pins back to the pre-restyle print values (see "Restyle pins" in the page).
 const S = {
   // The app shell is overflow:hidden — every page owns its scroll.
   scroll: { flex: 1, overflowY: 'auto' },
-  page: { maxWidth: 1000, margin: '0 auto', padding: '20px 24px 60px' },
+  page: { maxWidth: 1280, margin: '0 auto', padding: '24px 24px 60px' },
+  // Print-only agenda title (the print sheet sizes it) — the screen title is `title`.
   h1: { fontSize: 22, fontWeight: 800, color: 'var(--text-primary)', margin: 0 },
+  title: { fontSize: 22, fontWeight: 800, letterSpacing: '-.02em', lineHeight: 1.2, color: 'var(--text-primary)', margin: 0 },
   sub: { fontSize: 13, color: 'var(--text-secondary)' },
-  section: { background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', padding: '16px 18px', marginTop: 16 },
-  sectionTitle: { fontSize: 11, fontWeight: 800, letterSpacing: 1, textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 10 },
-  th: { textAlign: 'right', padding: '6px 8px', borderBottom: '1px solid var(--border)', fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.6, color: 'var(--text-muted)', whiteSpace: 'nowrap' },
-  td: { textAlign: 'right', padding: '7px 8px', borderBottom: '1px solid var(--border)', fontSize: 13, color: 'var(--text-primary)', whiteSpace: 'nowrap' },
-  input: { width: '100%', padding: '6px 8px', border: '1px solid var(--border)', borderRadius: 6, background: 'var(--surface)', color: 'var(--text-primary)', fontSize: 13, fontFamily: 'inherit', boxSizing: 'border-box' },
-  btn: { padding: '7px 14px', border: '1px solid var(--border)', borderRadius: 7, background: 'var(--surface)', color: 'var(--text-primary)', fontSize: 13, fontWeight: 600, cursor: 'pointer' },
-  btnPrimary: { padding: '7px 14px', border: '1px solid var(--accent)', borderRadius: 7, background: 'var(--accent)', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer' },
-  good: { color: 'var(--success)', fontWeight: 700 },
-  warn: { color: 'var(--warning)', fontWeight: 700 },
-  bad: { color: 'var(--danger)', fontWeight: 700 },
-  card: { flex: 1, border: '1px solid var(--border)', borderRadius: 10, padding: '12px 14px', minWidth: 150 },
-  cardLabel: { fontSize: 10, fontWeight: 700, letterSpacing: 0.8, textTransform: 'uppercase', color: 'var(--text-muted)' },
-  cardValue: { fontSize: 22, fontWeight: 800, color: 'var(--text-primary)', marginTop: 3 },
-  cardSub: { fontSize: 11, color: 'var(--text-secondary)', marginTop: 2 },
+  section: { ...panel, padding: '16px 20px', marginTop: 16 },
+  sectionTitle: { ...eyebrow, marginBottom: 12 },
+  th: { ...eyebrow, textAlign: 'right', padding: '8px 8px', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' },
+  td: { ...num, textAlign: 'right', padding: '8px 8px', borderBottom: '1px solid var(--border)', fontSize: 13, color: 'var(--text-primary)', whiteSpace: 'nowrap' },
+  // Paired with className="form-input" (border, radius, focus ring); this keeps the rows dense.
+  input: { padding: '6px 10px' },
+  good: { color: 'var(--tone-green-tx)', fontWeight: 700 },
+  warn: { color: 'var(--tone-amber-tx)', fontWeight: 700 },
+  bad: { color: 'var(--tone-red-tx)', fontWeight: 700 },
+  // Stat strip: zones split by hairlines — the 1px gaps let the border color
+  // show through, so it works as one row on desktop and two-up on a phone.
+  strip: { display: 'flex', flexWrap: 'wrap', gap: 1, background: 'var(--border)' },
 }
+const TONE = { good: 'green', warn: 'amber', bad: 'red' }
+
+// Section heading — the eyebrow label. lp-title is its print hook.
+const Title = ({ children, style }) => <div className="lp-title" style={{ ...S.sectionTitle, ...style }}>{children}</div>
 
 // Phone reading order for the report's top-level blocks: numbers first, the
 // AI read, then the rosters, with the fill-in sections last. Applied as flex
@@ -56,14 +65,17 @@ const goalToneName = (val, goal) => {
   return val >= goal ? 'good' : val >= goal * 0.9 ? 'warn' : 'bad'
 }
 
-// `style` and `big` are phone-only knobs (two-up widths, a larger headline
-// number) — desktop callers pass neither, so nothing changes there.
+// One zone of a stat strip (S.strip). `style` and `big` are phone-only knobs
+// (two-up widths, a larger headline number) — desktop callers pass neither.
+// minWidth 150 is also a print hook: print turns zones back into boxed cards.
 function Card({ label, value, sub, tone, style, big }) {
+  const isMobile = useIsMobile()
   return (
-    <div style={{ ...S.card, ...style }}>
-      <div style={S.cardLabel}>{label}</div>
-      <div style={{ ...S.cardValue, ...(big ? { fontSize: 30 } : {}), ...(tone === 'good' ? { color: 'var(--success)' } : tone === 'warn' ? { color: 'var(--warning)' } : tone === 'bad' ? { color: 'var(--danger)' } : {}) }}>{value}</div>
-      {sub && <div style={S.cardSub}>{sub}</div>}
+    <div className="lp-card" style={{ flex: 1, minWidth: 150, padding: isMobile ? '14px 14px' : '16px 20px', background: 'var(--surface)', ...style }}>
+      <div className="lp-card-label" style={eyebrow}>{label}</div>
+      <div className="lp-card-value" style={{ ...num, fontSize: big ? 32 : isMobile ? 22 : 26, fontWeight: 800, letterSpacing: '-.02em', lineHeight: 1.15, marginTop: 6,
+        color: TONE[tone] ? `var(--tone-${TONE[tone]}-tx)` : 'var(--text-primary)' }}>{value}</div>
+      {sub && <div className="lp-card-sub" style={{ fontSize: 12.5, color: 'var(--text-secondary)', marginTop: 4 }}>{sub}</div>}
     </div>
   )
 }
@@ -79,7 +91,7 @@ function Table({ headers, rows }) {
       <table style={{ width: '100%', borderCollapse: 'collapse' }}>
         <thead><tr>{headers.map((h, i) => <th key={i} className={i === 0 ? pin : undefined} style={{ ...S.th, textAlign: i ? 'right' : 'left' }}>{h}</th>)}</tr></thead>
         <tbody>{rows.map((r, ri) => (
-          <tr key={ri}>{r.map((c, ci) => <td key={ci} className={ci === 0 ? pin : undefined} style={{ ...S.td, textAlign: ci ? 'right' : 'left', ...(ci === 0 ? { fontWeight: 600 } : {}) }}>{c}</td>)}</tr>
+          <tr key={ri} className="eval-row">{r.map((c, ci) => <td key={ci} className={ci === 0 ? pin : undefined} style={{ ...S.td, textAlign: ci ? 'right' : 'left', ...(ci === 0 ? { fontWeight: 600 } : {}) }}>{c}</td>)}</tr>
         ))}</tbody>
       </table>
     </div>
@@ -99,12 +111,12 @@ function EditRows({ rows, cols, onChange }) {
   const isMobile = useIsMobile()
   // Phone cell — same select / input the table draws, just not in a table.
   const field = (r, ri, c) => c.options ? (
-    <select style={S.input} value={r[c.key] || ''} onChange={e => set(ri, c.key, e.target.value)}>
+    <select className="form-input" style={S.input} value={r[c.key] || ''} onChange={e => set(ri, c.key, e.target.value)}>
       <option value=""></option>
       {c.options.map(o => <option key={o} value={o}>{o}</option>)}
     </select>
   ) : (
-    <input style={S.input} value={r[c.key] || ''} placeholder={ri === display.length - 1 ? c.placeholder || '' : ''}
+    <input className="form-input" style={S.input} value={r[c.key] || ''} placeholder={ri === display.length - 1 ? c.placeholder || '' : ''}
       onChange={e => set(ri, c.key, e.target.value)} />
   )
   return (
@@ -115,9 +127,9 @@ function EditRows({ rows, cols, onChange }) {
         // (dashed, so it reads as the empty one).
         <div className="no-print" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           {display.map((r, ri) => (
-            <div key={ri} style={{ border: `1px ${ri === display.length - 1 ? 'dashed' : 'solid'} var(--border)`, borderRadius: 8, padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div key={ri} style={{ border: `1px ${ri === display.length - 1 ? 'dashed' : 'solid'} var(--border)`, borderRadius: 12, padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 8 }}>
               {cols.map(c => (
-                <label key={c.key} style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 10, fontWeight: 700, letterSpacing: 0.6, textTransform: 'uppercase', color: 'var(--text-muted)' }}>
+                <label key={c.key} style={{ ...eyebrow, display: 'flex', flexDirection: 'column', gap: 4 }}>
                   {c.label}
                   {field(r, ri, c)}
                 </label>
@@ -131,14 +143,14 @@ function EditRows({ rows, cols, onChange }) {
           <thead><tr>{cols.map(c => <th key={c.key} style={{ ...S.th, textAlign: 'left', width: c.width }}>{c.label}</th>)}</tr></thead>
           <tbody>{display.map((r, ri) => (
             <tr key={ri}>{cols.map(c => (
-              <td key={c.key} style={{ padding: '3px 4px', borderBottom: '1px solid var(--border)' }}>
+              <td key={c.key} style={{ padding: '4px 4px', borderBottom: '1px solid var(--border)' }}>
                 {c.options ? (
-                  <select style={S.input} value={r[c.key] || ''} onChange={e => set(ri, c.key, e.target.value)}>
+                  <select className="form-input" style={S.input} value={r[c.key] || ''} onChange={e => set(ri, c.key, e.target.value)}>
                     <option value=""></option>
                     {c.options.map(o => <option key={o} value={o}>{o}</option>)}
                   </select>
                 ) : (
-                  <input style={S.input} value={r[c.key] || ''} placeholder={ri === display.length - 1 ? c.placeholder || '' : ''}
+                  <input className="form-input" style={S.input} value={r[c.key] || ''} placeholder={ri === display.length - 1 ? c.placeholder || '' : ''}
                     onChange={e => set(ri, c.key, e.target.value)} />
                 )}
               </td>
@@ -175,7 +187,7 @@ function EditList({ items, onChange, mark }) {
         {display.map((x, i) => (
           <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
             <span style={{ color: 'var(--text-muted)', width: 14 }}>{mark}</span>
-            <input style={S.input} value={x} placeholder={i === display.length - 1 ? 'Add…' : ''} onChange={e => set(i, e.target.value)} />
+            <input className="form-input" style={S.input} value={x} placeholder={i === display.length - 1 ? 'Add…' : ''} onChange={e => set(i, e.target.value)} />
           </div>
         ))}
       </div>
@@ -199,13 +211,13 @@ class LeadershipErrorBoundary extends Component {
     if (this.state.error) {
       return (
         <div style={{ flex: 1, overflowY: 'auto', padding: 24 }}>
-          <div style={{ maxWidth: 700, margin: '40px auto', background: 'var(--surface)', border: '1px solid var(--danger)', borderRadius: 12, padding: '20px 24px' }}>
-            <div style={{ fontSize: 16, fontWeight: 800, color: 'var(--danger)', marginBottom: 8 }}>The Leadership page hit an error rendering this report</div>
-            <div style={{ fontSize: 13, color: 'var(--text-primary)', fontFamily: 'monospace', whiteSpace: 'pre-wrap', background: 'var(--surface-2)', borderRadius: 8, padding: '10px 12px', marginBottom: 12 }}>
+          <div style={{ ...panel, maxWidth: 700, margin: '40px auto', borderColor: 'var(--tone-red-bd)', padding: '20px 24px' }}>
+            <div style={{ fontSize: 16, fontWeight: 800, color: 'var(--tone-red-tx)', marginBottom: 8 }}>The Leadership page hit an error rendering this report</div>
+            <div style={{ fontSize: 13, color: 'var(--text-primary)', fontFamily: 'monospace', whiteSpace: 'pre-wrap', background: 'var(--surface-2)', borderRadius: 10, padding: '10px 12px', marginBottom: 12 }}>
               {String(this.state.error?.message || this.state.error)}
             </div>
             <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', marginBottom: 12 }}>Screenshot this box for Claude — it names the exact field that broke.</div>
-            <button style={{ padding: '7px 14px', border: '1px solid var(--border)', borderRadius: 7, background: 'var(--surface)', color: 'var(--text-primary)', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}
+            <button className="btn" style={{ borderRadius: 99 }}
               onClick={() => { this.setState({ error: null }) }}>Try again</button>
           </div>
         </div>
@@ -240,11 +252,15 @@ function LeadershipPageInner() {
   // when isMobile is false, so the desktop render is byte-for-byte the same.
   const isMobile = useIsMobile()
   const mo = (k) => (isMobile ? { order: MOBILE_ORDER[k] } : undefined)
-  const sec = isMobile ? { ...S.section, padding: '12px 12px' } : S.section
+  const sec = isMobile ? { ...S.section, padding: '14px 14px' } : S.section
   const page = isMobile ? { ...S.page, padding: '12px 12px 48px' } : S.page
   const mBtn = isMobile ? { padding: '11px 14px', minHeight: 40 } : undefined   // 40px tap targets
   const half = isMobile ? { flex: '1 1 calc(50% - 5px)' } : undefined          // KPI cards two-up
   const full = isMobile ? { flex: '1 1 100%' } : undefined
+  // A stat strip inside a section runs edge to edge (hairline above and below);
+  // the headline strip is its own panel. lp-cards is the print hook for both.
+  const bleed = { ...S.strip, margin: isMobile ? '0 -14px' : '0 -20px', borderTop: '1px solid var(--border)', borderBottom: '1px solid var(--border)' }
+  const pill = { borderRadius: 99, ...mBtn }
 
   const authHeaders = useCallback(async () => {
     const { data: { session } } = await sb.auth.getSession()
@@ -365,17 +381,10 @@ function LeadershipPageInner() {
 
   return (
     <div style={isMobile && ltab === 'brain' ? { ...S.scroll, display: 'flex', flexDirection: 'column' } : S.scroll}>
-    {/* Same tab chrome as Dispatch for Profit / My Page: full-width surface
-        bar, accent underline, sticky so it survives the agenda's scroll. */}
-    <div className="no-print" style={{ position: 'sticky', top: 0, zIndex: 30, background: 'var(--surface)', borderBottom: '1px solid var(--border)', padding: isMobile ? '0 12px' : '0 24px', display: 'flex', gap: 4 }}>
-      {[['agenda', 'Weekly Agenda'], ['brain', 'AI Analyst']].map(([k, l]) => (
-        <button key={k} onClick={() => setLtab(k)}
-          style={{ padding: '12px 14px', border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 13,
-            fontWeight: ltab === k ? 700 : 500, color: ltab === k ? 'var(--accent)' : 'var(--text-muted)',
-            borderBottom: `2px solid ${ltab === k ? 'var(--accent)' : 'transparent'}`, marginBottom: -1 }}>
-          {l}
-        </button>
-      ))}
+    {/* The app's page header: full-width surface bar with the kit's page
+        tabs, sticky so it survives the agenda's scroll. */}
+    <div className="no-print" style={{ position: 'sticky', top: 0, zIndex: 30, background: 'var(--surface)', borderBottom: '1px solid var(--border)', padding: isMobile ? '0 12px' : '0 24px', display: 'flex', alignItems: 'center', gap: 12 }}>
+      <PageTabs value={ltab} onChange={setLtab} tabs={[['agenda', 'Weekly Agenda'], ['brain', 'AI Analyst']]} />
     </div>
     {/* Phone + AI tab: the page becomes a flex column so the chat fills the
         space under the tabs instead of sizing itself off the viewport. */}
@@ -405,7 +414,9 @@ function LeadershipPageInner() {
             --bg: #fff; --surface: #fff; --surface-2: #f5f5f4; --border: #c8c8c4; --border-strong: #999;
             --text-primary: #111; --text-secondary: #3a3a38; --text-muted: #6a6a66;
             --accent: #1A5C8A; --success: #15803D; --danger: #B91C1C; --warning: #8A5A00;
-            --tone-amber-bg: #fff; --tone-amber-bd: #c8c8c4; --tone-amber-tx: #6a6a66;
+            --tone-amber-bg: #fff; --tone-amber-bd: #c8c8c4;
+            /* Status colors on screen are tone tokens; they print as the old success / warning / danger. */
+            --tone-green-tx: #15803D; --tone-amber-tx: #8A5A00; --tone-red-tx: #B91C1C;
           }
           /* Editors are replaced by their static .print-only twins. */
           .no-print { display: none !important; }
@@ -430,6 +441,17 @@ function LeadershipPageInner() {
           #leadership-print table { width: 100% !important; table-layout: auto; }
           #leadership-print th, #leadership-print td { white-space: normal !important; font-size: 8.5px !important; padding: 2px 4px !important; line-height: 1.25 !important; }
           #leadership-print .lp-trend { height: 96px !important; }
+          /* Restyle pins (Sep 2026): the screen moved to the app-wide kit (eyebrow
+             labels, hairline stat strips, tabular numbers). These hold the printed
+             agenda at its tuned values — keep them after the rules above. */
+          #leadership-print, #leadership-print * { font-variant-numeric: normal !important; }
+          #leadership-print .lp-title { font-size: 8.5px !important; font-weight: 800 !important; letter-spacing: 1px !important; margin-bottom: 4px !important; }
+          #leadership-print th { font-size: 8px !important; letter-spacing: 0.6px !important; }
+          #leadership-print .lp-cards { background: none !important; border: none !important; overflow: visible !important; margin-left: 0 !important; margin-right: 0 !important; }
+          #leadership-print .lp-card { border: 1px solid var(--border) !important; background: none !important; }
+          #leadership-print .lp-card-label { font-size: 8px !important; letter-spacing: 0.8px !important; }
+          #leadership-print .lp-card-value { font-size: 14px !important; margin-top: 1px !important; line-height: 1.5 !important; letter-spacing: normal !important; }
+          #leadership-print .lp-card-sub { font-size: 8.5px !important; margin-top: 2px !important; line-height: 1.5 !important; }
         }
       `}</style>
       {/* Phone only: report tables scroll sideways; pin their first column
@@ -446,28 +468,24 @@ function LeadershipPageInner() {
 
       {/* Phone: the title takes the whole first line so the three buttons
           land together on one row beneath it, all 40px tall. */}
-      <div className="no-print" style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 4 }}>
-        <div style={isMobile ? { flex: '1 1 100%' } : { flex: 1 }}>
-          <h1 style={S.h1}>Weekly Leadership Agenda</h1>
-          <div style={S.sub}>Week ending&nbsp;
-            <select value={week || ''} onChange={e => setWeek(e.target.value)}
-              style={{ ...S.input, width: 'auto', display: 'inline-block', padding: isMobile ? '10px 8px' : '3px 6px' }}>
+      <div className="no-print" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>
+        <div style={isMobile ? { flex: '1 1 100%' } : { flex: 1, minWidth: 0 }}>
+          <h1 style={S.title}>Weekly Leadership Agenda</h1>
+          <div style={{ ...S.sub, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 6 }}>
+            <span>Week ending</span>
+            <select className="form-input" value={week || ''} onChange={e => setWeek(e.target.value)}
+              style={{ width: 'auto', borderRadius: 99, fontWeight: 600, padding: isMobile ? '10px 14px' : '5px 12px' }}>
               {weeks.map(w => <option key={w} value={w}>{w}{w === currentWeek ? ' — this week (in progress)' : ''}</option>)}
             </select>
-            {report?.facts?.partial && (
-              <span style={{ marginLeft: 10, fontSize: 11.5, fontWeight: 700, padding: '2px 8px', borderRadius: 20,
-                background: 'var(--tone-amber-bg)', border: '1px solid var(--tone-amber-bd)', color: 'var(--tone-amber-tx)' }}>
-                data through {report.facts.asOf}
-              </span>
-            )}
-            {saving === 'saving' && <span style={{ marginLeft: 10, color: 'var(--text-muted)', fontSize: 12 }}>Saving…</span>}
-            {saving === 'saved' && <span style={{ marginLeft: 10, color: 'var(--success)', fontSize: 12 }}>Saved ✓</span>}
-            {saving === 'error' && <span style={{ marginLeft: 10, color: 'var(--danger)', fontSize: 12 }}>Save failed (migration pending?)</span>}
+            {report?.facts?.partial && <ToneChip tone="amber">data through {report.facts.asOf}</ToneChip>}
+            {saving === 'saving' && <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>Saving…</span>}
+            {saving === 'saved' && <span style={{ color: 'var(--tone-green-tx)', fontSize: 12, fontWeight: 600 }}>Saved ✓</span>}
+            {saving === 'error' && <span style={{ color: 'var(--tone-red-tx)', fontSize: 12, fontWeight: 600 }}>Save failed (migration pending?)</span>}
           </div>
         </div>
-        <button style={{ ...S.btn, ...mBtn }} disabled={loading} onClick={() => load(week, true)}>↻ Refresh numbers</button>
-        <button style={{ ...S.btn, ...mBtn }} onClick={() => window.print()}>🖨 Print</button>
-        <button style={{ ...S.btnPrimary, ...mBtn }} disabled={busy === 'email'} onClick={emailIt}>{busy === 'email' ? 'Sending…' : '✉ Email it'}</button>
+        <button className="btn" style={pill} disabled={loading} onClick={() => load(week, true)}>↻ Refresh numbers</button>
+        <button className="btn" style={pill} onClick={() => window.print()}>🖨 Print</button>
+        <button className="btn primary" style={pill} disabled={busy === 'email'} onClick={emailIt}>{busy === 'email' ? 'Sending…' : '✉ Email it'}</button>
       </div>
 
       {migrationPending && (
@@ -476,8 +494,12 @@ function LeadershipPageInner() {
           rebuilds from scratch (~1 min) and fill-ins are lost. Run the SQL block from SUPABASE_SETUP.sql (bottom) in the Supabase SQL editor.
         </div>
       )}
-      {error && <div style={{ ...sec, borderColor: 'var(--danger)', color: 'var(--danger)' }}>{error}</div>}
-      {loading && <div style={{ ...sec, color: 'var(--text-secondary)' }}>Building W/E {week} from ServiceTitan + Andi — 20–60s on a fresh pull…</div>}
+      {error && <div style={{ ...sec, borderColor: 'var(--tone-red-bd)', background: 'var(--tone-red-bg)', color: 'var(--tone-red-tx)', fontSize: 13 }}>{error}</div>}
+      {loading && <>
+        <div style={{ ...sec, color: 'var(--text-secondary)', fontSize: 13 }}>Building W/E {week} from ServiceTitan + Andi — 20–60s on a fresh pull…</div>
+        <div className="skel" style={{ height: isMobile ? 220 : 104, borderRadius: 16, marginTop: 16 }} />
+        <div className="skel" style={{ height: 280, borderRadius: 16, marginTop: 16 }} />
+      </>}
 
       {f && !loading && (
         <div id="leadership-print" style={isMobile ? { display: 'flex', flexDirection: 'column' } : undefined}>
@@ -493,12 +515,12 @@ function LeadershipPageInner() {
 
           {/* Meeting openers */}
           <div style={{ ...sec, ...mo('openers') }}>
-            <div style={S.sectionTitle}>Quote · Ice breaker · Positive news</div>
+            <Title>Quote · Ice breaker · Positive news</Title>
             <div style={{ display: 'grid', gap: 8 }}>
-              <div className="no-print" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                <input style={S.input} placeholder="Quote of the day…" value={notes.quote || ''} onChange={e => patchNotes({ quote: e.target.value })} />
-                <input style={S.input} placeholder="Ice breaker…" value={notes.icebreaker || ''} onChange={e => patchNotes({ icebreaker: e.target.value })} />
-                <input style={S.input} placeholder="Positive news prompt…" value={notes.positive ?? DEFAULT_POSITIVE} onChange={e => patchNotes({ positive: e.target.value })} />
+              <div className="no-print" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <input className="form-input" placeholder="Quote of the day…" value={notes.quote || ''} onChange={e => patchNotes({ quote: e.target.value })} />
+                <input className="form-input" placeholder="Ice breaker…" value={notes.icebreaker || ''} onChange={e => patchNotes({ icebreaker: e.target.value })} />
+                <input className="form-input" placeholder="Positive news prompt…" value={notes.positive ?? DEFAULT_POSITIVE} onChange={e => patchNotes({ positive: e.target.value })} />
               </div>
               <div className="print-only" style={{ display: 'none', fontSize: 12.5, lineHeight: 1.7 }}>
                 {notes.quote && <div><b>Quote:</b> {notes.quote}</div>}
@@ -508,9 +530,10 @@ function LeadershipPageInner() {
             </div>
           </div>
 
-          {/* Headline cards — on a phone: sales full-width and big, the rest
+          {/* Headline numbers — one panel split into zones (the app's summary
+              panel look). On a phone: sales full-width and big, the rest
               two-up, plus a clubs card (the desktop scorecard already shows it). */}
-          <div style={{ display: 'flex', gap: 10, marginTop: 16, flexWrap: 'wrap', ...mo('cards') }}>
+          <div className="lp-cards" style={{ ...panel, ...S.strip, overflow: 'hidden', marginTop: 16, ...mo('cards') }}>
             <Card label="Wk Sales" value={money(f.totals.sales)} style={full} big={isMobile}
               sub={`goal ${money(f.totals.salesGoal)}${f.compare?.yoyWeek?.salesDelta != null ? ` · YoY ${f.compare.yoyWeek.salesDelta >= 0 ? '+' : ''}${pct(f.compare.yoyWeek.salesDelta)}` : ''}`}
               tone={f.totals.hitGoal ? 'good' : 'bad'} />
@@ -531,17 +554,17 @@ function LeadershipPageInner() {
             const mRev = Number(b.monthRevenue) || f.mtd.target
             const ySales = Number(b.yearSales) || f.ytd?.target
             const budgetInput = (key, val, ph) => (
-              <label style={{ fontSize: 12, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 6 }}>
+              <label style={{ fontSize: 12, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 8 }}>
                 {ph}
-                <input style={{ ...S.input, width: 110 }} inputMode="numeric" placeholder="$"
+                <input className="form-input" style={{ ...S.input, ...num, width: 110 }} inputMode="numeric" placeholder="$"
                   value={b[key] ?? ''}
                   onChange={e => patchNotes({ budgets: { ...b, [key]: e.target.value.replace(/[^0-9]/g, '') } })} />
               </label>
             )
             return (
               <div style={{ ...sec, ...mo('pacing') }}>
-                <div style={S.sectionTitle}>Sales & revenue pacing</div>
-                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                <Title>Sales & revenue pacing</Title>
+                <div className="lp-cards" style={bleed}>
                   <Card label="MTD Sales" value={money(f.mtd.sales)} style={half}
                     sub={`budget ${money(mSales)} · proj ${money(f.mtd.salesProjected)}`}
                     tone={goalToneName(f.mtd.salesProjected, mSales)} />
@@ -552,7 +575,7 @@ function LeadershipPageInner() {
                     sub={`target ${money(ySales)} · proj ${money(f.ytd.projected)}`}
                     tone={goalToneName(f.ytd.projected, ySales)} />}
                 </div>
-                <div className="no-print" style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginTop: 10 }}>
+                <div className="no-print" style={{ display: 'flex', gap: isMobile ? 10 : 20, flexWrap: 'wrap', marginTop: 14 }}>
                   {budgetInput('monthSales', b.monthSales, 'Month sales budget')}
                   {budgetInput('monthRevenue', b.monthRevenue, 'Month revenue budget')}
                   {budgetInput('yearSales', b.yearSales, 'Annual sales target')}
@@ -564,28 +587,29 @@ function LeadershipPageInner() {
           {/* AI read — a 60-second scan: headline, top highlights, actions by dept */}
           {ai && (
             <div style={{ ...sec, borderLeft: '4px solid var(--accent)', ...mo('ai') }}>
-              {ai.stale && <div className="no-print" style={{ fontSize: 11.5, color: 'var(--warning)', marginBottom: 6 }}>AI text is from the previous refresh — the AI pass failed this time. Refresh numbers to try again.</div>}
+              <div className="no-print" style={{ ...eyebrow, color: 'var(--accent)', marginBottom: 8 }}>AI read</div>
+              {ai.stale && <div className="no-print" style={{ fontSize: 11.5, color: 'var(--tone-amber-tx)', marginBottom: 6 }}>AI text is from the previous refresh — the AI pass failed this time. Refresh numbers to try again.</div>}
               {ai.headline && <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--text-primary)', marginBottom: 10 }}>{ai.headline}</div>}
               {aiWins.length > 0 && <>
-                <div style={{ ...S.sectionTitle, color: 'var(--success)' }}>Wins</div>
+                <Title style={{ color: 'var(--tone-green-tx)' }}>Wins</Title>
                 {aiWins.map((s, i) => (
                   <div key={i} style={{ fontSize: 13, lineHeight: 1.7, color: 'var(--text-primary)' }}>✓ {String(s)}</div>
                 ))}
               </>}
               {aiChallenges.length > 0 && <>
-                <div style={{ ...S.sectionTitle, marginTop: 12, color: 'var(--danger)' }}>Challenges</div>
+                <Title style={{ marginTop: 12, color: 'var(--tone-red-tx)' }}>Challenges</Title>
                 {aiChallenges.map((s, i) => (
                   <div key={i} style={{ fontSize: 13, lineHeight: 1.7, color: 'var(--text-primary)' }}>• {String(s)}</div>
                 ))}
               </>}
               {aiHighlights.length > 0 && <>
-                <div style={S.sectionTitle}>Top highlights</div>
+                <Title>Top highlights</Title>
                 {aiHighlights.map((s, i) => (
                   <div key={i} style={{ fontSize: 13, lineHeight: 1.7, color: 'var(--text-primary)' }}>• {String(s)}</div>
                 ))}
               </>}
               {aiActions.length > 0 && <>
-                <div style={{ ...S.sectionTitle, marginTop: 14 }}>Action items by department</div>
+                <Title style={{ marginTop: 14 }}>Action items by department</Title>
                 {/* Column flow (not grid): blocks pack top-to-bottom so a short
                     department never gets stranded next to a tall one. */}
                 <div style={{ columns: '2 300px', columnGap: 24 }}>
@@ -600,7 +624,7 @@ function LeadershipPageInner() {
                 </div>
               </>}
               {!aiActions.length && aiItems.length > 0 && <>
-                <div style={{ ...S.sectionTitle, marginTop: 12 }}>Action items</div>
+                <Title style={{ marginTop: 12 }}>Action items</Title>
                 {aiItems.map((a, i) => (
                   <div key={i} style={{ fontSize: 13, lineHeight: 1.6, color: 'var(--text-primary)' }}>
                     → {String(a.action || '')} {a.owner && <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>({a.owner})</span>}
@@ -612,7 +636,7 @@ function LeadershipPageInner() {
 
           {/* Department scorecard */}
           <div style={{ ...sec, ...mo('scorecard') }}>
-            <div style={S.sectionTitle}>Department scorecard</div>
+            <Title>Department scorecard</Title>
             <Table
               headers={['Dept', 'Wk Sales', 'Budget', 'Var', 'Wk Rev', 'Rev Tgt', 'Close / Tgt', 'Avg Sale', 'Opps', 'Missed $', '5★', 'Clubs', 'Callbacks', 'GM / Tgt', 'LW True Labor %']}
               rows={[
@@ -629,7 +653,7 @@ function LeadershipPageInner() {
                   d.missedSales ? <span style={S.bad}>{money(d.missedSales)}</span> : '—',
                   String(d.fiveStar || 0),
                   String(d.clubs || 0),
-                  d.callbacks ? <span style={{ color: 'var(--warning)', fontWeight: 700 }}>{d.callbacks}</span> : '0',
+                  d.callbacks ? <span style={{ color: 'var(--tone-amber-tx)', fontWeight: 700 }}>{d.callbacks}</span> : '0',
                   d.gm != null
                     ? <span style={goalTone(d.gm, d.gmTarget || 0.55)} title={d.gmCosts ? `Revenue ${money(d.gmCosts.revenue)} · materials/equipment ${money(d.gmCosts.materials)} · POs ${money(d.gmCosts.po)} · other ${money(d.gmCosts.otherNonLabor)} · labor ${money(d.gmCosts.labor)} (${d.gmCosts.laborSource}) · ST's own GM ${d.gmSt != null ? pct(d.gmSt) : '—'}` : undefined}>{pct(d.gm)} <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>/ {pct(d.gmTarget || 0.55)}</span></span>
                     : '—',
@@ -661,7 +685,7 @@ function LeadershipPageInner() {
 
           {/* KPIs + opportunities side-by-side feel */}
           <div style={{ ...sec, ...mo('kpis') }}>
-            <div style={S.sectionTitle}>Company KPIs — week over week</div>
+            <Title>Company KPIs — week over week</Title>
             <Table headers={['KPI', 'This Wk', 'Last Wk', 'Δ', 'Goal']}
               rows={f.kpis.map(k => {
                 const fmtV = (v) => v == null ? '—' : (k.fmt === 'pct' ? pct(v) : k.fmt === 'money' ? money(v) : String(v))
@@ -682,7 +706,7 @@ function LeadershipPageInner() {
           </div>
 
           <div style={{ ...sec, ...mo('opps') }}>
-            <div style={S.sectionTitle}>Opportunities per day vs the $20M plan</div>
+            <Title>Opportunities per day vs the $20M plan</Title>
             <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 8 }}>
               Average sales opportunities run per working day (Mon–Fri full, Saturday half), this week and last, against the plan's daily goal.
               {f.oppsDaily?.partial ? ` This week counts ${f.oppsDaily.effDays} completed days through ${f.oppsDaily.through}.` : ''}
@@ -708,12 +732,12 @@ function LeadershipPageInner() {
 
           {/* True labor */}
           <div style={{ ...sec, ...mo('labor') }}>
-            <div style={S.sectionTitle}>
+            <Title>
               Last week's true labor{f.labor.weekEnd ? ` — wk ending ${f.labor.weekEnd}` : ''} {f.labor.source === 'adp'
-                ? <span style={{ color: 'var(--success)' }}>— ACTUALS from ADP {f.labor.actual?.source === 'invoice' ? `invoice ${f.labor.actual?.invoiceNo}` : f.labor.actual?.invoiceNo}{f.labor.actual?.approx ? ' (burden estimated from measured rates)' : ''} ✓</span>
+                ? <span style={{ color: 'var(--tone-green-tx)' }}>— ACTUALS from ADP {f.labor.actual?.source === 'invoice' ? `invoice ${f.labor.actual?.invoiceNo}` : f.labor.actual?.invoiceNo}{f.labor.actual?.approx ? ' (burden estimated from measured rates)' : ''} ✓</span>
                 : '(ADP-burdened model)'}
-            </div>
-            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            </Title>
+            <div className="lp-cards" style={bleed}>
               <Card label="LW field labor (true)" value={money(f.labor.estFieldBurdened)} style={half}
                 sub={f.labor.source === 'adp' ? `${money(f.labor.actual?.totals?.field?.gross)} gross · ${f.labor.actual?.totals?.field?.n ?? '—'} employees` : `${money(f.labor.impliedCommissions)} commissions + pool + burden`} />
               <Card label="LW office labor" value={money(f.labor.officeWeeklyCost)} style={half} sub={f.labor.source === 'adp' ? `${f.labor.actual?.totals?.office?.n ?? '—'} employees` : 'burdened weekly baseline'} />
@@ -721,19 +745,19 @@ function LeadershipPageInner() {
               <Card label="LW hidden pool" value={money(f.labor.hiddenPool)} style={half} sub={f.labor.source === 'adp' ? 'actual field gross − job commissions' : 'field pay not tied to a job'} />
             </div>
             {f.labor.source === 'adp' && (f.labor.actual.unmatched || []).length > 0 && (
-              <div style={{ fontSize: 12, color: 'var(--warning)', marginTop: 8 }}>
+              <div style={{ fontSize: 12, color: 'var(--tone-amber-tx)', marginTop: 8 }}>
                 No department mapping for: {f.labor.actual.unmatched.join(', ')} — upload a recent benefits invoice or tell Claude to remap.
               </div>
             )}
-            <div className="no-print" style={{ display: 'flex', gap: 12, alignItems: 'center', marginTop: 10, flexWrap: 'wrap' }}>
-              <label style={{ ...S.btn, ...mBtn, cursor: 'pointer', display: 'inline-block' }}>
+            <div className="no-print" style={{ display: 'flex', gap: 12, alignItems: 'center', marginTop: 14, flexWrap: 'wrap' }}>
+              <label className="btn" style={{ ...pill, cursor: 'pointer', whiteSpace: 'normal' }}>
                 {busy === 'payroll' ? 'Parsing…' : '📎 Upload ADP payroll (.xls — invoice or register)'}
                 <input type="file" accept=".xls,.xlsx" style={{ display: 'none' }} disabled={busy === 'payroll'}
                   onChange={e => uploadPayroll(e.target.files?.[0])} />
               </label>
               {f.labor.source !== 'adp' && <>
                 <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>or type actual field gross:</span>
-                <input style={{ ...S.input, width: 140 }} placeholder="$" value={notes.fieldPayrollActual || ''}
+                <input className="form-input" style={{ ...S.input, ...num, width: 140 }} placeholder="$" value={notes.fieldPayrollActual || ''}
                   onChange={e => patchNotes({ fieldPayrollActual: e.target.value.replace(/[^0-9.]/g, '') })} />
               </>}
             </div>
@@ -743,16 +767,16 @@ function LeadershipPageInner() {
 
           {/* 6-week trend */}
           <div style={{ ...sec, ...mo('trend') }}>
-            <div style={S.sectionTitle}>6-week sales trend</div>
+            <Title>6-week sales trend</Title>
             <div className="lp-trend" style={{ display: 'flex', gap: 8, alignItems: 'flex-end', height: 120, padding: '0 4px', ...(isMobile ? { maxWidth: '100%' } : {}) }}>
               {f.trend.map((t, i) => {
                 const max = Math.max(...f.trend.map(x => x.sales), t.goal)
                 return (
                   <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
-                    <div style={{ fontSize: 10, color: 'var(--text-secondary)' }}>{money(t.sales)}</div>
+                    <div style={{ ...num, fontSize: 10, color: 'var(--text-secondary)' }}>{money(t.sales)}</div>
                     <div style={{
                       width: '70%', height: Math.max(6, 90 * t.sales / max),
-                      background: t.hit ? 'var(--success)' : 'var(--danger)', borderRadius: 4, opacity: i === f.trend.length - 1 ? 1 : 0.65,
+                      background: t.hit ? 'var(--tone-green-tx)' : 'var(--tone-red-tx)', borderRadius: 4, opacity: i === f.trend.length - 1 ? 1 : 0.65,
                     }} />
                     <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{t.weekEnd.slice(5)}</div>
                   </div>
@@ -764,7 +788,7 @@ function LeadershipPageInner() {
 
           {/* Editable meeting sections */}
           <div style={{ ...sec, ...mo('topics') }}>
-            <div style={S.sectionTitle}>Discussion topics</div>
+            <Title>Discussion topics</Title>
             <EditRows rows={notes.topics} onChange={v => patchNotes({ topics: v })}
               cols={[
                 { key: 'topic', label: 'Topic', placeholder: 'Add a topic…' },
@@ -773,7 +797,7 @@ function LeadershipPageInner() {
           </div>
 
           <div style={{ ...sec, ...mo('rocks') }}>
-            <div style={S.sectionTitle}>Rocks — one per leader, progress reported every week</div>
+            <Title>Rocks — one per leader, progress reported every week</Title>
             <EditRows rows={notes.projects} onChange={v => patchNotes({ projects: v })}
               cols={[
                 { key: 'project', label: 'Rock', placeholder: 'Add a rock…' },
@@ -782,7 +806,7 @@ function LeadershipPageInner() {
                 { key: 'target', label: 'Due', width: 110 },
                 { key: 'notes', label: 'This week\u2019s progress' },
               ]} />
-            <div className="no-print" style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 4 }}>
+            <div className="no-print" style={{ fontSize: 11.5, lineHeight: 1.55, color: 'var(--text-muted)', marginTop: 10 }}>
               EOS-style: each leader owns one rock and reports progress here weekly. A rock is either <b>On Track</b> or
               <b> Off Track</b> — no in-between. Rocks marked <b>Done</b> stay on this week's agenda and drop off next
               week's automatically; carry the progress column fresh each week.
@@ -831,8 +855,8 @@ function Md({ text }) {
       if (rows.length) out.push(
         <div key={key++} style={{ overflowX: 'auto', margin: '10px 0' }}>
           <table style={{ borderCollapse: 'collapse', fontSize: 13, minWidth: 320 }}>
-            <thead><tr>{rows[0].map((c, ci) => <th key={ci} style={{ textAlign: ci ? 'right' : 'left', padding: '6px 12px', borderBottom: '2px solid var(--border)', fontSize: 11, textTransform: 'uppercase', letterSpacing: .4, color: 'var(--text-muted)' }}>{inline(c)}</th>)}</tr></thead>
-            <tbody>{rows.slice(1).map((r, ri) => <tr key={ri}>{r.map((c, ci) => <td key={ci} style={{ textAlign: ci ? 'right' : 'left', padding: '6px 12px', borderBottom: '1px solid var(--border)', fontWeight: ci ? 400 : 600 }}>{inline(c)}</td>)}</tr>)}</tbody>
+            <thead><tr>{rows[0].map((c, ci) => <th key={ci} style={{ ...eyebrow, textAlign: ci ? 'right' : 'left', padding: '6px 12px', borderBottom: '1px solid var(--border-strong)' }}>{inline(c)}</th>)}</tr></thead>
+            <tbody>{rows.slice(1).map((r, ri) => <tr key={ri}>{r.map((c, ci) => <td key={ci} style={{ ...num, textAlign: ci ? 'right' : 'left', padding: '7px 12px', borderBottom: '1px solid var(--border)', fontWeight: ci ? 400 : 600 }}>{inline(c)}</td>)}</tr>)}</tbody>
           </table>
         </div>)
       continue
@@ -940,7 +964,7 @@ function BrainChat({ authHeaders }) {
           onMouseLeave={e => e.currentTarget.style.background = 'var(--surface)'}>
           <span style={{ fontSize: 15, lineHeight: 1 }}>+</span> New chat
         </button>
-        {!isMobile && <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: .6, color: 'var(--text-muted)', padding: '4px 12px' }}>Recents</div>}
+        {!isMobile && <div style={{ ...eyebrow, padding: '4px 12px' }}>Recents</div>}
         {threads.length === 0 && <div style={{ fontSize: 12, color: 'var(--text-muted)', padding: '4px 12px' }}>Nothing yet.</div>}
         {threads.map(t => (
           <div key={t.id} onClick={() => openThread(t.id)} className="brain-thread"
@@ -1030,7 +1054,7 @@ function BrainChat({ authHeaders }) {
           </div>
         </div>
 
-        {err && <div style={{ maxWidth: 780, margin: '0 auto', width: '100%', padding: '4px 24px', fontSize: 12.5, color: 'var(--danger)' }}>{err}</div>}
+        {err && <div style={{ maxWidth: 780, margin: '0 auto', width: '100%', padding: '4px 24px', fontSize: 12.5, color: 'var(--tone-red-tx)' }}>{err}</div>}
 
         {/* Composer */}
         <div style={{ padding: isMobile ? '8px 4px 10px' : '10px 24px 18px' }}>
@@ -1039,7 +1063,7 @@ function BrainChat({ authHeaders }) {
               placeholder="Ask about techs, CSRs, revenue, labor, marketing…"
               onChange={e => { setInput(e.target.value); e.target.style.height = 'auto'; e.target.style.height = Math.min(e.target.scrollHeight, 160) + 'px' }}
               onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); ask() } }}
-              style={{ width: '100%', resize: 'none', padding: '14px 52px 14px 18px', borderRadius: 16, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-primary)', fontSize: 14, lineHeight: 1.5, outline: 'none', boxShadow: '0 2px 12px rgba(0,0,0,.05)' }}
+              style={{ width: '100%', resize: 'none', padding: '14px 52px 14px 18px', borderRadius: 16, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-primary)', fontSize: 14, fontFamily: 'inherit', lineHeight: 1.5, outline: 'none', boxShadow: '0 2px 12px rgba(0,0,0,.05)' }}
               onFocus={e => e.target.style.borderColor = 'var(--accent)'}
               onBlur={e => e.target.style.borderColor = 'var(--border)'} />
             <button onClick={() => ask()} disabled={busy || !input.trim()} title="Send"

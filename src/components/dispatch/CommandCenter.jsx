@@ -3,6 +3,7 @@ import { sb } from '../../lib/supabase'
 import { useAuth } from '../../lib/AuthContext'
 import { usePhone } from '../../lib/PhoneContext'
 import { useIsMobile } from '../../lib/useIsMobile'
+import { Segmented, ToneChip, Stat, EmptyState, Face, eyebrow, panel, num } from '../ui'
 
 // Dispatch Command Center — the board as a queue you clear.
 // One request per day (GET /api/dispatch/center) feeds every section; the
@@ -33,8 +34,10 @@ const windowLabel = (c) => { const a = hr(c.windowStart), b = hr(c.windowEnd); r
 const clock = (iso) => iso ? new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : ''
 const localDate = (iso) => { if (!iso) return ''; const d = new Date(iso); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` }
 const weekday = (ymd, opts) => (ymd ? new Date(ymd + 'T12:00:00').toLocaleDateString('en-US', opts || { weekday: 'short', month: 'short', day: 'numeric' }) : '')
-const EYEBROW = { fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: .5, color: 'var(--text-secondary)' }
+const EYEBROW = eyebrow
 const MUTED = { fontSize: 12, color: 'var(--text-muted)' }
+// Face shows initials; ServiceTitan names sometimes carry a suffix ("Bryce (Plumbing)").
+const faceName = (n) => String(n || '').replace(/[^\p{L}\s'-]/gu, ' ').trim()
 const POLL_MS = 60_000
 const STALE_MS = 5 * 60_000
 const FOLD = 8
@@ -210,24 +213,33 @@ function TierDot({ tier, title }) {
   const t = TIER[tier] || TIER.unranked
   return <span title={title || t.label} style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: t.color, flexShrink: 0 }} />
 }
+// A tech's initials with the seat-tier dot pinned to the corner, where the
+// inline TierDot would sit — the face costs the name as little width as possible.
+function TechFace({ name, tier, size = 22, title }) {
+  const t = TIER[tier] || TIER.unranked
+  return (
+    <span title={title} style={{ position: 'relative', display: 'inline-flex', flexShrink: 0 }}>
+      <Face name={faceName(name)} size={size} />
+      <span style={{ position: 'absolute', right: -1, bottom: -1, width: 8, height: 8, borderRadius: '50%', background: t.color, boxShadow: '0 0 0 1.5px var(--surface)' }} />
+    </span>
+  )
+}
 function Kind({ kind }) {
   const m = { partial: ['Finish move', 'red'], place: ['Place', 'amber'], reassign: ['Reassign', 'red'], swap: ['Swap', 'amber'], techout: ['Tech out', 'red'], late: ['Running late', 'red'] }[kind] || [kind, 'gray']
-  return <span style={{ fontSize: 10, fontWeight: 800, textTransform: 'uppercase', letterSpacing: .6, padding: '2px 7px', borderRadius: 99,
-    color: `var(--tone-${m[1]}-tx)`, background: `var(--tone-${m[1]}-bg)`, border: `1px solid var(--tone-${m[1]}-bd)` }}>{m[0]}</span>
+  return <ToneChip tone={m[1]} small>{m[0]}</ToneChip>
 }
-// On a phone every button is a thumb target (40px tall or more); the desktop keeps its sizes.
-function Btn({ children, primary, danger, small, ...p }) {
+// The app's .btn, as a pill. On a phone every button is a thumb target (40px
+// tall or more); the desktop keeps its sizes.
+function Btn({ children, primary, danger, ghost, small, ...p }) {
   const isMobile = useIsMobile()
-  return <button {...p} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: small ? '4px 10px' : '7px 14px', borderRadius: 'var(--radius)',
-    fontSize: small ? 11 : 12, fontWeight: primary ? 600 : 500, border: `1px solid ${primary ? 'var(--accent)' : danger ? 'var(--danger)' : 'var(--border-strong)'}`,
-    background: primary ? 'var(--accent)' : 'var(--surface)', color: primary ? '#fff' : danger ? 'var(--danger)' : 'var(--text-primary)', cursor: p.disabled ? 'default' : 'pointer',
-    opacity: p.disabled ? .45 : 1, whiteSpace: 'nowrap', ...(isMobile ? { minHeight: 40 } : {}), ...(p.style || {}) }}>{children}</button>
+  return <button {...p} className={`btn${primary ? ' primary' : danger ? ' danger' : ghost ? ' ghost' : ''}${small ? ' sm' : ''}`}
+    style={{ borderRadius: 99, ...(ghost ? { color: 'var(--text-secondary)' } : {}), ...(isMobile ? { minHeight: 40 } : {}), ...(p.style || {}) }}>{children}</button>
 }
 function Spin({ size = 11, light }) { return <span className="spinner" style={{ width: size, height: size, borderWidth: 1.5, display: 'inline-block', ...(light ? { borderColor: 'rgba(255,255,255,.35)', borderTopColor: '#fff' } : {}) }} /> }
 const MenuItem = ({ children, ...p }) => {
   const isMobile = useIsMobile()
   return (
-    <button {...p} style={{ display: 'flex', width: '100%', alignItems: 'center', gap: 8, padding: '7px 8px', border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 12, color: 'var(--text-primary)', borderRadius: 6, textAlign: 'left', ...(isMobile ? { minHeight: 40 } : {}), ...(p.style || {}) }}
+    <button {...p} style={{ display: 'flex', width: '100%', alignItems: 'center', gap: 8, padding: '7px 8px', border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 12, color: 'var(--text-primary)', borderRadius: 8, textAlign: 'left', ...(isMobile ? { minHeight: 40 } : {}), ...(p.style || {}) }}
       onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'} onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>{children}</button>
   )
 }
@@ -246,7 +258,7 @@ function Popover({ onClose, anchor, style, children }) {
     document.addEventListener('keydown', k); document.addEventListener('mousedown', m)
     return () => { document.removeEventListener('keydown', k); document.removeEventListener('mousedown', m) }
   }, [onClose, anchor])
-  return <div ref={ref} style={{ position: 'absolute', zIndex: 50, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', boxShadow: '0 6px 20px rgba(0,0,0,.14)', padding: 8, ...(isMobile ? { maxWidth: 'calc(100vw - 24px)' } : {}), ...style }}>{children}</div>
+  return <div ref={ref} style={{ position: 'absolute', zIndex: 50, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 14, boxShadow: '0 16px 40px -12px rgba(15,20,40,.35)', padding: 8, ...(isMobile ? { maxWidth: 'calc(100vw - 24px)' } : {}), ...style }}>{children}</div>
 }
 
 // ── Toasts (local; the page has no shared toast bus) ─────────────────────────
@@ -260,8 +272,9 @@ function useToasts() {
   const el = (
     <div style={{ position: 'fixed', bottom: 18, left: '50%', transform: 'translateX(-50%)', display: 'flex', flexDirection: 'column', gap: 8, zIndex: 900, pointerEvents: 'none' }}>
       {list.map(t => (
-        <div key={t.id} style={{ background: 'var(--text-primary)', color: 'var(--surface)', padding: '10px 14px', borderRadius: 10, fontSize: 12, boxShadow: '0 10px 30px rgba(0,0,0,.25)', display: 'flex', gap: 8, alignItems: 'center', maxWidth: isMobile ? 'calc(100vw - 24px)' : 560 }}>
-          <span style={{ fontWeight: 800, color: t.tone === 'ok' ? '#6FDDA0' : t.tone === 'warn' ? '#EFC252' : '#F49382' }}>{t.tone === 'ok' ? '✓' : t.tone === 'warn' ? '!' : '×'}</span>{t.text}
+        <div key={t.id} style={{ background: 'var(--text-primary)', color: 'var(--surface)', padding: '10px 14px', borderRadius: 14, fontSize: 12.5, fontWeight: 500, boxShadow: '0 16px 40px -12px rgba(15,20,40,.5)', display: 'flex', gap: 9, alignItems: 'center', maxWidth: isMobile ? 'calc(100vw - 24px)' : 560 }}>
+          {/* A chip carries its own background, so the mark reads on the inverted toast in either theme. */}
+          <span style={{ flexShrink: 0, display: 'inline-flex' }}><ToneChip tone={t.tone === 'ok' ? 'green' : t.tone === 'warn' ? 'amber' : 'red'} small>{t.tone === 'ok' ? '✓' : t.tone === 'warn' ? '!' : '×'}</ToneChip></span>{t.text}
         </div>
       ))}
     </div>
@@ -572,7 +585,16 @@ export default function CommandCenter() {
   )
 
   if (!anyEntry) {
-    return <div>{err ? <div style={{ color: 'var(--danger)', fontSize: 13 }}>{err}</div> : <div className="spinner lg" style={{ margin: '60px auto' }} />}{toasts}</div>
+    return <div>{err ? <div style={{ color: 'var(--danger)', fontSize: 13 }}>{err}</div> : (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <div className="skel" style={{ height: 38, width: 'min(460px, 100%)', borderRadius: 99 }} />
+        <div className="skel" style={{ height: 100, borderRadius: 16 }} />
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 7fr) minmax(0, 5fr)', gap: 14 }}>
+          <div className="skel" style={{ height: 340, borderRadius: 16 }} />
+          <div className="skel" style={{ height: 340, borderRadius: 16 }} />
+        </div>
+      </div>
+    )}{toasts}</div>
   }
 
   // Freshness: what's on screen, from the client's own clock.
@@ -589,15 +611,13 @@ export default function CommandCenter() {
       {/* Header row: day toggle · status · next · report a change · refresh.
           On a phone it stacks by flex order: toggle + freshness, then the counts, then the buttons. */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-        <div style={{ display: 'flex', border: '1px solid var(--border)', borderRadius: 99, overflow: 'hidden' }}>
-          {[0, 1, 2].map(d => (
-            <button key={d} onClick={() => { dayRef.current = d; setShowAll(false); setDay(d) }} style={{ padding: '5px 13px', border: 'none', fontSize: 11, fontWeight: 700, cursor: 'pointer',
-              background: day === d ? 'var(--text-primary)' : 'transparent', color: day === d ? 'var(--surface)' : 'var(--text-muted)', ...(isMobile ? { minHeight: 40, padding: '8px 12px' } : {}) }}>{dayName(d)}</button>
-          ))}
-        </div>
-        {board && <span style={{ ...MUTED, ...(isMobile ? { order: 2, flexBasis: '100%' } : {}) }}>{board.counts.total} calls · {rev.remaining} to run · {rev.done} done · {rev.working} on site</span>}
-        <span title={payload ? `board computed ${clock(payload.generatedAt)}` : ''} style={{ fontSize: 10, fontWeight: 800, textTransform: 'uppercase', letterSpacing: .5, padding: '2px 8px', borderRadius: 99, display: 'inline-flex', alignItems: 'center', gap: 5,
-          color: `var(--tone-${pill[1]}-tx)`, background: `var(--tone-${pill[1]}-bg)`, border: `1px solid var(--tone-${pill[1]}-bd)` }}>{refreshing && <Spin size={9} />}{pill[0]}</span>
+        {/* On a phone the label is padded out so each day is a 40px thumb target. */}
+        <Segmented value={day} onChange={d => { dayRef.current = d; setShowAll(false); setDay(d) }}
+          options={[0, 1, 2].map(d => [d, isMobile ? <span style={{ display: 'inline-block', lineHeight: '28px' }}>{dayName(d)}</span> : dayName(d)])} />
+        {board && <span style={{ ...MUTED, ...num, ...(isMobile ? { order: 2, flexBasis: '100%' } : {}) }}>{board.counts.total} calls · {rev.remaining} to run · {rev.done} done · {rev.working} on site</span>}
+        <ToneChip tone={pill[1]} small title={payload ? `board computed ${clock(payload.generatedAt)}` : ''}>
+          {refreshing && <span style={{ display: 'inline-block', marginRight: 5, verticalAlign: -1 }}><Spin size={9} /></span>}{pill[0]}
+        </ToneChip>
         {refreshErr && entry && <span style={{ ...MUTED, fontSize: 11, color: 'var(--tone-amber-tx)', ...(isMobile ? { order: 2, flexBasis: '100%' } : {}) }}>couldn’t refresh — showing {clock(new Date(entry.fetchedAt).toISOString())}</span>}
         <span style={{ flex: 1, ...(isMobile ? { display: 'none' } : {}) }} />
         <div ref={reportWrapRef} style={{ position: 'relative', ...(isMobile ? { order: 3 } : {}) }}>
@@ -616,8 +636,8 @@ export default function CommandCenter() {
                   <div style={{ ...EYEBROW, padding: '4px 6px' }}>Tech out</div>
                   <div style={{ maxHeight: 240, overflow: 'auto' }}>
                     {techs.filter(t => t.rankable && t.onShift && !t.out).sort((a, b) => (b.calls || 0) - (a.calls || 0)).map(t => (
-                      <MenuItem key={t.techId} onClick={() => setReportPick(t)}>
-                        <TierDot tier={t.tier} /><span style={{ fontWeight: 600 }}>{t.name}</span><span style={MUTED}>{t.calls} call{t.calls === 1 ? '' : 's'} · {t.trade}</span>
+                      <MenuItem key={t.techId} onClick={() => setReportPick(t)} style={{ padding: '6px 8px' }}>
+                        <TechFace name={t.name} tier={t.tier} size={20} title={TIER[t.tier]?.label || TIER.unranked.label} /><span style={{ fontWeight: 600 }}>{t.name}</span><span style={{ ...MUTED, ...num }}>{t.calls} call{t.calls === 1 ? '' : 's'} · {t.trade}</span>
                       </MenuItem>
                     ))}
                   </div>
@@ -627,7 +647,7 @@ export default function CommandCenter() {
                       {outList.map(o => (
                         <div key={o.techId} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 8px', fontSize: 12 }}>
                           <span style={{ fontWeight: 600 }}>{o.name}</span><span style={MUTED}>{o.until === 'tomorrow' ? 'through tomorrow' : 'rest of the day'} · {o.by}</span>
-                          <button onClick={() => techBack(o)} style={{ marginLeft: 'auto', border: 'none', background: 'transparent', color: 'var(--accent)', cursor: 'pointer', fontSize: 11, fontWeight: 600, ...(isMobile ? { minHeight: 40, padding: '0 8px' } : {}) }}>Undo</button>
+                          <button onClick={() => techBack(o)} style={{ marginLeft: 'auto', border: 'none', background: 'transparent', color: 'var(--accent)', cursor: 'pointer', fontSize: 11.5, fontWeight: 700, ...(isMobile ? { minHeight: 40, padding: '0 8px' } : {}) }}>Undo</button>
                         </div>
                       ))}
                     </div>
@@ -642,30 +662,37 @@ export default function CommandCenter() {
       </div>
       {board && (
         <div onClick={next ? jumpToNext : undefined} style={{ fontSize: 13, display: 'flex', gap: 8, alignItems: 'baseline', cursor: next ? 'pointer' : 'default', marginTop: -6, ...(isMobile ? { flexWrap: 'wrap' } : {}) }}>
-          <span style={{ ...EYEBROW, color: next ? 'var(--danger)' : 'var(--success)' }}>Next</span>
+          <span style={{ ...EYEBROW, color: next ? 'var(--tone-red-tx)' : 'var(--tone-green-tx)' }}>Next</span>
           {next
-            ? <span><span style={{ fontWeight: 700 }}>{next.title}</span> — by {hr(next.actBy)}{next.upside > 0 && <span style={{ color: 'var(--tone-green-tx)', fontWeight: 700 }}> (+{money(next.upside)})</span>}</span>
-            : <span style={{ color: 'var(--text-secondary)' }}>Board is clean — next re-read in {Math.floor(countdown / 60)}:{String(countdown % 60).padStart(2, '0')}</span>}
+            ? <span><span style={{ fontWeight: 700 }}>{next.title}</span> — by <span style={num}>{hr(next.actBy)}</span>{next.upside > 0 && <span style={{ ...num, color: 'var(--tone-green-tx)', fontWeight: 700 }}> (+{money(next.upside)})</span>}</span>
+            : <span style={{ color: 'var(--text-secondary)' }}>Board is clean — next re-read in <span style={num}>{Math.floor(countdown / 60)}:{String(countdown % 60).padStart(2, '0')}</span></span>}
         </div>
       )}
 
-      {!board && <div className="spinner lg" style={{ margin: '60px auto' }} />}
+      {!board && (
+        <>
+          <div className="skel" style={{ height: 100, borderRadius: 16 }} />
+          <div className="skel" style={{ height: 340, borderRadius: 16 }} />
+        </>
+      )}
       {board && (
         <>
-          {/* State tiles — "needs you" is the only tinted number. Four across; two-up on a phone. */}
+          {/* State tiles — "needs you" is the only tinted number. One panel split
+              into four zones; two-up on a phone ("mgrid" keeps the phone layer
+              from stacking it into one tall column). */}
           <div style={{ position: 'relative' }}>
-            <div className={isMobile ? 'mgrid' : undefined} style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, minmax(0,1fr))' : 'repeat(4, minmax(0,1fr))', gap: 12 }}>
-              <Tile label="Needs a decision" value={cards.length ? `${cards.length} move${cards.length === 1 ? '' : 's'}` : 'Board is clean'} sub={cards.length ? `${money(queue.atStake)} expected if you take the picks` : 'nothing waiting on you'} color={cards.length ? 'var(--warning)' : 'var(--success)'} />
-              <Tile label="Expected revenue" value={money(rev.expected)} sub={`${money((rev.soldToday || 0) + (rev.expected || 0))} projected day end · ${rev.opportunityCalls} opportunity calls`} />
+            <div className={isMobile ? 'mgrid' : undefined} style={{ ...panel, overflow: 'hidden', display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, minmax(0,1fr))' : 'repeat(4, minmax(0,1fr))' }}>
+              <Tile i={0} label="Needs a decision" value={cards.length ? `${cards.length} move${cards.length === 1 ? '' : 's'}` : 'Board is clean'} sub={cards.length ? `${money(queue.atStake)} expected if you take the picks` : 'nothing waiting on you'} tone={cards.length ? 'amber' : 'green'} />
+              <Tile i={1} label="Expected revenue" value={money(rev.expected)} sub={`${money((rev.soldToday || 0) + (rev.expected || 0))} projected day end · ${rev.opportunityCalls} opportunity calls`} />
               {day === 0 ? (
                 <>
-                  <Tile label="Sold so far" value={money(rev.soldToday)} sub={`${money(rev.invoicedToday)} invoiced · ${money(rev.booked)} installs finishing`} />
-                  <Tile tileRef={leftTileRef} label="Left behind" value={money(leftBehind.quotedAmt)} sub={`${leftBehind.rows.length} quoted, not sold · ${leftBehind.none} no sale`} onClick={() => setLeftOpen(o => !o)} active={leftOpen} />
+                  <Tile i={2} label="Sold so far" value={money(rev.soldToday)} sub={`${money(rev.invoicedToday)} invoiced · ${money(rev.booked)} installs finishing`} />
+                  <Tile i={3} tileRef={leftTileRef} label="Left behind" value={money(leftBehind.quotedAmt)} sub={`${leftBehind.rows.length} quoted, not sold · ${leftBehind.none} no sale`} onClick={() => setLeftOpen(o => !o)} active={leftOpen} />
                 </>
               ) : (
                 <>
-                  <Tile label="Opportunities booked" value={`${calls.filter(c => c.opportunity >= 3).length}`} sub={`${money(calls.reduce((s, c) => s + (c.expectedRevenue || 0), 0))} expected if they run`} />
-                  <Tile label="Open slots ≈ $" value={`${covCells.reduce((s, x) => s + (x.d.needed || 0), 0)} open`}
+                  <Tile i={2} label="Opportunities booked" value={`${calls.filter(c => c.opportunity >= 3).length}`} sub={`${money(calls.reduce((s, c) => s + (c.expectedRevenue || 0), 0))} expected if they run`} />
+                  <Tile i={3} label="Open slots ≈ $" value={`${covCells.reduce((s, x) => s + (x.d.needed || 0), 0)} open`}
                     sub={covCells.some(x => x.d.stake) ? `≈ ${money(covCells.reduce((s, x) => s + (x.d.stake || 0), 0))} if booked · ${covCells.filter(x => x.d.needed > 0).map(x => `${x.trade} ${x.d.needed}`).join(' · ') || 'all trades at target'}` : 'no trade rates to price them yet'} />
                 </>
               )}
@@ -677,9 +704,9 @@ export default function CommandCenter() {
                 <div style={{ maxHeight: 280, overflow: 'auto' }}>
                   {leftBehind.rows.map(c => (
                     <div key={c.appointmentId + '|' + c.techId} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px', fontSize: 12, borderTop: '1px solid var(--border)', ...(isMobile ? { flexWrap: 'wrap' } : {}) }}>
-                      <span style={{ fontWeight: 700 }}>#{c.jobNumber}</span><span style={{ color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>{c.jobType}</span>
+                      <span style={{ ...num, fontWeight: 700 }}>#{c.jobNumber}</span><span style={{ color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>{c.jobType}</span>
                       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}><TierDot tier={c.techTier} />{c.techName}</span>
-                      <span style={{ marginLeft: 'auto', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>Quoted {money(c.outcome.amount)}</span>
+                      <span style={{ ...num, marginLeft: 'auto', fontWeight: 700, color: 'var(--tone-amber-tx)' }}>Quoted {money(c.outcome.amount)}</span>
                       <a href="#" onClick={e => { e.preventDefault(); setLeftOpen(false); openCall(c) }} style={{ fontSize: 11 }}>open call</a>
                     </div>
                   ))}
@@ -693,7 +720,7 @@ export default function CommandCenter() {
           {/* Coverage strip — information for CSRs and marketing, never a card */}
           {coverage?.board && (
             <div ref={covWrapRef} style={{ position: 'relative' }}>
-              <div className="card" style={{ padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 18, flexWrap: 'wrap', ...(isMobile ? { gap: 10 } : {}) }}>
+              <div style={{ ...panel, padding: '10px 16px', display: 'flex', alignItems: 'center', gap: 18, flexWrap: 'wrap', ...(isMobile ? { gap: 10, padding: '10px 12px' } : {}) }}>
                 <span style={EYEBROW}>Coverage · booked %</span>
                 {coverage.board.map(r => (
                   <div key={r.trade} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
@@ -707,7 +734,7 @@ export default function CommandCenter() {
                           const w = covWrapRef.current?.getBoundingClientRect(), b = e.currentTarget.getBoundingClientRect()
                           setCovPop({ trade: r.trade, di: i, el: e.currentTarget, left: w ? Math.max(0, Math.min(b.left - w.left, w.width - 360)) : 0 })
                         }}
-                        style={{ position: 'relative', minWidth: 40, textAlign: 'center', padding: '2px 6px', borderRadius: 6, fontVariantNumeric: 'tabular-nums', fontWeight: 700, fontSize: 12, cursor: 'pointer',
+                        style={{ position: 'relative', minWidth: 40, textAlign: 'center', padding: '2px 6px', borderRadius: 99, fontVariantNumeric: 'tabular-nums', fontWeight: 700, fontSize: 12, cursor: 'pointer',
                           color: `var(--tone-${tone}-tx)`, background: `var(--tone-${tone}-bg)`, border: `1px solid var(--tone-${tone}-bd)`, outline: open ? '2px solid var(--border-strong)' : 'none', outlineOffset: 1, ...(isMobile ? { minHeight: 40, padding: '6px 10px' } : {}) }}>
                         {d.status === 'none' ? '—' : `${d.pct}%`}
                         {building === `${r.trade}|${d.date}` ? <span style={{ position: 'absolute', top: -5, right: -5 }}><Spin size={9} /></span>
@@ -745,21 +772,22 @@ export default function CommandCenter() {
             {/* Queue */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}>
               <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
-                <span style={{ fontSize: 13, fontWeight: 700 }}>Needs a decision</span>
+                <span style={{ fontSize: 14, fontWeight: 700 }}>Needs a decision</span>
                 <span style={MUTED}>{queue.hiddenCount ? `${queue.hiddenCount} snoozed or dismissed · ` : ''}sorted by when you have to act</span>
                 {day === 0 && <MovesStrip actions={payload.actions || []} dismissals={payload.dismissals || []} />}
               </div>
               {!cards.length && (
-                <div style={{ border: '1px dashed var(--border-strong)', borderRadius: 'var(--radius-lg)', padding: '26px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>
+                <EmptyState>
                   <div style={{ color: 'var(--text-primary)', fontSize: 15, fontWeight: 700, marginBottom: 4 }}>Board is clean — nothing needs you.</div>
                   New bookings, late windows and call-outs land here within a minute.
-                </div>
+                </EmptyState>
               )}
               {renderList.map(item => item.group ? (
                 <div key={`g:${item.group.techId}`} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 10px', borderRadius: 'var(--radius)', background: 'var(--tone-red-bg)', border: '1px solid var(--tone-red-bd)', fontSize: 12, ...(isMobile ? { flexWrap: 'wrap' } : {}) }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 10px', borderRadius: 14, background: 'var(--tone-red-bg)', border: '1px solid var(--tone-red-bd)', fontSize: 12, ...(isMobile ? { flexWrap: 'wrap' } : {}) }}>
+                    <Face name={faceName(item.group.techName)} size={24} />
                     <span style={{ fontWeight: 800, color: 'var(--tone-red-tx)' }}>{item.group.techName} out {item.group.until === 'tomorrow' ? 'through tomorrow' : 'for the rest of today'}</span>
-                    <span style={MUTED}>{item.cards.length} call{item.cards.length === 1 ? '' : 's'}</span>
+                    <span style={{ ...MUTED, ...num }}>{item.cards.length} call{item.cards.length === 1 ? '' : 's'}</span>
                     <span style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
                       <Btn small primary disabled={item.cards.some(c => pendingKeys.has(c.key))} onClick={() => applyAll(item.group, item.cards)}>Apply all picks</Btn>
                       <Btn small onClick={() => techBack({ techId: item.group.techId, name: item.group.techName, until: item.group.until })}>Back on</Btn>
@@ -785,13 +813,19 @@ export default function CommandCenter() {
   )
 }
 
-const Tile = ({ label, value, sub, color, onClick, active, tileRef }) => (
-  <div ref={tileRef} className="card" onClick={onClick} style={{ padding: '12px 14px', cursor: onClick ? 'pointer' : 'default', outline: active ? '2px solid var(--border-strong)' : 'none', outlineOffset: -1 }}>
-    <div style={{ ...EYEBROW, display: 'flex', gap: 6 }}>{label}{onClick && <span style={{ fontWeight: 500, textTransform: 'none', letterSpacing: 0, color: 'var(--text-muted)' }}>▾</span>}</div>
-    <div style={{ fontSize: 22, fontWeight: 800, letterSpacing: -.5, lineHeight: 1.15, marginTop: 4, color: color || 'var(--text-primary)', fontVariantNumeric: 'tabular-nums' }}>{value}</div>
-    <div style={{ ...MUTED, fontSize: 11, marginTop: 2 }}>{sub}</div>
-  </div>
-)
+// One zone of the state-tiles panel: the kit's Stat, with hairline dividers
+// between zones (four across, or a 2×2 grid on a phone).
+function Tile({ i, label, value, sub, tone, onClick, active, tileRef }) {
+  const isMobile = useIsMobile()
+  const cols = isMobile ? 2 : 4
+  return (
+    <div ref={tileRef} className={onClick ? 'eval-row' : undefined} onClick={onClick}
+      style={{ padding: isMobile ? '12px 14px' : '14px 18px', minWidth: 0, cursor: onClick ? 'pointer' : 'default', background: active ? 'var(--surface-2)' : 'transparent',
+        borderLeft: i % cols ? '1px solid var(--border)' : 'none', borderTop: i >= cols ? '1px solid var(--border)' : 'none' }}>
+      <Stat label={<>{label}{onClick && <span style={{ marginLeft: 6, fontWeight: 500, letterSpacing: 0 }}>▾</span>}</>} value={value} sub={sub} tone={tone} />
+    </div>
+  )
+}
 
 // One muted line: where tomorrow's board is short and what it's worth.
 function CapacityCallout({ coverage }) {
@@ -831,24 +865,24 @@ function MovesStrip({ actions, dismissals }) {
   const empty = !actions.length && !dismissals.length
   return (
     <>
-      <button onClick={() => setOpen(o => !o)} style={{ marginLeft: 'auto', border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 11, color: 'var(--text-secondary)', padding: 0, fontVariantNumeric: 'tabular-nums', ...(isMobile ? { minHeight: 40, textAlign: 'left' } : {}) }}>
-        Today: {empty ? 'nothing yet' : <>{applied} applied <span style={{ color: 'var(--tone-green-tx)', fontWeight: 700 }}>✓</span>{partial ? <> · {partial} partial <span style={{ color: 'var(--tone-amber-tx)', fontWeight: 700 }}>⚠</span></> : ''}{failed ? <> · {failed} failed <span style={{ color: 'var(--tone-red-tx)', fontWeight: 700 }}>×</span></> : ''} · <span style={{ color: 'var(--tone-green-tx)', fontWeight: 700 }}>+{money(upside)}</span> expected · {dismissed.length} dismissed</>} · {open ? 'hide ▴' : 'show ▾'}
+      <button onClick={() => setOpen(o => !o)} style={{ marginLeft: 'auto', border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 11.5, color: 'var(--text-secondary)', padding: 0, fontVariantNumeric: 'tabular-nums', ...(isMobile ? { minHeight: 40, textAlign: 'left' } : {}) }}>
+        Today: {empty ? 'nothing yet' : <>{applied} applied <span style={{ color: 'var(--tone-green-tx)', fontWeight: 700 }}>✓</span>{partial ? <> · {partial} partial <span style={{ color: 'var(--tone-amber-tx)', fontWeight: 700 }}>⚠</span></> : ''}{failed ? <> · {failed} failed <span style={{ color: 'var(--tone-red-tx)', fontWeight: 700 }}>×</span></> : ''} · <span style={{ color: 'var(--tone-green-tx)', fontWeight: 700 }}>+{money(upside)}</span> expected · {dismissed.length} dismissed</>} · <span style={{ color: 'var(--accent)', fontWeight: 600 }}>{open ? 'hide ▴' : 'show ▾'}</span>
       </button>
       {open && (
-        <div className="card" style={{ padding: 0, width: '100%', flexBasis: '100%' }}>
+        <div style={{ ...panel, overflow: 'hidden', width: '100%', flexBasis: '100%' }}>
           <div style={{ maxHeight: 220, overflow: 'auto' }}>
-            {!rows.length && <div style={{ ...MUTED, padding: '8px 14px' }}>No moves yet today.</div>}
+            {!rows.length && <div style={{ ...MUTED, padding: '9px 16px' }}>No moves yet today.</div>}
             {rows.map(a => (
-              <div key={a.id} className="mgrid" style={{ display: 'grid', gridTemplateColumns: '58px 1fr auto', gap: 10, padding: '7px 14px', borderBottom: '1px solid var(--border)', fontSize: 12, alignItems: 'baseline' }}>
+              <div key={a.id} className="mgrid" style={{ display: 'grid', gridTemplateColumns: '58px 1fr auto', gap: 10, padding: '7px 16px', borderBottom: '1px solid var(--border)', fontSize: 12, alignItems: 'baseline' }}>
                 <span style={{ ...MUTED, fontSize: 11, fontVariantNumeric: 'tabular-nums' }}>{clock(a.created_at)}</span>
-                <span>{a.summary} <span style={{ fontWeight: 700, color: a.st_status === 'ok' ? 'var(--tone-green-tx)' : a.st_status === 'partial' ? 'var(--tone-amber-tx)' : 'var(--tone-red-tx)' }}>{a.st_status === 'ok' ? '✓' : a.st_status}</span>
-                  {Number(a.after?.upside) > 0 && a.st_status === 'ok' && <span style={{ color: 'var(--tone-green-tx)', fontWeight: 700 }}> +{money(a.after.upside)}</span>}
+                <span>{a.summary} <ToneChip small tone={a.st_status === 'ok' ? 'green' : a.st_status === 'partial' ? 'amber' : 'red'}>{a.st_status === 'ok' ? '✓' : a.st_status}</ToneChip>
+                  {Number(a.after?.upside) > 0 && a.st_status === 'ok' && <span style={{ ...num, color: 'var(--tone-green-tx)', fontWeight: 700 }}> +{money(a.after.upside)}</span>}
                   {a.st_error && a.st_status !== 'ok' && <div style={{ ...MUTED, fontSize: 11, color: 'var(--tone-red-tx)' }}>ST said: {a.st_error.slice(0, 160)}</div>}</span>
                 <span style={{ ...MUTED, fontSize: 11 }}>{a.actor_name}</span>
               </div>
             ))}
           </div>
-          {reasons.length > 0 && <div style={{ ...MUTED, padding: '7px 14px', fontSize: 11, borderTop: '1px solid var(--border)' }}>dismissed: {reasons.map(([r, n]) => `${r} ×${n}`).join(' · ')}</div>}
+          {reasons.length > 0 && <div style={{ ...MUTED, padding: '8px 16px', fontSize: 11, borderTop: '1px solid var(--border)' }}>dismissed: {reasons.map(([r, n]) => `${r} ×${n}`).join(' · ')}</div>}
         </div>
       )}
     </>
@@ -867,7 +901,7 @@ const Card = memo(function Card({ c, day, isNext, flash, pending, stError, pick,
   const keep = selId === 'keep'
   const alt = keep ? null : alts.find(a => a.techId === selId) || null
   const pt = isPartial ? (c.partialTechs || []).find(x => x.techId === selId) || null : null
-  const rail = c.severity === 'high' ? 'var(--danger)' : c.severity === 'mid' ? 'var(--warning)' : 'var(--accent)'
+  const rail = c.severity === 'high' ? 'var(--tone-red-tx)' : c.severity === 'mid' ? 'var(--tone-amber-tx)' : 'var(--accent)'
   const noAlts = !isPartial && c.kind !== 'swap' && !alts.length
   const push = noAlts ? nextWindowBody(c) : null
   const canKeep = (c.kind === 'reassign' || c.kind === 'late') && c.current
@@ -917,9 +951,9 @@ const Card = memo(function Card({ c, day, isNext, flash, pending, stError, pick,
       <div style={{ padding: '11px 14px', display: 'grid', gap: 8, minWidth: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', fontSize: 11, color: 'var(--text-muted)' }}>
           <Kind kind={c.kind} />
-          {c.actBy && <span style={{ fontWeight: 700, color: 'var(--text-secondary)' }}>act by {hr(c.actBy)}</span>}
-          {c.kind === 'place' && c.isNew && <span style={{ fontWeight: 800, color: 'var(--tone-blue-tx)', background: 'var(--tone-blue-bg)', border: '1px solid var(--tone-blue-bd)', borderRadius: 99, padding: '1px 7px', fontSize: 10 }}>new · booked {clock(c.createdOn)}</span>}
-          {c.jobType && <span>{c.jobType} · {windowLabel(c)}{c.zip ? ` · ${c.zip}` : ''}</span>}
+          {c.actBy && <span style={{ ...num, fontWeight: 700, color: 'var(--text-secondary)' }}>act by {hr(c.actBy)}</span>}
+          {c.kind === 'place' && c.isNew && <ToneChip tone="blue" small>new · booked {clock(c.createdOn)}</ToneChip>}
+          {c.jobType && <span>{c.jobType} · <span style={num}>{windowLabel(c)}</span>{c.zip ? ` · ${c.zip}` : ''}</span>}
           {c.current && <span>· {c.current.techName} <TierDot tier={c.current.tier} /> {c.current.status === 'Working' ? 'on site' : c.current.status === 'Dispatched' ? 'rolling' : c.current.status?.toLowerCase()}</span>}
           <span style={{ marginLeft: 'auto', display: 'flex', gap: 10 }}>
             {isPartial && c.jobId && <a href={ST_JOB_URL(c.jobId)} target="_blank" rel="noreferrer" style={{ fontSize: 11 }}>Open in ServiceTitan ↗</a>}
@@ -927,13 +961,13 @@ const Card = memo(function Card({ c, day, isNext, flash, pending, stError, pick,
           </span>
         </div>
         <div style={{ fontSize: 13, fontWeight: 800, lineHeight: 1.3 }}>
-          {c.title}{c.upside > 0 && <span style={{ color: 'var(--tone-green-tx)', fontWeight: 800 }}> — +{money(c.upside)} expected</span>}
+          {c.title}{c.upside > 0 && <span style={{ ...num, color: 'var(--tone-green-tx)', fontWeight: 800 }}> — +{money(c.upside)} expected</span>}
         </div>
         {c.why && <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{c.why}</div>}
 
         {isPartial && (
-          <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius)', overflow: 'hidden' }}>
-            <div style={{ padding: '4px 10px', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: .5, color: 'var(--text-muted)', background: 'var(--surface-2)' }}>Remove from</div>
+          <div style={{ border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>
+            <div style={{ ...EYEBROW, padding: '4px 10px', background: 'var(--surface-2)' }}>Remove from</div>
             {(c.partialTechs || []).map((t, i) => (
               <div key={t.techId} onClick={() => onPick(c.key, t.techId)} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', fontSize: 12, cursor: 'pointer', borderTop: i ? '1px solid var(--border)' : 'none', background: t.techId === selId ? 'var(--accent-bg)' : 'transparent', ...(isMobile ? { minHeight: 40 } : {}) }}>
                 {radio(t.techId === selId)}<TierDot tier={t.tier} /><span style={{ fontWeight: 600 }}>{t.techName}</span>{t.recommended && <span style={{ fontSize: 9, fontWeight: 800, color: 'var(--tone-green-tx)' }}>PICK</span>}
@@ -943,10 +977,10 @@ const Card = memo(function Card({ c, day, isNext, flash, pending, stError, pick,
         )}
 
         {alts.length > 0 && (
-          <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius)', overflow: 'hidden' }}>
+          <div style={{ border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>
             {/* Six columns on a desk. On a phone a row is radio · tech · $/opp, with
                 load, drive and close rate folded into a second line under the name. */}
-            <div className="mgrid" style={{ display: 'grid', gridTemplateColumns: isMobile ? '18px 1fr auto' : '18px 1fr 110px 90px 70px 90px', gap: 8, padding: '4px 10px', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: .5, color: 'var(--text-muted)', background: 'var(--surface-2)' }}>
+            <div className="mgrid" style={{ ...EYEBROW, display: 'grid', gridTemplateColumns: isMobile ? '18px 1fr auto' : '18px 1fr 110px 90px 70px 90px', gap: 8, padding: '4px 10px', background: 'var(--surface-2)' }}>
               <span /><span>Technician</span>{!isMobile && <><span>Load today</span><span>Drive</span><span title="estimate close rate — not the TV $90 rule">Close</span></>}<span style={{ textAlign: 'right' }}>$/opp</span>
             </div>
             {alts.map((a, i) => {
@@ -997,19 +1031,19 @@ const Card = memo(function Card({ c, day, isNext, flash, pending, stError, pick,
           </div>
         )}
         {c.kind === 'swap' && c.steps && <div style={{ ...MUTED, fontSize: 11 }}>Two moves, in order: {c.steps.map(s => `#${s.jobNumber} → ${s.toTechnicianName}`).join(', then ')}{c.travel?.minutes != null ? ` · ${c.travel.minutes} min between the two sites` : ''} · stops if the first one doesn’t take</div>}
-        {stError && <div style={{ fontSize: 12, color: 'var(--tone-red-tx)', background: 'var(--tone-red-bg)', border: '1px solid var(--tone-red-bd)', borderRadius: 'var(--radius)', padding: '5px 10px' }}><b>ST said:</b> {stError}</div>}
+        {stError && <div style={{ fontSize: 12, color: 'var(--tone-red-tx)', background: 'var(--tone-red-bg)', border: '1px solid var(--tone-red-bd)', borderRadius: 10, padding: '5px 10px' }}><b>ST said:</b> {stError}</div>}
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           <Btn primary disabled={disabled} onClick={run} style={isMobile ? { width: '100%', justifyContent: 'center', whiteSpace: 'normal' } : undefined}>{pending && <Spin size={10} light />}{primary}</Btn>
           {!dismissing ? (
             <span style={{ marginLeft: 'auto', display: 'flex', gap: 4 }}>
-              <Btn small onClick={() => onDismiss(c.key, 'snooze', null, snoozeMin)} style={{ border: 'none', background: 'transparent', color: 'var(--text-secondary)' }}>Snooze {snoozeMin === 60 ? '1h' : `${snoozeMin}m`}</Btn>
-              <Btn small onClick={() => setDismissing(true)} style={{ border: 'none', background: 'transparent', color: 'var(--text-secondary)' }}>Not this one</Btn>
+              <Btn small ghost onClick={() => onDismiss(c.key, 'snooze', null, snoozeMin)}>Snooze {snoozeMin === 60 ? '1h' : `${snoozeMin}m`}</Btn>
+              <Btn small ghost onClick={() => setDismissing(true)}>Not this one</Btn>
             </span>
           ) : (
             <span style={{ marginLeft: 'auto', display: 'flex', gap: 4, alignItems: 'center', fontSize: 11, color: 'var(--text-muted)', flexWrap: 'wrap' }}>why?
               {DISMISS_REASONS.map(r => <Btn key={r} small onClick={() => onDismiss(c.key, 'dismiss', r)}>{r}</Btn>)}
-              <Btn small onClick={() => setDismissing(false)} style={{ border: 'none', background: 'transparent' }}>cancel</Btn>
+              <Btn small ghost onClick={() => setDismissing(false)} style={{ color: 'var(--text-primary)' }}>cancel</Btn>
             </span>
           )}
         </div>
@@ -1049,44 +1083,48 @@ const Board = memo(function Board({ board, onOpen, onUnhold, pendingKeys }) {
   const COLS = isMobile ? '96px 1fr' : '150px 1fr'   // the name column gives the lane its room on a phone
   return (
     <div className="card" style={{ padding: 0, position: 'sticky', top: 0 }}>
-      <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 10, ...(isMobile ? { flexWrap: 'wrap' } : {}) }}>
-        <span style={{ fontSize: 13, fontWeight: 700 }}>The board</span><span style={MUTED}>click any call · $ = opportunity, ring = seat tier</span>
-        <span style={{ marginLeft: 'auto', display: 'flex', gap: 10, fontSize: 10, color: 'var(--text-muted)' }}>
-          {[['green', 'opportunity'], ['amber', 'repair'], ['blue', 'install'], ['gray', 'routine']].map(([t, l]) => <span key={t}><i style={{ display: 'inline-block', width: 9, height: 9, borderRadius: 2, marginRight: 4, verticalAlign: -1, background: `var(--tone-${t}-bg)`, border: `1px solid var(--tone-${t}-bd)` }} />{l}</span>)}
+      <div style={{ padding: '11px 14px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 10, ...(isMobile ? { flexWrap: 'wrap' } : {}) }}>
+        <span style={{ fontSize: 14, fontWeight: 700 }}>The board</span><span style={MUTED}>click any call · $ = opportunity, ring = seat tier</span>
+        <span style={{ marginLeft: 'auto', display: 'flex', gap: 10, fontSize: 10.5, color: 'var(--text-muted)' }}>
+          {[['green', 'opportunity'], ['amber', 'repair'], ['blue', 'install'], ['gray', 'routine']].map(([t, l]) => <span key={t}><i style={{ display: 'inline-block', width: 9, height: 9, borderRadius: 3, marginRight: 4, verticalAlign: -1, background: `var(--tone-${t}-bg)`, border: `1px solid var(--tone-${t}-bd)` }} />{l}</span>)}
         </span>
       </div>
       <div className="mgrid" style={{ display: 'grid', gridTemplateColumns: COLS, padding: '5px 14px 3px', borderBottom: '1px solid var(--border)', background: 'var(--surface-2)' }}>
         <span /><div style={{ position: 'relative', height: 13 }}>
-          {(isMobile ? [8, 12, 16, 20] : [8, 10, 12, 14, 16, 18, 20]).map(h => <span key={h} style={{ position: 'absolute', left: `${((h - 7) / 13) * 100}%`, transform: 'translateX(-50%)', fontSize: 10, fontWeight: 700, color: 'var(--text-muted)' }}>{h === 12 ? '12PM' : h > 12 ? `${h - 12}PM` : `${h}AM`}</span>)}
+          {(isMobile ? [8, 12, 16, 20] : [8, 10, 12, 14, 16, 18, 20]).map(h => <span key={h} style={{ ...num, position: 'absolute', left: `${((h - 7) / 13) * 100}%`, transform: 'translateX(-50%)', fontSize: 10, fontWeight: 700, color: 'var(--text-muted)' }}>{h === 12 ? '12PM' : h > 12 ? `${h - 12}PM` : `${h}AM`}</span>)}
         </div>
       </div>
       <div style={{ overflow: 'auto', maxHeight: isMobile ? '70vh' : 'calc(100vh - 330px)' }}>
         {groups.map(g => (
           <div key={g.tr}>
-            <div style={{ ...EYEBROW, padding: '8px 14px 2px', display: 'flex', gap: 8 }}>{g.label}<span style={{ ...MUTED, fontSize: 11, textTransform: 'none', letterSpacing: 0 }}>{g.calls} calls</span></div>
+            <div style={{ ...EYEBROW, padding: '8px 14px 2px', display: 'flex', gap: 8 }}>{g.label}<span style={{ ...MUTED, ...num, fontSize: 11, textTransform: 'none', letterSpacing: 0 }}>{g.calls} calls</span></div>
             {g.techs.map(({ t, mine, rowOf, rows, shifts, opp, label }) => (
               <div key={t.techId} className="mgrid" style={{ display: 'grid', gridTemplateColumns: COLS, alignItems: 'center', padding: '3px 14px', minHeight: 32, opacity: t.onShift || t.out ? 1 : .55 }}>
-                <div title={`${TIER[t.tier]?.label || ''} · ${t.status}`} style={{ minWidth: 0, paddingRight: 8 }}>
-                  <div style={{ fontSize: 12, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6, overflow: 'hidden', whiteSpace: 'nowrap' }}>
-                    <TierDot tier={t.tier} /><span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.name}</span>
-                    {t.out && <span style={{ fontSize: 9, fontWeight: 800, letterSpacing: .5, padding: '0 5px', borderRadius: 4, color: 'var(--tone-red-tx)', border: '1px solid var(--tone-red-bd)', background: 'repeating-linear-gradient(45deg, var(--tone-red-bg) 0 3px, var(--surface) 3px 6px)' }}>OUT</span>}
-                    {!t.out && label === 'done' && <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-muted)' }}>done</span>}
+                {/* Desk: the tech's face carries the tier dot. Phone: the 96px column keeps the bare dot. */}
+                <div title={`${TIER[t.tier]?.label || ''} · ${t.status}`} style={{ minWidth: 0, paddingRight: 8, display: 'flex', alignItems: 'center', gap: 7 }}>
+                  {!isMobile && <TechFace name={t.name} tier={t.tier} size={22} />}
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6, overflow: 'hidden', whiteSpace: 'nowrap' }}>
+                      {isMobile && <TierDot tier={t.tier} />}<span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.name}</span>
+                      {t.out && <span style={{ fontSize: 9, fontWeight: 800, letterSpacing: .5, padding: '0 5px', borderRadius: 4, color: 'var(--tone-red-tx)', border: '1px solid var(--tone-red-bd)', background: 'repeating-linear-gradient(45deg, var(--tone-red-bg) 0 3px, var(--surface) 3px 6px)' }}>OUT</span>}
+                      {!t.out && label === 'done' && <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-muted)' }}>done</span>}
+                    </div>
+                    {t.rankable !== false && t.expectedValue != null && <div style={{ fontSize: 10, color: 'var(--text-muted)', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{money(t.expectedValue)}/opp · {opp} opp</div>}
                   </div>
-                  {t.rankable !== false && t.expectedValue != null && <div style={{ fontSize: 10, color: 'var(--text-muted)', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{money(t.expectedValue)}/opp · {opp} opp</div>}
                 </div>
-                <div style={{ position: 'relative', height: rows * 26, borderRadius: 4, background: 'repeating-linear-gradient(to right, transparent 0 calc(100%/13 - 1px), var(--border) calc(100%/13 - 1px) calc(100%/13))' }}>
-                  {shifts.map((s, i) => <div key={i} style={{ position: 'absolute', top: 0, bottom: 0, left: `${pos(s.start) * 100}%`, width: `${(pos(s.end) - pos(s.start)) * 100}%`, background: 'var(--accent-bg)', opacity: .35, borderRadius: 4 }} />)}
-                  {nowPos != null && nowPos > 0 && nowPos < 1 && <div style={{ position: 'absolute', top: -1, bottom: -1, left: `${nowPos * 100}%`, width: 2, background: 'var(--danger)', opacity: .7, zIndex: 1 }} />}
+                <div style={{ position: 'relative', height: rows * 26, borderRadius: 6, background: 'repeating-linear-gradient(to right, transparent 0 calc(100%/13 - 1px), var(--border) calc(100%/13 - 1px) calc(100%/13))' }}>
+                  {shifts.map((s, i) => <div key={i} style={{ position: 'absolute', top: 0, bottom: 0, left: `${pos(s.start) * 100}%`, width: `${(pos(s.end) - pos(s.start)) * 100}%`, background: 'var(--accent-bg)', opacity: .35, borderRadius: 6 }} />)}
+                  {nowPos != null && nowPos > 0 && nowPos < 1 && <div style={{ position: 'absolute', top: -1, bottom: -1, left: `${nowPos * 100}%`, width: 2, background: 'var(--tone-red-tx)', opacity: .7, zIndex: 1 }} />}
                   {!mine.length && (t.out
                     ? <span style={{ position: 'absolute', left: 8, top: 4, fontSize: 9, fontWeight: 800, letterSpacing: .5, padding: '0 5px', borderRadius: 4, color: 'var(--tone-red-tx)', border: '1px solid var(--tone-red-bd)', background: 'repeating-linear-gradient(45deg, var(--tone-red-bg) 0 3px, var(--surface) 3px 6px)' }}>OUT</span>
                     : <span style={{ position: 'absolute', left: 8, top: 5, fontSize: 10, color: 'var(--text-muted)' }}>{label}</span>)}
                   {mine.map(c => {
                     const k = kindOf(c); const tn = tone[k] || 'gray'
                     const glyph = c.status === 'Done' ? '✓' : c.status === 'Working' ? '●' : c.status === 'Dispatched' ? '→' : ''
-                    const ring = c.opportunity >= 3 && c.status !== 'Done' ? { boxShadow: `0 0 0 2px ${c.techTier === 'green' ? 'var(--success)' : 'var(--danger)'}` } : {}
+                    const ring = c.opportunity >= 3 && c.status !== 'Done' ? { boxShadow: `0 0 0 2px ${c.techTier === 'green' ? 'var(--tone-green-tx)' : 'var(--tone-red-tx)'}` } : {}
                     return (
                       <div key={c.appointmentId + '|' + c.techId} onClick={() => onOpen(c)} title={`#${c.jobNumber} · ${c.jobType} · ${windowLabel(c)} · ${c.status}${c.opportunityReasons?.length ? '\n' + c.opportunityReasons.join(' · ') : ''}`}
-                        style={{ position: 'absolute', top: 2 + (rowOf.get(c.appointmentId + '|' + c.techId) || 0) * 26, height: 22, left: `${pos(c.windowStart) * 100}%`, width: `calc(${(pos(c.windowEnd) - pos(c.windowStart)) * 100}% - 3px)`, borderRadius: 5, cursor: 'pointer',
+                        style={{ position: 'absolute', top: 2 + (rowOf.get(c.appointmentId + '|' + c.techId) || 0) * 26, height: 22, left: `${pos(c.windowStart) * 100}%`, width: `calc(${(pos(c.windowEnd) - pos(c.windowStart)) * 100}% - 3px)`, borderRadius: 7, cursor: 'pointer', fontVariantNumeric: 'tabular-nums',
                           fontSize: 10, fontWeight: 700, padding: '0 6px', display: 'flex', alignItems: 'center', gap: 4, overflow: 'hidden', whiteSpace: 'nowrap',
                           ...(k === 'hold' ? { background: 'repeating-linear-gradient(45deg, var(--surface-2) 0 4px, var(--surface) 4px 8px)', border: '1px dashed var(--border-strong)', color: 'var(--text-muted)' }
                             : { background: `var(--tone-${tn}-bg)`, border: `1px solid var(--tone-${tn}-bd)`, color: `var(--tone-${tn}-tx)` }),
@@ -1114,7 +1152,7 @@ const Board = memo(function Board({ board, onOpen, onUnhold, pendingKeys }) {
 })
 
 // ── Drawer ──────────────────────────────────────────────────────────────────
-const Skel = ({ w = '100%' }) => <div style={{ height: 12, width: w, borderRadius: 4, background: 'var(--surface-2)', marginTop: 6 }} />
+const Skel = ({ w = '100%' }) => <div className="skel" style={{ height: 12, width: w, borderRadius: 6, marginTop: 6 }} />
 function Drawer({ call: d, board, holdReasons, profile, phone, onClose, onAct, toast, detailMemo, prefill }) {
   // Job detail is remembered per job for a minute (same as the server): the
   // remembered copy paints instantly, and anything older re-reads behind it.
@@ -1231,7 +1269,7 @@ function Drawer({ call: d, board, holdReasons, profile, phone, onClose, onAct, t
     onAct({ kind: 'log', jobId: d.jobId, jobNumber: jn, summary: `Placed a call to ${detail.customer.name || 'the customer'} on #${jn} from Andi` })
   }
 
-  const sel = { width: '100%', border: '1px solid var(--border-strong)', borderRadius: 'var(--radius)', padding: '7px 10px', fontSize: 13, background: 'var(--surface)', color: 'var(--text-primary)', fontFamily: 'inherit' }
+  const sel = { width: '100%', border: '1px solid var(--border-strong)', borderRadius: 10, padding: '7px 10px', fontSize: 13, background: 'var(--surface)', color: 'var(--text-primary)', fontFamily: 'inherit' }
   const sec = { ...EYEBROW, marginBottom: 6 }
   // Phone: each field row stacks and its button runs the full width.
   const row = { display: 'flex', gap: 8, ...(isMobile ? { flexDirection: 'column' } : {}) }
@@ -1240,33 +1278,33 @@ function Drawer({ call: d, board, holdReasons, profile, phone, onClose, onAct, t
   return (
     <>
       <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.35)', zIndex: 500 }} />
-      <aside style={{ position: 'fixed', top: 0, right: 0, bottom: 0, width: 'min(460px, 100vw)', background: 'var(--surface)', borderLeft: '1px solid var(--border)', boxShadow: '0 10px 30px rgba(0,0,0,.25)', zIndex: 501, display: 'flex', flexDirection: 'column' }}>
+      <aside style={{ position: 'fixed', top: 0, right: 0, bottom: 0, width: 'min(460px, 100vw)', background: 'var(--surface)', borderLeft: '1px solid var(--border)', boxShadow: '-24px 0 60px -24px rgba(15,20,40,.4)', zIndex: 501, display: 'flex', flexDirection: 'column', ...(isMobile ? {} : { borderRadius: '18px 0 0 18px' }) }}>
         <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--border)', display: 'flex', gap: 10, alignItems: 'flex-start' }}>
           <div style={{ minWidth: 0 }}>
             <div style={EYEBROW}>{d.status === 'Hold' ? 'On hold' : d.status || 'Scheduled'} · {windowLabel(d)}{(detail?.location?.zip || d.zip) ? ` · ${detail?.location?.zip || d.zip}` : ''}</div>
-            <div style={{ fontSize: 15, fontWeight: 700, lineHeight: 1.25, marginTop: 2 }}>{jn ? `#${jn}` : '…'} <span style={{ color: 'var(--text-muted)', fontWeight: 500 }}>{jobType}</span></div>
+            <div style={{ fontSize: 16, fontWeight: 700, lineHeight: 1.25, marginTop: 3 }}><span style={num}>{jn ? `#${jn}` : '…'}</span> <span style={{ color: 'var(--text-muted)', fontWeight: 500 }}>{jobType}</span></div>
           </div>
-          <Btn small onClick={onClose} style={{ marginLeft: 'auto', border: 'none', background: 'transparent' }}>Close</Btn>
+          <Btn small ghost onClick={onClose} style={{ marginLeft: 'auto', color: 'var(--text-primary)' }}>Close</Btn>
         </div>
-        <div style={{ padding: '14px 18px', overflow: 'auto', display: 'grid', gap: 14, flex: 1 }}>
+        <div style={{ padding: '14px 18px', overflow: 'auto', display: 'grid', gap: 16, flex: 1 }}>
           {err && <div style={{ color: 'var(--danger)', fontSize: 12 }}>{err}</div>}
           <div>
             <div style={sec}>Customer</div>
             {detail ? (
               <>
-                <div style={{ fontSize: 13, fontWeight: 600 }}>{detail.customer?.name || '—'}{detail.customer?.doNotService && <span style={{ marginLeft: 8, fontSize: 10, color: 'var(--tone-red-tx)', fontWeight: 800 }}>DO NOT SERVICE</span>}</div>
-                <div style={{ ...MUTED, marginTop: 2 }}>{[detail.location?.street, detail.location?.city].filter(Boolean).join(', ')}{detail.customer?.phone ? ` · ${detail.customer.phone}` : ''}</div>
+                <div style={{ fontSize: 14, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>{detail.customer?.name || '—'}{detail.customer?.doNotService && <ToneChip tone="red" small>DO NOT SERVICE</ToneChip>}</div>
+                <div style={{ ...MUTED, marginTop: 2 }}>{[detail.location?.street, detail.location?.city].filter(Boolean).join(', ')}{detail.customer?.phone ? <> · <span style={num}>{detail.customer.phone}</span></> : ''}</div>
               </>
             ) : <><Skel w="55%" /><Skel w="80%" /></>}
             <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
               <Btn small disabled={!detail?.customer?.phone} onClick={call}>Call</Btn>
-              <a className="btn sm" href={ST_JOB_URL(d.jobId)} target="_blank" rel="noreferrer" style={{ fontSize: 11, padding: '4px 10px', ...(isMobile ? { minHeight: 40 } : {}) }}>Open in ServiceTitan ↗</a>
+              <a className="btn sm" href={ST_JOB_URL(d.jobId)} target="_blank" rel="noreferrer" style={{ fontSize: 11, padding: '4px 10px', borderRadius: 99, ...(isMobile ? { minHeight: 40 } : {}) }}>Open in ServiceTitan ↗</a>
             </div>
           </div>
           <div>
             <div style={sec}>Assigned tech</div>
             <div style={row}>
-              <select style={sel} value={techId} onChange={e => setTechId(e.target.value)}>
+              <select className="form-input" style={sel} value={techId} onChange={e => setTechId(e.target.value)}>
                 <option value="">— Unassigned —</option>
                 {ranked.map(t => <option key={t.techId} value={String(t.techId)}>{t.name}{t.techId === d.techId ? ' (current)' : ''} — {TIER[t.tier]?.label || t.tier}{t.expectedValue != null ? ` · ${money(t.expectedValue)}/opp` : ''}{t.allDayInstall ? ' · all-day install' : ''}</option>)}
               </select>
@@ -1277,8 +1315,8 @@ function Drawer({ call: d, board, holdReasons, profile, phone, onClose, onAct, t
           <div>
             <div style={sec}>Arrival window</div>
             <div style={row}>
-              <input type="date" style={{ ...sel, width: isMobile ? '100%' : 150 }} value={dateStr} onChange={e => setDateStr(e.target.value)} />
-              <select style={sel} value={win} onChange={e => setWin(e.target.value)}>
+              <input type="date" className="form-input" style={{ ...sel, width: isMobile ? '100%' : 150 }} value={dateStr} onChange={e => setDateStr(e.target.value)} />
+              <select className="form-input" style={sel} value={win} onChange={e => setWin(e.target.value)}>
                 <option value="">— pick —</option>
                 {WINDOWS.map(([s, e]) => <option key={s} value={`${s}-${e}`}>{s > 12 ? s - 12 : s} {s >= 12 ? 'PM' : 'AM'} – {e > 12 ? e - 12 : e} {e >= 12 ? 'PM' : 'AM'}</option>)}
               </select>
@@ -1288,10 +1326,10 @@ function Drawer({ call: d, board, holdReasons, profile, phone, onClose, onAct, t
           <div>
             <div style={sec}>Job type · priority</div>
             <div style={row}>
-              <select style={sel} value={jobTypeId} disabled={!detail} onChange={e => setJobTypeId(e.target.value)}>
+              <select className="form-input" style={sel} value={jobTypeId} disabled={!detail} onChange={e => setJobTypeId(e.target.value)}>
                 {detail ? (detail.jobTypes || []).map(t => <option key={t.id} value={String(t.id)}>{t.name}</option>) : <option value="">{jobType || 'loading…'}</option>}
               </select>
-              <select style={{ ...sel, width: isMobile ? '100%' : 120 }} value={priority} disabled={!detail} onChange={e => setPriority(e.target.value)}>{['', 'Low', 'Normal', 'High', 'Urgent'].map(p => <option key={p} value={p}>{p || '—'}</option>)}</select>
+              <select className="form-input" style={{ ...sel, width: isMobile ? '100%' : 120 }} value={priority} disabled={!detail} onChange={e => setPriority(e.target.value)}>{['', 'Low', 'Normal', 'High', 'Urgent'].map(p => <option key={p} value={p}>{p || '—'}</option>)}</select>
               <Btn primary disabled={busy || !detail} onClick={saveType} style={full}>Fix</Btn>
             </div>
           </div>
@@ -1299,8 +1337,8 @@ function Drawer({ call: d, board, holdReasons, profile, phone, onClose, onAct, t
             <div style={sec}>{d.status === 'Hold' ? 'Release hold' : 'Put on hold'}</div>
             {d.status !== 'Hold' && (
               <div style={{ display: 'grid', gap: 6 }}>
-                <select style={sel} value={holdReason} onChange={e => setHoldReason(e.target.value)}><option value="">— reason (required by ServiceTitan) —</option>{holdReasons.map(r => <option key={r.id} value={String(r.id)}>{r.name}</option>)}</select>
-                <input style={sel} placeholder="memo (optional)" value={holdMemo} onChange={e => setHoldMemo(e.target.value)} />
+                <select className="form-input" style={sel} value={holdReason} onChange={e => setHoldReason(e.target.value)}><option value="">— reason (required by ServiceTitan) —</option>{holdReasons.map(r => <option key={r.id} value={String(r.id)}>{r.name}</option>)}</select>
+                <input className="form-input" style={sel} placeholder="memo (optional)" value={holdMemo} onChange={e => setHoldMemo(e.target.value)} />
               </div>
             )}
             <div style={{ marginTop: 6 }}><Btn disabled={busy || !d.appointmentId || (d.status !== 'Hold' && !holdReason)} onClick={saveHold} style={full}>{d.status === 'Hold' ? 'Take off hold' : 'Hold this appointment'}</Btn></div>
@@ -1309,26 +1347,26 @@ function Drawer({ call: d, board, holdReasons, profile, phone, onClose, onAct, t
             <div style={sec}>Notes on the job</div>
             {detail ? (
               <>
-                {detail.job.summary && <div style={{ borderLeft: '2px solid var(--border-strong)', padding: '2px 10px', fontSize: 12, color: 'var(--text-secondary)', fontStyle: 'italic', marginBottom: 8, whiteSpace: 'pre-wrap' }}>{detail.job.summary}<span style={{ display: 'block', fontStyle: 'normal', fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>booking summary</span></div>}
-                {(detail.notes || []).slice(0, 5).map((n, i) => <div key={i} style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>{n.isPinned ? '📌 ' : ''}{n.text}<span style={{ ...MUTED, fontSize: 10 }}> · {n.createdOn ? new Date(n.createdOn).toLocaleDateString() : ''}</span></div>)}
+                {detail.job.summary && <div style={{ background: 'var(--surface-2)', borderRadius: 10, padding: '7px 11px', fontSize: 12, color: 'var(--text-secondary)', fontStyle: 'italic', marginBottom: 8, whiteSpace: 'pre-wrap' }}>{detail.job.summary}<span style={{ display: 'block', fontStyle: 'normal', fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>booking summary</span></div>}
+                {(detail.notes || []).slice(0, 5).map((n, i) => <div key={i} style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>{n.isPinned ? '📌 ' : ''}{n.text}<span style={{ ...MUTED, ...num, fontSize: 10 }}> · {n.createdOn ? new Date(n.createdOn).toLocaleDateString() : ''}</span></div>)}
               </>
             ) : <><Skel /><Skel w="70%" /></>}
             <div style={{ ...row, marginTop: 6 }}>
-              <input style={sel} placeholder="Pin a note to the job" value={note} onChange={e => setNote(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') saveNote() }} />
+              <input className="form-input" style={sel} placeholder="Pin a note to the job" value={note} onChange={e => setNote(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') saveNote() }} />
               <Btn disabled={busy || !note.trim()} onClick={saveNote} style={full}>Pin</Btn>
             </div>
           </div>
           {(!detail || detail.estimates?.length > 0) && (
             <div>
               <div style={sec}>Estimates</div>
-              {detail ? detail.estimates.map(e => <div key={e.id} style={{ fontSize: 12, display: 'flex', gap: 8 }}><span style={{ fontWeight: 700, color: e.status === 'Sold' ? 'var(--tone-green-tx)' : 'var(--text-muted)', minWidth: 46 }}>{e.status}</span><span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.name}</span><span style={{ fontVariantNumeric: 'tabular-nums' }}>{money(e.subtotal)}</span></div>)
+              {detail ? detail.estimates.map(e => <div key={e.id} style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}><span style={{ minWidth: 58, display: 'inline-flex' }}><ToneChip tone={e.status === 'Sold' ? 'green' : 'gray'} small>{e.status}</ToneChip></span><span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.name}</span><span style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 600 }}>{money(e.subtotal)}</span></div>)
                 : <Skel w="60%" />}
             </div>
           )}
           <div>
             <div style={sec}>Text the customer</div>
             <div style={row}>
-              <input style={sel} placeholder={!detail ? 'loading the customer…' : detail.customer?.phone ? `Text ${detail.customer.name || 'the customer'}…` : 'No phone on file'} disabled={!detail?.customer?.phone} value={smsBody} onChange={e => setSmsBody(e.target.value)} />
+              <input className="form-input" style={sel} placeholder={!detail ? 'loading the customer…' : detail.customer?.phone ? `Text ${detail.customer.name || 'the customer'}…` : 'No phone on file'} disabled={!detail?.customer?.phone} value={smsBody} onChange={e => setSmsBody(e.target.value)} />
               <Btn disabled={busy || !detail?.customer?.phone || !smsBody.trim()} onClick={sendSms} style={full}>Send</Btn>
             </div>
             <div style={{ ...MUTED, fontSize: 11, marginTop: 4 }}>You write it; nothing is sent automatically. Logged in Today’s moves.</div>

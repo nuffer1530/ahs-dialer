@@ -6,7 +6,7 @@ import { sb } from '../lib/supabase'
 import Badge from '../components/Badge'
 import { isDone, fmtShort, syncWorkerActivity } from '../lib/utils'
 import { INTERACTION_COLORS } from '../lib/constants'
-import Avatar from '../components/Avatar'
+import { Stat, ToneChip, Face, eyebrow, num, panel } from '../components/ui'
 import { useIsMobile } from '../lib/useIsMobile'
 
 const DEFAULT_STATUS_OPTIONS = [
@@ -17,6 +17,23 @@ const DEFAULT_STATUS_OPTIONS = [
   { value: 'Lunch',     color: '#f97316' },
   { value: 'Offline',   color: '#6b7280' },
 ]
+
+// Status and interaction colors are hexes an admin can change in Settings.
+// The chips here draw from the theme's tone tokens instead (so they read in
+// light and dark), taking the tone nearest each hex by hue: the defaults land
+// where you'd expect — Available green, On Call blue, Wrap Up and Lunch amber,
+// Break purple, Offline gray — and a custom status follows the color it got.
+function toneOf(hex) {
+  const m = /^#?([0-9a-f]{6})$/i.exec(String(hex || '').trim())
+  if (!m) return 'gray'
+  const n = parseInt(m[1], 16)
+  const r = ((n >> 16) & 255) / 255, g = ((n >> 8) & 255) / 255, b = (n & 255) / 255
+  const max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min
+  const sat = d === 0 ? 0 : d / (1 - Math.abs(max + min - 1))
+  if (sat < 0.2 || d < 0.1) return 'gray'
+  const h = ((max === r ? (g - b) / d : max === g ? (b - r) / d + 2 : (r - g) / d + 4) * 60 + 360) % 360
+  return h < 15 || h >= 335 ? 'red' : h < 65 ? 'amber' : h < 180 ? 'green' : h < 250 ? 'blue' : 'purple'
+}
 
 function timeSince(isoString) {
   if (!isoString) return '—'
@@ -37,22 +54,30 @@ function fmtWait(secs) {
   return `${Math.floor(secs / 60)}m ${secs % 60}s`
 }
 
-// One KPI tile. `tone` drives the accent so a queue building up reads red at a
-// glance from across the room.
+// One KPI — a zone of the summary panel. `tone` drives the color so a queue
+// building up reads red at a glance from across the room. Each zone draws its
+// hairline on its left and top edges and the panel clips the ones on its outer
+// edge, so the dividers land right however many zones fit on a row.
+const KPI_TONE = { good:'green', warn:'amber', bad:'red', accent:'blue' }
 function Kpi({ label, value, sub, tone = 'default', big = false }) {
-  const tones = {
-    default: 'var(--text-primary)',
-    good:    '#16A34A',
-    warn:    '#C87800',
-    bad:     '#DC2626',
-    accent:  'var(--accent)',
-  }
   return (
-    <div style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius-lg)',
-      padding:'14px 16px', display:'flex', flexDirection:'column', gap:2, minWidth:0 }}>
-      <div style={{ fontSize:10, fontWeight:700, letterSpacing:.6, textTransform:'uppercase', color:'var(--text-muted)' }}>{label}</div>
-      <div style={{ fontSize: big ? 34 : 26, fontWeight:700, lineHeight:1.1, color: tones[tone], fontVariantNumeric:'tabular-nums' }}>{value}</div>
-      {sub && <div style={{ fontSize:11, color:'var(--text-muted)' }}>{sub}</div>}
+    <div style={{ padding:'16px 20px', minWidth:0, boxShadow:'-1px 0 0 var(--border), 0 -1px 0 var(--border)' }}>
+      <Stat label={label} value={value} sub={sub} tone={KPI_TONE[tone]} big={big} />
+    </div>
+  )
+}
+
+// A section panel. flexShrink: the page is a height-bound flex column, and a
+// panel with overflow hidden would otherwise compress instead of scrolling.
+const sec = { ...panel, overflow:'hidden', flexShrink:0 }
+
+// Section header row — title, a muted one-liner, anything else on the right.
+function SectionHead({ title, desc, isMobile, children }) {
+  return (
+    <div style={{ padding: isMobile ? '12px 14px' : '14px 20px', borderBottom:'1px solid var(--border)', display:'flex', alignItems:'center', gap:'6px 10px', flexWrap:'wrap' }}>
+      <span style={{ fontSize:14.5, fontWeight:700 }}>{title}</span>
+      {desc && <span style={{ fontSize:12, color:'var(--text-muted)' }}>{desc}</span>}
+      {children && <div style={{ marginLeft:'auto', display:'flex', alignItems:'center', gap:6, flexWrap:'wrap' }}>{children}</div>}
     </div>
   )
 }
@@ -196,8 +221,10 @@ export default function LivePage() {
   const todayStr = now.toDateString()
 
   if (loading) return (
-    <div style={{ display:'flex', alignItems:'center', justifyContent:'center', flex:1 }}>
-      <div className="spinner lg"></div>
+    <div style={{ flex:1, overflowY:'auto', padding: isMobile ? 12 : 24, display:'flex', flexDirection:'column', gap:16, background:'var(--bg)' }}>
+      <div className="skel" style={{ height:108, borderRadius:16, flexShrink:0 }} />
+      <div className="skel" style={{ height:340, borderRadius:16, flexShrink:0 }} />
+      <div className="skel" style={{ height:220, borderRadius:16, flexShrink:0 }} />
     </div>
   )
 
@@ -255,39 +282,44 @@ export default function LivePage() {
   const abTone = !settled.length ? 'default' : abandonRate <= 5 ? 'good' : abandonRate <= 10 ? 'warn' : 'bad'
 
   return (
-    <div style={{ flex:1, overflowY:'auto', padding: isMobile ? 12 : 24, display:'flex', flexDirection:'column', gap: isMobile ? 14 : 20 }}>
+    <div style={{ flex:1, overflowY:'auto', padding: isMobile ? 12 : 24, display:'flex', flexDirection:'column', gap:16, background:'var(--bg)' }}>
 
       {/* Admin status override modal */}
       {isAdmin && overrideTarget && (
         <div onClick={() => setOverrideTarget(null)}
           style={{ position:'fixed', inset:0, background:'rgba(0,0,0,.45)', zIndex:1000, display:'flex', alignItems:'center', justifyContent:'center' }}>
           <div onClick={e => e.stopPropagation()} className="mkeep"
-            style={{ background:'var(--surface)', borderRadius:'var(--radius-lg)', padding:24, minWidth:260, boxShadow:'0 8px 32px rgba(0,0,0,.25)' }}>
-            <div style={{ fontSize:13, fontWeight:600, marginBottom:4 }}>Change Status</div>
-            <div style={{ fontSize:12, color:'var(--text-muted)', marginBottom:16 }}>{overrideTarget.name}</div>
+            style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:18, padding:22, minWidth:260, boxShadow:'0 24px 60px -20px rgba(15,20,40,.35)' }}>
+            <div style={eyebrow}>Change status</div>
+            <div style={{ fontSize:16, fontWeight:700, margin:'3px 0 14px' }}>{overrideTarget.name}</div>
             <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
-              {statusOptions.map(s => (
-                <button key={s.value} onClick={() => adminSetStatus(overrideTarget.id, s.value)}
-                  style={{ display:'flex', alignItems:'center', gap:10, padding: isMobile ? '12px 14px' : '10px 14px', borderRadius:'var(--radius)',
-                    border: overrideTarget.status === s.value ? `2px solid ${s.color}` : '2px solid transparent',
-                    background: overrideTarget.status === s.value ? s.color + '18' : 'var(--surface-2)',
-                    cursor:'pointer', fontSize:13, fontWeight: overrideTarget.status === s.value ? 600 : 400,
-                    color:'var(--text-primary)', textAlign:'left' }}>
-                  <div style={{ width:10, height:10, borderRadius:'50%', background:s.color, flexShrink:0 }}></div>
-                  {s.value}
-                  {overrideTarget.status === s.value && <span style={{ marginLeft:'auto', fontSize:11, color:s.color }}>✓ Current</span>}
-                </button>
-              ))}
+              {statusOptions.map(s => {
+                const on = overrideTarget.status === s.value
+                const t = toneOf(s.color)
+                return (
+                  <button key={s.value} onClick={() => adminSetStatus(overrideTarget.id, s.value)} className={on ? undefined : 'eval-row'}
+                    style={{ display:'flex', alignItems:'center', gap:10, padding: isMobile ? '12px 14px' : '10px 14px', borderRadius:12,
+                      border: `1px solid ${on ? `var(--tone-${t}-bd)` : 'var(--border)'}`,
+                      background: on ? `var(--tone-${t}-bg)` : 'var(--surface)',
+                      cursor:'pointer', fontSize:13, fontWeight: on ? 700 : 500,
+                      color:'var(--text-primary)', textAlign:'left' }}>
+                    <span style={{ width:9, height:9, borderRadius:'50%', background:`var(--tone-${t}-tx)`, flexShrink:0 }} />
+                    {s.value}
+                    {on && <span style={{ marginLeft:'auto', fontSize:11.5, fontWeight:700, color:`var(--tone-${t}-tx)` }}>✓ Current</span>}
+                  </button>
+                )
+              })}
             </div>
-            <button onClick={() => setOverrideTarget(null)} className="btn sm" style={{ marginTop:16, width:'100%', minHeight: isMobile ? 40 : undefined }}>Cancel</button>
+            <button onClick={() => setOverrideTarget(null)} className="btn" style={{ marginTop:14, width:'100%', justifyContent:'center', borderRadius:99, minHeight: isMobile ? 40 : undefined }}>Cancel</button>
           </div>
         </div>
       )}
 
       {/* ── Telephony KPIs — always first, this is what a floor lead scans.
-          mgrid: auto-fit already gives two tiles a row on a phone; without it
-          the phone layer stacks all six. ── */}
-      <div className="mgrid" style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(150px, 1fr))', gap:12 }}>
+          One summary panel, zones split by hairlines. mgrid: auto-fit already
+          gives two zones a row on a phone; without it the phone layer stacks
+          all six. ── */}
+      <div className="mgrid" style={{ ...sec, display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(150px, 1fr))' }}>
         <Kpi label="In queue" value={queued.length} tone={queueTone} big
           sub={queued.length ? `longest ${fmtWait(longestWait)}` : 'nobody waiting'} />
         <Kpi label="Live calls" value={onCall.length} tone={onCall.length ? 'accent' : 'default'} big
@@ -306,52 +338,53 @@ export default function LivePage() {
 
       {/* Who's actually waiting, oldest first — the queue itself */}
       {queued.length > 0 && (
-        <div className="card">
-          <div className="card-header">
-            <div className="card-title">Waiting now</div>
-            <span style={{ fontSize:11, color:'var(--text-muted)' }}>{queued.length} caller{queued.length === 1 ? '' : 's'}</span>
-          </div>
+        <div style={sec}>
+          <SectionHead isMobile={isMobile} title="Waiting now" desc="Oldest first">
+            <ToneChip tone={KPI_TONE[queueTone]}>{queued.length} caller{queued.length === 1 ? '' : 's'}</ToneChip>
+          </SectionHead>
           {/* Three columns fit a phone, so skip the forced 640px sideways scroll. */}
-          <table className="data-table" style={isMobile ? { minWidth:0 } : undefined}>
-            <thead><tr><th>Caller</th><th>Number</th><th>Waiting</th></tr></thead>
-            <tbody>
-              {[...queued].sort((a, b) => new Date(a.queued_at) - new Date(b.queued_at)).map(t => {
-                const w = waitOf(t)
-                return (
-                  <tr key={t.task_sid}>
-                    <td style={{ padding:'10px 12px', fontWeight:600 }}>{t.contact_name || 'Unknown caller'}</td>
-                    <td style={{ padding:'10px 12px', fontSize:12, color:'var(--text-secondary)' }}>{t.from_number || '—'}</td>
-                    <td style={{ padding:'10px 12px', fontWeight:700, fontVariantNumeric:'tabular-nums',
-                      color: w > 60 ? '#DC2626' : w > 30 ? '#C87800' : 'var(--text-primary)' }}>{fmtWait(w)}</td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
+          <div style={{ overflowX:'auto' }}>
+            <table className="data-table" style={isMobile ? { minWidth:0 } : undefined}>
+              <thead><tr><th>Caller</th><th>Number</th><th style={{ textAlign:'right' }}>Waiting</th></tr></thead>
+              <tbody>
+                {[...queued].sort((a, b) => new Date(a.queued_at) - new Date(b.queued_at)).map(t => {
+                  const w = waitOf(t)
+                  return (
+                    <tr key={t.task_sid}>
+                      <td style={{ fontWeight:650 }}>{t.contact_name || 'Unknown caller'}</td>
+                      <td style={{ color:'var(--text-secondary)' }}>{t.from_number || '—'}</td>
+                      <td style={{ textAlign:'right' }}>
+                        <ToneChip tone={w > 60 ? 'red' : w > 30 ? 'amber' : 'gray'}>{fmtWait(w)}</ToneChip>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 
       {/* 👁 Live Call X-Ray — admin-only list of in-progress transcriptions */}
       {isAdmin && xrayCalls.length > 0 && (
-        <div className="card" style={{ borderLeft:'3px solid var(--accent)' }}>
-          <div className="card-header">
-            <div className="card-title">Live Calls — click to read along</div>
-            <span style={{ fontSize:11, color:'var(--text-muted)' }}>{xrayCalls.length} in progress · transcript only, nothing extra is recorded</span>
-          </div>
+        <div style={sec}>
+          <SectionHead isMobile={isMobile} title="Live calls" desc="Click a call to read along · transcript only, nothing extra is recorded">
+            <ToneChip tone="blue">{xrayCalls.length} in progress</ToneChip>
+          </SectionHead>
           <div>
-            {xrayCalls.map(c => (
-              <div key={c.id} onClick={() => setWatchSid(c.id)}
-                style={{ display:'flex', alignItems:'center', gap:12, padding: isMobile ? '12px 12px' : '10px 18px', borderBottom:'1px solid var(--border)', cursor:'pointer',
-                  flexWrap: isMobile ? 'wrap' : undefined }}
-                onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
-                onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-                <span style={{ width:8, height:8, borderRadius:'50%', background:'var(--danger)', animation:'pulse 1.2s infinite', flexShrink:0 }} />
-                <span style={{ fontSize:13, fontWeight:700 }}>{xrayName(c)}</span>
-                <span style={{ fontSize:11.5, color:'var(--text-muted)' }}>
-                  {c.direction === 'inbound' ? '📥 inbound' : '📤 outbound'}{c.rep ? ` · ${c.rep}` : ''} · {xrayDur(c.startedAt)} · {c.lines} lines
+            {xrayCalls.map((c, i) => (
+              <button key={c.id} onClick={() => setWatchSid(c.id)} className="eval-row"
+                style={{ width:'100%', textAlign:'left', display:'flex', alignItems:'center', gap:10, padding: isMobile ? '12px 12px' : '11px 20px',
+                  border:'none', borderTop: i ? '1px solid var(--border)' : 'none', background:'transparent', cursor:'pointer', color:'inherit', font:'inherit',
+                  flexWrap: isMobile ? 'wrap' : undefined }}>
+                <span style={{ width:8, height:8, borderRadius:'50%', background:'var(--tone-red-tx)', animation:'pulse 1.2s infinite', flexShrink:0 }} />
+                <span style={{ fontSize:13.5, fontWeight:700 }}>{xrayName(c)}</span>
+                <ToneChip tone={c.direction === 'inbound' ? 'blue' : 'purple'} small>{c.direction === 'inbound' ? 'Inbound' : 'Outbound'}</ToneChip>
+                <span style={{ ...num, fontSize:12, color:'var(--text-muted)' }}>
+                  {c.rep ? `${c.rep} · ` : ''}{xrayDur(c.startedAt)} · {c.lines} lines
                 </span>
-                <span style={{ marginLeft:'auto', fontSize:11.5, fontWeight:700, color:'var(--accent)' }}>View transcript</span>
-              </div>
+                <span style={{ marginLeft:'auto', fontSize:12, fontWeight:700, color:'var(--accent)' }}>View transcript</span>
+              </button>
             ))}
           </div>
         </div>
@@ -361,21 +394,21 @@ export default function LivePage() {
         <div onClick={() => setWatchSid(null)}
           style={{ position:'fixed', inset:0, background:'rgba(0,0,0,.5)', zIndex:800, display:'flex', alignItems:'center', justifyContent:'center', padding: isMobile ? 10 : 20 }}>
           <div onClick={e => e.stopPropagation()}
-            style={{ background:'var(--surface)', borderRadius:14, width:'100%', maxWidth:640, height:'78vh', boxShadow:'0 16px 48px rgba(0,0,0,.35)', display:'flex', flexDirection:'column', overflow:'hidden' }}>
-            <div style={{ padding:'12px 18px', borderBottom:'1px solid var(--border)', display:'flex', alignItems:'center', gap:10, flexShrink:0 }}>
+            style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:18, width:'100%', maxWidth:640, height:'78vh', boxShadow:'0 24px 60px -20px rgba(15,20,40,.35)', display:'flex', flexDirection:'column', overflow:'hidden' }}>
+            <div style={{ padding: isMobile ? '12px 14px' : '14px 20px', borderBottom:'1px solid var(--border)', display:'flex', alignItems:'center', gap:12, flexShrink:0 }}>
               {watchTx?.active !== false
-                ? <span style={{ width:9, height:9, borderRadius:'50%', background:'var(--danger)', animation:'pulse 1.2s infinite' }} />
-                : <span style={{ width:9, height:9, borderRadius:'50%', background:'var(--text-muted)' }} />}
+                ? <span style={{ width:9, height:9, borderRadius:'50%', background:'var(--tone-red-tx)', animation:'pulse 1.2s infinite', flexShrink:0 }} />
+                : <span style={{ width:9, height:9, borderRadius:'50%', background:'var(--text-muted)', flexShrink:0 }} />}
               <div style={{ flex:1, minWidth:0 }}>
-                <div style={{ fontSize:14, fontWeight:800 }}>
+                <div style={{ fontSize:15, fontWeight:700, display:'flex', alignItems:'center', gap:8, flexWrap:'wrap' }}>
                   {watchTx ? (watchTx.contactName || contacts.find(x => x.id === watchTx.contactId)?.name || 'Live call') : 'Live call'}
-                  {watchTx?.active === false && <span style={{ fontWeight:600, color:'var(--text-muted)' }}> — call ended</span>}
+                  {watchTx?.active === false && <ToneChip tone="gray" small>Call ended</ToneChip>}
                 </div>
-                <div style={{ fontSize:11, color:'var(--text-muted)' }}>
+                <div style={{ fontSize:12, color:'var(--text-muted)', marginTop:1 }}>
                   {watchTx?.rep ? `with ${watchTx.rep} · ` : ''}updates every few seconds · the rep can't see that you're reading
                 </div>
               </div>
-              <button className="btn sm" onClick={() => setWatchSid(null)} style={isMobile ? { minHeight:40 } : undefined}>Close</button>
+              <button className="btn sm" onClick={() => setWatchSid(null)} style={{ borderRadius:99, ...(isMobile ? { minHeight:40 } : {}) }}>Close</button>
             </div>
             <div style={{ flex:1, overflowY:'auto', padding:16, display:'flex', flexDirection:'column', gap:8 }}
               ref={el => {
@@ -393,13 +426,13 @@ export default function LivePage() {
               )}
               {(watchTx?.lines || []).map((l, i) => (
                 <div key={i} style={{ alignSelf: l.who === 'Rep' ? 'flex-end' : 'flex-start', maxWidth:'85%' }}>
-                  <div style={{ fontSize:9.5, fontWeight:700, textTransform:'uppercase', letterSpacing:.5, marginBottom:2,
+                  <div style={{ ...eyebrow, ...num, fontSize:10, marginBottom:3,
                     color: l.who === 'Rep' ? 'var(--accent)' : 'var(--tone-amber-tx)', textAlign: l.who === 'Rep' ? 'right' : 'left' }}>
                     {l.who}{l.at ? ` · ${new Date(l.at).toLocaleTimeString([], { hour:'numeric', minute:'2-digit', second:'2-digit' })}` : ''}
                   </div>
-                  <div style={{ padding:'8px 12px', borderRadius:12, fontSize:13, lineHeight:1.5,
+                  <div style={{ padding:'9px 13px', borderRadius:14, fontSize:13, lineHeight:1.5,
                     background: l.who === 'Rep' ? 'var(--accent-bg)' : 'var(--surface-2)',
-                    border: `1px solid ${l.who === 'Rep' ? 'var(--accent)' : 'var(--border)'}` }}>
+                    border: `1px solid ${l.who === 'Rep' ? 'var(--tone-blue-bd)' : 'var(--border)'}` }}>
                     {l.text}
                   </div>
                 </div>
@@ -410,32 +443,22 @@ export default function LivePage() {
       )}
 
       {/* Agent Status Board */}
-      <div className="card">
-        <div className="card-header" style={isMobile ? { flexWrap:'wrap', gap:6 } : undefined}>
-          <div className="card-title">Agent Status Board</div>
-          <div style={{ display:'flex', gap:12, flexWrap:'wrap' }}>
-            {statusOptions.map(s => {
-              const count = profiles.filter(p => (p.status || 'Offline') === s.value).length
-              if (count === 0) return null
-              return (
-                <span key={s.value} style={{ fontSize:11, display:'flex', alignItems:'center', gap:4, color:'var(--text-muted)' }}>
-                  <div style={{ width:6, height:6, borderRadius:'50%', background:s.color }}></div>
-                  {count} {s.value}
-                </span>
-              )
-            })}
-            {/* Also show any statuses not in statusOptions (edge case) */}
-            {profiles.filter(p => p.status && !statusOptions.find(s => s.value === p.status)).map(p => p.status)
-              .filter((v, i, arr) => arr.indexOf(v) === i)
-              .map(status => (
-                <span key={status} style={{ fontSize:11, display:'flex', alignItems:'center', gap:4, color:'var(--text-muted)' }}>
-                  <div style={{ width:6, height:6, borderRadius:'50%', background:'#6b7280' }}></div>
-                  {profiles.filter(p => p.status === status).length} {status}
-                </span>
-              ))
-            }
-          </div>
-        </div>
+      <div style={sec}>
+        <SectionHead isMobile={isMobile} title="Agent status board"
+          desc={`${profiles.length} on the floor${isAdmin ? ' · click a status to change it' : ''}`}>
+          {statusOptions.map(s => {
+            const count = profiles.filter(p => (p.status || 'Offline') === s.value).length
+            if (count === 0) return null
+            return <ToneChip key={s.value} tone={toneOf(s.color)} small>{count} {s.value}</ToneChip>
+          })}
+          {/* Also show any statuses not in statusOptions (edge case) */}
+          {profiles.filter(p => p.status && !statusOptions.find(s => s.value === p.status)).map(p => p.status)
+            .filter((v, i, arr) => arr.indexOf(v) === i)
+            .map(status => (
+              <ToneChip key={status} tone="gray" small>{profiles.filter(p => p.status === status).length} {status}</ToneChip>
+            ))
+          }
+        </SectionHead>
         <div style={{ overflowX:'auto' }}>
           <table className="data-table">
             <thead>
@@ -444,8 +467,8 @@ export default function LivePage() {
                 <th>Status</th>
                 <th>Time in Status</th>
                 <th>Interaction</th>
-                <th>Today Calls</th>
-                <th>Today Booked</th>
+                <th style={{ textAlign:'center' }}>Today Calls</th>
+                <th style={{ textAlign:'center' }}>Today Booked</th>
                 <th>Last Call</th>
               </tr>
             </thead>
@@ -457,54 +480,49 @@ export default function LivePage() {
                 const todayLogs = repLogs.filter(l => new Date(l.created_at).toDateString() === todayStr)
                 const lastLog = repLogs[0]
                 const lastContact = lastLog ? contacts.find(c => c.id === lastLog.contact_id) : null
+                const bookedToday = todayLogs.filter(l => l.outcome === 'Booked').length
 
                 return (
                   <tr key={p.id}>
-                    <td style={{ padding:'10px 12px', fontWeight:500 }}>
-                      <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-                        <div style={{ width:28, height:28, borderRadius:'50%', background:'var(--accent-bg)', color:'var(--accent)', display:'flex', alignItems:'center', justifyContent:'center', fontSize: p.avatar ? 18 : 11, fontWeight:600, flexShrink:0 }}>
-                          <Avatar avatar={p.avatar} name={p.name || p.email} />
-                        </div>
-                        <div style={{ fontSize:13 }}>{p.name || p.email}</div>
+                    <td>
+                      <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+                        <Face avatar={p.avatar} name={p.name || p.email} size={30} />
+                        <span style={{ fontSize:13, fontWeight:650, whiteSpace:'nowrap' }}>{p.name || p.email}</span>
                         {p.id !== myProfile?.id && (
-                          <button onClick={() => callTeammate(p)}
+                          <button onClick={() => callTeammate(p)} className="btn sm"
                             disabled={!twilioReady || !!callStatus || status === 'Offline'}
                             title={status === 'Offline' ? `${p.name || 'They'} aren't logged in` : `Call ${p.name || p.email} — rings their browser wherever they're logged in`}
-                            style={{ marginLeft:2, padding: isMobile ? '6px 14px' : '2px 10px', fontSize: isMobile ? 12 : 10.5, fontWeight:700, borderRadius:99,
-                              minHeight: isMobile ? 40 : undefined,
-                              border:'1px solid var(--accent)', cursor: (!twilioReady || callStatus || status === 'Offline') ? 'not-allowed' : 'pointer',
-                              background:'transparent', color:'var(--accent)', opacity: (!twilioReady || callStatus || status === 'Offline') ? .4 : 1 }}>
+                            style={{ marginLeft:2, padding: isMobile ? '6px 14px' : '2px 10px', fontSize: isMobile ? 12 : 11, fontWeight:700, borderRadius:99,
+                              minHeight: isMobile ? 40 : undefined, color:'var(--accent)' }}>
                             Call
                           </button>
                         )}
                       </div>
                     </td>
-                    <td style={{ padding:'10px 12px' }}>
+                    <td>
                       <span
                         onClick={() => isAdmin && setOverrideTarget({ id:p.id, name:p.name || p.email, status })}
-                        style={{ display:'inline-flex', alignItems:'center', gap:6, padding:'3px 10px', borderRadius:99, fontSize:11, fontWeight:600, background:statusColor + '20', color:statusColor, cursor: isAdmin ? 'pointer' : 'default',
+                        style={{ display:'inline-flex', alignItems:'center', cursor: isAdmin ? 'pointer' : 'default',
                           minHeight: isMobile && isAdmin ? 40 : undefined }}
                         title={isAdmin ? 'Click to change status' : ''}>
-                        <div style={{ width:6, height:6, borderRadius:'50%', background:statusColor }}></div>
-                        {status}
-                        {isAdmin && <span style={{ fontSize:9, opacity:.5 }}>▾</span>}
+                        <ToneChip tone={toneOf(statusColor)}>
+                          <span style={{ display:'inline-block', width:6, height:6, borderRadius:99, background:'currentColor', marginRight:6, verticalAlign:1 }} />
+                          {status}
+                          {isAdmin && <span style={{ fontSize:9, opacity:.6, marginLeft:5 }}>▾</span>}
+                        </ToneChip>
                       </span>
                     </td>
-                    <td style={{ padding:'10px 12px', fontSize:12, color:'var(--text-muted)' }}>
+                    <td style={{ color:'var(--text-secondary)', whiteSpace:'nowrap' }}>
                       {p.status_since ? timeSince(p.status_since) : '—'}
                     </td>
                     {/* What they're engaged on — inbound, outbound, a paid lead,
                         a text, an email. Campaign rides underneath when set, so
                         this column didn't lose information when it was renamed. */}
-                    <td style={{ padding:'10px 12px', fontSize:12 }}>
+                    <td>
                       {p.interaction_type && ['On Call', 'Wrap Up'].includes(p.status) ? (
                         <div>
-                          <span style={{ display:'inline-block', padding:'2px 8px', borderRadius:99, fontSize:11, fontWeight:600,
-                            background: INTERACTION_COLORS[p.interaction_type] ? INTERACTION_COLORS[p.interaction_type] + '20' : 'var(--surface-2)',
-                            color: INTERACTION_COLORS[p.interaction_type] || 'var(--text-secondary)' }}>
-                            {p.interaction_type}
-                          </span>
-                          {p.current_campaign && <div style={{ fontSize:10, color:'var(--text-muted)', marginTop:2 }}>{p.current_campaign}</div>}
+                          <ToneChip tone={toneOf(INTERACTION_COLORS[p.interaction_type])} small>{p.interaction_type}</ToneChip>
+                          {p.current_campaign && <div style={{ fontSize:11, color:'var(--text-muted)', marginTop:3 }}>{p.current_campaign}</div>}
                         </div>
                       ) : (
                         p.current_campaign
@@ -512,17 +530,17 @@ export default function LivePage() {
                           : <span style={{ color:'var(--text-muted)' }}>—</span>
                       )}
                     </td>
-                    <td style={{ padding:'10px 12px', fontWeight:600, textAlign:'center' }}>
+                    <td style={{ fontWeight:700, textAlign:'center' }}>
                       {todayLogs.length}
                     </td>
-                    <td style={{ padding:'10px 12px', fontWeight:600, textAlign:'center', color:'var(--success)' }}>
-                      {todayLogs.filter(l => l.outcome === 'Booked').length}
+                    <td style={{ fontWeight:700, textAlign:'center', color: bookedToday ? 'var(--tone-green-tx)' : 'var(--text-muted)' }}>
+                      {bookedToday}
                     </td>
-                    <td style={{ padding:'10px 12px', fontSize:11, color:'var(--text-muted)' }}>
+                    <td style={{ fontSize:11.5, color:'var(--text-muted)' }}>
                       {lastLog ? (
                         <div>
-                          <div style={{ fontWeight:500, color:'var(--text-secondary)' }}>{lastContact?.name || '—'}</div>
-                          <div>{fmtShort(lastLog.created_at)} · {lastLog.outcome}</div>
+                          <div style={{ fontWeight:600, color:'var(--text-secondary)' }}>{lastContact?.name || '—'}</div>
+                          <div style={{ whiteSpace:'nowrap' }}>{fmtShort(lastLog.created_at)} · {lastLog.outcome}</div>
                         </div>
                       ) : '—'}
                     </td>
@@ -535,50 +553,50 @@ export default function LivePage() {
       </div>
 
       {/* Recent Calls Live Feed */}
-      <div className="card">
-        <div className="card-header">
-          <div className="card-title">Recent Calls — Live Feed</div>
-          <span style={{ fontSize:11, color:'var(--text-muted)' }}>{logs.length} calls in last 24h</span>
-        </div>
+      <div style={sec}>
+        <SectionHead isMobile={isMobile} title="Recent calls" desc={`Live feed · ${logs.length} calls in last 24h`} />
         {logs.length === 0 ? (
-          <div className="empty-state"><div>No calls in the last 24 hours.</div></div>
+          <div style={{ padding:'40px 20px', textAlign:'center', color:'var(--text-muted)', fontSize:13 }}>No calls in the last 24 hours.</div>
         ) : (
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Rep</th>
-                <th>Contact</th>
-                <th>Outcome</th>
-                <th>Notes</th>
-                <th>Time</th>
-              </tr>
-            </thead>
-            <tbody>
-              {logs.slice(0, 5).map(l => {
-                const contact = contacts.find(c => c.id === l.contact_id)
-                const color = getStatusColor(l.outcome) || '#6b7280'
-                return (
-                  <tr key={l.id}>
-                    <td style={{ padding:'8px 12px', fontWeight:500, fontSize:12 }}>{l.rep}</td>
-                    <td style={{ padding:'8px 12px', fontSize:12 }}>{contact?.name || '—'}</td>
-                    <td style={{ padding:'8px 12px' }}>
-                      <span style={{ padding:'2px 8px', borderRadius:99, fontSize:10, fontWeight:600,
-                        background: l.outcome === 'Booked' ? '#DCFCE7' : l.outcome === 'DNC' ? '#FEF2F2' : 'var(--surface-2)',
-                        color: l.outcome === 'Booked' ? '#16A34A' : l.outcome === 'DNC' ? '#7F1D1D' : 'var(--text-secondary)' }}>
-                        {l.outcome}
-                      </span>
-                    </td>
-                    <td style={{ padding:'8px 12px', fontSize:11, color:'var(--text-muted)', maxWidth:200, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
-                      {l.notes || '—'}
-                    </td>
-                    <td style={{ padding:'8px 12px', fontSize:11, color:'var(--text-muted)' }}>
-                      {fmtShort(l.created_at)}
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
+          <div style={{ overflowX:'auto' }}>
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Rep</th>
+                  <th>Contact</th>
+                  <th>Outcome</th>
+                  <th>Notes</th>
+                  <th>Time</th>
+                </tr>
+              </thead>
+              <tbody>
+                {logs.slice(0, 5).map(l => {
+                  const contact = contacts.find(c => c.id === l.contact_id)
+                  const color = getStatusColor(l.outcome) || '#6b7280'
+                  return (
+                    <tr key={l.id}>
+                      <td>
+                        <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                          <Face avatar={profiles.find(p => (p.name || p.email) === l.rep)?.avatar} name={l.rep} size={22} />
+                          <span style={{ fontWeight:600, whiteSpace:'nowrap' }}>{l.rep}</span>
+                        </div>
+                      </td>
+                      <td>{contact?.name || '—'}</td>
+                      <td>
+                        <ToneChip tone={l.outcome === 'Booked' ? 'green' : l.outcome === 'DNC' ? 'red' : 'gray'} small>{l.outcome}</ToneChip>
+                      </td>
+                      <td style={{ color:'var(--text-muted)', maxWidth:200, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                        {l.notes || '—'}
+                      </td>
+                      <td style={{ color:'var(--text-muted)', whiteSpace:'nowrap' }}>
+                        {fmtShort(l.created_at)}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
     </div>

@@ -6,12 +6,56 @@ import { useData } from '../lib/DataContext'
 import { useIsMobile } from '../lib/useIsMobile'
 import Modal from '../components/Modal'
 import CampaignsPage from './CampaignsPage'
-import Avatar from '../components/Avatar'
 import AvatarCropper from '../components/AvatarCropper'
 import KnowledgeTab from '../components/KnowledgeTab'
 import CallRoutingTab from '../components/CallRoutingTab'
 import CallQATab from '../components/CallQATab'
 import { OPS_DEFAULTS, invalidateOpsConfig, loadOpsConfig } from '../lib/opsConfig'
+import { PageTabs, SummaryPanel, Stat, ToneChip, Face, eyebrow, panel, num } from '../components/ui'
+
+// ── Settings' local kit ──────────────────────────────────────────────────────
+// A settings section: the kit's 16px panel with a header row (title, a muted
+// description, actions on the right) over a hairline divider. `flush` hands
+// the body to the caller for divided rows and tables.
+function Section({ title, desc, actions, children, flush, style, bodyStyle }) {
+  const isMobile = useIsMobile()
+  return (
+    <section style={{ ...panel, flexShrink:0, overflow:'hidden', ...style }}>
+      <div style={{ padding: isMobile ? '12px 14px' : '14px 20px', borderBottom:'1px solid var(--border)', display:'flex', alignItems:'center', gap:12, flexWrap:'wrap' }}>
+        <div style={{ flex:'1 1 260px', minWidth:0 }}>
+          <div style={{ fontSize:14.5, fontWeight:700, lineHeight:1.3 }}>{title}</div>
+          {desc && <div style={{ fontSize:12, color:'var(--text-muted)', marginTop:2, lineHeight:1.5 }}>{desc}</div>}
+        </div>
+        {actions && <div style={{ display:'flex', alignItems:'center', gap:10, flexWrap:'wrap', marginLeft:'auto' }}>{actions}</div>}
+      </div>
+      {flush ? children : <div style={{ padding: isMobile ? 14 : '16px 20px', ...bodyStyle }}>{children}</div>}
+    </section>
+  )
+}
+
+// Every save/status line on Settings reads the same: muted while working or
+// idle, green once it worked, red when it didn't.
+function SaveNote({ children, error, muted }) {
+  if (!children) return null
+  return (
+    <span role="status" style={{ fontSize:12, fontWeight:600, lineHeight:1.4,
+      color: muted ? 'var(--text-muted)' : error ? 'var(--tone-red-tx)' : 'var(--tone-green-tx)' }}>
+      {children}
+    </span>
+  )
+}
+
+// A tinted callout for results and warnings that need more room than a SaveNote.
+function Notice({ tone = 'amber', children, style }) {
+  return (
+    <div style={{ padding:'10px 14px', borderRadius:12, fontSize:12.5, lineHeight:1.5,
+      background:`var(--tone-${tone}-bg)`, border:`1px solid var(--tone-${tone}-bd)`, color:`var(--tone-${tone}-tx)`, ...style }}>
+      {children}
+    </div>
+  )
+}
+
+const ROLE_CHIP = { admin: ['blue', 'Admin'], dispatcher: ['purple', 'Dispatcher'], rep: ['gray', 'Rep'] }
 
 const EMOJIS = {
   '🔥 Hype': ['🔥','⚡','💥','🚀','🎯','💪','👊','🏆','👑','💎','🌟','⭐','🔑','💰','🎰','🃏'],
@@ -195,90 +239,98 @@ function CommissionMapping() {
     setBusy('')
   }
 
-  if (loading) return <div style={{ padding:40, textAlign:'center', color:'var(--text-muted)' }}>Loading ServiceTitan data…</div>
-  if (err && !cfg) return <div style={{ padding:20, color:'#DC2626' }}>{err} <button onClick={load} className="btn sm" style={{ marginLeft:8 }}>Retry</button></div>
+  if (loading) return (
+    <div style={{ maxWidth:900, display:'flex', flexDirection:'column', gap:12 }}>
+      <div style={{ fontSize:12.5, color:'var(--text-muted)' }}>Loading ServiceTitan data…</div>
+      <div className="skel" style={{ height:180, borderRadius:16 }} />
+      <div className="skel" style={{ height:180, borderRadius:16 }} />
+    </div>
+  )
+  if (err && !cfg) return (
+    <Notice tone="red" style={{ maxWidth:900, display:'flex', alignItems:'center', gap:10, flexWrap:'wrap' }}>
+      {err} <button onClick={load} className="btn sm" style={{ borderRadius:99 }}>Retry</button>
+    </Notice>
+  )
 
   const csrProfiles = (cfg.profiles || []).filter(p => p.role !== 'admin' || true) // show all; admins can be CSRs too
   const jobHits = cfg.stJobTypes.filter(j => j.name?.toLowerCase().includes(jobSearch.toLowerCase()))
-  const secStyle = { background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius-lg)', padding:18, marginBottom:18 }
-  const hStyle = { fontSize:14, fontWeight:700, marginBottom:2 }
-  const subStyle = { fontSize:12, color:'var(--text-muted)', marginBottom:14 }
-  const selStyle = { padding:'6px 8px', border:'1px solid var(--border)', borderRadius:'var(--radius)', fontSize:12, background:'var(--surface)', color:'var(--text-primary)' }
+  // Rows inside a section sit on hairline dividers; inputs match .form-input.
+  const row = (i) => ({ padding: isMobile ? '10px 14px' : '9px 20px', borderTop: i ? '1px solid var(--border)' : 'none' })
+  const selStyle = { padding:'6px 8px', border:'1px solid var(--border-strong)', borderRadius:10, fontSize:12, fontFamily:'inherit', background:'var(--surface)', color:'var(--text-primary)' }
+  const moneyIn = { ...selStyle, width:90 }
+  const searchIn = { ...selStyle, width:'100%', padding:'7px 14px', borderRadius:99, background:'var(--surface-2)' }
   const saveBtn = (onClick, key) => (
-    <button onClick={onClick} disabled={busy===key} className="btn sm"
-      style={{ background:'var(--accent)', borderColor:'var(--accent)', color:'#fff', fontWeight:600, minHeight: isMobile ? 40 : undefined, padding: isMobile ? '8px 18px' : undefined }}>
+    <button onClick={onClick} disabled={busy===key} className="btn sm primary"
+      style={{ borderRadius:99, minHeight: isMobile ? 40 : undefined, padding: isMobile ? '8px 18px' : '5px 16px' }}>
       {busy===key ? 'Saving…' : 'Save'}
     </button>
   )
+  const footer = (btn) => (
+    <div style={{ padding: isMobile ? '12px 14px' : '12px 20px', borderTop:'1px solid var(--border)', display:'flex', justifyContent:'flex-end' }}>{btn}</div>
+  )
 
   return (
-    <div style={{ maxWidth:900 }}>
-      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:6 }}>
-        <div style={{ fontSize:12, color:'var(--text-muted)' }}>Map ServiceTitan data to commission rules. The reconciler uses these to attribute and pay spiffs.</div>
-        {savedMsg && <span style={{ fontSize:12, color:'#16A34A', fontWeight:600 }}>{savedMsg}</span>}
+    <div style={{ maxWidth:900, display:'flex', flexDirection:'column', gap:16 }}>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:12, flexWrap:'wrap' }}>
+        <div style={{ fontSize:12.5, color:'var(--text-muted)' }}>Map ServiceTitan data to commission rules. The reconciler uses these to attribute and pay spiffs.</div>
+        <SaveNote>{savedMsg}</SaveNote>
       </div>
-      {err && <div style={{ fontSize:12, color:'#DC2626', marginBottom:10 }}>{err}</div>}
+      {err && <Notice tone="red">{err}</Notice>}
 
       {/* CSR ↔ ST user */}
-      <div style={secStyle}>
-        <div style={hStyle}>CSRs → ServiceTitan users</div>
-        <div style={subStyle}>Match each CSR to their ST login so jobs they book directly in ServiceTitan get attributed. Auto-matched by name where possible.</div>
-        <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
-          {csrProfiles.map(p => (
-            <div key={p.id} style={{ display:'flex', alignItems: isMobile ? 'stretch' : 'center', justifyContent:'space-between', gap: isMobile ? 4 : 12, flexDirection: isMobile ? 'column' : 'row' }}>
-              <span style={{ fontSize:13, fontWeight:500 }}>{p.name || p.email}</span>
-              <select value={csrMap[p.id] || ''} onChange={e => setCsrMap(m => ({ ...m, [p.id]: e.target.value ? Number(e.target.value) : '' }))} style={{ ...selStyle, minWidth: isMobile ? 0 : 240, minHeight: isMobile ? 40 : undefined }}>
-                <option value="">— not mapped —</option>
-                {cfg.stEmployees.map(e => <option key={e.id} value={e.id}>{e.name}{e.email ? ` (${e.email})` : ''}</option>)}
-              </select>
-            </div>
-          ))}
-        </div>
-        <div style={{ marginTop:14, textAlign:'right' }}>{saveBtn(saveCsrs, 'csr')}</div>
-      </div>
+      <Section flush title="CSRs → ServiceTitan users"
+        desc="Match each CSR to their ST login so jobs they book directly in ServiceTitan get attributed. Auto-matched by name where possible.">
+        {csrProfiles.map((p, i) => (
+          <div key={p.id} style={{ ...row(i), display:'flex', alignItems: isMobile ? 'stretch' : 'center', justifyContent:'space-between', gap: isMobile ? 4 : 12, flexDirection: isMobile ? 'column' : 'row' }}>
+            <span style={{ fontSize:13, fontWeight:600 }}>{p.name || p.email}</span>
+            <select value={csrMap[p.id] || ''} onChange={e => setCsrMap(m => ({ ...m, [p.id]: e.target.value ? Number(e.target.value) : '' }))} style={{ ...selStyle, minWidth: isMobile ? 0 : 240, minHeight: isMobile ? 40 : undefined }}>
+              <option value="">— not mapped —</option>
+              {cfg.stEmployees.map(e => <option key={e.id} value={e.id}>{e.name}{e.email ? ` (${e.email})` : ''}</option>)}
+            </select>
+          </div>
+        ))}
+        {footer(saveBtn(saveCsrs, 'csr'))}
+      </Section>
 
       {/* Category → payout. This is what the sync actually pays. */}
-      <div style={secStyle}>
-        <div style={hStyle}>Category payouts</div>
-        <div style={subStyle}>
+      <Section flush title="Category payouts"
+        desc={<>
           What each category pays a rep. This is the amount the sync uses — job types themselves carry no amount,
           only a category. A category left blank pays nothing and the job stays unsettled until you set it,
           so no payout is lost by filling this in late.
-        </div>
-        <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
-          {JOB_CATEGORIES.map(c => (
-            <div key={c.value} style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:12 }}>
-              <span style={{ fontSize:13 }}>
-                {c.label}
-                <span style={{ fontSize:11, color:'var(--text-muted)', marginLeft:8 }}>
-                  {(cfg.jobTypeSpiffs || []).filter(j => j.category === c.value).length} job types
-                </span>
+        </>}>
+        {JOB_CATEGORIES.map((c, i) => (
+          <div key={c.value} style={{ ...row(i), display:'flex', alignItems:'center', justifyContent:'space-between', gap:12 }}>
+            <span style={{ fontSize:13, fontWeight:600 }}>
+              {c.label}
+              <span style={{ ...num, fontSize:11.5, fontWeight:400, color:'var(--text-muted)', marginLeft:8 }}>
+                {(cfg.jobTypeSpiffs || []).filter(j => j.category === c.value).length} job types
               </span>
-              <div style={{ display:'flex', alignItems:'center', gap:4 }}>
-                <span style={{ fontSize:13, color:'var(--text-muted)' }}>$</span>
-                <input type="number" step="0.01" min="0" value={catAmts[c.value] ?? ''} placeholder="—"
-                  onChange={e => setCatAmts(a => ({ ...a, [c.value]: e.target.value === '' ? '' : Number(e.target.value) }))}
-                  style={{ width:90, padding:'6px 8px', border:'1px solid var(--border)', borderRadius:'var(--radius)', fontSize:12, background:'var(--surface)', color:'var(--text-primary)' }} />
-              </div>
+            </span>
+            <div style={{ display:'flex', alignItems:'center', gap:4 }}>
+              <span style={{ fontSize:13, color:'var(--text-muted)' }}>$</span>
+              <input type="number" step="0.01" min="0" value={catAmts[c.value] ?? ''} placeholder="—"
+                onChange={e => setCatAmts(a => ({ ...a, [c.value]: e.target.value === '' ? '' : Number(e.target.value) }))}
+                style={{ ...moneyIn, ...num }} />
             </div>
-          ))}
-        </div>
-        <div style={{ marginTop:14, textAlign:'right' }}>{saveBtn(saveCatAmts, 'cats')}</div>
-      </div>
+          </div>
+        ))}
+        {footer(saveBtn(saveCatAmts, 'cats'))}
+      </Section>
 
       {/* Job type → category */}
-      <div style={secStyle}>
-        <div style={hStyle}>Job types → spiff category</div>
-        <div style={subStyle}>
+      <Section flush title="Job types → spiff category"
+        desc={<>
           Tag each ST job type — the category decides the payout. Anything left non-commissionable never pays.
           Every category pays when ServiceTitan marks the job <strong>completed</strong>, including the estimate
           categories: a free estimate that completes pays out whether or not it sold anything.
+        </>}>
+        <div style={{ padding: isMobile ? '12px 14px' : '12px 20px', borderBottom:'1px solid var(--border)' }}>
+          <input value={jobSearch} onChange={e => setJobSearch(e.target.value)} placeholder="Search job types…" style={searchIn} />
         </div>
-        <input value={jobSearch} onChange={e => setJobSearch(e.target.value)} placeholder="Search job types…"
-          style={{ width:'100%', padding:'7px 10px', border:'1px solid var(--border)', borderRadius:'var(--radius)', fontSize:12, marginBottom:10, background:'var(--surface-2)', color:'var(--text-primary)' }} />
-        <div style={{ maxHeight:340, overflowY:'auto', display:'flex', flexDirection:'column', gap:6, paddingRight:4 }}>
-          {jobHits.map(j => (
-            <div key={j.id} style={{ display:'flex', alignItems: isMobile ? 'stretch' : 'center', justifyContent:'space-between', gap: isMobile ? 4 : 12, flexDirection: isMobile ? 'column' : 'row' }}>
+        <div style={{ maxHeight:340, overflowY:'auto' }}>
+          {jobHits.map((j, i) => (
+            <div key={j.id} style={{ ...row(i), display:'flex', alignItems: isMobile ? 'stretch' : 'center', justifyContent:'space-between', gap: isMobile ? 4 : 12, flexDirection: isMobile ? 'column' : 'row' }}>
               <span style={{ fontSize:12.5 }}>{j.name}</span>
               <select value={jobCats[j.id] || 'non_commissionable'} onChange={e => setJobCats(c => ({ ...c, [j.id]: e.target.value }))}
                 style={{ ...selStyle, minWidth: isMobile ? 0 : 280, minHeight: isMobile ? 40 : undefined, color: (jobCats[j.id] && jobCats[j.id]!=='non_commissionable') ? 'var(--accent)' : 'var(--text-muted)', fontWeight: (jobCats[j.id] && jobCats[j.id]!=='non_commissionable') ? 600 : 400 }}>
@@ -290,26 +342,23 @@ function CommissionMapping() {
               </select>
             </div>
           ))}
-          {jobHits.length === 0 && <div style={{ fontSize:12, color:'var(--text-muted)', padding:8 }}>No job types match.</div>}
+          {jobHits.length === 0 && <div style={{ fontSize:12.5, color:'var(--text-muted)', padding: isMobile ? '12px 14px' : '12px 20px' }}>No job types match.</div>}
         </div>
-        <div style={{ marginTop:14, textAlign:'right' }}>{saveBtn(saveJobs, 'jobs')}</div>
-      </div>
+        {footer(saveBtn(saveJobs, 'jobs'))}
+      </Section>
 
       {/* Membership type → payout + how to sell it */}
-      <div style={secStyle}>
-        <div style={hStyle}>Membership types → payout &amp; sale setup</div>
-        <div style={subStyle}>
+      <Section flush title="Membership types → payout & sale setup"
+        desc={<>
           Set the spiff for each ST membership type (e.g. Full $20, HVAC-only $10).
           To let reps <strong>sell</strong> a membership from the dialer, also pick its sale task and term —
           ServiceTitan can't tell us which pricebook item sells which membership, so it has to be set here once.
           <strong> Selling creates a real invoice for the customer.</strong>
-        </div>
-
-        <div style={{ marginBottom:12 }}>
-          <div style={{ fontSize:10, color:'var(--text-muted)', marginBottom:3, fontWeight:600 }}>SEARCH PRICEBOOK FOR SALE TASKS</div>
-          <input value={svcQuery} onChange={e => setSvcQuery(e.target.value)} placeholder="e.g. membership, ACMP…"
-            style={{ width:'100%', padding:'7px 10px', border:'1px solid var(--border)', borderRadius:'var(--radius)', fontSize:12, background:'var(--surface-2)', color:'var(--text-primary)' }} />
-          <div style={{ fontSize:10, color:'var(--text-muted)', marginTop:4 }}>
+        </>}>
+        <div style={{ padding: isMobile ? '12px 14px' : '12px 20px' }}>
+          <div style={{ ...eyebrow, marginBottom:5 }}>Search pricebook for sale tasks</div>
+          <input value={svcQuery} onChange={e => setSvcQuery(e.target.value)} placeholder="e.g. membership, ACMP…" style={searchIn} />
+          <div style={{ fontSize:11.5, color:'var(--text-muted)', marginTop:6, lineHeight:1.5 }}>
             {svcLoading ? 'Searching…'
               : svcMeta.truncated
                 ? `Showing ${services.length} of ${svcMeta.total} matches — narrow the search to see the rest.`
@@ -318,37 +367,34 @@ function CommissionMapping() {
           </div>
         </div>
 
-        <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
+        <div>
           {cfg.stMembershipTypes.map(m => {
             const sellable = memSale[m.id]?.sale_task_id && memSale[m.id]?.duration_billing_id
             return (
-              <div key={m.id} style={{ border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:12, display:'flex', flexDirection:'column', gap:10 }}>
+              <div key={m.id} style={{ padding: isMobile ? '12px 14px' : '14px 20px', borderTop:'1px solid var(--border)', display:'flex', flexDirection:'column', gap:10 }}>
                 <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:12 }}>
-                  <span style={{ fontSize:13, fontWeight:600 }}>
+                  <span style={{ fontSize:13.5, fontWeight:700, display:'flex', alignItems:'center', gap:8, flexWrap:'wrap', minWidth:0 }}>
                     {m.name}
-                    <span style={{ marginLeft:8, fontSize:9, fontWeight:700, textTransform:'uppercase', letterSpacing:.4, padding:'2px 6px', borderRadius:99,
-                      background: sellable ? 'var(--success-bg)' : 'var(--surface-2)', color: sellable ? 'var(--success)' : 'var(--text-muted)' }}>
-                      {sellable ? 'Sellable' : 'Payout only'}
-                    </span>
+                    <ToneChip tone={sellable ? 'green' : 'gray'} small>{sellable ? 'Sellable' : 'Payout only'}</ToneChip>
                   </span>
                   <div style={{ display:'flex', alignItems:'center', gap:4 }}>
                     <span style={{ fontSize:13, color:'var(--text-muted)' }}>$</span>
                     <input type="number" step="0.01" value={memAmts[m.id] ?? ''} placeholder="0.00"
                       onChange={e => setMemAmts(a => ({ ...a, [m.id]: e.target.value === '' ? '' : Number(e.target.value) }))}
-                      style={{ width:90, padding:'6px 8px', border:'1px solid var(--border)', borderRadius:'var(--radius)', fontSize:12, background:'var(--surface)', color:'var(--text-primary)' }} />
+                      style={{ ...moneyIn, ...num }} />
                   </div>
                 </div>
 
                 <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
                   <div>
-                    <div style={{ fontSize:10, color:'var(--text-muted)', marginBottom:3, fontWeight:600 }}>SALE TASK (pricebook item)</div>
+                    <div style={{ ...eyebrow, marginBottom:4 }}>Sale task (pricebook item)</div>
                     <select value={memSale[m.id]?.sale_task_id || ''}
                       onChange={e => {
                         const id = e.target.value
                         const svc = services.find(s => String(s.id) === String(id))
                         setMemSale(s => ({ ...s, [m.id]: { ...s[m.id], sale_task_id: id || null, sale_task_name: svc?.name || null } }))
                       }}
-                      style={{ width:'100%', padding:'6px 8px', border:'1px solid var(--border)', borderRadius:'var(--radius)', fontSize:12, background:'var(--surface)', color:'var(--text-primary)' }}>
+                      style={{ ...selStyle, width:'100%' }}>
                       <option value="">— not sellable from Andi —</option>
                       {/* A saved task may not be in the current search results —
                           keep it listed so selecting elsewhere can't wipe it. */}
@@ -363,11 +409,11 @@ function CommissionMapping() {
                     </select>
                   </div>
                   <div>
-                    <div style={{ fontSize:10, color:'var(--text-muted)', marginBottom:3, fontWeight:600 }}>TERM / BILLING</div>
+                    <div style={{ ...eyebrow, marginBottom:4 }}>Term / billing</div>
                     <select value={memSale[m.id]?.duration_billing_id || ''}
                       onChange={e => setMemSale(s => ({ ...s, [m.id]: { ...s[m.id], duration_billing_id: e.target.value || null } }))}
                       onFocus={() => loadDurations(m.id)}
-                      style={{ width:'100%', padding:'6px 8px', border:'1px solid var(--border)', borderRadius:'var(--radius)', fontSize:12, background:'var(--surface)', color:'var(--text-primary)' }}>
+                      style={{ ...selStyle, width:'100%' }}>
                       <option value="">{durations[m.id] ? '— select a term —' : 'click to load…'}</option>
                       {(durations[m.id] || []).map(d => (
                         <option key={d.id} value={d.id}>
@@ -380,10 +426,10 @@ function CommissionMapping() {
               </div>
             )
           })}
-          {cfg.stMembershipTypes.length === 0 && <div style={{ fontSize:12, color:'var(--text-muted)' }}>No membership types returned from ServiceTitan.</div>}
+          {cfg.stMembershipTypes.length === 0 && <div style={{ fontSize:12.5, color:'var(--text-muted)', padding: isMobile ? '12px 14px' : '12px 20px', borderTop:'1px solid var(--border)' }}>No membership types returned from ServiceTitan.</div>}
         </div>
-        <div style={{ marginTop:14, textAlign:'right' }}>{saveBtn(saveMems, 'mems')}</div>
-      </div>
+        {footer(saveBtn(saveMems, 'mems'))}
+      </Section>
     </div>
   )
 }
@@ -451,57 +497,50 @@ function FloorTicker() {
   const setLine = (i, patch) => setMessages(m => m.map((x, j) => j === i ? { ...x, ...patch } : x))
   const removeLine = (i) => setMessages(m => m.filter((_, j) => j !== i))
 
-  if (loading) return <div className="spinner" style={{ margin:'40px auto' }} />
+  if (loading) return <div className="skel" style={{ height:220, borderRadius:16, maxWidth:760 }} />
 
   const TONES = [
     { id:'info', label:'Info', color:'var(--text-primary)' },
-    { id:'success', label:'Good news', color:'#16A34A' },
-    { id:'alert', label:'Alert', color:'#DC2626' },
+    { id:'success', label:'Good news', color:'var(--tone-green-tx)' },
+    { id:'alert', label:'Alert', color:'var(--tone-red-tx)' },
   ]
 
   return (
-    <div className="card" style={{ maxWidth:760 }}>
-      <div className="card-header">
-        <div className="card-title">Call Center TV — Floor Ticker</div>
-        {msg && <span style={{ fontSize:12, color: msg.startsWith('Error') ? 'var(--danger)' : 'var(--success)' }}>{msg}</span>}
-      </div>
-      <div className="card-body" style={{ display:'flex', flexDirection:'column', gap:16 }}>
-        <div style={{ fontSize:12, color:'var(--text-muted)' }}>
-          Messages scroll across the top of the Call Center TV. Use Alert (red) for anything urgent to the floor.
+    <Section title="Call Center TV — floor ticker" style={{ maxWidth:760 }}
+      desc="Messages scroll across the top of the Call Center TV. Use Alert (red) for anything urgent to the floor."
+      actions={<SaveNote error={msg.startsWith('Error')}>{msg}</SaveNote>}
+      bodyStyle={{ display:'flex', flexDirection:'column', gap:16 }}>
+      <label style={{ display:'flex', alignItems:'center', gap:10, cursor:'pointer' }}>
+        <div onClick={() => { const v = !enabled; setEnabled(v); save(v, messages) }}
+          style={{ width:40, height:22, borderRadius:99, background: enabled ? 'var(--accent)' : 'var(--border-strong)', position:'relative', transition:'background .15s', flexShrink:0 }}>
+          <div style={{ position:'absolute', top:2, left: enabled ? 20 : 2, width:18, height:18, borderRadius:'50%', background:'#fff', transition:'left .15s' }} />
         </div>
+        <span style={{ fontSize:13, fontWeight:600 }}>{enabled ? 'Ticker on' : 'Ticker off'}</span>
+      </label>
 
-        <label style={{ display:'flex', alignItems:'center', gap:10, cursor:'pointer' }}>
-          <div onClick={() => { const v = !enabled; setEnabled(v); save(v, messages) }}
-            style={{ width:40, height:22, borderRadius:99, background: enabled ? 'var(--accent)' : 'var(--border)', position:'relative', transition:'background .15s', flexShrink:0 }}>
-            <div style={{ position:'absolute', top:2, left: enabled ? 20 : 2, width:18, height:18, borderRadius:'50%', background:'#fff', transition:'left .15s' }} />
+      <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+        {messages.map((m, i) => (
+          <div key={i} style={{ display:'flex', gap:8, alignItems:'center' }}>
+            <select value={m.tone || 'info'} onChange={e => setLine(i, { tone: e.target.value })}
+              style={{ padding:'7px 8px', border:'1px solid var(--border-strong)', borderRadius:10, fontSize:12, fontFamily:'inherit', background:'var(--surface)', color:'var(--text-primary)', flexShrink:0 }}>
+              {TONES.map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
+            </select>
+            <input className="form-input" value={m.text} placeholder="Message to the floor…"
+              onChange={e => setLine(i, { text: e.target.value })}
+              style={{ flex:1, borderLeft:`3px solid ${TONES.find(t => t.id === (m.tone||'info'))?.color}` }} />
+            <button className="btn sm danger" onClick={() => removeLine(i)}>Remove</button>
           </div>
-          <span style={{ fontSize:13, fontWeight:600 }}>{enabled ? 'Ticker on' : 'Ticker off'}</span>
-        </label>
-
-        <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
-          {messages.map((m, i) => (
-            <div key={i} style={{ display:'flex', gap:8, alignItems:'center' }}>
-              <select value={m.tone || 'info'} onChange={e => setLine(i, { tone: e.target.value })}
-                style={{ padding:'7px 8px', border:'1px solid var(--border)', borderRadius:'var(--radius)', fontSize:12, background:'var(--surface)', color:'var(--text-primary)', flexShrink:0 }}>
-                {TONES.map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
-              </select>
-              <input className="form-input" value={m.text} placeholder="Message to the floor…"
-                onChange={e => setLine(i, { text: e.target.value })}
-                style={{ flex:1, borderLeft:`3px solid ${TONES.find(t => t.id === (m.tone||'info'))?.color}` }} />
-              <button className="btn sm danger" onClick={() => removeLine(i)}>Remove</button>
-            </div>
-          ))}
-          {messages.length === 0 && <div style={{ fontSize:12, color:'var(--text-muted)' }}>No messages. Add one to show a ticker on the TV.</div>}
-        </div>
-
-        <div style={{ display:'flex', gap:8 }}>
-          <button className="btn sm" onClick={addLine}>+ Add message</button>
-          <button className="btn sm primary" onClick={() => save(enabled, messages)} disabled={saving} style={{ marginLeft:'auto' }}>
-            {saving ? 'Saving…' : 'Save ticker'}
-          </button>
-        </div>
+        ))}
+        {messages.length === 0 && <div style={{ fontSize:12.5, color:'var(--text-muted)' }}>No messages. Add one to show a ticker on the TV.</div>}
       </div>
-    </div>
+
+      <div style={{ display:'flex', gap:8 }}>
+        <button className="btn sm" onClick={addLine} style={{ borderRadius:99 }}>+ Add message</button>
+        <button className="btn sm primary" onClick={() => save(enabled, messages)} disabled={saving} style={{ marginLeft:'auto', borderRadius:99, padding:'5px 16px' }}>
+          {saving ? 'Saving…' : 'Save ticker'}
+        </button>
+      </div>
+    </Section>
   )
 }
 
@@ -516,7 +555,6 @@ export default function AdminPage() {
     if (u.searchParams.get('tab') !== settingsTab) { u.searchParams.set('tab', settingsTab); window.history.replaceState({}, '', u) }
   }, [settingsTab])
   const [showMapping, setShowMapping] = useState(false)
-  const [hoveredTab, setHoveredTab] = useState(null)
   const [profiles, setProfiles] = useState([])
   const [loading, setLoading] = useState(true)
   const [editProfile, setEditProfile] = useState(null)
@@ -1028,36 +1066,12 @@ export default function AdminPage() {
   return (
     <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden' }}>
 
-      {/* Tab bar header */}
-      <div style={{ background:'var(--surface)', borderBottom:'1px solid var(--border)', flexShrink:0 }}>
-        <div style={{ padding: isMobile ? '12px 12px 0' : '16px 24px 0' }}>
-          <div style={{ fontSize:18, fontWeight:600, color:'var(--text-primary)' }}>Settings</div>
-          <div style={{ fontSize:12, color:'var(--text-muted)', marginTop:2 }}>Manage users, campaigns, commission, and statuses</div>
-        </div>
-        {/* Phone: nine tabs scroll sideways instead of wrapping into three lines. */}
-        <div style={{ display:'flex', padding: isMobile ? '0 12px' : '0 24px', marginTop:10, overflowX: isMobile ? 'auto' : undefined }}>
-          {TABS.map(t => {
-            const isActive = settingsTab === t.id
-            const isHov = hoveredTab === t.id && !isActive
-            return (
-              <button key={t.id} onClick={() => setSettingsTab(t.id)}
-                onMouseEnter={() => setHoveredTab(t.id)}
-                onMouseLeave={() => setHoveredTab(null)}
-                style={{
-                  padding:'10px 16px', fontSize:13, fontWeight: isActive ? 600 : 400,
-                  border:'none', cursor:'pointer',
-                  borderRadius:'var(--radius) var(--radius) 0 0',
-                  background: isHov ? 'var(--surface-2)' : 'transparent',
-                  color: isActive ? 'var(--accent)' : isHov ? 'var(--text-primary)' : 'var(--text-muted)',
-                  borderBottom: isActive ? '2px solid var(--accent)' : '2px solid transparent',
-                  transition:'color .1s, background .1s',
-                  whiteSpace: isMobile ? 'nowrap' : undefined, flexShrink: isMobile ? 0 : undefined,
-                }}>
-                {t.label}
-              </button>
-            )
-          })}
-        </div>
+      {/* ── HEADER BAR ── the settings tabs; the page title lives in the top bar.
+          The active tab stays in ?tab= (above). Phone: PageTabs scrolls the
+          nine tabs sideways instead of wrapping them. */}
+      <div style={{ background:'var(--surface)', borderBottom:'1px solid var(--border)', flexShrink:0, padding: isMobile ? '0 12px' : '0 24px',
+        display:'flex', alignItems:'center', gap:12 }}>
+        <PageTabs tabs={TABS.map(t => [t.id, t.label])} value={settingsTab} onChange={setSettingsTab} />
       </div>
 
       {/* Campaigns tab — full CampaignsPage */}
@@ -1074,22 +1088,14 @@ export default function AdminPage() {
 
       {/* Statuses tab — admin only */}
       {settingsTab === 'statuses' && isAdmin && (
-        <div style={{ flex:1, overflowY:'auto', padding: isMobile ? 12 : 24, display:'flex', flexDirection:'column', gap:20 }}>
-          <div className="card">
-            <div className="card-header">
-              <div className="card-title">Status Customization</div>
-              <div style={{ display:'flex', alignItems:'center', gap:10 }}>
-                {statusSaveMsg && <span style={{ fontSize:11, color: statusSaveMsg.startsWith('Error') ? 'var(--danger)' : 'var(--success)', fontWeight:600 }}>{statusSaveMsg}</span>}
-                {savingStatuses && <span style={{ fontSize:11, color:'var(--text-muted)' }}>Saving...</span>}
-                <span style={{ fontSize:11, color:'var(--text-muted)' }}>Changes save automatically. Locked statuses cannot be removed.</span>
-              </div>
-            </div>
-            <div className="card-body" style={{ display:'flex', flexDirection:'column', gap:10 }}>
+        <div style={{ flex:1, overflowY:'auto', padding: isMobile ? 12 : 24, display:'flex', flexDirection:'column', gap:16 }}>
+          <Section flush title="Status customization" desc="Changes save automatically. Locked statuses cannot be removed."
+            actions={<SaveNote muted={savingStatuses} error={statusSaveMsg.startsWith('Error')}>{savingStatuses ? 'Saving…' : statusSaveMsg}</SaveNote>}>
               {customStatuses.map((status, idx) => (
-                <div key={status.id} style={{ display:'flex', alignItems:'center', gap:12, padding:'10px 14px', background:'var(--surface-2)', borderRadius:'var(--radius)', border:'1px solid var(--border)' }}>
+                <div key={status.id} style={{ display:'flex', alignItems:'center', gap:12, padding: isMobile ? '10px 14px' : '10px 20px', borderTop: idx ? '1px solid var(--border)' : 'none' }}>
                   {/* Clickable color circle */}
                   <label style={{ position:'relative', flexShrink:0, cursor: status.locked ? 'default' : 'pointer' }} title={status.locked ? '' : 'Click to change color'}>
-                    <div style={{ width:28, height:28, borderRadius:'50%', background:status.color, border:'2px solid rgba(0,0,0,.12)', transition:'transform .1s', boxShadow:'0 1px 4px rgba(0,0,0,.15)' }}
+                    <div style={{ width:28, height:28, borderRadius:'50%', background:status.color, border:'2px solid var(--surface)', boxShadow:'0 0 0 1px var(--border-strong)', transition:'transform .1s' }}
                       onMouseEnter={e => { if (!status.locked) e.currentTarget.style.transform='scale(1.15)' }}
                       onMouseLeave={e => e.currentTarget.style.transform='scale(1)'} />
                     {!status.locked && (
@@ -1099,67 +1105,66 @@ export default function AdminPage() {
                     )}
                   </label>
                   {/* Label */}
-                  <input value={status.label} disabled={status.locked}
+                  <input className="form-input" value={status.label} disabled={status.locked}
                     onChange={e => updateStatuses(prev => prev.map((s,i) => i===idx ? {...s, label:e.target.value} : s))}
-                    style={{ flex:1, border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'6px 10px', fontSize:13, background: status.locked ? 'var(--surface)' : 'var(--surface)', color:'var(--text-primary)', fontFamily:'inherit', cursor: status.locked ? 'default' : 'text' }} />
+                    style={{ flex:1, padding:'6px 10px', cursor: status.locked ? 'default' : 'text' }} />
                   {status.locked
-                    ? <span style={{ fontSize:10, color:'var(--text-muted)', padding:'2px 8px', background:'var(--surface)', borderRadius:99, border:'1px solid var(--border)', flexShrink:0 }}>Locked</span>
-                    : <button onClick={() => updateStatuses(prev => prev.filter((_,i) => i !== idx))}
-                        style={{ padding:'4px 10px', background:'var(--danger-bg)', border:'1px solid var(--danger)', borderRadius:'var(--radius)', color:'var(--danger)', fontSize:11, cursor:'pointer', fontWeight:500, flexShrink:0 }}>Remove</button>
+                    ? <ToneChip tone="gray" small>Locked</ToneChip>
+                    : <button className="btn sm danger" onClick={() => updateStatuses(prev => prev.filter((_,i) => i !== idx))}
+                        style={{ flexShrink:0 }}>Remove</button>
                   }
                 </div>
               ))}
 
-              {/* Add new status */}
-              <button onClick={() => updateStatuses(prev => [...prev, { id:`custom_${Date.now()}`, label:'New Status', color:'#6b7280', locked:false }])}
-                style={{ padding:'8px 16px', border:'1px dashed var(--border)', borderRadius:'var(--radius)', background:'transparent', color:'var(--text-muted)', fontSize:12, cursor:'pointer', display:'flex', alignItems:'center', gap:6, marginTop:2 }}>
-                + Add status
-              </button>
+              <div style={{ padding: isMobile ? '12px 14px' : '12px 20px', borderTop:'1px solid var(--border)', display:'flex', flexDirection:'column', alignItems:'flex-start', gap:12 }}>
+                {/* Add new status */}
+                <button className="btn" onClick={() => updateStatuses(prev => [...prev, { id:`custom_${Date.now()}`, label:'New Status', color:'#6b7280', locked:false }])}
+                  style={{ borderRadius:99 }}>
+                  + Add status
+                </button>
 
-              <div style={{ padding:'10px 14px', background:'var(--warning-bg)', border:'1px solid #C87800', borderRadius:'var(--radius)', fontSize:12, color:'var(--warning)' }}>
-                Status changes affect all reps on next page load. Removing a status does not affect historical adherence data.
+                <Notice tone="amber" style={{ alignSelf:'stretch' }}>
+                  Status changes affect all reps on next page load. Removing a status does not affect historical adherence data.
+                </Notice>
               </div>
-            </div>
-          </div>
+          </Section>
         </div>
       )}
 
       {/* Commission tab */}
       {settingsTab === 'commission' && (
-        <div style={{ flex:1, overflowY:'auto', padding: isMobile ? 12 : 24, display:'flex', flexDirection:'column', gap:20 }}>
-          {commLoading ? <div className="spinner" style={{ margin:'40px auto' }} /> : (
+        <div style={{ flex:1, overflowY:'auto', padding: isMobile ? 12 : 24, display:'flex', flexDirection:'column', gap:16 }}>
+          {commLoading ? (
+            <>
+              <div className="skel" style={{ height:110, borderRadius:16, flexShrink:0 }} />
+              <div className="skel" style={{ height:260, borderRadius:16, flexShrink:0 }} />
+            </>
+          ) : (
             <>
               {/* The old flat booking/membership rates are gone: payouts now come
                   from the per-job-type amounts in Commission Mapping, paid when
                   ServiceTitan marks the job completed. */}
               {isAdmin && (
-                <div className="card">
-                  <div className="card-header"><div className="card-title">How payouts work</div></div>
-                  <div className="card-body" style={{ fontSize:12, color:'var(--text-secondary)', lineHeight:1.6 }}>
-                    Each job type carries its own payout — set them under <strong>Commission Mapping</strong> below.
-                    A rep is paid when ServiceTitan marks the booked job <strong>completed</strong>, not when they book it,
-                    so earnings appear after the job runs. Membership payouts come from the per-membership-type amounts.
-                    See the <strong>Payouts</strong> tab for the full ledger.
-                  </div>
-                </div>
+                <Section title="How payouts work" bodyStyle={{ fontSize:12.5, color:'var(--text-secondary)', lineHeight:1.6 }}>
+                  Each job type carries its own payout — set them under <strong>Commission Mapping</strong> below.
+                  A rep is paid when ServiceTitan marks the booked job <strong>completed</strong>, not when they book it,
+                  so earnings appear after the job runs. Membership payouts come from the per-membership-type amounts.
+                  See the <strong>Payouts</strong> tab for the full ledger.
+                </Section>
               )}
 
               {isAdmin && oppInc && (
-                <div className="card" style={{ borderLeft:'3px solid #D4A017' }}>
-                  <div className="card-header">
-                    <div className="card-title">🎯 Opportunity Watch Bonus</div>
-                    {oppIncSaved && <span style={{ fontSize:11, fontWeight:700, color:'var(--success)' }}>✓ Saved</span>}
-                  </div>
-                  <div className="card-body" style={{ display:'flex', flexDirection:'column', gap:12 }}>
-                    <div style={{ fontSize:12, color:'var(--text-secondary)', lineHeight:1.6 }}>
-                      Mon–Fri: if <strong>every trade with capacity</strong> hits Opportunity Watch (board full) before the
-                      cutoff, the floor gets an unlock announcement and the pool is paid that evening, once the last
-                      shift ends — split equally among the reps and dispatchers who were scheduled <strong>and actually
-                      worked</strong> (handled at least one ServiceTitan call that day). Someone on the schedule who didn't
-                      work gets nothing. Pays at most once per day; skips company holidays.
-                    </div>
+                <Section title="🎯 Opportunity Watch Bonus"
+                  desc={<>
+                    Mon–Fri: if <strong>every trade with capacity</strong> hits Opportunity Watch (board full) before the
+                    cutoff, the floor gets an unlock announcement and the pool is paid that evening, once the last
+                    shift ends — split equally among the reps and dispatchers who were scheduled <strong>and actually
+                    worked</strong> (handled at least one ServiceTitan call that day). Someone on the schedule who didn't
+                    work gets nothing. Pays at most once per day; skips company holidays.
+                  </>}
+                  actions={oppIncSaved && <SaveNote>✓ Saved</SaveNote>}>
                     <div style={{ display:'flex', gap:16, alignItems:'stretch', flexWrap: isMobile ? 'wrap' : undefined }}>
-                      <div className="form-field" style={{ display:'flex', flexDirection:'column', width:110, flexShrink:0 }}>
+                      <div className="form-field" style={{ display:'flex', flexDirection:'column', width:110, flexShrink:0, marginBottom:0 }}>
                         <label className="form-label">&nbsp;</label>
                         <label style={{ display:'flex', alignItems:'center', gap:8, fontSize:13, fontWeight:700, cursor:'pointer', flex:1 }}>
                           <input type="checkbox" checked={oppInc.enabled}
@@ -1167,70 +1172,66 @@ export default function AdminPage() {
                           Enabled
                         </label>
                       </div>
-                      <div className="form-field" style={{ width:140, flexShrink:0 }}>
+                      <div className="form-field" style={{ width:140, flexShrink:0, marginBottom:0 }}>
                         <label className="form-label">Daily pool ($)</label>
                         <input className="form-input" type="number" min="1" step="1" value={oppInc.pool}
                           onChange={e => setOppInc(v => ({ ...v, pool: Number(e.target.value) }))} style={{ width:'100%' }} />
                       </div>
-                      <div className="form-field" style={{ width:150, flexShrink:0 }}>
+                      <div className="form-field" style={{ width:150, flexShrink:0, marginBottom:0 }}>
                         <label className="form-label">Cutoff (Denver)</label>
                         <input className="form-input" type="time" value={oppInc.cutoff}
                           onChange={e => setOppInc(v => ({ ...v, cutoff: e.target.value }))} style={{ width:'100%' }} />
                       </div>
-                      <div className="form-field" style={{ display:'flex', flexDirection:'column', width:100, flexShrink:0 }}>
+                      <div className="form-field" style={{ display:'flex', flexDirection:'column', width:100, flexShrink:0, marginBottom:0 }}>
                         <label className="form-label">&nbsp;</label>
-                        <button className="btn primary" onClick={saveOppInc} style={{ flex:1, justifyContent:'center' }}>Save</button>
+                        <button className="btn primary" onClick={saveOppInc} style={{ flex:1, justifyContent:'center', borderRadius:99 }}>Save</button>
                       </div>
                     </div>
-                  </div>
-                </div>
+                </Section>
               )}
 
               {/* Admin: All rep earnings this week */}
               {isAdmin && allRepEarnings.length > 0 && (
-                <div className="card">
-                  <div className="card-header"><div className="card-title">Team Earnings - This Week</div></div>
-                  <table className="data-table">
-                    <thead><tr><th>Rep</th><th style={{textAlign:'center'}}>Today</th><th style={{textAlign:'center'}}>This Week</th><th style={{textAlign:'center'}}>Bookings</th><th style={{textAlign:'center'}}>Memberships</th></tr></thead>
-                    <tbody>
-                      {allRepEarnings.map(([name, d]) => (
-                        <tr key={name}>
-                          <td style={{padding:'10px 12px', fontWeight:600}}>{name}</td>
-                          <td style={{padding:'10px 12px', textAlign:'center', fontWeight:700, color:'#16A34A'}}>{'$'}{d.daily.toFixed(2)}</td>
-                          <td style={{padding:'10px 12px', textAlign:'center', fontWeight:700, color:'var(--accent)'}}>{'$'}{d.weekly.toFixed(2)}</td>
-                          <td style={{padding:'10px 12px', textAlign:'center'}}>{d.bookings}</td>
-                          <td style={{padding:'10px 12px', textAlign:'center'}}>{d.memberships}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                <Section flush title="Team earnings — this week" desc="Per rep since Monday, from the commissions ledger">
+                  <div style={{ overflowX:'auto' }}>
+                    <table className="data-table">
+                      <thead><tr><th>Rep</th><th style={{textAlign:'center'}}>Today</th><th style={{textAlign:'center'}}>This Week</th><th style={{textAlign:'center'}}>Bookings</th><th style={{textAlign:'center'}}>Memberships</th></tr></thead>
+                      <tbody>
+                        {allRepEarnings.map(([name, d]) => (
+                          <tr key={name}>
+                            <td>
+                              <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+                                <Face avatar={profiles.find(p => p.name === name)?.avatar} name={name} size={28} />
+                                <span style={{ fontWeight:600 }}>{name}</span>
+                              </div>
+                            </td>
+                            <td style={{ textAlign:'center', fontWeight:700, color:'var(--tone-green-tx)' }}>{'$'}{d.daily.toFixed(2)}</td>
+                            <td style={{ textAlign:'center', fontWeight:700, color:'var(--accent)' }}>{'$'}{d.weekly.toFixed(2)}</td>
+                            <td style={{ textAlign:'center' }}>{d.bookings}</td>
+                            <td style={{ textAlign:'center' }}>{d.memberships}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </Section>
               )}
 
               {/* Rep: Personal earnings summary */}
               {!isAdmin && (
-                <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16 }}>
+                <SummaryPanel isMobile={isMobile} style={{ marginBottom:0, flexShrink:0 }}>
                   {[
-                    { label:'Today', value: commissionHistory.filter(c => new Date(c.earned_at).toISOString().split('T')[0] === new Date().toISOString().split('T')[0]).reduce((s,c) => s + parseFloat(c.amount), 0), accent:'#16A34A', note:'Resets at midnight' },
-                    { label:'This Week', value: commissionHistory.reduce((s,c) => s + parseFloat(c.amount), 0), accent:'var(--accent)', note:'Resets Monday 12:01am' },
-                  ].map(({ label, value, accent, note }) => (
-                    <div key={label} style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:16, padding:'24px', textAlign:'center' }}>
-                      <div style={{ fontSize:12, fontWeight:600, textTransform:'uppercase', letterSpacing:.8, color:'var(--text-muted)', marginBottom:8 }}>{label}</div>
-                      <div style={{ fontSize:42, fontWeight:900, color:accent, letterSpacing:-1 }}>{'$'}{value.toFixed(2)}</div>
-                      <div style={{ fontSize:11, color:'var(--text-muted)', marginTop:6 }}>{note}</div>
-                    </div>
+                    { label:'Today', value: commissionHistory.filter(c => new Date(c.earned_at).toISOString().split('T')[0] === new Date().toISOString().split('T')[0]).reduce((s,c) => s + parseFloat(c.amount), 0), tone:'green', note:'Resets at midnight' },
+                    { label:'This Week', value: commissionHistory.reduce((s,c) => s + parseFloat(c.amount), 0), tone:'blue', note:'Resets Monday 12:01am' },
+                  ].map(({ label, value, tone, note }) => (
+                    <Stat key={label} big label={label} value={`$${value.toFixed(2)}`} tone={tone} sub={note} />
                   ))}
-                </div>
+                </SummaryPanel>
               )}
 
               {/* Admin: Manual adjustment panel */}
               {isAdmin && (
-                <div className="card">
-                  <div className="card-header">
-                    <div className="card-title">Manual Adjustment</div>
-                    <span style={{ fontSize:11, color:'var(--text-muted)' }}>Add or deduct from a rep's commission balance</span>
-                  </div>
-                  <div className="card-body">
+                <Section title="Manual adjustment" desc="Add or deduct from a rep's commission balance">
                     <div style={{ display:'grid', gridTemplateColumns:'1fr 140px 1fr auto', gap:12, alignItems:'flex-end' }}>
                       <div className="form-field" style={{ margin:0 }}>
                         <label className="form-label">Rep</label>
@@ -1244,7 +1245,7 @@ export default function AdminPage() {
                         <input className="form-input" type="number" step="0.50" value={adjAmount}
                           onChange={e => setAdjAmount(e.target.value)}
                           placeholder="e.g. 5.00 or -2.00"
-                          style={{ color: adjAmount && parseFloat(adjAmount) < 0 ? 'var(--danger)' : parseFloat(adjAmount) > 0 ? 'var(--success)' : 'var(--text-primary)' }} />
+                          style={{ ...num, color: adjAmount && parseFloat(adjAmount) < 0 ? 'var(--tone-red-tx)' : parseFloat(adjAmount) > 0 ? 'var(--tone-green-tx)' : 'var(--text-primary)' }} />
                       </div>
                       <div className="form-field" style={{ margin:0 }}>
                         <label className="form-label">Reason</label>
@@ -1253,23 +1254,22 @@ export default function AdminPage() {
                       </div>
                       <button className="btn primary" onClick={addInlineAdjustment}
                         disabled={adjSaving || !adjProfileId || !adjAmount}
-                        style={{ whiteSpace:'nowrap', height: isMobile ? 40 : 36 }}>
-                        {adjSaving ? 'Adding...' : 'Add'}
+                        style={{ whiteSpace:'nowrap', height: isMobile ? 40 : 36, borderRadius:99, padding:'0 20px', justifyContent:'center' }}>
+                        {adjSaving ? 'Adding…' : 'Add'}
                       </button>
                     </div>
-                    <div style={{ fontSize:11, color:'var(--text-muted)', marginTop:8 }}>
+                    <div style={{ fontSize:11.5, color:'var(--text-muted)', marginTop:10 }}>
                       Use a negative amount to deduct (e.g. -5.00). Adjustments appear immediately in the history below.
                     </div>
-                  </div>
-                </div>
+                </Section>
               )}
 
               {/* Commission history */}
-              <div className="card">
-                <div className="card-header"><div className="card-title">Commission History — This Week</div></div>
+              <Section flush title="Commission history — this week" desc="Bookings, memberships, adjustments and reversals since Monday">
                 {commissionHistory.length === 0 ? (
-                  <div className="empty-state"><div className="empty-icon">--</div><div>No commissions earned yet this week</div></div>
+                  <div style={{ padding:'40px 20px', textAlign:'center', color:'var(--text-muted)', fontSize:13 }}>No commissions earned yet this week</div>
                 ) : (
+                  <div style={{ overflowX:'auto' }}>
                   <table className="data-table">
                     <thead><tr>{isAdmin && <th>Rep</th>}<th>Type</th><th>Detail</th><th style={{textAlign:'right'}}>Amount</th><th>When</th>{isAdmin && <th>By</th>}</tr></thead>
                     <tbody>
@@ -1282,25 +1282,23 @@ export default function AdminPage() {
                         const madeBy = c._updaterName || updaterProfile?.name || updaterProfile?.email || (isAdj ? 'Admin' : null)
                         return (
                           <tr key={c.id}>
-                            {isAdmin && <td style={{padding:'10px 12px', fontWeight:500}}>{c.profiles?.name || c.rep_name}</td>}
-                            <td style={{padding:'10px 12px'}}>
-                              <span style={{ padding:'2px 8px', borderRadius:99, fontSize:11, fontWeight:600,
-                                background: isRev ? 'var(--danger-bg)' : isAdj ? (amt < 0 ? 'var(--danger-bg)' : 'var(--warning-bg)') : isMem ? '#EFF6FF' : '#DCFCE7',
-                                color: isRev ? 'var(--danger)' : isAdj ? (amt < 0 ? 'var(--danger)' : 'var(--warning)') : isMem ? '#3b82f6' : '#16A34A' }}>
+                            {isAdmin && <td style={{ fontWeight:600 }}>{c.profiles?.name || c.rep_name}</td>}
+                            <td>
+                              <ToneChip small tone={isRev ? 'red' : isAdj ? (amt < 0 ? 'red' : 'amber') : isMem ? 'blue' : 'green'}>
                                 {isRev ? 'Reversal' : isAdj ? 'Adjustment' : isMem ? 'Membership' : 'Booking'}
-                              </span>
+                              </ToneChip>
                             </td>
-                            <td style={{padding:'10px 12px', color:'var(--text-secondary)', fontSize:12}}>
+                            <td style={{ color:'var(--text-secondary)' }}>
                               {isAdj ? (c.notes || 'Manual adjustment') : isRev ? (c.notes || `Reversed${c.contact_name ? ` — ${c.contact_name}` : ''}`) : c.contact_name}
                             </td>
-                            <td style={{padding:'10px 12px', textAlign:'right', fontWeight:700, color: amt < 0 ? 'var(--danger)' : '#16A34A'}}>
+                            <td style={{ textAlign:'right', fontWeight:700, color: amt < 0 ? 'var(--tone-red-tx)' : 'var(--tone-green-tx)' }}>
                               {amt >= 0 ? '+' : ''}{'$'}{amt.toFixed(2)}
                             </td>
-                            <td style={{padding:'10px 12px', color:'var(--text-muted)', fontSize:11}}>
+                            <td style={{ color:'var(--text-muted)', fontSize:11.5, whiteSpace:'nowrap' }}>
                               {new Date(c.earned_at).toLocaleString('en-US', { month:'short', day:'numeric', hour:'numeric', minute:'2-digit' })}
                             </td>
                             {isAdmin && (
-                              <td style={{padding:'10px 12px', fontSize:11, color: madeBy ? 'var(--text-secondary)' : 'var(--text-muted)'}}>
+                              <td style={{ fontSize:11.5, color: madeBy ? 'var(--text-secondary)' : 'var(--text-muted)' }}>
                                 {madeBy || '--'}
                               </td>
                             )}
@@ -1309,21 +1307,26 @@ export default function AdminPage() {
                       })}
                     </tbody>
                   </table>
+                  </div>
                 )}
-              </div>
+              </Section>
             </>
           )}
 
           {/* Commission engine setup / mapping (collapsible) */}
           {isAdmin && (
-            <div style={{ borderTop:'1px solid var(--border)', marginTop:20, paddingTop:16 }}>
-              <button onClick={() => setShowMapping(v => !v)} style={{ display:'flex', alignItems:'center', gap:8, background:'none', border:'none', cursor:'pointer', padding:0, fontSize:14, fontWeight:700, color:'var(--text-primary)' }}>
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ transform: showMapping ? 'rotate(90deg)' : 'none', transition:'transform .15s' }}><path d="m9 18 6-6-6-6"/></svg>
-                Commission engine setup
+            <>
+              <button onClick={() => setShowMapping(v => !v)} className="lift-hover" aria-expanded={showMapping}
+                style={{ ...panel, flexShrink:0, width:'100%', display:'flex', alignItems:'center', gap:12, padding: isMobile ? '12px 14px' : '14px 20px',
+                  cursor:'pointer', textAlign:'left', font:'inherit', color:'var(--text-primary)' }}>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink:0, transform: showMapping ? 'rotate(90deg)' : 'none', transition:'transform .15s' }}><path d="m9 18 6-6-6-6"/></svg>
+                <span style={{ flex:1, minWidth:0 }}>
+                  <span style={{ display:'block', fontSize:14.5, fontWeight:700 }}>Commission engine setup</span>
+                  <span style={{ display:'block', fontSize:12, color:'var(--text-muted)', marginTop:2 }}>Map ServiceTitan users, job types, and membership types to spiff rules.</span>
+                </span>
               </button>
-              <div style={{ fontSize:12, color:'var(--text-muted)', marginTop:2, marginLeft:20 }}>Map ServiceTitan users, job types, and membership types to spiff rules.</div>
-              {showMapping && <div style={{ marginTop:16 }}><CommissionMapping /></div>}
-            </div>
+              {showMapping && <CommissionMapping />}
+            </>
           )}
         </div>
       )}
@@ -1337,15 +1340,19 @@ export default function AdminPage() {
       {settingsTab === 'callqa' && isAdmin && <CallQATab />}
 
       {settingsTab === 'ops' && isAdmin && (
-        <div style={{ flex:1, overflowY:'auto', padding: isMobile ? 12 : 24, display:'flex', flexDirection:'column', gap:20 }}>
-          {!opsForm || !wxLocs ? <div className="spinner"></div> : (
+        <div style={{ flex:1, overflowY:'auto', padding: isMobile ? 12 : 24, display:'flex', flexDirection:'column', gap:16 }}>
+          {!opsForm || !wxLocs ? (
             <>
-              <div className="card">
-                <div className="card-header">
-                  <div className="card-title">Call center thresholds</div>
-                  <span style={{ fontSize:11, color:'var(--text-muted)' }}>Drives the TV, Analytics, wrap-up and the dialer — no deploy needed</span>
-                </div>
-                <div className="card-body" style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(200px, 1fr))', gap:14 }}>
+              <div className="skel" style={{ height:200, borderRadius:16, flexShrink:0 }} />
+              <div className="skel" style={{ height:160, borderRadius:16, flexShrink:0 }} />
+            </>
+          ) : (
+            <>
+              {/* Thresholds and weather save together (autosave, below); the
+                  one status line lives on the first section. */}
+              <Section title="Call center thresholds" desc="Drives the TV, Analytics, wrap-up and the dialer — no deploy needed"
+                actions={<SaveNote muted={opsSaving || !opsMsg} error={opsMsg.startsWith('Error')}>{opsSaving ? 'Saving…' : opsMsg || 'Changes save automatically'}</SaveNote>}
+                bodyStyle={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(200px, 1fr))', gap:16 }}>
                   {[
                     ['serviceLevelSeconds', 'Service level window (sec)', 'Answered within this counts toward service level'],
                     ['serviceLevelTarget', 'Service level target (%)', 'Green at or above this'],
@@ -1354,27 +1361,22 @@ export default function AdminPage() {
                     ['maxAttempts', 'Max dial attempts', 'Contact goes to Max Attempts after this many'],
                     ['retryGapHours', 'Hours before re-dialing', 'A No Answer / Voicemail lead isn’t served again until this passes (20 = next day, a bit earlier)'],
                   ].map(([k, label, hint]) => (
-                    <div key={k} className="form-field">
+                    <div key={k} className="form-field" style={{ marginBottom:0 }}>
                       <label className="form-label">{label}</label>
                       <input className="form-input" type="number" min="1" value={opsForm[k]}
                         onChange={e => { setOpsForm(f => ({ ...f, [k]: Number(e.target.value) })); setOpsDirty(true) }} />
-                      <div style={{ fontSize:10, color:'var(--text-muted)', marginTop:3 }}>{hint}</div>
+                      <div style={{ fontSize:11, color:'var(--text-muted)', marginTop:4, lineHeight:1.45 }}>{hint}</div>
                     </div>
                   ))}
-                </div>
-              </div>
-              <div className="card">
-                <div className="card-header">
-                  <div className="card-title">Weather locations</div>
-                  <span style={{ fontSize:11, color:'var(--text-muted)' }}>Up to 5 · shown across the top of every page and the Floor TV</span>
-                </div>
-                <div className="card-body" style={{ display:'flex', flexDirection:'column', gap:10 }}>
+              </Section>
+              <Section title="Weather locations" desc="Up to 5 · shown across the top of every page and the Floor TV"
+                bodyStyle={{ display:'flex', flexDirection:'column', gap:10 }}>
                   {wxLocs.map((l, i) => (
                     <div key={i} style={{ display:'flex', gap:8, alignItems:'center' }}>
                       <input className="form-input" value={l.key} title="Short label shown in the strip"
                         onChange={e => { setWxLocs(ls => ls.map((x, xi) => xi === i ? { ...x, key: e.target.value } : x)); setOpsDirty(true) }}
                         style={{ width:130 }} />
-                      <span style={{ flex:1, fontSize:12, color:'var(--text-muted)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{l.name}</span>
+                      <span style={{ flex:1, minWidth:0, fontSize:12.5, color:'var(--text-muted)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{l.name}</span>
                       <button className="btn sm" onClick={() => { setWxLocs(ls => ls.filter((_, xi) => xi !== i)); setOpsDirty(true) }} disabled={wxLocs.length <= 1}>Remove</button>
                     </div>
                   ))}
@@ -1383,13 +1385,13 @@ export default function AdminPage() {
                       <input className="form-input" placeholder="Add a place — city, town or address" value={wxQuery}
                         onChange={e => wxSearch(e.target.value)} />
                       {wxSugs.length > 0 && (
-                        <div style={{ marginTop:4, background:'var(--surface)', border:'1px solid var(--border)', borderRadius:8, overflow:'hidden' }}>
+                        <div style={{ marginTop:6, background:'var(--surface)', border:'1px solid var(--border)', borderRadius:12, overflow:'hidden', boxShadow:'0 10px 24px -14px rgba(15, 20, 40, .28)' }}>
                           {wxSugs.map((sug, si) => (
                             <button key={si} onClick={() => {
                               const short = String(sug.placeName || '').split(',')[0].trim()
                               setWxLocs(ls => [...ls, { key: short, name: sug.placeName, lat: sug.lat, lng: sug.lng }])
                               setWxQuery(''); setWxSugs([]); setOpsDirty(true)
-                            }} style={{ display:'block', width:'100%', textAlign:'left', padding:'8px 12px', background:'transparent', border:'none', cursor:'pointer', fontSize:12, color:'var(--text-primary)' }}
+                            }} style={{ display:'block', width:'100%', textAlign:'left', padding:'9px 14px', background:'transparent', border:'none', borderTop: si ? '1px solid var(--border)' : 'none', cursor:'pointer', fontSize:12.5, color:'var(--text-primary)' }}
                               onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
                               onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
                               {sug.placeName}
@@ -1399,29 +1401,23 @@ export default function AdminPage() {
                       )}
                     </div>
                   )}
-                </div>
-              </div>
-              <div className="card">
-                <div className="card-body" style={{ display:'flex', alignItems:'center', gap:10, fontSize:12.5, color:'var(--text-muted)' }}>
-                  Hours of operation and the holiday schedule now live in
-                  <button className="btn sm" onClick={() => setSettingsTab('routing')}>Call Routing</button>
-                  where they actually control the phones.
-                </div>
+              </Section>
+              <div style={{ ...panel, flexShrink:0, padding: isMobile ? '12px 14px' : '12px 20px', display:'flex', alignItems:'center', gap:10, flexWrap:'wrap', fontSize:12.5, color:'var(--text-muted)' }}>
+                Hours of operation and the holiday schedule now live in
+                <button className="btn sm" onClick={() => setSettingsTab('routing')} style={{ borderRadius:99 }}>Call Routing</button>
+                where they actually control the phones.
               </div>
 
               {/* Morning digest — send one on demand instead of waiting for 7 AM */}
-              <div className="card">
-                <div className="card-header">
-                  <div className="card-title">Morning digest</div>
-                  <span style={{ fontSize:11, color:'var(--text-muted)' }}>Yesterday's sales, close rates, techs, call center, and marketing — emailed at 7 AM</span>
-                </div>
-                <div className="card-body" style={{ display:'flex', alignItems:'end', gap:10, flexWrap:'wrap' }}>
+              <Section title="Morning digest" desc="Yesterday's sales, close rates, techs, call center, and marketing — emailed at 7 AM"
+                bodyStyle={{ display:'flex', flexDirection:'column', gap:14 }}>
+                <div style={{ display:'flex', alignItems:'end', gap:10, flexWrap:'wrap' }}>
                   <div className="form-field" style={{ flex:1, minWidth:320, margin:0 }}>
                     <label className="form-label">Recipients (comma-separated)</label>
                     <input className="form-input" value={digestTo} placeholder="name@awesomeservice.com, other@…"
                       onChange={e => setDigestTo(e.target.value)} />
                   </div>
-                  <button className="btn sm" disabled={digestToSaving} onClick={async () => {
+                  <button className="btn" style={{ borderRadius:99 }} disabled={digestToSaving} onClick={async () => {
                     setDigestToSaving(true)
                     const clean = digestTo.split(',').map(x => x.trim()).filter(Boolean).join(', ')
                     const { error } = await sb.from('app_settings').upsert({ key: 'daily_digest_to', value: clean }, { onConflict: 'key' })
@@ -1430,8 +1426,8 @@ export default function AdminPage() {
                     else { setDigestTo(clean); toast(clean ? `Digest now goes to: ${clean}` : 'Digest recipients cleared — no one will receive it') }
                   }}>{digestToSaving ? 'Saving…' : 'Save recipients'}</button>
                 </div>
-                <div className="card-body" style={{ display:'flex', alignItems:'center', gap:10, flexWrap:'wrap', paddingTop:0 }}>
-                  <button className="btn sm primary" disabled={digestBusy} onClick={async () => {
+                <div style={{ display:'flex', alignItems:'center', gap:10, flexWrap:'wrap', paddingTop:14, borderTop:'1px solid var(--border)' }}>
+                  <button className="btn primary" style={{ borderRadius:99 }} disabled={digestBusy} onClick={async () => {
                     setDigestBusy(true); setDigestMsg('')
                     try {
                       const { data: { session } } = await sb.auth.getSession()
@@ -1442,72 +1438,59 @@ export default function AdminPage() {
                     } catch (e) { setDigestMsg(`Error: ${e.message}`) }
                     setDigestBusy(false)
                   }}>{digestBusy ? 'Building…' : 'Email me yesterday’s digest'}</button>
-                  {digestMsg && <span style={{ fontSize:12.5, fontWeight:600, color: digestMsg.startsWith('Error') ? 'var(--danger)' : 'var(--success)' }}>{digestMsg}</span>}
+                  <SaveNote error={digestMsg.startsWith('Error')}>{digestMsg}</SaveNote>
                   <span style={{ fontSize:11.5, color:'var(--text-muted)', marginLeft:'auto' }}>Takes ~30s to build — it queries a full day of ServiceTitan.</span>
                 </div>
-              </div>
-              <div style={{ fontSize:12, color: opsMsg.startsWith('Error') ? 'var(--danger)' : 'var(--text-muted)' }}>
-                {opsSaving ? 'Saving…' : opsMsg || 'Changes save automatically'}
-              </div>
+              </Section>
             </>
           )}
         </div>
       )}
 
       {settingsTab === 'users' && (
-        <div style={{ flex:1, overflowY:'auto', padding: isMobile ? 12 : 24, display:'flex', flexDirection:'column', gap:20 }}>
+        <div style={{ flex:1, overflowY:'auto', padding: isMobile ? 12 : 24, display:'flex', flexDirection:'column', gap:16 }}>
 
           {/* MY PROFILE */}
-          <div className="card">
-            <div className="card-header">
-              <div className="card-title">My Profile</div>
-              {profileMsg && <span style={{ fontSize:12, color:'var(--success)' }}>{profileMsg}</span>}
-            </div>
-            <div className="card-body" style={{ display:'flex', flexDirection:'column', gap:16 }}>
+          <Section title="My profile" desc="Your name and avatar as the team sees them"
+            actions={<>
+              <SaveNote muted={savingProfile || !profileMsg}>{savingProfile ? 'Saving…' : profileMsg || 'Changes save automatically'}</SaveNote>
+              <button className="btn" style={{ borderRadius:99 }} onClick={() => { setPwModal('me'); setNewPw(''); setPwMsg('') }}>
+                Change my password
+              </button>
+            </>}
+            bodyStyle={{ display:'flex', flexDirection:'column', gap:16 }}>
               <div style={{ display:'flex', alignItems:'center', gap:16 }}>
                 <div style={{ position:'relative', flexShrink:0 }}>
-                  <div style={{ width:64, height:64, borderRadius:'50%', overflow:'hidden', background:'var(--accent-bg)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:38, fontWeight:700, border:'2px solid var(--border)' }}>
-                    <Avatar avatar={myAvatar} name={myName || profile?.email} />
-                  </div>
+                  <Face avatar={myAvatar} name={myName || profile?.email} size={64} />
                   <button onClick={() => { setPickerSelected(myAvatar); setShowAvatarPicker(true) }}
                     style={{ position:'absolute', bottom:0, right:0, width:22, height:22, borderRadius:'50%', background:'var(--accent)', border:'2px solid var(--surface)', color:'#fff', fontSize:14, fontWeight:700, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' }}
                     title="Change avatar">+</button>
                 </div>
-                <div>
-                  <div style={{ fontSize:13, fontWeight:600 }}>{myName || profile?.email}</div>
-                  <div style={{ fontSize:11, color:'var(--text-muted)', marginTop:2 }}>
-                    {!myAvatar ? 'No avatar set' : /^(data:|https?:|\/)/.test(myAvatar) ? 'Photo set' : `Emoji ${myAvatar}`} · <span style={{ color:'var(--accent)', cursor:'pointer' }} onClick={() => { setPickerSelected(myAvatar); setShowAvatarPicker(true) }}>Change</span>
+                <div style={{ minWidth:0 }}>
+                  <div style={{ fontSize:14.5, fontWeight:700 }}>{myName || profile?.email}</div>
+                  <div style={{ fontSize:12, color:'var(--text-muted)', marginTop:2 }}>
+                    {!myAvatar ? 'No avatar set' : /^(data:|https?:|\/)/.test(myAvatar) ? 'Photo set' : `Emoji ${myAvatar}`} · <span style={{ color:'var(--accent)', cursor:'pointer', fontWeight:600 }} onClick={() => { setPickerSelected(myAvatar); setShowAvatarPicker(true) }}>Change</span>
                   </div>
                 </div>
               </div>
-              <div className="form-field">
+              <div className="form-field" style={{ marginBottom:0 }}>
                 <label className="form-label">Display name</label>
                 <input className="form-input" value={myName} onChange={e => setMyName(e.target.value)} placeholder="Your name"
                   onBlur={() => { if ((myName || '') !== (profile?.name || '')) saveMyProfile({ name: myName }) }} />
               </div>
-              <div style={{ display:'flex', gap:8, flexWrap:'wrap', alignItems:'center' }}>
-                <span style={{ fontSize:12, color:'var(--text-muted)' }}>{savingProfile ? 'Saving…' : profileMsg || 'Changes save automatically'}</span>
-                <div style={{ flex:1 }} />
-                <button className="btn" onClick={() => { setPwModal('me'); setNewPw(''); setPwMsg('') }}>
-                  Change my password
-                </button>
-              </div>
-            </div>
-          </div>
+          </Section>
 
           {/* EMOJI PICKER MODAL */}
           {showAvatarPicker && (
             <Modal title="Choose Your Avatar" onClose={() => setShowAvatarPicker(false)} width={520}>
               <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
-                <div style={{ display:'flex', alignItems:'center', gap:12, padding:'12px 16px', background:'var(--surface-2)', borderRadius:'var(--radius)' }}>
-                  <div style={{ width:48, height:48, borderRadius:'50%', overflow:'hidden', background:'var(--accent-bg)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:28, fontWeight:700, flexShrink:0 }}>
-                    <Avatar avatar={pickerSelected || myAvatar} name={myName || profile?.email} />
+                <div style={{ display:'flex', alignItems:'center', gap:12, padding:'12px 16px', background:'var(--surface-2)', border:'1px solid var(--border)', borderRadius:14 }}>
+                  <Face avatar={pickerSelected || myAvatar} name={myName || profile?.email} size={48} />
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <div style={{ fontSize:13.5, fontWeight:700 }}>{myName || profile?.email}</div>
+                    <div style={{ fontSize:12, color:'var(--text-muted)' }}>{pickerSelected ? 'Looking good! Hit save to lock it in.' : 'Upload a photo or pick an emoji'}</div>
                   </div>
-                  <div style={{ flex:1 }}>
-                    <div style={{ fontSize:13, fontWeight:600 }}>{myName || profile?.email}</div>
-                    <div style={{ fontSize:11, color:'var(--text-muted)' }}>{pickerSelected ? 'Looking good! Hit save to lock it in.' : 'Upload a photo or pick an emoji'}</div>
-                  </div>
-                  <label className="btn sm" style={{ cursor:'pointer', flexShrink:0 }}>
+                  <label className="btn sm" style={{ cursor:'pointer', flexShrink:0, borderRadius:99 }}>
                     Upload photo
                     <input type="file" accept="image/*" onChange={onAvatarFile} style={{ display:'none' }} />
                   </label>
@@ -1515,7 +1498,7 @@ export default function AdminPage() {
                 <div style={{ maxHeight:400, overflowY:'auto', display:'flex', flexDirection:'column', gap:14 }}>
                   {Object.entries(EMOJIS).map(([category, emojis]) => (
                     <div key={category}>
-                      <div style={{ fontSize:10, fontWeight:600, textTransform:'uppercase', letterSpacing:.5, color:'var(--text-muted)', marginBottom:6 }}>{category}</div>
+                      <div style={{ ...eyebrow, marginBottom:6 }}>{category}</div>
                       <div style={{ display:'flex', flexWrap:'wrap', gap:6 }}>
                         {emojis.map(emoji => (
                           <button key={emoji} onClick={() => setPickerSelected(emoji)}
@@ -1548,21 +1531,15 @@ export default function AdminPage() {
           {/* ADMIN ONLY — User Management */}
           {isAdmin && (
             <>
-              {msg && <div style={{ background: msg.startsWith('Error') ? 'var(--danger-bg)' : 'var(--success-bg)', color: msg.startsWith('Error') ? 'var(--danger)' : 'var(--success)', padding:'10px 14px', borderRadius:'var(--radius)', fontSize:13 }}>{msg}</div>}
-              <div className="card">
-                <div className="card-header">
-                  <div className="card-title">User Management</div>
-                  <div style={{ display:'flex', alignItems:'center', gap:12, flexWrap: isMobile ? 'wrap' : undefined, justifyContent: isMobile ? 'flex-end' : undefined }}>
-                    <span style={{ fontSize:11, color:'var(--text-muted)' }}>Invite by email below — they set their own name and password</span>
-                    {removedProfiles.length > 0 && (
-                      <button className="btn sm" onClick={() => setShowRemoved(v => !v)}>
-                        {showRemoved ? 'Hide' : `Show removed (${removedProfiles.length})`}
-                      </button>
-                    )}
-                  </div>
-                </div>
+              {msg && <Notice tone={msg.startsWith('Error') ? 'red' : 'green'}>{msg}</Notice>}
+              <Section flush title="User management" desc="Invite by email below — they set their own name and password"
+                actions={removedProfiles.length > 0 && (
+                  <button className="btn sm" style={{ borderRadius:99 }} onClick={() => setShowRemoved(v => !v)}>
+                    {showRemoved ? 'Hide removed' : `Show removed (${removedProfiles.length})`}
+                  </button>
+                )}>
                 {/* Invite a user */}
-                <div style={{ padding:'12px 16px', borderBottom:'1px solid var(--border)', display:'flex', flexDirection:'column', gap:8 }}>
+                <div style={{ padding: isMobile ? '12px 14px' : '14px 20px', borderBottom:'1px solid var(--border)', display:'flex', flexDirection:'column', gap:10 }}>
                   <div style={{ display:'flex', gap:8, alignItems:'center', flexWrap:'wrap' }}>
                     <input className="form-input" type="email" placeholder="teammate@awesomeservice.com"
                       value={invEmail} onChange={e => setInvEmail(e.target.value)}
@@ -1573,58 +1550,61 @@ export default function AdminPage() {
                       <option value="dispatcher">Dispatcher</option>
                       <option value="admin">Admin</option>
                     </select>
-                    <button className="btn primary" onClick={sendInvite} disabled={invBusy || !invEmail.trim()}>
+                    <button className="btn primary" onClick={sendInvite} disabled={invBusy || !invEmail.trim()} style={{ borderRadius:99 }}>
                       {invBusy ? 'Sending…' : 'Send invite'}
                     </button>
                   </div>
                   {invMsg && (
-                    <div style={{ fontSize:12, color: invMsg.ok ? 'var(--success)' : 'var(--danger)' }}>
+                    <Notice tone={invMsg.ok ? 'green' : 'red'}>
                       {invMsg.text}
                       {invMsg.link && (
-                        <div style={{ display:'flex', gap:6, alignItems:'center', marginTop:4 }}>
+                        <div style={{ display:'flex', gap:6, alignItems:'center', marginTop:6 }}>
                           <input className="form-input" readOnly value={invMsg.link} style={{ flex:1, fontSize:11 }}
                             onFocus={e => e.target.select()} />
                           <button className="btn sm" onClick={() => navigator.clipboard?.writeText(invMsg.link)}>Copy</button>
                         </div>
                       )}
-                    </div>
+                    </Notice>
                   )}
                 </div>
-                {loading ? <div className="card-body"><div className="spinner"></div></div> : (
-                  <table className="data-table">
-                    <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Active Campaigns</th><th>Actions</th></tr></thead>
-                    <tbody>
-                      {visibleProfiles.map(p => {
+                {/* One row per person: face, name + role, email under it; their
+                    campaigns in priority order; actions on the right. A fixed
+                    actions column keeps the rows aligned. Phone: stacks. */}
+                {loading ? (
+                  <div style={{ padding: isMobile ? '12px 14px' : '14px 20px', display:'flex', flexDirection:'column', gap:10 }}>
+                    {[0, 1, 2].map(i => <div key={i} className="skel" style={{ height:40, borderRadius:10 }} />)}
+                  </div>
+                ) : visibleProfiles.map((p, i) => {
                         const activeCamps = getProfileCampaigns(p.id)
                         const removed = p.active === false
+                        const [roleTone, roleLabel] = ROLE_CHIP[p.role || 'rep'] || ['gray', p.role]
                         return (
-                          <tr key={p.id} style={removed ? { opacity:.55 } : undefined}>
-                            <td style={{ padding:'10px 12px', fontWeight:500 }}>
-                              <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-                                <div style={{ width:28, height:28, borderRadius:'50%', background:'var(--accent-bg)', display:'flex', alignItems:'center', justifyContent:'center', fontSize: p.avatar ? 18 : 11, fontWeight:600, flexShrink:0, filter: removed ? 'grayscale(1)' : undefined }}>
-                                  <Avatar avatar={p.avatar} name={p.name || p.email} />
-                                </div>
-                                {p.name || '—'}
-                                {removed && <span style={{ fontSize:9, fontWeight:700, textTransform:'uppercase', letterSpacing:.5, padding:'2px 6px', borderRadius:99, background:'var(--surface-2)', color:'var(--text-muted)' }}>Removed</span>}
+                          <div key={p.id} className="eval-row" style={{ display:'grid', gridTemplateColumns: isMobile ? 'minmax(0, 1fr)' : 'minmax(0, 1.2fr) minmax(0, 1fr) 280px',
+                            gap: isMobile ? 10 : 16, alignItems:'center', padding: isMobile ? '12px 14px' : '11px 20px', borderTop: i ? '1px solid var(--border)' : 'none', opacity: removed ? .55 : 1 }}>
+                            <div style={{ display:'flex', alignItems:'center', gap:12, minWidth:0 }}>
+                              <div style={{ flexShrink:0, filter: removed ? 'grayscale(1)' : undefined }}>
+                                <Face avatar={p.avatar} name={p.name || p.email} size={34} />
                               </div>
-                            </td>
-                            <td style={{ padding:'10px 12px', color:'var(--text-secondary)', fontSize:12 }}>{p.email}</td>
-                            <td style={{ padding:'10px 12px' }}>
-                              <span style={{ display:'inline-block', padding:'2px 8px', borderRadius:99, fontSize:10, fontWeight:600, background: p.role==='admin' ? 'var(--accent-bg)' : 'var(--surface-2)', color: p.role==='admin' ? 'var(--accent)' : 'var(--text-secondary)' }}>
-                                {p.role || 'rep'}
-                              </span>
-                            </td>
-                            <td style={{ padding:'10px 12px' }}>
-                              {activeCamps.length === 0 ? <span style={{ fontSize:11, color:'var(--text-muted)' }}>No campaigns assigned</span> : (
-                                <div style={{ display:'flex', gap:4, flexWrap:'wrap' }}>
-                                  {activeCamps.map((name, i) => (
-                                    <span key={name} style={{ fontSize:10, padding:'2px 7px', borderRadius:99, background:'var(--accent-bg)', color:'var(--accent)', fontWeight:600 }}>{i+1}. {name}</span>
-                                  ))}
+                              <div style={{ minWidth:0 }}>
+                                <div style={{ display:'flex', alignItems:'center', gap:6, flexWrap:'wrap' }}>
+                                  <span style={{ fontSize:13.5, fontWeight:650 }}>{p.name || '—'}</span>
+                                  <ToneChip tone={roleTone} small>{roleLabel}</ToneChip>
+                                  {removed && <ToneChip tone="gray" small>Removed</ToneChip>}
                                 </div>
+                                <div style={{ fontSize:12, color:'var(--text-muted)', marginTop:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{p.email}</div>
+                              </div>
+                            </div>
+                            <div style={{ display:'flex', gap:4, flexWrap:'wrap', minWidth:0 }}>
+                              {activeCamps.length === 0 ? <span style={{ fontSize:12, color:'var(--text-muted)' }}>No campaigns assigned</span> : (
+                                activeCamps.map((name, ci) => (
+                                  <span key={name} style={{ fontSize:11, fontWeight:600, padding:'1px 8px', borderRadius:99, background:'var(--accent-bg)', color:'var(--accent-text)' }}>
+                                    <span style={num}>{ci + 1}.</span> {name}
+                                  </span>
+                                ))
                               )}
-                            </td>
-                            <td style={{ padding:'10px 12px' }}>
-                              <div style={{ display:'flex', gap:6 }}>
+                            </div>
+                            <div>
+                              <div style={{ display:'flex', gap:6, flexWrap:'wrap', justifyContent: isMobile ? 'flex-start' : 'flex-end' }}>
                                 {removed ? (
                                   <button className="btn sm" disabled={busyUser === p.id} onClick={() => setUserActive(p, true)}>
                                     {busyUser === p.id ? 'Restoring…' : 'Restore'}
@@ -1642,14 +1622,11 @@ export default function AdminPage() {
                                   </>
                                 )}
                               </div>
-                            </td>
-                          </tr>
+                            </div>
+                          </div>
                         )
                       })}
-                    </tbody>
-                  </table>
-                )}
-              </div>
+              </Section>
 
             </>
           )}
@@ -1684,7 +1661,7 @@ export default function AdminPage() {
                   <div style={{ fontSize:11, color:'var(--text-muted)', marginBottom:10 }}>Grant the queues this rep may log into. They choose which of these to go available for. Inbound always outranks outbound; campaign #1 is served first.</div>
 
                   {/* Inbound skill — the fixed, top-priority queue */}
-                  <label style={{ display:'flex', alignItems:'center', gap:10, padding:'10px 12px', marginBottom:10, borderRadius:'var(--radius)', cursor:'pointer',
+                  <label style={{ display:'flex', alignItems:'center', gap:10, padding:'10px 12px', marginBottom:10, borderRadius:12, cursor:'pointer',
                     background: editProfile.inbound_skill ? 'var(--accent-bg)' : 'var(--surface-2)',
                     border:`1px solid ${editProfile.inbound_skill ? 'var(--accent)' : 'var(--border)'}` }}>
                     <input type="checkbox" checked={!!editProfile.inbound_skill}
@@ -1696,7 +1673,7 @@ export default function AdminPage() {
                   </label>
 
                   {/* Dispatch line — techs calling (719) 259-2681; only these workers ring */}
-                  <label style={{ display:'flex', alignItems:'center', gap:10, padding:'10px 12px', marginBottom:10, borderRadius:'var(--radius)', cursor:'pointer',
+                  <label style={{ display:'flex', alignItems:'center', gap:10, padding:'10px 12px', marginBottom:10, borderRadius:12, cursor:'pointer',
                     background: editProfile.dispatch_skill ? 'var(--tone-purple-bg)' : 'var(--surface-2)',
                     border:`1px solid ${editProfile.dispatch_skill ? 'var(--tone-purple-bd)' : 'var(--border)'}` }}>
                     <input type="checkbox" checked={!!editProfile.dispatch_skill}
@@ -1707,20 +1684,20 @@ export default function AdminPage() {
                     </div>
                   </label>
 
-                  <div style={{ fontSize:10, fontWeight:600, textTransform:'uppercase', letterSpacing:.5, color:'var(--text-muted)', marginBottom:8 }}>Outbound campaigns</div>
+                  <div style={{ ...eyebrow, marginBottom:8 }}>Outbound campaigns</div>
                   {editProfile.campaigns.filter(c => c.active).sort((a, b) => a.priority - b.priority).length > 0 && (
                     <div style={{ marginBottom:8 }}>
-                      <div style={{ fontSize:10, fontWeight:600, textTransform:'uppercase', letterSpacing:.5, color:'var(--text-muted)', marginBottom:6 }}>Active (priority order)</div>
+                      <div style={{ ...eyebrow, marginBottom:6 }}>Active (priority order)</div>
                       <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
                         {editProfile.campaigns.filter(c => c.active).sort((a, b) => a.priority - b.priority).map((c, idx, arr) => (
-                          <div key={c.campaign_id} style={{ display:'flex', alignItems:'center', gap:8, padding:'8px 10px', background:'var(--success-bg)', border:'1px solid var(--success)', borderRadius:'var(--radius)' }}>
-                            <span style={{ fontSize:11, fontWeight:700, color:'var(--success)', minWidth:18 }}>#{idx+1}</span>
-                            <span style={{ fontSize:13, fontWeight:500, flex:1 }}>{c.name}</span>
+                          <div key={c.campaign_id} style={{ display:'flex', alignItems:'center', gap:8, padding:'8px 10px', background:'var(--tone-green-bg)', border:'1px solid var(--tone-green-bd)', borderRadius:10 }}>
+                            <span style={{ ...num, fontSize:11, fontWeight:800, color:'var(--tone-green-tx)', minWidth:18 }}>#{idx+1}</span>
+                            <span style={{ fontSize:13, fontWeight:600, flex:1 }}>{c.name}</span>
                             <div style={{ display:'flex', gap:2 }}>
-                              <button onClick={() => movePriority(c.campaign_id, 'up')} disabled={idx===0} style={{ padding:'2px 6px', fontSize:11, borderRadius:4, border:'1px solid var(--border)', background:'var(--surface)', cursor: idx===0 ? 'not-allowed' : 'pointer', opacity: idx===0 ? .3 : 1 }}>▲</button>
-                              <button onClick={() => movePriority(c.campaign_id, 'down')} disabled={idx===arr.length-1} style={{ padding:'2px 6px', fontSize:11, borderRadius:4, border:'1px solid var(--border)', background:'var(--surface)', cursor: idx===arr.length-1 ? 'not-allowed' : 'pointer', opacity: idx===arr.length-1 ? .3 : 1 }}>▼</button>
+                              <button onClick={() => movePriority(c.campaign_id, 'up')} disabled={idx===0} style={{ padding:'2px 6px', fontSize:11, borderRadius:6, border:'1px solid var(--border)', background:'var(--surface)', color:'var(--text-primary)', cursor: idx===0 ? 'not-allowed' : 'pointer', opacity: idx===0 ? .3 : 1 }}>▲</button>
+                              <button onClick={() => movePriority(c.campaign_id, 'down')} disabled={idx===arr.length-1} style={{ padding:'2px 6px', fontSize:11, borderRadius:6, border:'1px solid var(--border)', background:'var(--surface)', color:'var(--text-primary)', cursor: idx===arr.length-1 ? 'not-allowed' : 'pointer', opacity: idx===arr.length-1 ? .3 : 1 }}>▼</button>
                             </div>
-                            <button onClick={() => toggleCampaign(c.campaign_id)} style={{ padding:'2px 8px', fontSize:11, borderRadius:4, border:'1px solid var(--danger)', background:'var(--danger-bg)', color:'var(--danger)', cursor:'pointer', fontWeight:500 }}>Remove</button>
+                            <button onClick={() => toggleCampaign(c.campaign_id)} style={{ padding:'2px 8px', fontSize:11, borderRadius:6, border:'1px solid var(--tone-red-bd)', background:'var(--tone-red-bg)', color:'var(--tone-red-tx)', cursor:'pointer', fontWeight:600 }}>Remove</button>
                           </div>
                         ))}
                       </div>
@@ -1728,42 +1705,36 @@ export default function AdminPage() {
                   )}
                   {editProfile.campaigns.filter(c => !c.active).length > 0 && (
                     <div>
-                      <div style={{ fontSize:10, fontWeight:600, textTransform:'uppercase', letterSpacing:.5, color:'var(--text-muted)', marginBottom:6 }}>Available to add</div>
+                      <div style={{ ...eyebrow, marginBottom:6 }}>Available to add</div>
                       <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
                         {editProfile.campaigns.filter(c => !c.active).map(c => (
-                          <div key={c.campaign_id} style={{ display:'flex', alignItems:'center', gap:8, padding:'8px 10px', background:'var(--surface-2)', border:'1px solid var(--border)', borderRadius:'var(--radius)' }}>
+                          <div key={c.campaign_id} style={{ display:'flex', alignItems:'center', gap:8, padding:'8px 10px', background:'var(--surface-2)', border:'1px solid var(--border)', borderRadius:10 }}>
                             <span style={{ fontSize:13, flex:1, color:'var(--text-muted)' }}>{c.name}</span>
-                            <button onClick={() => toggleCampaign(c.campaign_id)} style={{ padding:'2px 8px', fontSize:11, borderRadius:4, border:'1px solid var(--accent)', background:'var(--accent-bg)', color:'var(--accent)', cursor:'pointer', fontWeight:500 }}>+ Add</button>
+                            <button onClick={() => toggleCampaign(c.campaign_id)} style={{ padding:'2px 8px', fontSize:11, borderRadius:6, border:'1px solid var(--accent)', background:'var(--accent-bg)', color:'var(--accent)', cursor:'pointer', fontWeight:600 }}>+ Add</button>
                           </div>
                         ))}
                       </div>
                     </div>
                   )}
                 </div>
-                <div style={{ background:'var(--warning-bg)', border:'1px solid #C87800', borderRadius:'var(--radius)', padding:'10px 14px', fontSize:12, color:'var(--warning)' }}>
-                  Changes take effect on next page load.
-                </div>
+                <Notice tone="amber">Changes take effect on next page load.</Notice>
               </div>
               <div className="modal-actions">
                 <button className="btn" onClick={() => setEditProfile(null)}>Cancel</button>
-                <button className="btn primary" onClick={saveProfile} disabled={saving}>{saving ? 'Saving...' : 'Save changes'}</button>
+                <button className="btn primary" onClick={saveProfile} disabled={saving}>{saving ? 'Saving…' : 'Save changes'}</button>
               </div>
             </Modal>
           )}
 
           {/* ── COMPANY DIRECTORY ── */}
           {isAdmin && (
-            <div className="card">
-              <div className="card-header">
-                <div className="card-title">Company Directory</div>
-                <span style={{ fontSize:11, color:'var(--text-muted)' }}>Numbers every CSR can dial from Manual Dial — techs, warehouse, vendors, the office next door</span>
-                {dirMsg && <span style={{ fontSize:12, color:'var(--success)', marginLeft:'auto' }}>{dirMsg}</span>}
-              </div>
-              <div className="card-body" style={{ display:'flex', flexDirection:'column', gap:8 }}>
-                {directory === null ? <div className="spinner" /> : (
+            <Section title="Company directory" desc="Numbers every CSR can dial from Manual Dial — techs, warehouse, vendors, the office next door"
+              actions={<SaveNote>{dirMsg}</SaveNote>}
+              bodyStyle={{ display:'flex', flexDirection:'column', gap:8 }}>
+                {directory === null ? <div className="skel" style={{ height:40, borderRadius:10 }} /> : (
                   <>
                     {directory.length === 0 && (
-                      <div style={{ fontSize:12, color:'var(--text-muted)' }}>Nobody here yet — add the warehouse, on-call techs, the answering service…</div>
+                      <div style={{ fontSize:12.5, color:'var(--text-muted)' }}>Nobody here yet — add the warehouse, on-call techs, the answering service…</div>
                     )}
                     {directory.map((d, i) => (
                       <div key={i} style={{ display:'flex', gap:8, alignItems:'center', flexWrap:'wrap' }}>
@@ -1776,14 +1747,13 @@ export default function AdminPage() {
                         <button className="btn sm" onClick={() => setDirectory(ds => ds.filter((_, xi) => xi !== i))}>Remove</button>
                       </div>
                     ))}
-                    <div style={{ display:'flex', gap:8, alignItems:'center' }}>
-                      <button className="btn sm" onClick={() => setDirectory(ds => [...(ds || []), { name:'', number:'', label:'' }])}>+ Add entry</button>
-                      <button className="btn sm primary" onClick={saveDirectory} disabled={dirSaving}>{dirSaving ? 'Saving…' : 'Save directory'}</button>
+                    <div style={{ display:'flex', gap:8, alignItems:'center', marginTop:4 }}>
+                      <button className="btn sm" style={{ borderRadius:99 }} onClick={() => setDirectory(ds => [...(ds || []), { name:'', number:'', label:'' }])}>+ Add entry</button>
+                      <button className="btn sm primary" style={{ borderRadius:99, padding:'5px 16px' }} onClick={saveDirectory} disabled={dirSaving}>{dirSaving ? 'Saving…' : 'Save directory'}</button>
                     </div>
                   </>
                 )}
-              </div>
-            </div>
+            </Section>
           )}
         </div>
       )}
@@ -1802,12 +1772,12 @@ export default function AdminPage() {
               <input className="form-input" type="password" value={newPw} onChange={e => setNewPw(e.target.value)}
                 placeholder="Min 6 characters" onKeyDown={e => e.key === 'Enter' && changePassword()} />
             </div>
-            {pwMsg && <div style={{ fontSize:12, color: pwMsg.startsWith('✓') ? 'var(--success)' : 'var(--danger)', padding:'8px 12px', background: pwMsg.startsWith('✓') ? 'var(--success-bg)' : 'var(--danger-bg)', borderRadius:'var(--radius)' }}>{pwMsg}</div>}
+            {pwMsg && <Notice tone={pwMsg.startsWith('✓') ? 'green' : 'red'}>{pwMsg}</Notice>}
           </div>
           <div className="modal-actions">
             <button className="btn" onClick={() => { setPwModal(null); setNewPw(''); setPwMsg('') }}>Cancel</button>
             <button className="btn primary" onClick={changePassword} disabled={savingPw || newPw.length < 6}>
-              {savingPw ? 'Saving...' : 'Change password'}
+              {savingPw ? 'Saving…' : 'Change password'}
             </button>
           </div>
         </Modal>
@@ -1836,7 +1806,7 @@ export default function AdminPage() {
           <div className="modal-actions">
             <button className="btn" onClick={() => { setCommAdjModal(null); setCommAdjAmount(''); setCommAdjNote('') }}>Cancel</button>
             <button className="btn primary" onClick={addCommissionAdjustment} disabled={savingAdj || !commAdjAmount}>
-              {savingAdj ? 'Saving...' : 'Add adjustment'}
+              {savingAdj ? 'Saving…' : 'Add adjustment'}
             </button>
           </div>
         </Modal>

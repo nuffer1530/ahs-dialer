@@ -1,19 +1,55 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useMemo } from 'react'
 import { toast } from '../lib/dialogs'
 import { useData } from '../lib/DataContext'
 import { useAuth } from '../lib/AuthContext'
 import { useNavigate } from 'react-router-dom'
 import { sb } from '../lib/supabase'
-import Badge from '../components/Badge'
+import { useIsMobile } from '../lib/useIsMobile'
 import Modal from '../components/Modal'
 import AICampaignModal from '../components/AICampaignModal'
 import RichTextEditor, { RichText } from '../components/RichTextEditor'
+import { SummaryPanel, Stat, Ring, ToneChip, EmptyState, eyebrow, num, panel } from '../components/ui'
 import { isDone, normPhone, findCol, parseLine, cleanPhone } from '../lib/utils'
+
+// Contact status → theme tone (the STATUS_COLORS families, taken from the tone
+// tokens so the chips read in dark mode). Custom statuses fall back to gray.
+const STATUS_TONE = {
+  'Pending': 'blue', 'Rescheduled': 'blue', 'Question / Info': 'blue',
+  'No Answer': 'amber', 'Canceled Appt': 'amber', 'Not Booked - Price': 'amber',
+  'Voicemail': 'purple', 'Max Attempts': 'purple',
+  'Booked': 'green',
+  'Not Interested': 'red', 'DNC': 'red',
+  'Bad Data': 'gray', 'Wrong Number': 'gray',
+}
+const statusTone = (s) => STATUS_TONE[s] || 'gray'
+// Chip order on a card: the dialer's own status order, anything custom after.
+const STATUS_ORDER = ['Pending', 'No Answer', 'Voicemail', 'Booked', 'Not Interested', 'DNC', 'Bad Data', 'Max Attempts']
+const statusRank = (s) => { const i = STATUS_ORDER.indexOf(s); return i < 0 ? STATUS_ORDER.length : i }
+const CAMP_TONE = { Active: 'green', Paused: 'amber', Complete: 'gray' }
+// Progress reads blue while a list is being worked, green once it's finished,
+// gray while there's nothing in it yet.
+const ringTone = (total, pct) => (!total ? 'gray' : pct >= 100 ? 'green' : 'blue')
+const fmt = (n) => (Number(n) || 0).toLocaleString('en-US')
+const NO_STATS = { cc: [], total: 0, done: 0, booked: 0, pct: 0, statuses: [] }
+// The contacts list inside a card stays compact; its header sticks while it scrolls.
+const cellTh = { position: 'sticky', top: 0, zIndex: 1, padding: '8px 12px' }
+const cellTd = { padding: '7px 12px' }
+const richBox = { background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 12, padding: '14px 16px', fontSize: 13, lineHeight: 1.7, color: 'var(--text-primary)' }
+const dangerBox = { background: 'var(--tone-red-bg)', border: '1px solid var(--tone-red-bd)', borderRadius: 12, padding: '12px 14px', fontSize: 13, lineHeight: 1.55, color: 'var(--tone-red-tx)', marginBottom: 16 }
+
+const XIcon = () => (
+  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+)
+const Chevron = ({ open }) => (
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
+    style={{ flexShrink: 0, color: 'var(--text-muted)', transition: 'transform .15s', transform: open ? 'rotate(90deg)' : 'none' }}><path d="M9 5l7 7-7 7" /></svg>
+)
 
 export default function CampaignsPage() {
   const { contacts, setContacts, campaigns, setCampaigns, dncSet } = useData()
   const { isAdmin } = useAuth()
   const navigate = useNavigate()
+  const isMobile = useIsMobile()
   const [showModal, setShowModal] = useState(false)
   const [showAI, setShowAI] = useState(false)
   const [editCamp, setEditCamp] = useState(null)
@@ -194,20 +230,231 @@ export default function CampaignsPage() {
     setContacts(prev => prev.filter(c => c.id !== id))
   }
 
+  // Per-campaign counts for the cards and the summary, worked out once per data
+  // change rather than on every keystroke in the editors and modals. `cc` keeps
+  // the contacts in their loaded order (the contacts list shows the first 100).
+  const campStats = useMemo(() => {
+    const lists = new Map()
+    for (const c of contacts) {
+      const l = lists.get(c.campaign_id)
+      if (l) l.push(c)
+      else lists.set(c.campaign_id, [c])
+    }
+    const out = new Map()
+    for (const camp of campaigns) {
+      const cc = lists.get(camp.id) || []
+      const total = cc.length, done = cc.filter(isDone).length, booked = cc.filter(c => c.status === 'Booked').length
+      const counts = new Map()
+      for (const c of cc) { const s = c.status || 'Pending'; counts.set(s, (counts.get(s) || 0) + 1) }
+      const statuses = [...counts].sort((a, b) => statusRank(a[0]) - statusRank(b[0]) || b[1] - a[1])
+      out.set(camp.id, { cc, total, done, booked, pct: total ? Math.round((done/total)*100) : 0, statuses })
+    }
+    return out
+  }, [contacts, campaigns])
+  const totals = useMemo(() => {
+    let total = 0, done = 0, booked = 0
+    for (const s of campStats.values()) { total += s.total; done += s.done; booked += s.booked }
+    return { total, done, booked, remaining: total - done, pct: total ? Math.round((done/total)*100) : 0 }
+  }, [campStats])
+  const activeCount = campaigns.filter(c => c.status === 'Active').length
+  const act = { borderRadius:99, ...(isMobile ? { minHeight:34, padding:'6px 13px', fontSize:12 } : {}) }
+  const sumTone = ringTone(totals.total, totals.pct)
+
   return (
-    <div style={{ flex:1, overflowY:'auto', padding:24 }}>
-      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:20 }}>
-        <div>
-          <div style={{ fontSize:18, fontWeight:600, color:'var(--text-primary)' }}>Campaigns</div>
-          <div style={{ fontSize:12, color:'var(--text-muted)', marginTop:2 }}>Manage contact lists and dialing campaigns</div>
+    <div style={{ flex:1, overflowY:'auto', background:'var(--bg)' }}>
+      <div style={{ padding: isMobile ? 12 : 24, display:'flex', flexDirection:'column', gap:16 }}>
+
+        {/* Title + page actions */}
+        <div style={{ display:'flex', alignItems:'center', gap:12, flexWrap:'wrap' }}>
+          <div style={{ flex:'1 1 260px', minWidth:0 }}>
+            <div style={{ fontSize:15, fontWeight:700, color:'var(--text-primary)' }}>Campaigns</div>
+            <div style={{ fontSize:12.5, color:'var(--text-muted)', marginTop:2 }}>Manage contact lists and dialing campaigns</div>
+          </div>
+          {isAdmin && (
+            <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
+              <button className="btn" onClick={() => setShowAI(true)} style={{ borderRadius:99, minHeight: isMobile ? 40 : undefined }}>AI campaign</button>
+              <button className="btn primary" onClick={openNew} style={{ borderRadius:99, minHeight: isMobile ? 40 : undefined }}>+ New campaign</button>
+            </div>
+          )}
         </div>
-        {isAdmin && (
-          <div style={{ display:'flex', gap:8 }}>
-            <button className="btn" onClick={() => setShowAI(true)} style={{ fontSize:13, padding:'8px 16px', lineHeight:1.2 }}>AI campaign</button>
-            <button className="btn primary" onClick={openNew} style={{ fontSize:13, padding:'8px 16px', lineHeight:1.2 }}>+ New campaign</button>
+
+        {importProgress && (
+          <div role="status" style={{ background:'var(--tone-blue-bg)', border:'1px solid var(--tone-blue-bd)', borderRadius:12, padding:'10px 16px', fontSize:13, fontWeight:600, color:'var(--tone-blue-tx)' }}>
+            {importProgress}
+          </div>
+        )}
+
+        {/* Headline numbers — the same counts the cards show, summed */}
+        {campaigns.length > 0 && (
+          <SummaryPanel isMobile={isMobile} style={{ marginBottom:0 }} columns="minmax(270px, 310px) repeat(3, minmax(0, 1fr))">
+            <div style={{ display:'flex', alignItems:'center', gap:16 }}>
+              <Ring pct={totals.pct} size={76} stroke={7} tone={sumTone}>
+                <div style={{ ...num, fontSize:19, fontWeight:800, letterSpacing:'-.02em', color:`var(--tone-${sumTone}-tx)` }}>{totals.pct}<span style={{ fontSize:11 }}>%</span></div>
+              </Ring>
+              <div style={{ minWidth:0 }}>
+                <div style={eyebrow}>Worked through</div>
+                <div style={{ ...num, fontSize:12.5, color:'var(--text-secondary)', marginTop:4 }}>{fmt(totals.done)} of {fmt(totals.total)} contacts</div>
+                <div style={{ fontSize:11.5, color:'var(--text-muted)', marginTop:2 }}>Final outcome or max attempts</div>
+              </div>
+            </div>
+            <Stat label="Contacts" value={fmt(totals.total)} sub={`${campaigns.length} campaign${campaigns.length === 1 ? '' : 's'} · ${activeCount} active`} />
+            <Stat label="Remaining" value={fmt(totals.remaining)} tone={totals.remaining > 0 ? 'amber' : undefined} sub="Still open to dial" />
+            <Stat label="Booked" value={fmt(totals.booked)} tone={totals.booked > 0 ? 'green' : undefined} sub="Contacts marked Booked" />
+          </SummaryPanel>
+        )}
+
+        {isAdmin && inbForm && (
+          <div style={{ ...panel, overflow:'hidden' }}>
+            <button type="button" className="eval-row" onClick={() => setInbOpen(v => !v)} aria-expanded={inbOpen}
+              style={{ width:'100%', display:'flex', alignItems:'center', gap:12, padding: isMobile ? '12px 14px' : '14px 20px', border:'none', background:'transparent', color:'inherit', font:'inherit', textAlign:'left', cursor:'pointer', userSelect:'none' }}>
+              <Chevron open={inbOpen} />
+              <span style={{ flex:1, minWidth:0 }}>
+                <span style={{ display:'block', fontSize:14, fontWeight:700 }}>Inbound call script & tips</span>
+                <span style={{ display:'block', fontSize:12, color:'var(--text-muted)', marginTop:2 }}>Shown on any call without a campaign — inbound calls, ST searches, leads.</span>
+              </span>
+              <span style={{ maxWidth:'45%', textAlign:'right', fontSize:12, fontWeight: inbMsg ? 600 : 500,
+                color: inbMsg ? (inbMsg.startsWith('Error') ? 'var(--tone-red-tx)' : 'var(--tone-green-tx)') : 'var(--text-muted)' }}>
+                {inbMsg || (inbOpen ? 'Saves automatically' : 'Click to edit')}
+              </span>
+            </button>
+            {inbOpen && (
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14, padding: isMobile ? 14 : '16px 20px', borderTop:'1px solid var(--border)' }}>
+              <div className="form-field" style={{ marginBottom:0 }}>
+                <label className="form-label">Inbound script</label>
+                <RichTextEditor value={inbForm.script} minHeight={150} placeholder="Thank you for calling Awesome Home Services, this is ..."
+                  onChange={v => { setInbForm(f => ({ ...f, script: v })); setInbDirty(true) }} />
+              </div>
+              <div className="form-field" style={{ marginBottom:0 }}>
+                <label className="form-label">Inbound tips</label>
+                <RichTextEditor value={inbForm.tips} minHeight={150} placeholder="Always confirm callback number and address early..."
+                  onChange={v => { setInbForm(f => ({ ...f, tips: v })); setInbDirty(true) }} />
+              </div>
+            </div>
+            )}
+          </div>
+        )}
+
+        {campaigns.length === 0 ? (
+          <EmptyState>{isAdmin ? 'No campaigns yet. Create your first one.' : 'No campaigns yet.'}</EmptyState>
+        ) : (
+          // Cards share a row height so their actions line up; while a contacts
+          // list is open the cards size to their own content instead, so its
+          // neighbours don't stretch around it.
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(min(340px, 100%), 1fr))', gap:16, alignItems: showContacts ? 'start' : undefined }}>
+            {campaigns.map(camp => {
+              const { cc, total, done, booked, pct, statuses } = campStats.get(camp.id) || NO_STATS
+              const hasScript = !!(camp.script || camp.tips)
+              const tone = ringTone(total, pct)
+              return (
+                <div key={camp.id} className="lift-hover" style={{ ...panel, padding: isMobile ? '14px 14px 12px' : '16px 18px 14px', display:'flex', flexDirection:'column', gap:14, minWidth:0 }}>
+                  {/* Header — progress ring, name, status */}
+                  <div style={{ display:'flex', alignItems:'center', gap:12 }}>
+                    <div title={`${pct}% done — ${fmt(done)} of ${fmt(total)} contacts at a final outcome or max attempts`} style={{ flexShrink:0 }}>
+                      <Ring pct={pct} size={54} stroke={5} tone={tone}>
+                        <div style={{ textAlign:'center', lineHeight:1 }}>
+                          <div style={{ ...num, fontSize:13, fontWeight:800, letterSpacing:'-.02em', color:`var(--tone-${tone}-tx)` }}>{pct}<span style={{ fontSize:9 }}>%</span></div>
+                          <div style={{ fontSize:8.5, fontWeight:700, letterSpacing:'.06em', textTransform:'uppercase', color:'var(--text-muted)', marginTop:2 }}>done</div>
+                        </div>
+                      </Ring>
+                    </div>
+                    <div style={{ flex:1, minWidth:0 }}>
+                      <div title={camp.name} style={{ fontSize:15.5, fontWeight:700, lineHeight:1.25, color:'var(--text-primary)', overflow:'hidden', display:'-webkit-box', WebkitLineClamp:2, WebkitBoxOrient:'vertical', wordBreak:'break-word' }}>
+                        {camp.name}
+                      </div>
+                      <div style={{ display:'flex', alignItems:'center', gap:6, marginTop:5, flexWrap:'wrap' }}>
+                        <ToneChip tone={CAMP_TONE[camp.status] || 'blue'} small>{camp.status || 'Pending'}</ToneChip>
+                        {hasScript && <ToneChip tone="blue" small title="This campaign has a call script or tips">Script</ToneChip>}
+                      </div>
+                    </div>
+                    {isAdmin && (
+                      <button onClick={() => setShowDeleteConfirm(camp.id)} title="Delete campaign" aria-label="Delete campaign"
+                        style={{ width:28, height:28, padding:0, borderRadius:99, border:'1px solid var(--border)', background:'transparent', color:'var(--text-muted)', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0, alignSelf:'flex-start', transition:'background .12s, color .12s, border-color .12s' }}
+                        onMouseEnter={e => { e.currentTarget.style.background='var(--tone-red-bg)'; e.currentTarget.style.color='var(--tone-red-tx)'; e.currentTarget.style.borderColor='var(--tone-red-bd)' }}
+                        onMouseLeave={e => { e.currentTarget.style.background='transparent'; e.currentTarget.style.color='var(--text-muted)'; e.currentTarget.style.borderColor='var(--border)' }}>
+                        <XIcon />
+                      </button>
+                    )}
+                  </div>
+
+                  {camp.description && (
+                    <div title={camp.description} style={{ marginTop:-4, fontSize:12.5, lineHeight:1.5, color:'var(--text-secondary)', overflow:'hidden', display:'-webkit-box', WebkitLineClamp:3, WebkitBoxOrient:'vertical' }}>
+                      {camp.description}
+                    </div>
+                  )}
+
+                  {/* Counts — a real row, so it stays three across on a phone */}
+                  <div className="mgrid" style={{ display:'grid', gridTemplateColumns:'repeat(3, minmax(0, 1fr))', margin: isMobile ? '0 -14px' : '0 -18px', borderTop:'1px solid var(--border)', borderBottom:'1px solid var(--border)' }}>
+                    {[['Total', total, null], ['Remaining', total - done, 'amber'], ['Booked', booked, 'green']].map(([l, v, t], i) => (
+                      <div key={l} style={{ padding: isMobile ? '10px 14px' : '11px 18px', minWidth:0, borderLeft: i ? '1px solid var(--border)' : 'none' }}>
+                        <div style={eyebrow}>{l}</div>
+                        <div style={{ ...num, fontSize:20, fontWeight:800, letterSpacing:'-.02em', lineHeight:1.15, marginTop:4, color: t && v > 0 ? `var(--tone-${t}-tx)` : 'var(--text-primary)' }}>{fmt(v)}</div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Where the list stands, status by status */}
+                  {total > 0 ? (
+                    <div style={{ display:'flex', flexWrap:'wrap', gap:5 }}>
+                      {statuses.map(([st, n]) => <ToneChip key={st} tone={statusTone(st)} small>{st} {fmt(n)}</ToneChip>)}
+                    </div>
+                  ) : (
+                    <div style={{ fontSize:12.5, color:'var(--text-muted)' }}>No contacts yet{isAdmin ? ' — upload a CSV to start dialing.' : '.'}</div>
+                  )}
+
+                  {/* Actions */}
+                  <div style={{ marginTop:'auto', display:'flex', gap:6, flexWrap:'wrap' }}>
+                    <button className="btn sm primary" onClick={() => dialCampaign(camp.id)} style={act}>Power Dial</button>
+                    <button className="btn sm" onClick={() => setShowScriptModal(camp)} style={act}>{hasScript ? 'View Script' : 'Add Script'}</button>
+                    {isAdmin && (
+                      <>
+                        <button className="btn sm" onClick={() => startUpload(camp.id)} disabled={importing === camp.id} style={act}>
+                          {importing === camp.id ? 'Uploading...' : '+ Upload'}
+                        </button>
+                        <button className="btn sm" onClick={() => openEdit(camp)} style={act}>Edit</button>
+                      </>
+                    )}
+                    <button className="btn sm" onClick={() => exportCampaign(camp.id)} style={act}>Export</button>
+                    <button className="btn sm" onClick={() => setShowContacts(showContacts === camp.id ? null : camp.id)} aria-expanded={showContacts === camp.id}
+                      style={{ ...act, ...(showContacts === camp.id ? { background:'var(--accent-bg)', color:'var(--accent-text)', borderColor:'var(--accent)' } : {}) }}>
+                      {showContacts === camp.id ? 'Hide contacts' : 'Contacts'}
+                    </button>
+                    {isAdmin && (
+                      <button className="btn sm danger" onClick={() => { setShowClearConfirm(camp.id); setClearConfirmText('') }} style={act}>Clear</button>
+                    )}
+                  </div>
+
+                  {/* Contact list */}
+                  {showContacts === camp.id && (
+                    <div style={{ maxHeight:260, overflow:'auto', border:'1px solid var(--border)', borderRadius:12 }}>
+                      <table className="data-table" style={{ fontSize:11.5 }}>
+                        <thead><tr><th style={cellTh}>Name</th><th style={cellTh}>Phone</th><th style={cellTh}>Status</th>{isAdmin&&<th style={cellTh}>Actions</th>}</tr></thead>
+                        <tbody>
+                          {cc.slice(0,100).map(contact => (
+                            <tr key={contact.id}>
+                              <td style={{ ...cellTd, fontWeight:600 }}>{contact.name}</td>
+                              <td style={{ ...cellTd, whiteSpace:'nowrap' }}>{contact.phone || <span style={{ color:'var(--text-muted)' }}>—</span>}</td>
+                              <td style={cellTd}><ToneChip tone={statusTone(contact.status||'Pending')} small>{contact.status||'Pending'}</ToneChip></td>
+                              {isAdmin && <td style={cellTd}>
+                                <div style={{display:'flex',gap:4}}>
+                                  <button className="btn sm" onClick={() => setEditContact({...contact})}>Edit</button>
+                                  <button className="btn sm danger" onClick={() => deleteContact(contact.id)}>Remove</button>
+                                </div>
+                              </td>}
+                            </tr>
+                          ))}
+                          {cc.length > 100 && <tr><td colSpan={4} style={{ ...cellTd, padding:'8px 12px', color:'var(--text-muted)', textAlign:'center' }}>+{fmt(cc.length-100)} more contacts</td></tr>}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )
+            })}
           </div>
         )}
       </div>
+
+      <input type="file" accept=".csv" ref={fileRef} style={{display:'none'}} onChange={handleFile} />
 
       {showAI && (
         <AICampaignModal
@@ -237,155 +484,18 @@ export default function CampaignsPage() {
         />
       )}
 
-      {importProgress && (
-        <div style={{ background:'var(--accent-bg)', border:'1px solid var(--accent)', borderRadius:'var(--radius)', padding:'10px 16px', marginBottom:16, fontSize:13, color:'var(--accent)' }}>
-          {importProgress}
-        </div>
-      )}
-
-      <input type="file" accept=".csv" ref={fileRef} style={{display:'none'}} onChange={handleFile} />
-
-      {isAdmin && inbForm && (
-        <div className="card" style={{ marginBottom:16 }}>
-          <div className="card-header" onClick={() => setInbOpen(v => !v)} style={{ cursor:'pointer', userSelect:'none' }}>
-            <div className="card-title" style={{ display:'flex', alignItems:'center', gap:8 }}>
-              <span style={{ display:'inline-block', transition:'transform .15s', transform: inbOpen ? 'rotate(90deg)' : 'none', fontSize:11 }}>▶</span>
-              Inbound call script & tips
-            </div>
-            <span style={{ fontSize:11, color: inbMsg.startsWith('Error') ? 'var(--danger)' : 'var(--text-muted)' }}>
-              {inbMsg || (inbOpen ? 'Shown on any call without a campaign — inbound calls, ST searches, leads. Saves automatically.' : 'Click to edit')}
-            </span>
-          </div>
-          {inbOpen && (
-          <div className="card-body" style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14 }}>
-            <div className="form-field">
-              <label className="form-label">Inbound script</label>
-              <RichTextEditor value={inbForm.script} minHeight={150} placeholder="Thank you for calling Awesome Home Services, this is ..."
-                onChange={v => { setInbForm(f => ({ ...f, script: v })); setInbDirty(true) }} />
-            </div>
-            <div className="form-field">
-              <label className="form-label">Inbound tips</label>
-              <RichTextEditor value={inbForm.tips} minHeight={150} placeholder="Always confirm callback number and address early..."
-                onChange={v => { setInbForm(f => ({ ...f, tips: v })); setInbDirty(true) }} />
-            </div>
-          </div>
-          )}
-        </div>
-      )}
-
-      <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(min(320px, 100%), 1fr))', gap:14 }}>
-        {campaigns.map(camp => {
-          const cc = contacts.filter(c => c.campaign_id === camp.id)
-          const total = cc.length, done = cc.filter(isDone).length, booked = cc.filter(c => c.status === 'Booked').length
-          const pct = total ? Math.round((done/total)*100) : 0
-          const hasScript = !!(camp.script || camp.tips)
-          return (
-            <div key={camp.id} className="card" style={{ display:'flex', flexDirection:'column', gap:12, padding:'16px 18px', position:'relative' }}>
-              {/* Header */}
-              <div style={{ display:'flex', alignItems:'flex-start', justifyContent:'space-between', gap:8 }}>
-                <div style={{ minWidth:0 }}>
-                  <div style={{ fontSize:14, fontWeight:600, color:'var(--text-primary)' }}>{camp.name}</div>
-                  {camp.description && <div style={{ fontSize:12, color:'var(--text-muted)', marginTop:2 }}>{camp.description}</div>}
-                </div>
-                <div style={{ display:'flex', alignItems:'center', gap:6, flexShrink:0 }}>
-                  {hasScript && (
-                    <span style={{ fontSize:10, background:'var(--accent-bg)', color:'var(--accent)', padding:'2px 7px', borderRadius:99, fontWeight:600, textTransform:'uppercase', letterSpacing:.4 }}>
-                      Script
-                    </span>
-                  )}
-                  <Badge status={camp.status} />
-                  {isAdmin && (
-                    <button onClick={() => setShowDeleteConfirm(camp.id)}
-                      style={{ width:20, height:20, borderRadius:'50%', border:'1px solid var(--border)', background:'var(--surface-2)', color:'var(--text-muted)', cursor:'pointer', fontSize:13, fontWeight:700, display:'flex', alignItems:'center', justifyContent:'center', lineHeight:1, flexShrink:0 }}
-                      onMouseEnter={e => { e.currentTarget.style.background='var(--danger-bg)'; e.currentTarget.style.color='var(--danger)'; e.currentTarget.style.borderColor='var(--danger)' }}
-                      onMouseLeave={e => { e.currentTarget.style.background='var(--surface-2)'; e.currentTarget.style.color='var(--text-muted)'; e.currentTarget.style.borderColor='var(--border)' }}
-                      title="Delete campaign">x</button>
-                  )}
-                </div>
-              </div>
-
-              {/* Progress bar */}
-              <div style={{ height:4, background:'var(--surface-2)', borderRadius:99, overflow:'hidden' }}>
-                <div style={{ height:'100%', width:`${pct}%`, background:'var(--success)', borderRadius:99, transition:'width .3s' }} />
-              </div>
-
-              {/* Stats */}
-              <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:8 }}>
-                {[['Total',total,null],['Remaining',total-done,'warning'],['Booked',booked,'success'],['Done',pct+'%',null]].map(([l,v,c]) => (
-                  <div key={l} style={{ textAlign:'center', padding:'8px 4px', background:'var(--surface-2)', borderRadius:'var(--radius)' }}>
-                    <div style={{ fontSize:17, fontWeight:700, color: c ? `var(--${c})` : 'var(--text-primary)', letterSpacing:'-.5px' }}>{v}</div>
-                    <div style={{ fontSize:9, color:'var(--text-muted)', textTransform:'uppercase', letterSpacing:.6, marginTop:2 }}>{l}</div>
-                  </div>
-                ))}
-              </div>
-
-              {/* Actions */}
-              <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
-                <button className="btn sm primary" onClick={() => dialCampaign(camp.id)}>Power Dial</button>
-                <button className="btn sm" onClick={() => setShowScriptModal(camp)}>{hasScript ? 'View Script' : 'Add Script'}</button>
-                {isAdmin && (
-                  <>
-                    <button className="btn sm" onClick={() => startUpload(camp.id)} disabled={importing === camp.id}>
-                      {importing === camp.id ? 'Uploading...' : '+ Upload'}
-                    </button>
-                    <button className="btn sm" onClick={() => openEdit(camp)}>Edit</button>
-                    <button className="btn sm danger" onClick={() => { setShowClearConfirm(camp.id); setClearConfirmText('') }}>Clear</button>
-                  </>
-                )}
-                <button className="btn sm" onClick={() => exportCampaign(camp.id)}>Export</button>
-                <button className="btn sm" onClick={() => setShowContacts(showContacts === camp.id ? null : camp.id)}>
-                  {showContacts === camp.id ? 'Hide contacts' : 'Contacts'}
-                </button>
-              </div>
-
-              {/* Contact list */}
-              {showContacts === camp.id && (
-                <div style={{ marginTop:4, borderTop:'1px solid var(--border)', paddingTop:10 }}>
-                  <div style={{ maxHeight:260, overflowY:'auto' }}>
-                    <table className="data-table" style={{ fontSize:11 }}>
-                      <thead><tr><th>Name</th><th>Phone</th><th>Status</th>{isAdmin&&<th>Actions</th>}</tr></thead>
-                      <tbody>
-                        {cc.slice(0,100).map(contact => (
-                          <tr key={contact.id}>
-                            <td style={{padding:'6px 10px'}}>{contact.name}</td>
-                            <td style={{padding:'6px 10px'}}>{contact.phone||'--'}</td>
-                            <td style={{padding:'6px 10px'}}><Badge status={contact.status||'Pending'} /></td>
-                            {isAdmin && <td style={{padding:'6px 10px'}}>
-                              <div style={{display:'flex',gap:4}}>
-                                <button className="btn sm" onClick={() => setEditContact({...contact})}>Edit</button>
-                                <button className="btn sm danger" onClick={() => deleteContact(contact.id)}>Remove</button>
-                              </div>
-                            </td>}
-                          </tr>
-                        ))}
-                        {cc.length > 100 && <tr><td colSpan={4} style={{padding:'8px 10px',color:'var(--text-muted)',textAlign:'center'}}>+{cc.length-100} more contacts</td></tr>}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              )}
-            </div>
-          )
-        })}
-        {campaigns.length === 0 && (
-          <div className="empty-state" style={{ gridColumn:'1/-1' }}>
-            <div style={{ fontSize:13, color:'var(--text-muted)' }}>
-              {isAdmin ? 'No campaigns yet. Create your first one.' : 'No campaigns yet.'}
-            </div>
-          </div>
-        )}
-      </div>
-
       {/* Campaign modal */}
       {showModal && (
         <Modal title={editCamp ? 'Edit campaign' : 'New campaign'} onClose={() => setShowModal(false)} width={560}>
-          <div className="form-field"><label className="form-label">Name</label><input className="form-input" value={campForm.name} onChange={e=>setCampForm(p=>({...p,name:e.target.value}))} placeholder="e.g. Rocky MTN Acquisition" autoFocus /></div>
-          <div className="form-field"><label className="form-label">Description</label><textarea className="form-input" value={campForm.description} onChange={e=>setCampForm(p=>({...p,description:e.target.value}))} placeholder="Brief description of this campaign" /></div>
-          <div className="form-field"><label className="form-label">Status</label>
-            <select className="form-input" value={campForm.status} onChange={e=>setCampForm(p=>({...p,status:e.target.value}))}>
-              {['Active','Paused','Complete'].map(s => <option key={s}>{s}</option>)}
-            </select>
+          <div style={{ display:'grid', gridTemplateColumns:'minmax(0, 1fr) 150px', gap:12 }}>
+            <div className="form-field"><label className="form-label">Name</label><input className="form-input" value={campForm.name} onChange={e=>setCampForm(p=>({...p,name:e.target.value}))} placeholder="e.g. Rocky MTN Acquisition" autoFocus /></div>
+            <div className="form-field"><label className="form-label">Status</label>
+              <select className="form-input" value={campForm.status} onChange={e=>setCampForm(p=>({...p,status:e.target.value}))}>
+                {['Active','Paused','Complete'].map(s => <option key={s}>{s}</option>)}
+              </select>
+            </div>
           </div>
+          <div className="form-field"><label className="form-label">Description</label><textarea className="form-input" value={campForm.description} onChange={e=>setCampForm(p=>({...p,description:e.target.value}))} placeholder="Brief description of this campaign" /></div>
           <div className="form-field">
             <label className="form-label">Call script</label>
             <RichTextEditor value={campForm.script} onChange={v=>setCampForm(p=>({...p,script:v}))}
@@ -405,17 +515,17 @@ export default function CampaignsPage() {
 
       {/* Script/Tips viewer */}
       {showScriptModal && (
-        <Modal title={`${showScriptModal.name} -- Script & Tips`} onClose={() => setShowScriptModal(null)} width={640}>
+        <Modal title={`${showScriptModal.name} — Script & tips`} onClose={() => setShowScriptModal(null)} width={640}>
           {showScriptModal.script ? (
             <div style={{ marginBottom:20 }}>
-              <div style={{ fontSize:11, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color:'var(--text-muted)', marginBottom:8 }}>Call Script</div>
-              <RichText html={showScriptModal.script} style={{ background:'var(--surface-2)', borderRadius:'var(--radius)', padding:'14px 16px', fontSize:13, lineHeight:1.7, color:'var(--text-primary)' }} />
+              <div style={{ ...eyebrow, marginBottom:8 }}>Call script</div>
+              <RichText html={showScriptModal.script} style={richBox} />
             </div>
           ) : <div style={{ color:'var(--text-muted)', fontSize:13, marginBottom:16 }}>No script added yet.</div>}
           {showScriptModal.tips ? (
             <div>
-              <div style={{ fontSize:11, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color:'var(--text-muted)', marginBottom:8 }}>Tips & Talking Points</div>
-              <RichText html={showScriptModal.tips} style={{ background:'var(--surface-2)', borderRadius:'var(--radius)', padding:'14px 16px', fontSize:13, lineHeight:1.7, color:'var(--text-primary)' }} />
+              <div style={{ ...eyebrow, marginBottom:8 }}>Tips & talking points</div>
+              <RichText html={showScriptModal.tips} style={richBox} />
             </div>
           ) : <div style={{ color:'var(--text-muted)', fontSize:13 }}>No tips added yet.</div>}
           <div className="modal-actions">
@@ -428,7 +538,7 @@ export default function CampaignsPage() {
       {/* Clear contacts confirmation */}
       {showClearConfirm && (
         <Modal title="Clear all contacts?" onClose={() => setShowClearConfirm(null)}>
-          <div style={{ background:'var(--danger-bg)', border:'1px solid #E8C0B8', borderRadius:'var(--radius)', padding:'12px 14px', fontSize:13, color:'var(--danger)', marginBottom:16 }}>
+          <div style={dangerBox}>
             This will permanently delete all contacts and call logs for this campaign. This cannot be undone.
           </div>
           <div className="form-field">
@@ -449,7 +559,7 @@ export default function CampaignsPage() {
       {/* Delete campaign confirmation */}
       {showDeleteConfirm && (
         <Modal title="Delete Campaign?" onClose={() => setShowDeleteConfirm(null)}>
-          <div style={{ background:'var(--danger-bg)', border:'1px solid #E8C0B8', borderRadius:'var(--radius)', padding:'12px 14px', fontSize:13, color:'var(--danger)', marginBottom:16 }}>
+          <div style={dangerBox}>
             <strong>You are about to permanently delete "{campaigns.find(c => c.id === showDeleteConfirm)?.name}".</strong>
             <br /><br />
             This will delete the campaign and all contacts attached to it. Call logs and rep stats will be preserved for Analytics. This cannot be undone.
@@ -468,12 +578,14 @@ export default function CampaignsPage() {
       {/* Contact edit modal */}
       {editContact && (
         <Modal title="Edit contact" onClose={() => setEditContact(null)} width={560}>
-          {[['Name','name'],['Phone','phone'],['Email','email'],['Address','address'],['City','city'],['State','state'],['Zip','zip'],['Source','source']].map(([label, field]) => (
-            <div key={field} className="form-field">
-              <label className="form-label">{label}</label>
-              <input className="form-input" value={editContact[field]||''} onChange={e=>setEditContact(prev=>({...prev,[field]:e.target.value}))} />
-            </div>
-          ))}
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(2, minmax(0, 1fr))', columnGap:12 }}>
+            {[['Name','name'],['Phone','phone'],['Email','email'],['Address','address'],['City','city'],['State','state'],['Zip','zip'],['Source','source']].map(([label, field]) => (
+              <div key={field} className="form-field">
+                <label className="form-label">{label}</label>
+                <input className="form-input" value={editContact[field]||''} onChange={e=>setEditContact(prev=>({...prev,[field]:e.target.value}))} />
+              </div>
+            ))}
+          </div>
           <div className="form-field"><label className="form-label">Status</label>
             <select className="form-input" value={editContact.status||'Pending'} onChange={e=>setEditContact(prev=>({...prev,status:e.target.value}))}>
               {['Pending','No Answer','Voicemail','Booked','Not Interested','DNC','Bad Data','Max Attempts'].map(s=><option key={s}>{s}</option>)}

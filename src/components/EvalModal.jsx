@@ -5,8 +5,13 @@
 import { useEffect, useState } from 'react'
 import { sb } from '../lib/supabase'
 import { useIsMobile } from '../lib/useIsMobile'
+import { Ring, ToneChip, eyebrow, num } from './ui'
 
 const scoreTone = (pct) => pct >= 90 ? 'green' : pct >= 75 ? 'amber' : 'red'
+
+const TargetIcon = () => (
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" aria-hidden="true"><circle cx="12" cy="12" r="8.5" /><circle cx="12" cy="12" r="4" /><circle cx="12" cy="12" r="0.8" fill="currentColor" /></svg>
+)
 
 // Resolve a playable URL for the eval's recording. Andi-native evals carry a
 // Twilio recording sid (open proxy, unguessable sid); ServiceTitan-sweep
@@ -64,48 +69,58 @@ export default function EvalModal({ evalRow, onClose }) {
   return (
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 2000, background: 'rgba(0,0,0,.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: isMobile ? 8 : 20 }}>
       <div onClick={e => e.stopPropagation()}
-        style={{ width: 640, maxWidth: isMobile ? '100%' : '96vw', maxHeight: '88vh', display: 'flex', flexDirection: 'column', background: 'var(--surface)', borderRadius: 14, border: '1px solid var(--border)', overflow: 'hidden' }}>
+        style={{ width: 640, maxWidth: isMobile ? '100%' : '96vw', maxHeight: '88vh', display: 'flex', flexDirection: 'column', background: 'var(--surface)',
+          borderRadius: isMobile ? 16 : 18, border: '1px solid var(--border)', overflow: 'hidden', boxShadow: '0 24px 60px -20px rgba(15,20,40,.35)' }}>
 
-        <div style={{ padding: isMobile ? '12px 12px' : '14px 18px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
-          <div style={{ width: 52, height: 52, borderRadius: 12, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-            background: `var(--tone-${t}-bg)`, border: `1.5px solid var(--tone-${t}-bd)`, color: `var(--tone-${t}-tx)`, flexShrink: 0 }}>
-            <div style={{ fontSize: 17, fontWeight: 900, lineHeight: 1 }}>{Math.round(Number(evalRow.pct))}</div>
-            <div style={{ fontSize: 8.5, fontWeight: 700, letterSpacing: .5 }}>SCORE</div>
-          </div>
+        <div style={{ padding: isMobile ? '12px 12px' : '16px 20px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: isMobile ? 12 : 14, flexShrink: 0 }}>
+          <Ring pct={Number(evalRow.pct)} size={isMobile ? 52 : 58} stroke={5} tone={t}>
+            <div style={{ ...num, fontSize: isMobile ? 16 : 17, fontWeight: 800, letterSpacing: '-.02em', color: `var(--tone-${t}-tx)` }}>
+              {Math.round(Number(evalRow.pct))}<span style={{ fontSize: 10 }}>%</span>
+            </div>
+          </Ring>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 14, fontWeight: 800 }}>Call Evaluation — {evalRow.rep || 'Unknown rep'}</div>
-            <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 2 }}>
+            <div style={eyebrow}>Call evaluation</div>
+            <div style={{ fontSize: 16, fontWeight: 700, letterSpacing: '-.01em', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {evalRow.rep || 'Unknown rep'}
+            </div>
+            <div style={{ ...num, fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
               {evalRow.contact_name || (evalRow.phone ? `(${String(evalRow.phone).slice(0,3)}) ${String(evalRow.phone).slice(3,6)}-${String(evalRow.phone).slice(6)}` : 'Unknown caller')} · {when} · {evalRow.earned}/{evalRow.possible} pts
             </div>
           </div>
-          <button onClick={onClose} style={{ border: 'none', background: 'var(--surface-2)', width: isMobile ? 40 : 28, height: isMobile ? 40 : 28, borderRadius: 8, cursor: 'pointer', fontSize: 15, color: 'var(--text-secondary)', flexShrink: 0 }}>×</button>
+          <button onClick={onClose} aria-label="Close" title="Close"
+            style={{ border: '1px solid var(--border)', background: 'var(--surface-2)', width: isMobile ? 40 : 30, height: isMobile ? 40 : 30, borderRadius: 99, cursor: 'pointer',
+              fontSize: 16, lineHeight: 1, padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-secondary)', flexShrink: 0 }}>×</button>
         </div>
 
         {(audioUrl || audioErr) && (
-          <div style={{ padding: isMobile ? '10px 12px' : '10px 18px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 12, background: 'var(--surface-2)', flexShrink: 0, flexWrap: isMobile ? 'wrap' : undefined }}>
+          <div style={{ padding: isMobile ? '10px 12px' : '10px 20px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 10, background: 'var(--surface-2)', flexShrink: 0, flexWrap: isMobile ? 'wrap' : undefined }}>
             {audioUrl ? (
               <>
                 <audio controls preload="none" src={audioUrl} style={isMobile ? { width: '100%', minWidth: 0, height: 34 } : { flex: 1, height: 34 }} />
-                <a href={`${audioUrl}${audioUrl.includes('?') ? '&' : '?'}download=1`} title="Download recording"
-                  style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--text-secondary)', textDecoration: 'none', whiteSpace: 'nowrap' }}>Download</a>
+                <a href={`${audioUrl}${audioUrl.includes('?') ? '&' : '?'}download=1`} title="Download recording" className="btn sm"
+                  style={{ borderRadius: 99, ...(isMobile ? { minHeight: 40, padding: '0 16px' } : {}) }}>Download</a>
               </>
             ) : (
-              <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>Recording unavailable — {audioErr}</span>
+              <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Recording unavailable — {audioErr}</span>
             )}
-            {fromST && <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: .4, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>via ServiceTitan</span>}
+            {fromST && <ToneChip tone="gray" small>via ServiceTitan</ToneChip>}
           </div>
         )}
 
-        <div style={{ flex: 1, overflowY: 'auto', padding: isMobile ? 12 : 18 }}>
+        <div style={{ flex: 1, overflowY: 'auto', padding: isMobile ? 12 : '16px 20px 18px' }}>
           {evalRow.summary && (
-            <div style={{ fontSize: 12.5, lineHeight: 1.55, padding: '10px 13px', background: 'var(--surface-2)', borderRadius: 10, marginBottom: 10 }}>
-              {evalRow.summary}
+            <div style={{ padding: '11px 14px', background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 12, marginBottom: 10 }}>
+              <div style={{ ...eyebrow, marginBottom: 5 }}>Call summary</div>
+              <div style={{ fontSize: 12.5, lineHeight: 1.55 }}>{evalRow.summary}</div>
             </div>
           )}
           {tip && (
-            <div style={{ fontSize: 12.5, lineHeight: 1.5, padding: '10px 13px', borderRadius: 10, marginBottom: 14,
-              background: 'var(--tone-blue-bg)', border: '1px solid var(--tone-blue-bd)', color: 'var(--tone-blue-tx)' }}>
-              <b>Next call:</b> {tip}
+            <div style={{ padding: '11px 14px', borderRadius: 12, marginBottom: 16,
+              background: 'var(--tone-blue-bg)', border: '1px solid var(--tone-blue-bd)' }}>
+              <div style={{ ...eyebrow, color: 'var(--tone-blue-tx)', marginBottom: 5, display: 'flex', alignItems: 'center', gap: 6 }}>
+                <TargetIcon /> Next call
+              </div>
+              <div style={{ fontSize: 12.5, lineHeight: 1.55 }}>{tip}</div>
             </div>
           )}
 
@@ -121,34 +136,32 @@ export default function EvalModal({ evalRow, onClose }) {
             const orphans = items.filter(it => !claimed.has(it))
             if (orphans.length) grouped.push({ name: 'Other', weight: null, pct: null, rows: orphans })
             return grouped.filter(g => g.rows.length).map((g, gi) => (
-              <div key={gi} style={{ marginBottom: 12 }}>
+              <div key={gi} style={{ marginBottom: 14 }}>
                 {g.name != null && (
-                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 6 }}>
-                    <span style={{ fontSize: 11, fontWeight: 800, textTransform: 'uppercase', letterSpacing: .6, color: 'var(--text-secondary)' }}>{g.name}</span>
-                    {g.weight != null && <span style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>{g.weight}% of score</span>}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 7, padding: '0 2px' }}>
+                    <span style={{ ...eyebrow, color: 'var(--text-secondary)' }}>{g.name}</span>
+                    {g.weight != null && <span style={{ ...num, fontSize: 11, color: 'var(--text-muted)' }}>{g.weight}% of score</span>}
                     {g.pct != null && (
-                      <span style={{ marginLeft: 'auto', fontSize: 11.5, fontWeight: 800,
-                        color: g.pct >= 90 ? 'var(--tone-green-tx)' : g.pct >= 75 ? 'var(--tone-amber-tx)' : 'var(--tone-red-tx)' }}>
-                        {Math.round(g.pct)}%
+                      <span style={{ marginLeft: 'auto' }}>
+                        <ToneChip tone={scoreTone(g.pct)} small>{Math.round(g.pct)}%</ToneChip>
                       </span>
                     )}
                   </div>
                 )}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <div style={{ border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>
                   {g.rows.map((it, i) => {
                     const full = it.applicable && it.earned >= it.max
                     const zero = it.applicable && it.earned === 0
                     return (
-                      <div key={i} style={{ display: 'flex', gap: 10, padding: '8px 11px', borderRadius: 9,
-                        background: 'var(--surface)', border: '1px solid var(--border)', opacity: it.applicable ? 1 : .55 }}>
-                        <div style={{ width: 44, flexShrink: 0, textAlign: 'center' }}>
-                          <div style={{ fontSize: 13, fontWeight: 800,
-                            color: !it.applicable ? 'var(--text-muted)' : full ? 'var(--tone-green-tx)' : zero ? 'var(--tone-red-tx)' : 'var(--tone-amber-tx)' }}>
+                      <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 12, padding: isMobile ? '9px 10px' : '10px 14px',
+                        borderTop: i ? '1px solid var(--border)' : 'none', opacity: it.applicable ? 1 : .55 }}>
+                        <div style={{ width: 52, flexShrink: 0, display: 'flex', justifyContent: 'center', paddingTop: 1 }}>
+                          <ToneChip tone={!it.applicable ? 'gray' : full ? 'green' : zero ? 'red' : 'amber'}>
                             {it.applicable ? `${it.earned}/${it.max}` : 'N/A'}
-                          </div>
+                          </ToneChip>
                         </div>
                         <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontSize: 12.5, fontWeight: 700 }}>{it.criterion}</div>
+                          <div style={{ fontSize: 12.5, fontWeight: 650 }}>{it.criterion}</div>
                           {it.evidence && (
                             <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 2, lineHeight: 1.45 }}>{it.evidence}</div>
                           )}
@@ -160,7 +173,7 @@ export default function EvalModal({ evalRow, onClose }) {
               </div>
             ))
           })()}
-          <div style={{ fontSize: 10.5, color: 'var(--text-muted)', marginTop: 10 }}>
+          <div style={{ ...num, fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
             N/A items are excluded from the score — this call was graded out of {evalRow.possible} points.
           </div>
         </div>

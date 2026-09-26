@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { sb } from '../lib/supabase'
+import { useIsMobile } from '../lib/useIsMobile'
+import { ToneChip, panel } from './ui'
 
 // Pending shift swaps involving me (accept/decline as the co-worker, cancel as
 // the requester) plus the management approval queue. Lives above the Team
@@ -9,6 +11,17 @@ const nice = (s) => s ? new Date(`${s}T12:00:00`).toLocaleDateString([], { weekd
 const STATUS_TXT = {
   pending_peer: 'waiting on co-worker', pending_manager: 'waiting on management',
   approved: 'approved', denied: 'denied', declined: 'declined', canceled: 'canceled',
+}
+const STATUS_TONE = { pending_peer: 'amber', pending_manager: 'amber', approved: 'green', denied: 'red', declined: 'red', canceled: 'gray' }
+const cap = (s) => (s ? s[0].toUpperCase() + s.slice(1) : s)
+
+// Two opposing arrows — also marks swappable shifts on the Team Schedule.
+export function SwapIcon({ size = 13 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ flexShrink: 0 }}>
+      <path d="M16 3l4 4-4 4M20 7H4M8 21l-4-4 4-4M4 17h16" />
+    </svg>
+  )
 }
 
 async function authed(path, opts = {}) {
@@ -23,6 +36,7 @@ async function authed(path, opts = {}) {
 }
 
 export default function SwapRequests({ profile, profiles }) {
+  const isMobile = useIsMobile()
   const [data, setData] = useState({ mine: [], queue: [] })
   const [busy, setBusy] = useState(null)
   const [err, setErr] = useState('')
@@ -55,51 +69,63 @@ export default function SwapRequests({ profile, profiles }) {
   const recent = data.mine.filter(r => !['pending_peer', 'pending_manager'].includes(r.status)).slice(0, 4)
   if (!askMe.length && !myPending.length && !data.queue.length && !recent.length) return null
 
+  // One hairline-divided row per swap: status chip, what, actions on the right.
+  const row = { display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', padding: isMobile ? '10px 12px' : '11px 18px', borderTop: '1px solid var(--border)' }
+  const text = { flex: '1 1 240px', minWidth: 0, fontSize: 12.5, lineHeight: 1.45 }
+
   return (
-    <div className="card" style={{ marginBottom: 14, padding: '12px 16px' }}>
-      <div style={{ fontSize: 11, fontWeight: 800, textTransform: 'uppercase', letterSpacing: .5, color: 'var(--text-muted)', marginBottom: 8 }}>
-        🔁 Shift swaps
+    <div style={{ ...panel, overflow: 'hidden' }}>
+      <div style={{ padding: isMobile ? '12px 12px' : '13px 18px', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <span style={{ display: 'inline-flex', color: 'var(--accent)' }}><SwapIcon size={15} /></span>
+        <span style={{ fontSize: 14, fontWeight: 700 }}>Shift swaps</span>
+        <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Trades waiting on you, yours in progress, and recent ones</span>
       </div>
-      {err && <div style={{ fontSize: 12, color: 'var(--danger)', marginBottom: 8 }}>{err}</div>}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
-        {askMe.map(r => (
-          <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', padding: '8px 10px', background: 'var(--accent-bg)', borderRadius: 8 }}>
-            <span style={{ fontSize: 12.5, flex: 1, minWidth: 220 }}>
-              <b>{nameOf(r.requester_id)}</b> wants to {r.target_date ? <>trade: you take <b>{nice(r.requester_date)}</b>, they take your <b>{nice(r.target_date)}</b></> : <>give you their <b>{nice(r.requester_date)}</b> shift</>}
-              {r.note && <span style={{ color: 'var(--text-muted)' }}> — "{r.note}"</span>}
-            </span>
-            <button className="btn sm" disabled={busy === r.id} onClick={() => act('/api/swaps/peer', { id: r.id, accept: false }, r.id)}
-              style={{ color: 'var(--danger)', borderColor: 'var(--danger)' }}>Decline</button>
+      {err && <div style={{ ...row, fontSize: 12.5, fontWeight: 600, color: 'var(--tone-red-tx)', background: 'var(--tone-red-bg)' }}>{err}</div>}
+      {askMe.map(r => (
+        <div key={r.id} style={row}>
+          <ToneChip tone="blue" small>Waiting on you</ToneChip>
+          <span style={text}>
+            <b>{nameOf(r.requester_id)}</b> wants to {r.target_date ? <>trade: you take <b>{nice(r.requester_date)}</b>, they take your <b>{nice(r.target_date)}</b></> : <>give you their <b>{nice(r.requester_date)}</b> shift</>}
+            {r.note && <span style={{ color: 'var(--text-muted)' }}> — "{r.note}"</span>}
+          </span>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn sm danger" disabled={busy === r.id} onClick={() => act('/api/swaps/peer', { id: r.id, accept: false }, r.id)}>Decline</button>
             <button className="btn sm primary" disabled={busy === r.id} onClick={() => act('/api/swaps/peer', { id: r.id, accept: true }, r.id)}>
               {busy === r.id ? 'Saving…' : 'Accept'}
             </button>
           </div>
-        ))}
-        {data.queue.map(r => (
-          <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', padding: '8px 10px', background: 'var(--tone-amber-bg)', borderRadius: 8 }}>
-            <span style={{ fontSize: 12.5, flex: 1, minWidth: 220 }}>
-              <b>Needs approval:</b> {what(r)} <span style={{ color: 'var(--text-muted)' }}>(both agreed)</span>
-              {r.note && <span style={{ color: 'var(--text-muted)' }}> — "{r.note}"</span>}
-            </span>
-            <button className="btn sm" disabled={busy === r.id} onClick={() => act('/api/swaps/decide', { id: r.id, decision: 'denied' }, r.id)}
-              style={{ color: 'var(--danger)', borderColor: 'var(--danger)' }}>Deny</button>
+        </div>
+      ))}
+      {data.queue.map(r => (
+        <div key={r.id} style={row}>
+          <ToneChip tone="amber" small>Needs approval</ToneChip>
+          <span style={text}>
+            {what(r)} <span style={{ color: 'var(--text-muted)' }}>(both agreed)</span>
+            {r.note && <span style={{ color: 'var(--text-muted)' }}> — "{r.note}"</span>}
+          </span>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn sm danger" disabled={busy === r.id} onClick={() => act('/api/swaps/decide', { id: r.id, decision: 'denied' }, r.id)}>Deny</button>
             <button className="btn sm primary" disabled={busy === r.id} onClick={() => act('/api/swaps/decide', { id: r.id, decision: 'approved' }, r.id)}>
               {busy === r.id ? 'Swapping…' : 'Approve'}
             </button>
           </div>
-        ))}
-        {myPending.map(r => (
-          <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12.5 }}>
-            <span style={{ flex: 1 }}>{what(r)} <span style={{ color: 'var(--tone-amber-tx)', fontWeight: 700 }}>· {STATUS_TXT[r.status]}</span></span>
-            <button className="btn sm" disabled={busy === r.id} onClick={() => act('/api/swaps/cancel', { id: r.id }, r.id)}>Cancel</button>
-          </div>
-        ))}
-        {recent.map(r => (
-          <div key={r.id} style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
-            {what(r)} · {STATUS_TXT[r.status]}{r.decided_by ? ` by ${r.decided_by}` : ''}
-          </div>
-        ))}
-      </div>
+        </div>
+      ))}
+      {myPending.map(r => (
+        <div key={r.id} style={row}>
+          <ToneChip tone="amber" small>{cap(STATUS_TXT[r.status])}</ToneChip>
+          <span style={text}>{what(r)}</span>
+          <button className="btn sm" disabled={busy === r.id} onClick={() => act('/api/swaps/cancel', { id: r.id }, r.id)}>Cancel</button>
+        </div>
+      ))}
+      {recent.map(r => (
+        <div key={r.id} style={{ ...row, padding: isMobile ? '9px 12px' : '9px 18px' }}>
+          <ToneChip tone={STATUS_TONE[r.status] || 'gray'} small>{cap(STATUS_TXT[r.status])}</ToneChip>
+          <span style={{ ...text, fontSize: 12, color: 'var(--text-muted)' }}>
+            {what(r)}{r.decided_by ? ` · by ${r.decided_by}` : ''}
+          </span>
+        </div>
+      ))}
     </div>
   )
 }

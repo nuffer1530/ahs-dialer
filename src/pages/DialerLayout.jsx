@@ -622,9 +622,9 @@ function DialerLayoutInner() {
     display: 'flex',
     alignItems: 'center',
     gap: navCollapsed ? 0 : 10,
-    padding: navCollapsed ? '10px 0' : '9px 14px',
+    padding: navCollapsed ? '10px 0' : '9px 12px',
     justifyContent: navCollapsed ? 'center' : 'flex-start',
-    borderRadius: 'var(--radius)',
+    borderRadius: 10,
     fontSize: 13,
     fontWeight: isActive ? 600 : 400,
     color: isActive ? 'var(--accent)' : 'var(--text-muted)',
@@ -889,7 +889,7 @@ function DialerLayoutInner() {
         </button>
 
         {showStatusMenu && (
-          <div style={{ position:'absolute', top:'calc(100% + 6px)', right:0, width:240, background:'var(--surface)', border:'1px solid var(--border)', borderRadius:10, boxShadow:'0 8px 32px rgba(0,0,0,.18)', overflow:'hidden' }}>
+          <div style={{ position:'absolute', top:'calc(100% + 6px)', right:0, width:240, background:'var(--surface)', border:'1px solid var(--border)', borderRadius:14, boxShadow:'0 24px 60px -20px rgba(15,20,40,.35)', overflow:'hidden' }}>
 
             {/* Who you are */}
             <div style={{ padding:'12px 14px', borderBottom:'1px solid var(--border)', background:'var(--surface-2)', display:'flex', alignItems:'center', gap:10 }}>

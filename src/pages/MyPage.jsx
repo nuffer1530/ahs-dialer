@@ -1,15 +1,15 @@
-import { useState, useEffect, Fragment } from 'react'
+import { useState, useEffect, Fragment, Children } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { sb } from '../lib/supabase'
 import TimeOffTab from '../components/TimeOffTab'
 import CallEvalsTab from '../components/CallEvalsTab'
 import PtoRequestModal from '../components/PtoRequestModal'
 import ShiftSwapModal from '../components/ShiftSwapModal'
-import SwapRequests from '../components/SwapRequests'
+import SwapRequests, { SwapIcon } from '../components/SwapRequests'
 import { useAuth } from '../lib/AuthContext'
 import { useIsMobile } from '../lib/useIsMobile'
 import { inboundStats, outboundStats, acwStats, ahtOf, fmtSecs, fmtPct, SERVICE_LEVEL_SECONDS, SERVICE_LEVEL_TARGET } from '../lib/analytics'
-import Avatar from '../components/Avatar'
+import { PageTabs, PillNav, Segmented, Ring, ToneChip, SummaryPanel, Stat, EmptyState, Face, eyebrow, num, panel } from '../components/ui'
 
 const DAYS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun']
 
@@ -45,11 +45,12 @@ function fmtDate(ymd) {
   return `${names[mo-1]} ${d}`
 }
 
+// Tone per day type — theme tokens, so the chips read in dark mode too.
 const DAY_TYPE_STYLES = {
-  pto:     { label: 'PTO',     bg: 'var(--tone-green-bg)', color: '#2E7D52', border: '#2E7D52' },
-  sick:    { label: 'Sick',    bg: 'var(--tone-red-bg)', color: '#B5341A', border: '#B5341A' },
-  holiday: { label: 'Holiday', bg: '#F0ECFB', color: '#5B3FA0', border: '#5B3FA0' },
-  work:    { label: null,      bg: null,       color: null,      border: null      },
+  pto:     { label: 'PTO',     tone: 'green'  },
+  sick:    { label: 'Sick',    tone: 'red'    },
+  holiday: { label: 'Holiday', tone: 'purple' },
+  work:    { label: null,      tone: null     },
 }
 
 // Scorecard KPIs -- Brandyn can adjust thresholds here
@@ -114,14 +115,26 @@ function getRating(kpi, value, thresholds) {
 }
 
 const RATING_LABELS = { 4: 'Exceeds', 3: 'Meets', 2: 'Needs Improvement', 1: 'Poor Performance' }
-// Theme-aware tone vars — hardcoded light-mode pastels made the dark-mode
-// scorecard an unreadable gray mush.
-const RATING_COLORS = {
-  4: { bg: 'var(--tone-green-bg)', text: 'var(--tone-green-tx)', border: 'var(--tone-green-bd)' },
-  3: { bg: 'var(--tone-green-bg)', text: 'var(--tone-green-tx)', border: 'var(--tone-green-bd)' },
-  2: { bg: 'var(--tone-amber-bg)', text: 'var(--tone-amber-tx)', border: 'var(--tone-amber-bd)' },
-  1: { bg: 'var(--tone-red-bg)', text: 'var(--tone-red-tx)', border: 'var(--tone-red-bd)' },
+// Tone per rating — the Team → Scorecards review's colors (Meets is blue).
+// Theme tokens: hardcoded light-mode pastels made the dark-mode scorecard an
+// unreadable gray mush.
+const RATING_TONES = { 4: 'green', 3: 'blue', 2: 'amber', 1: 'red' }
+// KPI track zones, worst on the left, best on the right.
+const ZONES = ['Poor', 'Needs impr.', 'Meets', 'Exceeds']
+
+// Commission rows: label + tone per type, shared by the day list and the table.
+const commKind = (c, amt) => c.event_type === 'reversal' ? { key: 'reversal', label: 'Reversed', tone: 'red' }
+  : c.event_type === 'adjustment' ? { key: 'adjustment', label: 'Adjustment', tone: amt < 0 ? 'red' : 'amber' }
+  : c.event_type === 'membership' ? { key: 'membership', label: 'Membership', tone: 'blue' }
+  : { key: 'booking', label: 'Booking', tone: 'green' }
+const COMM_ICONS = {
+  booking: 'M14.7 6.3a4 4 0 0 0-5.4 5.4L3.6 17.4a1.9 1.9 0 0 0 2.7 2.7l5.7-5.7a4 4 0 0 0 5.4-5.4l-2.6 2.6-2.5-.6-.6-2.5 3-2.2z',
+  membership: 'M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.9l-5.2 2.7 1-5.8-4.3-4.1 5.9-.9z',
+  adjustment: 'M4 11h16v9H4zM3 7h18v4H3zM12 7v13M12 7C10.5 4 7 4 7 6s3 1 5 1zm0 0c1.5-3 5-3 5-1s-3 1-5 1z',
+  reversal: 'M9 14L4 9l5-5M4 9h10.5a5.5 5.5 0 0 1 0 11H11',
 }
+const money = (n) => `${n < 0 ? '−' : ''}$${Math.abs(n).toFixed(2)}`    // $12.00 / −$5.00
+const signed = (n) => `${n < 0 ? '−' : '+'}$${Math.abs(n).toFixed(2)}`  // +$12.00 / −$5.00
 
 export default function MyPage() {
   const { profile, isAdmin } = useAuth()
@@ -225,7 +238,6 @@ export default function MyPage() {
   const [statusEvents, setStatusEvents] = useState([])
   const [attendancePoints, setAttendancePoints] = useState([])
   const [loading, setLoading] = useState(true)
-  const [hoveredTab, setHoveredTab] = useState(null)
   const now = new Date()
   const [scorecardMonth, setScorecardMonth] = useState({ year: now.getFullYear(), month: now.getMonth() })
   const [scWeights, setScWeights] = useState({ attendance: 25, booking_pct: 20, booked_calls: 20, call_quality: 15, memberships: 20 })
@@ -245,7 +257,7 @@ export default function MyPage() {
 
   const today = toYMD(new Date())
   const weekDates = getWeekDates(weekBase)
-  const weekLabel = `${fmtDate(weekDates[0])} - ${fmtDate(weekDates[6])}`
+  const weekLabel = `${fmtDate(weekDates[0])} – ${fmtDate(weekDates[6])}`
 
   useEffect(() => {
     if (!profile?.id) return
@@ -363,7 +375,7 @@ export default function MyPage() {
 
   // Commission week helpers
   const commWeekDates = getWeekDates(commWeekBase)
-  const commWeekLabel = `${fmtDate(commWeekDates[0])} - ${fmtDate(commWeekDates[6])}`
+  const commWeekLabel = `${fmtDate(commWeekDates[0])} – ${fmtDate(commWeekDates[6])}`
   const isCurrentCommWeek = commWeekBase === getTodayMonday()
   const navCommWeek = (dir) => {
     const d = new Date(commWeekBase + 'T00:00:00')
@@ -393,235 +405,90 @@ export default function MyPage() {
   const MOBILE_TAB_ORDER = ['my-schedule', 'commissions', 'scorecard', 'team-schedule', 'stats', 'call-evals', 'time-off']
   const shownTabs = isMobile ? MOBILE_TAB_ORDER.map(id => TABS.find(t => t.id === id)).filter(Boolean) : TABS
 
+  // Header: the open tab's period navigation (the same handlers as before, as
+  // pill navs) and, for admins, Notify team.
+  const weekNavTab = (tab === 'my-schedule' && schedView === 'week') || tab === 'team-schedule' || tab === 'commissions'
+  const monthNavTab = tab === 'my-schedule' && schedView === 'month'
+  const hasHeaderActions = weekNavTab || monthNavTab || tab === 'scorecard' || isAdmin
+  const navMin = isMobile ? 132 : 150
+  // Stat zones: the kit's Stat, at phone size when zones sit two or three across.
+  const S = isMobile ? MiniStat : Stat
+  const stack = { display:'flex', flexDirection:'column', gap: isMobile ? 12 : 16 }
+  const headPad = isMobile ? '12px 14px' : '14px 20px'
+  const rowPad = isMobile ? '10px 12px' : '11px 18px'
+
   return (
     <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden' }}>
 
-      {/* -- HEADER BAR -- */}
-      <div style={{ background:'var(--surface)', borderBottom:'1px solid var(--border)', flexShrink:0 }}>
-        {/* Title row */}
-        <div style={{ padding: isMobile ? '12px 12px 0' : '16px 24px 0', display:'flex', alignItems:'flex-start', justifyContent:'space-between', gap: isMobile ? 8 : 16, flexWrap: isMobile ? 'wrap' : undefined }}>
-          <div style={{ display:'flex', alignItems:'center', gap:10 }}>
-            <div style={{ width:32, height:32, borderRadius:'50%', background:'var(--accent-bg)', color:'var(--accent)', display:'flex', alignItems:'center', justifyContent:'center', fontSize: profile?.avatar ? 16 : 12, fontWeight:700, flexShrink:0 }}>
-              <Avatar avatar={profile?.avatar} name={profile?.name || profile?.email} />
-            </div>
-            <div>
-              <div style={{ fontSize:18, fontWeight:600, color:'var(--text-primary)' }}>{profile?.name || profile?.email}</div>
-              <div style={{ fontSize:12, color:'var(--text-muted)', marginTop:2 }}>My Page</div>
-            </div>
-          </div>
-          {((tab === 'my-schedule' && schedView === 'week') || tab === 'team-schedule' || tab === 'commissions') && (
-            <div style={{ display:'flex', alignItems:'center', gap:10, marginTop:2 }}>
-              <button onClick={() => tab === 'commissions' ? navCommWeek(-1) : (() => { const d = new Date(weekBase + 'T00:00:00'); d.setDate(d.getDate()-7); setWeekBase(toYMD(d)) })()}
-                style={{ width:32, height:32, border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface-2)', cursor:'pointer', fontSize:16, color:'var(--text-secondary)', display:'flex', alignItems:'center', justifyContent:'center' }}
-                onMouseEnter={e => e.currentTarget.style.background='var(--surface)'}
-                onMouseLeave={e => e.currentTarget.style.background='var(--surface-2)'}>{'<'}</button>
-              <span style={{ fontSize:13, fontWeight:500, color:'var(--text-primary)', minWidth:200, textAlign:'center' }}>
-                {tab === 'commissions' ? commWeekLabel : weekLabel}
-              </span>
-              <button onClick={() => tab === 'commissions' ? navCommWeek(1) : (() => { const d = new Date(weekBase + 'T00:00:00'); d.setDate(d.getDate()+7); setWeekBase(toYMD(d)) })()}
-                style={{ width:32, height:32, border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface-2)', cursor:'pointer', fontSize:16, color:'var(--text-secondary)', display:'flex', alignItems:'center', justifyContent:'center' }}
-                onMouseEnter={e => e.currentTarget.style.background='var(--surface)'}
-                onMouseLeave={e => e.currentTarget.style.background='var(--surface-2)'}>{'>'}</button>
-              <button onClick={() => tab === 'commissions' ? setCommWeekBase(getTodayMonday()) : setWeekBase(getTodayMonday())}
-                style={{ padding:'5px 10px', fontSize:12, fontWeight:500, border:'1px solid var(--accent)', borderRadius:'var(--radius)', background:'none', color:'var(--accent)', cursor:'pointer' }}>
-                This Week
+      {/* -- HEADER BAR -- page tabs on the left; the tab's period navigation
+          and Notify team on the right (their own row on a phone). */}
+      <div style={{ background:'var(--surface)', borderBottom:'1px solid var(--border)', flexShrink:0, padding: isMobile ? '0 12px' : '0 24px',
+        display:'flex', alignItems:'center', gap:'0 12px', flexWrap:'wrap' }}>
+        <PageTabs tabs={shownTabs.map(t => [t.id, t.label])} value={tab}
+          onChange={id => { setTab(id); setSearchParams(id === 'my-schedule' ? {} : { tab: id }, { replace: true }) }} />
+        {hasHeaderActions && (
+          <div style={{ marginLeft: isMobile ? 0 : 'auto', display:'flex', alignItems:'center', gap:8, flexWrap:'wrap', padding: isMobile ? '0 0 10px' : '6px 0' }}>
+            {weekNavTab && !(tab === 'commissions' ? isCurrentCommWeek : weekBase === getTodayMonday()) && (
+              <button className="btn sm" style={{ borderRadius:99 }}
+                onClick={() => tab === 'commissions' ? setCommWeekBase(getTodayMonday()) : setWeekBase(getTodayMonday())}>
+                This week
               </button>
-            </div>
-          )}
-          {announceOpen && (
-            <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,.45)', zIndex:700, display:'flex', alignItems:'center', justifyContent:'center', padding:20 }}
-              onMouseDown={() => setAnnounceOpen(false)}>
-              <div onMouseDown={e => e.stopPropagation()}
-                style={{ background:'var(--surface)', borderRadius:14, width:'100%', maxWidth:420, boxShadow:'0 12px 40px rgba(0,0,0,.25)', padding:'20px 22px' }}>
-                <div style={{ fontSize:15, fontWeight:700, marginBottom:2 }}>Notify the team</div>
-                <div style={{ fontSize:12, color:'var(--text-muted)', marginBottom:14 }}>Pops on their screen like a schedule alert — with a chime.</div>
-                <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
-                  <div className="form-field">
-                    <label className="form-label">Who</label>
-                    <label style={{ display:'flex', alignItems:'center', gap:8, fontSize:13, fontWeight:600, cursor:'pointer', padding:'6px 2px' }}>
-                      <input type="checkbox" checked={announce.all}
-                        onChange={e => setAnnounce(a => ({ ...a, all: e.target.checked }))} />
-                      Everyone on the floor
-                    </label>
-                    {!announce.all && (
-                      <div style={{ maxHeight:170, overflowY:'auto', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'4px 8px', display:'flex', flexDirection:'column' }}>
-                        {annProfiles.map(p => (
-                          <label key={p.id} style={{ display:'flex', alignItems:'center', gap:8, fontSize:13, cursor:'pointer', padding:'5px 2px' }}>
-                            <input type="checkbox" checked={announce.ids.includes(p.id)}
-                              onChange={e => setAnnounce(a => ({ ...a, ids: e.target.checked ? [...a.ids, p.id] : a.ids.filter(x => x !== p.id) }))} />
-                            {p.name || p.email}
-                          </label>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                  <div className="form-field">
-                    <label className="form-label">Message</label>
-                    <textarea className="form-input" rows={3} autoFocus value={announce.message}
-                      placeholder="Huddle in 5 · Pizza in the break room · Great job on the push this morning!"
-                      onChange={e => setAnnounce(a => ({ ...a, message: e.target.value }))}
-                      onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) sendAnnouncement() }} />
-                    <div style={{ display:'flex', gap:4, flexWrap:'wrap', marginTop:6 }}>
-                      {['📣','🎉','👏','🔥','💪','🍕','☕','⏰','🚨','✅','🙌','😂'].map(em => (
-                        <button key={em} type="button" onClick={() => setAnnounce(a => ({ ...a, message: a.message + em }))}
-                          style={{ border:'1px solid var(--border)', background:'var(--surface-2)', borderRadius:8, padding:'3px 7px', fontSize:15, cursor:'pointer', lineHeight:1 }}>
-                          {em}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                  <div className="form-field">
-                    <label className="form-label">When</label>
-                    <div style={{ display:'flex', gap:8, alignItems:'center', flexWrap: isMobile ? 'wrap' : undefined }}>
-                      <input className="form-input" type="datetime-local" value={announce.sendAt}
-                        min={new Date(Date.now() + 2 * 60_000).toISOString().slice(0, 16)}
-                        onChange={e => setAnnounce(a => ({ ...a, sendAt: e.target.value }))} style={{ flex:1 }} />
-                      {announce.sendAt && <button className="btn sm" onClick={() => setAnnounce(a => ({ ...a, sendAt: '' }))}>Send now instead</button>}
-                    </div>
-                    <div style={{ fontSize:10.5, color:'var(--text-muted)', marginTop:3 }}>Leave empty to send immediately.</div>
-                  </div>
-                  {annScheduled.length > 0 && (
-                    <div style={{ border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'6px 10px', display:'flex', flexDirection:'column', gap:4 }}>
-                      <div style={{ fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:.5, color:'var(--text-muted)' }}>Scheduled</div>
-                      {annScheduled.map(m => (
-                        <div key={m.id} style={{ display:'flex', alignItems:'center', gap:8, fontSize:11.5 }}>
-                          <span style={{ fontWeight:700, flexShrink:0 }}>
-                            {new Date(m.sendAt).toLocaleString([], { month:'short', day:'numeric', hour:'numeric', minute:'2-digit' })}
-                          </span>
-                          <span style={{ color:'var(--text-muted)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', flex:1 }}>
-                            {m.to === 'all' ? 'Everyone' : m.toNames || 'Selected'} — {m.message}
-                          </span>
-                          <button onClick={() => unscheduleAnn(m.id)} title="Cancel this scheduled message"
-                            style={{ border:'none', background:'none', color:'var(--danger)', cursor:'pointer', fontSize:13, flexShrink:0 }}>×</button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  {announceMsg && <div style={{ fontSize:12.5, fontWeight:700, color:'var(--tone-red-tx)' }}>{announceMsg}</div>}
-                  <div style={{ display:'flex', justifyContent:'flex-end', gap:8 }}>
-                    <button className="btn" onClick={() => setAnnounceOpen(false)}>Cancel</button>
-                    <button className="btn primary" onClick={sendAnnouncement}
-                      disabled={announceBusy || !announce.message.trim() || (!announce.all && !announce.ids.length)}>
-                      {announceBusy ? 'Sending…' : announce.sendAt ? '📅 Schedule it' : announce.all ? 'Send to everyone' : `Send (${announce.ids.length})`}
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-          {swapDay !== null && (
-            <ShiftSwapModal profile={profile} profiles={profiles} schedules={schedules}
-              initialDate={swapDay || undefined} onClose={() => setSwapDay(null)}
-              onSubmitted={() => { setPtoToast('Swap request sent — your co-worker has been emailed.'); setTimeout(() => setPtoToast(''), 6000) }} />
-          )}
-          {ptoDay && (
-            <PtoRequestModal initialDate={ptoDay} onClose={() => setPtoDay(null)}
-              onSubmitted={() => { setPtoToast('Request sent — your manager has been notified. Track it in the Time Off tab.'); setTimeout(() => setPtoToast(''), 6000) }} />
-          )}
-          {ptoToast && (
-            <div style={{ position:'fixed', bottom:20, right:20, left: isMobile ? 20 : undefined, zIndex:900, background:'var(--surface)', border:'1px solid var(--success)', color:'var(--success)', borderRadius:10, padding:'10px 16px', fontSize:12.5, fontWeight:600, boxShadow:'0 8px 24px rgba(0,0,0,.15)' }}>
-              ✓ {ptoToast}
-            </div>
-          )}
-          {tab === 'scorecard' && (
-            <div style={{ display:'flex', alignItems:'center', gap:10, marginTop:2 }}>
-              <button onClick={() => navMonth(-1)}
-                style={{ width:32, height:32, border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface-2)', cursor:'pointer', fontSize:16, color:'var(--text-secondary)', display:'flex', alignItems:'center', justifyContent:'center' }}
-                onMouseEnter={e => e.currentTarget.style.background='var(--surface)'}
-                onMouseLeave={e => e.currentTarget.style.background='var(--surface-2)'}>{'<'}</button>
-              <span style={{ fontSize:13, fontWeight:500, color:'var(--text-primary)', minWidth:180, textAlign:'center' }}>{scorecardLabel}</span>
-              <button onClick={() => navMonth(1)}
-                style={{ width:32, height:32, border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface-2)', cursor:'pointer', fontSize:16, color:'var(--text-secondary)', display:'flex', alignItems:'center', justifyContent:'center' }}
-                onMouseEnter={e => e.currentTarget.style.background='var(--surface)'}
-                onMouseLeave={e => e.currentTarget.style.background='var(--surface-2)'}>{'>'}</button>
-              {!isCurrentMonth && (
-                <button onClick={() => setScorecardMonth({ year: now.getFullYear(), month: now.getMonth() })}
-                  style={{ padding:'5px 10px', fontSize:12, fontWeight:500, border:'1px solid var(--accent)', borderRadius:'var(--radius)', background:'none', color:'var(--accent)', cursor:'pointer' }}>
-                  This Month
-                </button>
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* Tab bar */}
-        <div style={{ display:'flex', alignItems:'center', padding: isMobile ? '0 12px' : '0 24px', marginTop:10 }}>
-          <div style={{ display:'flex', gap:0, flex:1, overflowX:'auto' }}>
-            {shownTabs.map(t => {
-              const isActive = tab === t.id
-              const isHov = hoveredTab === t.id && !isActive
-              return (
-                <button key={t.id}
-                  onClick={() => { setTab(t.id); setSearchParams(t.id === 'my-schedule' ? {} : { tab: t.id }, { replace: true }) }}
-                  onMouseEnter={() => setHoveredTab(t.id)}
-                  onMouseLeave={() => setHoveredTab(null)}
-                  style={{
-                    padding:'10px 16px', fontSize:13, fontWeight: isActive ? 600 : 400,
-                    border:'none', cursor:'pointer',
-                    borderRadius:'var(--radius) var(--radius) 0 0',
-                    background: isHov ? 'var(--surface-2)' : 'transparent',
-                    color: isActive ? 'var(--accent)' : isHov ? 'var(--text-primary)' : 'var(--text-muted)',
-                    borderBottom: isActive ? '2px solid var(--accent)' : '2px solid transparent',
-                    transition:'color .1s, background .1s',
-                    whiteSpace: isMobile ? 'nowrap' : undefined, flexShrink: isMobile ? 0 : undefined,
-                  }}>
-                  {t.label}
-                </button>
-              )
-            })}
+            )}
+            {weekNavTab && (
+              <PillNav label={tab === 'commissions' ? commWeekLabel : weekLabel} minWidth={navMin}
+                onPrev={() => tab === 'commissions' ? navCommWeek(-1) : (() => { const d = new Date(weekBase + 'T00:00:00'); d.setDate(d.getDate()-7); setWeekBase(toYMD(d)) })()}
+                onNext={() => tab === 'commissions' ? navCommWeek(1) : (() => { const d = new Date(weekBase + 'T00:00:00'); d.setDate(d.getDate()+7); setWeekBase(toYMD(d)) })()} />
+            )}
+            {monthNavTab && (
+              <PillNav label={new Date(schedMonth.y, schedMonth.m, 1).toLocaleDateString([], { month:'long', year:'numeric' })} minWidth={navMin}
+                onPrev={() => setSchedMonth(({ y, m }) => (m === 0 ? { y: y - 1, m: 11 } : { y, m: m - 1 }))}
+                onNext={() => setSchedMonth(({ y, m }) => (m === 11 ? { y: y + 1, m: 0 } : { y, m: m + 1 }))} />
+            )}
+            {tab === 'scorecard' && !isCurrentMonth && (
+              <button className="btn sm" style={{ borderRadius:99 }} onClick={() => setScorecardMonth({ year: now.getFullYear(), month: now.getMonth() })}>
+                This month
+              </button>
+            )}
+            {tab === 'scorecard' && (
+              <PillNav label={scorecardLabel} minWidth={navMin} onPrev={() => navMonth(-1)} onNext={() => navMonth(1)} />
+            )}
+            {isAdmin && (
+              <button className="btn primary" onClick={() => { setAnnounceMsg(''); setAnnounceOpen(true); loadAnnScheduled() }}
+                title="Send or schedule a pop-up alert to the floor or selected people"
+                style={{ borderRadius:99 }}>
+                Notify team
+              </button>
+            )}
           </div>
-          {isAdmin && (
-            <button onClick={() => { setAnnounceMsg(''); setAnnounceOpen(true); loadAnnScheduled() }}
-              title="Send or schedule a pop-up alert to the floor or selected people"
-              style={{ marginLeft:'auto', padding: isMobile ? '9px 14px' : '9px 22px', fontSize:13, fontWeight:700, border:'none', borderRadius:'var(--radius)',
-                background:'var(--accent)', color:'#fff', cursor:'pointer', flexShrink: isMobile ? 0 : undefined, whiteSpace: isMobile ? 'nowrap' : undefined }}>
-              Notify team
-            </button>
-          )}
-        </div>
+        )}
       </div>
 
       {/* Content */}
       <div style={{ flex:1, overflow:'auto', padding: isMobile ? 12 : 24, background:'var(--bg)' }}>
         {loading ? (
-          <div style={{ display:'flex', alignItems:'center', justifyContent:'center', height:200 }}>
-            <div className="spinner" />
+          <div style={stack}>
+            <div className="skel" style={{ height:38, width: isMobile ? '100%' : 340, borderRadius:99 }} />
+            <div className="skel" style={{ height: isMobile ? 320 : 160, borderRadius:16 }} />
+            <div className="skel" style={{ height:120, borderRadius:16 }} />
           </div>
         ) : (
           <>
-            {/* MY SCHEDULE */}
             {tab === 'time-off' && <TimeOffTab profile={profile} />}
             {tab === 'call-evals' && <CallEvalsTab profile={profile} isAdmin={false} />}
+
+            {/* MY SCHEDULE — week cards or a month calendar; click a day to request time off */}
             {tab === 'my-schedule' && (
-              <div>
-                <div style={{ display:'flex', alignItems:'center', marginBottom:10, gap:10, flexWrap:'wrap' }}>
-                  <div style={{ display:'flex', border:'1px solid var(--border)', borderRadius:99, overflow:'hidden' }}>
-                    {[['week','Week'],['month','Month']].map(([v, label]) => (
-                      <button key={v} onClick={() => setSchedView(v)}
-                        style={{ padding:'5px 16px', border:'none', cursor:'pointer', fontSize:11.5, fontWeight:700,
-                          background: schedView === v ? 'var(--accent)' : 'transparent',
-                          color: schedView === v ? '#fff' : 'var(--text-muted)' }}>
-                        {label}
-                      </button>
-                    ))}
-                  </div>
-                  {schedView === 'month' && (
-                    <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-                      <button className="btn sm" onClick={() => setSchedMonth(({ y, m }) => (m === 0 ? { y: y - 1, m: 11 } : { y, m: m - 1 }))}>‹</button>
-                      <span style={{ fontSize:13, fontWeight:700, minWidth:130, textAlign:'center' }}>
-                        {new Date(schedMonth.y, schedMonth.m, 1).toLocaleDateString([], { month:'long', year:'numeric' })}
-                      </span>
-                      <button className="btn sm" onClick={() => setSchedMonth(({ y, m }) => (m === 11 ? { y: y + 1, m: 0 } : { y, m: m + 1 }))}>›</button>
-                    </div>
-                  )}
-                  <div style={{ marginLeft:'auto', display:'flex', alignItems:'center', gap:6 }}>
-                    <span style={{ fontSize:12, color:'var(--text-muted)' }}>Scheduled this {schedView}:</span>
-                    <span style={{ fontSize:14, fontWeight:800, color:'var(--accent)' }}>
+              <div style={stack}>
+                <div style={{ display:'flex', alignItems:'center', gap:12, flexWrap:'wrap' }}>
+                  <Segmented value={schedView} onChange={setSchedView} options={[['week','Week'],['month','Month']]} />
+                  <div style={{ marginLeft: isMobile ? 0 : 'auto', display:'flex', alignItems:'baseline', gap:8, flexWrap:'wrap' }}>
+                    <span style={eyebrow}>Scheduled this {schedView}</span>
+                    <span style={{ ...num, fontSize:20, fontWeight:800, letterSpacing:'-.02em', color:'var(--text-primary)' }}>
                       {schedView === 'week'
                         ? fmtH(weekDates.reduce((a, dd) => a + schedHours(getSched(profile?.id, dd)), 0))
                         : fmtH(monthScheds.reduce((a, sd) => a + schedHours(sd), 0))}h
                     </span>
-                    <span style={{ fontSize:10, color:'var(--text-muted)' }}>(lunch unpaid, breaks paid)</span>
+                    <span style={{ fontSize:11.5, color:'var(--text-muted)' }}>lunch unpaid, breaks paid</span>
                   </div>
                 </div>
                 {schedView === 'month' && (() => {
@@ -633,42 +500,41 @@ export default function MyPage() {
                   const short = (t) => fmt12(t).replace(':00', '').replace(' AM', 'a').replace(' PM', 'p')
                   const schedOf = (d) => monthScheds.find(sd => sd.date === toYMD(new Date(schedMonth.y, schedMonth.m, d)))
                   return (
-                    <div>
-                      <div className="mgrid" style={{ display:'grid', gridTemplateColumns:'repeat(7, 1fr)', gap: isMobile ? 4 : 6, marginBottom:6 }}>
+                    <div style={{ ...panel, padding: isMobile ? 8 : 16 }}>
+                      <div className="mgrid" style={{ display:'grid', gridTemplateColumns:'repeat(7, minmax(0, 1fr))', gap: isMobile ? 4 : 6, marginBottom:8 }}>
                         {DAYS.map(d => (
-                          <div key={d} style={{ textAlign:'center', fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:.5, color:'var(--text-muted)' }}>{d}</div>
+                          <div key={d} style={{ ...eyebrow, textAlign:'center' }}>{d}</div>
                         ))}
                       </div>
-                      <div className="mgrid" style={{ display:'grid', gridTemplateColumns:'repeat(7, 1fr)', gap: isMobile ? 4 : 6 }}>
+                      <div className="mgrid" style={{ display:'grid', gridTemplateColumns:'repeat(7, minmax(0, 1fr))', gap: isMobile ? 4 : 6 }}>
                         {cells.map((d, i) => {
                           if (!d) return <div key={`e${i}`} />
                           const dateStr = toYMD(new Date(schedMonth.y, schedMonth.m, d))
                           const sched = schedOf(d)
                           const dt = sched?.day_type
-                          const style = DAY_TYPE_STYLES[dt] || DAY_TYPE_STYLES.work
+                          const ds = DAY_TYPE_STYLES[dt] || DAY_TYPE_STYLES.work
                           const isToday = dateStr === today
                           const requestable = dateStr >= today
                           return (
                             <div key={dateStr}
                               onClick={() => requestable && setPtoDay(dateStr)}
                               title={requestable ? 'Click to request time off for this day' : undefined}
+                              className={requestable && !isToday ? 'lift-hover' : undefined}
                               style={{ background: isToday ? 'var(--accent-bg)' : 'var(--surface)',
                                 border:`1px solid ${isToday ? 'var(--accent)' : 'var(--border)'}`,
-                                borderRadius:8, padding: isMobile ? '6px 4px' : '8px 9px', minHeight: isMobile ? 56 : 64,
+                                borderRadius:10, padding: isMobile ? '6px 4px' : '8px 10px', minHeight: isMobile ? 56 : 72, overflow:'hidden',
                                 cursor: requestable ? 'pointer' : 'default', opacity: dateStr < today ? .55 : 1 }}>
-                              <div style={{ fontSize:11, fontWeight: isToday ? 800 : 600, color: isToday ? 'var(--accent)' : 'var(--text-secondary)' }}>{d}</div>
-                              {sched && dt && dt !== 'work' && (
-                                <div style={{ marginTop:4, padding:'1px 6px', borderRadius:5, background: style.bg, color: style.color, fontSize:9.5, fontWeight:700, display:'inline-block' }}>
-                                  {style.label}
-                                </div>
+                              <div style={{ ...num, fontSize:11.5, fontWeight: isToday ? 800 : 600, color: isToday ? 'var(--accent)' : 'var(--text-secondary)' }}>{d}</div>
+                              {sched && dt && dt !== 'work' && ds.label && (
+                                <div style={{ marginTop:4 }}><DayChip tone={ds.tone} tiny={isMobile}>{ds.label}</DayChip></div>
                               )}
                               {sched && dt === 'work' && sched.shift_start && (
                                 <div style={{ marginTop:4 }}>
-                                  <div style={{ fontSize:10.5, fontWeight:700, color:'var(--text-primary)' }}>{short(sched.shift_start)}–{short(sched.shift_end)}</div>
-                                  <div style={{ fontSize:9, fontWeight:700, color:'var(--accent)' }}>{fmtH(schedHours(sched))}h</div>
+                                  <div style={{ ...num, fontSize:10.5, fontWeight:700, color:'var(--text-primary)' }}>{short(sched.shift_start)}–{short(sched.shift_end)}</div>
+                                  <div style={{ ...num, fontSize:9.5, fontWeight:700, color:'var(--accent)' }}>{fmtH(schedHours(sched))}h</div>
                                 </div>
                               )}
-                              {!sched && <div style={{ marginTop:4, fontSize:9.5, color:'var(--text-muted)' }}>Off</div>}
+                              {!sched && <div style={{ marginTop:4, fontSize:10, color:'var(--text-muted)' }}>Off</div>}
                             </div>
                           )
                         })}
@@ -681,74 +547,73 @@ export default function MyPage() {
                   const ti = isMobile ? weekDates.indexOf(today) : -1
                   const ordered = ti > 0 ? [...weekDates.slice(ti), ...weekDates.slice(0, ti)] : weekDates
                   return (
-                <div style={{ display:'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(7, 1fr)', gap:8 }}>
-                  {ordered.map(date => {
-                    const sched = getSched(profile?.id, date)
-                    const isToday = date === today
-                    const dt = sched?.day_type
-                    const style = DAY_TYPE_STYLES[dt] || DAY_TYPE_STYLES.work
-                    const requestable = date >= today
-                    return (
-                      <Fragment key={date}>
-                      {ti > 0 && date === weekDates[0] && (
-                        <div style={{ fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color:'var(--text-muted)', marginTop:6 }}>Earlier this week</div>
-                      )}
-                      <div
-                        onClick={() => requestable && setPtoDay(date)}
-                        title={requestable ? 'Click to request time off for this day' : undefined}
-                        style={{
-                          background: isToday ? 'var(--accent-bg)' : 'var(--surface)',
-                          border: `1px solid ${isToday ? 'var(--accent)' : 'var(--border)'}`,
-                          borderRadius: 'var(--radius-lg)', padding:14, minHeight:120,
-                          cursor: requestable ? 'pointer' : 'default',
-                        }}
-                        onMouseEnter={e => { if (requestable) e.currentTarget.style.boxShadow = '0 0 0 2px var(--accent-bg)' }}
-                        onMouseLeave={e => e.currentTarget.style.boxShadow = 'none'}>
-                        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:8 }}>
-                          <div style={{ fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color: isToday ? 'var(--accent)' : 'var(--text-muted)' }}>
-                            {DAYS[weekDates.indexOf(date)]}
-                          </div>
-                          <div style={{ fontSize:12, fontWeight: isToday ? 700 : 400, color: isToday ? 'var(--accent)' : 'var(--text-secondary)' }}>
-                            {fmtDate(date).split(' ')[1]}
-                          </div>
-                        </div>
-
-                        {!sched && (
-                          <div style={{ fontSize:11, color:'var(--text-muted)', marginTop:8 }}>Off</div>
-                        )}
-
-                        {sched && dt && dt !== 'work' && (
-                          <div style={{ marginTop:8, padding:'4px 8px', borderRadius:6, background: style.bg, color: style.color, fontSize:11, fontWeight:600, display:'inline-block' }}>
-                            {style.label}
-                          </div>
-                        )}
-
-                        {sched && dt === 'work' && (
-                          <div style={{ marginTop:6 }}>
-                            <div style={{ fontSize:12, fontWeight:600, color:'var(--text-primary)', display:'flex', alignItems:'center', gap:6, flexWrap:'wrap' }}>
-                              <span>{fmt12(sched.shift_start)} - {fmt12(sched.shift_end)}</span>
-                              <span style={{ fontSize:10, fontWeight:700, color:'var(--accent)', background:'var(--accent-bg)', borderRadius:99, padding:'1px 7px' }}>
-                                {fmtH(schedHours(sched))}h
+                    <div style={{ display:'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(7, minmax(0, 1fr))', gap: isMobile ? 8 : 10 }}>
+                      {ordered.map(date => {
+                        const sched = getSched(profile?.id, date)
+                        const isToday = date === today
+                        const dt = sched?.day_type
+                        const ds = DAY_TYPE_STYLES[dt] || DAY_TYPE_STYLES.work
+                        const requestable = date >= today
+                        const breaks = sched && dt === 'work' ? [
+                          sched.break1_start && { t: sched.break1_start, label: 'Break' },
+                          sched.lunch_start && { t: sched.lunch_start, label: 'Lunch' },
+                          sched.break2_start && { t: sched.break2_start, label: 'Break' },
+                        ].filter(Boolean).sort((a, b) => String(a.t).localeCompare(String(b.t))) : []
+                        return (
+                          <Fragment key={date}>
+                          {ti > 0 && date === weekDates[0] && (
+                            <div style={{ ...eyebrow, marginTop:6 }}>Earlier this week</div>
+                          )}
+                          <div
+                            onClick={() => requestable && setPtoDay(date)}
+                            title={requestable ? 'Click to request time off for this day' : undefined}
+                            style={{ ...panel, borderRadius:14, padding:'12px 14px', minHeight: isMobile ? 0 : 132, minWidth:0,
+                              background: isToday ? 'var(--accent-bg)' : 'var(--surface)',
+                              border:`1px solid ${isToday ? 'var(--accent)' : 'var(--border)'}`,
+                              cursor: requestable ? 'pointer' : 'default', transition:'box-shadow .15s ease' }}
+                            onMouseEnter={e => { if (requestable) e.currentTarget.style.boxShadow = '0 10px 24px -14px rgba(15,20,40,.28)' }}
+                            onMouseLeave={e => e.currentTarget.style.boxShadow = 'none'}>
+                            <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:10 }}>
+                              <span style={{ ...eyebrow, color: isToday ? 'var(--accent)' : 'var(--text-muted)' }}>
+                                {DAYS[weekDates.indexOf(date)]}
+                              </span>
+                              <span style={{ ...num, display:'inline-flex', alignItems:'center', justifyContent:'center', minWidth:26, height:26, padding:'0 6px', borderRadius:99,
+                                fontSize:13, fontWeight: isToday ? 800 : 600, background: isToday ? 'var(--accent)' : 'transparent', color: isToday ? '#fff' : 'var(--text-primary)' }}>
+                                {fmtDate(date).split(' ')[1]}
                               </span>
                             </div>
-                            <div style={{ marginTop:8, display:'flex', flexDirection:'column', gap:4 }}>
-                              {[
-                                sched.break1_start && { t: sched.break1_start, label: 'Break' },
-                                sched.lunch_start && { t: sched.lunch_start, label: 'Lunch' },
-                                sched.break2_start && { t: sched.break2_start, label: 'Break' },
-                              ].filter(Boolean).sort((a, b) => String(a.t).localeCompare(String(b.t))).map((b, bi) => (
-                                <div key={bi} style={{ fontSize:10, color:'var(--text-muted)' }}>
-                                  {b.label} {fmt12(b.t)}
+
+                            {!sched && (
+                              <div style={{ fontSize:12, color:'var(--text-muted)' }}>Off</div>
+                            )}
+
+                            {sched && dt && dt !== 'work' && ds.label && (
+                              <ToneChip tone={ds.tone}>{ds.label}</ToneChip>
+                            )}
+
+                            {sched && dt === 'work' && (
+                              <div>
+                                <div style={{ ...num, fontSize:12.5, fontWeight:700, color:'var(--text-primary)', lineHeight:1.35 }}>
+                                  {fmt12(sched.shift_start)} – {fmt12(sched.shift_end)}
                                 </div>
-                              ))}
-                            </div>
+                                <div style={{ marginTop:6 }}><ToneChip tone="blue" small>{fmtH(schedHours(sched))}h</ToneChip></div>
+                                {breaks.length > 0 && (
+                                  <div style={{ marginTop:10, paddingTop:8, borderTop:'1px solid var(--border)', display:'flex', flexDirection:'column', gap:3 }}>
+                                    {breaks.map((b, bi) => (
+                                      <div key={bi} style={{ display:'flex', gap:6, fontSize:11, color:'var(--text-muted)' }}>
+                                        <span style={{ width:40, flexShrink:0 }}>{b.label}</span>
+                                        <span style={{ ...num, color:'var(--text-secondary)' }}>{fmt12(b.t)}</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            )}
                           </div>
-                        )}
-                      </div>
-                      </Fragment>
-                    )
-                  })}
-                </div>
+                          </Fragment>
+                        )
+                      })}
+                    </div>
                   )
                 })()}
               </div>
@@ -756,243 +621,258 @@ export default function MyPage() {
 
             {/* TEAM SCHEDULE — When-I-Work-style shift blocks, click your own to swap */}
             {tab === 'team-schedule' && (
-              <div>
+              <div style={stack}>
                 <SwapRequests profile={profile} profiles={profiles} />
-                <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:10, flexWrap: isMobile ? 'wrap' : undefined }}>
-                  <div style={{ fontSize:11.5, color:'var(--text-muted)' }}>
-                    Click one of <b>your</b> shifts to request a swap — your co-worker accepts, then management signs off.
+                <div style={{ display:'flex', alignItems:'center', gap:10, flexWrap:'wrap' }}>
+                  <div style={{ fontSize:12.5, color:'var(--text-muted)', flex:'1 1 260px' }}>
+                    Click one of <b style={{ color:'var(--text-secondary)' }}>your</b> shifts to request a swap — your co-worker accepts, then management signs off.
                   </div>
-                  <button className="btn sm" style={{ marginLeft:'auto' }} onClick={() => setSwapDay('')}>🔁 Request a swap</button>
+                  <button className="btn" style={{ borderRadius:99 }} onClick={() => setSwapDay('')}>
+                    <SwapIcon /> Request a swap
+                  </button>
                 </div>
-                <div style={{ overflowX:'auto', borderRadius:'var(--radius-lg)', border:'1px solid var(--border)' }}>
-                  <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12, minWidth:860 }}>
-                    <thead>
-                      <tr style={{ background:'var(--surface-2)' }}>
-                        <th style={{ padding:'10px 14px', textAlign:'left', fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color:'var(--text-muted)', borderBottom:'1px solid var(--border)', width:150 }}>Agent</th>
-                        {weekDates.map((date, i) => (
-                          <th key={date} style={{ padding:'8px 6px', textAlign:'center', fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color: date === today ? 'var(--accent)' : 'var(--text-muted)', borderBottom:'1px solid var(--border)', background: date === today ? 'var(--accent-bg)' : undefined }}>
-                            {DAYS[i]} <span style={{ fontWeight:400 }}>{fmtDate(date).split(' ').slice(1).join(' ')}</span>
-                          </th>
-                        ))}
-                        <th style={{ padding:'8px 10px', textAlign:'right', fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color:'var(--text-muted)', borderBottom:'1px solid var(--border)', width:60 }}>Hours</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {profiles.map((p, idx) => {
-                        const isMe = p.id === profile?.id
-                        const weekTotal = weekDates.reduce((a, dd) => a + schedHours(getSched(p.id, dd)), 0)
-                        return (
-                        <tr key={p.id} style={{ background: idx % 2 === 0 ? 'var(--surface)' : 'var(--surface-2)', borderBottom:'1px solid var(--border)' }}>
-                          <td style={{ padding:'10px 14px', fontWeight: isMe ? 700 : 500, color: isMe ? 'var(--accent)' : 'var(--text-primary)', whiteSpace:'nowrap' }}>
-                            {p.name || p.email}
-                            {isMe && <span style={{ fontSize:9, marginLeft:4, color:'var(--accent)' }}>(you)</span>}
-                          </td>
-                          {weekDates.map(date => {
-                            const sched = getSched(p.id, date)
-                            const dt = sched?.day_type
-                            const style = DAY_TYPE_STYLES[dt] || DAY_TYPE_STYLES.work
-                            const isToday = date === today
-                            const isWork = sched && (!dt || dt === 'work') && sched.shift_start
-                            const swappable = isMe && isWork && date > today
-                            return (
-                              <td key={date} onClick={() => swappable && setSwapDay(date)}
-                                title={swappable ? 'Request a swap for this shift' : undefined}
-                                style={{ padding:'6px 5px', textAlign:'center', background: isToday ? 'var(--accent-bg)' : undefined, verticalAlign:'middle', cursor: swappable ? 'pointer' : 'default' }}>
-                                {!sched && <span style={{ fontSize:10, color:'var(--border-strong)' }}>—</span>}
-                                {sched && dt && dt !== 'work' && (
-                                  <div style={{ fontSize:10.5, fontWeight:700, color: style.color, background: style.bg, padding:'8px 4px', borderRadius:8 }}>{style.label}</div>
-                                )}
-                                {isWork && (
-                                  <div style={{
-                                    background: sched.template_color || 'var(--accent-bg)',
-                                    border: swappable ? '1px dashed var(--accent)' : '1px solid transparent',
-                                    borderRadius:8, padding:'7px 4px', lineHeight:1.35,
-                                  }}>
-                                    <div style={{ fontSize:11, fontWeight:700, color:'#1C1B19' }}>
-                                      {fmt12(sched.shift_start).replace(':00','').replace(' ','')}–{fmt12(sched.shift_end).replace(':00','').replace(' ','')}
-                                    </div>
-                                    <div style={{ fontSize:9, fontWeight:600, color:'#1C1B19', opacity:.65 }}>{fmtH(schedHours(sched))}h{swappable ? ' · 🔁' : ''}</div>
-                                  </div>
-                                )}
-                              </td>
-                            )
-                          })}
-                          <td style={{ padding:'8px 10px', textAlign:'right', fontWeight:700, color: weekTotal > 0 ? 'var(--text-primary)' : 'var(--text-muted)', fontVariantNumeric:'tabular-nums' }}>
-                            {weekTotal > 0 ? `${fmtH(weekTotal)}` : '—'}
-                          </td>
-                        </tr>
-                        )
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
-
-            {/* MY STATS */}
-            {tab === 'stats' && (
-              <div>
-                <div style={{ fontSize:11, color:'var(--text-muted)', marginBottom:20 }}>Month to date . {new Date().toLocaleDateString('en-US', { month:'long', year:'numeric' })}</div>
-
-                <div className={isMobile ? 'mgrid' : undefined} style={{ display:'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : 'repeat(auto-fill, minmax(180px,1fr))', gap:12, marginBottom:32 }}>
-                  <StatCard label="Inbound Handled" value={myInbound.handled} sub="Calls you answered" />
-                  <StatCard label="Talk Time" value={fmtSecs(myInbound.att)} sub="Avg time on the call" />
-                  <StatCard label="After-Call Work" value={fmtSecs(myAcw.avg)} sub="Avg wrap-up per call" />
-                  <StatCard label="Handle Time" value={fmtSecs(ahtOf(myInbound.att, myAcw.avg))} sub="Talk + wrap-up" />
-                  <StatCard label="Service Level" value={fmtPct(myInbound.serviceLevel)}
-                    sub={`Answered within ${SERVICE_LEVEL_SECONDS}s`}
-                    valueColor={myInbound.serviceLevel == null ? undefined : myInbound.serviceLevel >= SERVICE_LEVEL_TARGET ? 'var(--success)' : myInbound.serviceLevel >= 60 ? 'var(--warning)' : 'var(--danger)'} />
-                  <StatCard label="Outbound Calls" value={myOutbound.calls} sub="Dials you made" />
-                  <StatCard label="Booked" value={myOutbound.booked} sub={`${fmtPct(myOutbound.conversion)} conversion`} valueColor={myOutbound.booked > 0 ? 'var(--success)' : 'var(--text-primary)'} />
-                  <StatCard label="Attendance Points" value={totalPoints.toFixed(1)} sub="Lower is better" valueColor={totalPoints === 0 ? 'var(--success)' : totalPoints <= 1 ? 'var(--warning)' : 'var(--danger)'} />
-                </div>
-
-                <div style={{ fontSize:12, fontWeight:700, color:'var(--text-secondary)', textTransform:'uppercase', letterSpacing:.6, marginBottom:12 }}>Attendance Points Log</div>
-                {myPoints.length === 0 ? (
-                  <div style={{ color:'var(--text-muted)', fontSize:13, padding:'24px 0' }}>No points this month.</div>
-                ) : (
-                  <div style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius-lg)', overflow:'hidden' }}>
-                    <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
+                <div style={{ ...panel, overflow:'hidden' }}>
+                  <div style={{ overflowX:'auto' }}>
+                    <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12, minWidth:860 }}>
                       <thead>
                         <tr style={{ background:'var(--surface-2)' }}>
-                          {['Date','Reason','Points','Notes'].map(h => (
-                            <th key={h} style={{ padding:'8px 14px', textAlign:'left', fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color:'var(--text-muted)', borderBottom:'1px solid var(--border)' }}>{h}</th>
-                          ))}
+                          <th style={{ ...eyebrow, padding:'10px 16px', textAlign:'left', borderBottom:'1px solid var(--border)', width:200 }}>Agent</th>
+                          {weekDates.map((date, i) => {
+                            const isToday = date === today
+                            return (
+                              <th key={date} style={{ ...eyebrow, padding:'8px 6px', textAlign:'center', color: isToday ? 'var(--accent)' : 'var(--text-muted)', borderBottom:'1px solid var(--border)', borderLeft:'1px solid var(--border)' }}>
+                                <div>{DAYS[i]}</div>
+                                <div style={{ ...num, display:'inline-flex', alignItems:'center', justifyContent:'center', minWidth:24, height:24, padding:'0 6px', borderRadius:99, marginTop:3,
+                                  fontSize:12.5, fontWeight: isToday ? 800 : 600, letterSpacing:0, textTransform:'none',
+                                  background: isToday ? 'var(--accent)' : 'transparent', color: isToday ? '#fff' : 'var(--text-primary)' }}>
+                                  {fmtDate(date).split(' ')[1]}
+                                </div>
+                              </th>
+                            )
+                          })}
+                          <th style={{ ...eyebrow, padding:'10px 16px', textAlign:'right', borderBottom:'1px solid var(--border)', borderLeft:'1px solid var(--border)', width:70 }}>Hours</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {myPoints.sort((a,b) => b.date.localeCompare(a.date)).map(pt => (
-                          <tr key={pt.id} style={{ borderBottom:'1px solid var(--border)' }}>
-                            <td style={{ padding:'9px 14px', color:'var(--text-secondary)' }}>{fmtDate(pt.date)}</td>
-                            <td style={{ padding:'9px 14px', textTransform:'capitalize' }}>{pt.reason?.replace(/_/g,' ')}</td>
-                            <td style={{ padding:'9px 14px', fontWeight:700, color:'var(--danger)' }}>+{pt.points}</td>
-                            <td style={{ padding:'9px 14px', color:'var(--text-muted)' }}>{pt.notes || '--'}</td>
+                        {profiles.map(p => {
+                          const isMe = p.id === profile?.id
+                          const weekTotal = weekDates.reduce((a, dd) => a + schedHours(getSched(p.id, dd)), 0)
+                          return (
+                          <tr key={p.id} style={{ borderTop:'1px solid var(--border)', background: isMe ? 'color-mix(in srgb, var(--accent-bg) 45%, transparent)' : undefined }}>
+                            <td style={{ padding:'8px 16px', whiteSpace:'nowrap' }}>
+                              <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+                                <Face avatar={p.avatar} name={p.name || p.email} size={28} />
+                                <span style={{ fontSize:13, fontWeight: isMe ? 700 : 600, color:'var(--text-primary)' }}>{p.name || p.email}</span>
+                                {isMe && <ToneChip tone="blue" small>You</ToneChip>}
+                              </div>
+                            </td>
+                            {weekDates.map(date => {
+                              const sched = getSched(p.id, date)
+                              const dt = sched?.day_type
+                              const ds = DAY_TYPE_STYLES[dt] || DAY_TYPE_STYLES.work
+                              const isToday = date === today
+                              const isWork = sched && (!dt || dt === 'work') && sched.shift_start
+                              const swappable = isMe && isWork && date > today
+                              // Template color as a tint, like the WFM grid (it's a category color).
+                              const tc = sched?.template_color
+                              return (
+                                <td key={date} onClick={() => swappable && setSwapDay(date)}
+                                  title={swappable ? 'Request a swap for this shift' : undefined}
+                                  style={{ padding:'6px 5px', textAlign:'center', verticalAlign:'middle', borderLeft:'1px solid var(--border)', cursor: swappable ? 'pointer' : 'default',
+                                    background: isToday ? 'color-mix(in srgb, var(--accent-bg) 60%, transparent)' : undefined }}>
+                                  {!sched && <span style={{ fontSize:11, color:'var(--text-muted)' }}>—</span>}
+                                  {sched && dt && dt !== 'work' && ds.label && (
+                                    <div style={{ fontSize:10.5, fontWeight:700, padding:'8px 4px', borderRadius:10,
+                                      color:`var(--tone-${ds.tone}-tx)`, background:`var(--tone-${ds.tone}-bg)`, border:`1px solid var(--tone-${ds.tone}-bd)` }}>{ds.label}</div>
+                                  )}
+                                  {isWork && (
+                                    <div style={{ background: tc ? `${tc}24` : 'var(--tone-green-bg)',
+                                      border: swappable ? '1px dashed var(--accent)' : `1px solid ${tc || 'var(--tone-green-bd)'}`,
+                                      borderRadius:10, padding:'6px 4px', lineHeight:1.35 }}>
+                                      <div style={{ ...num, fontSize:11, fontWeight:700, color: tc || 'var(--tone-green-tx)' }}>
+                                        {fmt12(sched.shift_start).replace(':00','').replace(' ','')}–{fmt12(sched.shift_end).replace(':00','').replace(' ','')}
+                                      </div>
+                                      <div style={{ ...num, fontSize:9.5, fontWeight:600, color:'var(--text-muted)', display:'flex', alignItems:'center', justifyContent:'center', gap:3 }}>
+                                        {fmtH(schedHours(sched))}h{swappable && <> · <SwapIcon size={10} /></>}
+                                      </div>
+                                    </div>
+                                  )}
+                                </td>
+                              )
+                            })}
+                            <td style={{ padding:'8px 16px', textAlign:'right', fontWeight:700, borderLeft:'1px solid var(--border)', color: weekTotal > 0 ? 'var(--text-primary)' : 'var(--text-muted)', fontVariantNumeric:'tabular-nums' }}>
+                              {weekTotal > 0 ? `${fmtH(weekTotal)}` : '—'}
+                            </td>
                           </tr>
-                        ))}
+                          )
+                        })}
                       </tbody>
                     </table>
                   </div>
-                )}
+                </div>
               </div>
             )}
 
+            {/* MY STATS — month to date */}
+            {tab === 'stats' && (() => {
+              const sl = myInbound.serviceLevel
+              const slTone = sl == null ? 'gray' : sl >= SERVICE_LEVEL_TARGET ? 'green' : sl >= 60 ? 'amber' : 'red'
+              return (
+                <div style={stack}>
+                  <div style={{ display:'flex', alignItems:'baseline', gap:8, flexWrap:'wrap' }}>
+                    <span style={{ fontSize:15, fontWeight:700 }}>Month to date</span>
+                    <span style={{ fontSize:12.5, color:'var(--text-muted)' }}>{new Date().toLocaleDateString('en-US', { month:'long', year:'numeric' })}</span>
+                  </div>
+                  <Zones isMobile={isMobile} wide={[0]} columns="minmax(240px, 280px) repeat(4, minmax(0, 1fr))">
+                    <div style={{ display:'flex', alignItems:'center', gap:16 }}>
+                      <Ring pct={sl || 0} size={isMobile ? 64 : 76} stroke={7} tone={slTone}>
+                        <div style={{ ...num, fontSize: isMobile ? 17 : 19, fontWeight:800, color:`var(--tone-${slTone}-tx)` }}>
+                          {sl == null ? '—' : <>{sl.toFixed(0)}<span style={{ fontSize:11 }}>%</span></>}
+                        </div>
+                      </Ring>
+                      <div style={{ minWidth:0 }}>
+                        <div style={eyebrow}>Service Level</div>
+                        <div style={{ fontSize:12.5, color:'var(--text-secondary)', marginTop:4 }}>Answered within {SERVICE_LEVEL_SECONDS}s</div>
+                        <div style={{ fontSize:11.5, color:'var(--text-muted)', marginTop:2 }}>Target {SERVICE_LEVEL_TARGET}%</div>
+                      </div>
+                    </div>
+                    <S label="Inbound Handled" value={myInbound.handled} sub="Calls you answered" />
+                    <S label="Talk Time" value={fmtSecs(myInbound.att)} sub="Avg time on the call" />
+                    <S label="After-Call Work" value={fmtSecs(myAcw.avg)} sub="Avg wrap-up per call" />
+                    <S label="Handle Time" value={fmtSecs(ahtOf(myInbound.att, myAcw.avg))} sub="Talk + wrap-up" />
+                  </Zones>
+                  <Zones isMobile={isMobile} wide={[2]}>
+                    <S label="Outbound Calls" value={myOutbound.calls} sub="Dials you made" />
+                    <S label="Booked" value={myOutbound.booked} sub={`${fmtPct(myOutbound.conversion)} conversion`} tone={myOutbound.booked > 0 ? 'green' : undefined} />
+                    <S label="Attendance Points" value={totalPoints.toFixed(1)} sub="Lower is better" tone={totalPoints === 0 ? 'green' : totalPoints <= 1 ? 'amber' : 'red'} />
+                  </Zones>
+
+                  <div style={{ ...panel, overflow:'hidden' }}>
+                    <div style={{ padding: headPad, display:'flex', alignItems:'baseline', gap:10, flexWrap:'wrap', borderBottom: myPoints.length ? '1px solid var(--border)' : 'none' }}>
+                      <span style={{ fontSize:14, fontWeight:700 }}>Attendance points log</span>
+                      <span style={{ fontSize:12, color:'var(--text-muted)' }}>This month</span>
+                    </div>
+                    {myPoints.length === 0 ? (
+                      <div style={{ padding: isMobile ? '0 14px 16px' : '0 20px 18px', fontSize:13, color:'var(--text-muted)' }}>No points this month.</div>
+                    ) : (
+                      <div style={{ overflowX:'auto' }}>
+                        <table className="data-table">
+                          <thead>
+                            <tr><th>Date</th><th>Reason</th><th>Points</th><th>Notes</th></tr>
+                          </thead>
+                          <tbody>
+                            {myPoints.sort((a,b) => b.date.localeCompare(a.date)).map(pt => (
+                              <tr key={pt.id}>
+                                <td style={{ fontWeight:600, whiteSpace:'nowrap' }}>{fmtDate(pt.date)}</td>
+                                <td style={{ textTransform:'capitalize' }}>{pt.reason?.replace(/_/g,' ')}</td>
+                                <td><ToneChip tone="red" small>+{pt.points}</ToneChip></td>
+                                <td style={{ color:'var(--text-muted)' }}>{pt.notes || '—'}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )
+            })()}
+
             {/* COMMISSIONS */}
             {tab === 'commissions' && (
-              <div>
+              <div style={stack}>
                 {commLoading ? (
-                  <div style={{ display:'flex', alignItems:'center', justifyContent:'center', height:120 }}><div className="spinner" /></div>
+                  <>
+                    <div className="skel" style={{ height: isMobile ? 92 : 104, borderRadius:16 }} />
+                    <div className="skel" style={{ height:200, borderRadius:14 }} />
+                  </>
                 ) : (
                   <>
-                    {/* Summary cards */}
-                    <div className={isMobile ? 'mgrid' : undefined} style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap: isMobile ? 8 : 12, marginBottom:24 }}>
-                      <StatCard compact={isMobile} label="Today" value={`$${commToday.toFixed(2)}`} sub="Resets at midnight" valueColor={commToday > 0 ? 'var(--success)' : 'var(--text-primary)'} />
-                      <StatCard compact={isMobile} label="This Week" value={`$${commTotal.toFixed(2)}`} sub={commWeekLabel} valueColor={commTotal > 0 ? 'var(--accent)' : 'var(--text-primary)'} />
-                      <StatCard compact={isMobile} label="Transactions" value={commissions.length} sub="This week" />
-                    </div>
+                    <Zones isMobile={isMobile} cols={3}>
+                      <S size={20} label="Today" value={money(commToday)} sub="Resets at midnight" tone={commToday > 0 ? 'green' : undefined} />
+                      <S size={20} label="This Week" value={money(commTotal)} sub={commWeekLabel} tone={commTotal > 0 ? 'green' : undefined} />
+                      <S size={20} label="Transactions" value={commissions.length} sub="This week" />
+                    </Zones>
 
-                    {/* Daily breakdown */}
-                    <div style={{ display:'flex', flexDirection:'column', gap:12, marginBottom:24 }}>
-                      {commByDay.filter(d => d.entries.length > 0 || d.date === today).map(({ date, entries, total }) => {
-                        const isToday = date === today
-                        return (
-                          <div key={date} style={{ background:'var(--surface)', border:`1px solid ${isToday ? 'var(--accent)' : 'var(--border)'}`, borderRadius:'var(--radius-lg)', overflow:'hidden' }}>
-                            {/* Day header */}
-                            <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'10px 16px', background: isToday ? 'var(--accent-bg)' : 'var(--surface-2)', borderBottom: entries.length > 0 ? '1px solid var(--border)' : 'none' }}>
-                              <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-                                <span style={{ fontSize:13, fontWeight:600, color: isToday ? 'var(--accent)' : 'var(--text-primary)' }}>
-                                  {DAYS[commWeekDates.indexOf(date)]} {fmtDate(date).split(' ')[1]}
-                                </span>
-                                {isToday && <span style={{ fontSize:10, fontWeight:700, color:'var(--accent)', background:'var(--accent-bg)', border:'1px solid var(--accent)', padding:'1px 6px', borderRadius:99, textTransform:'uppercase', letterSpacing:.5 }}>Today</span>}
-                              </div>
-                              <span style={{ fontSize:13, fontWeight:700, color: total > 0 ? 'var(--success)' : total < 0 ? 'var(--danger)' : 'var(--text-muted)' }}>
-                                {entries.length > 0 ? `$${total.toFixed(2)}` : '--'}
-                              </span>
-                            </div>
-                            {/* Entries */}
-                            {entries.length > 0 && entries.map(c => {
-                              const amt = parseFloat(c.amount || 0)
-                              const isAdj = c.event_type === 'adjustment'
-                              const isMem = c.event_type === 'membership'
-                              const isRev = c.event_type === 'reversal'
-                              return (
-                                <div key={c.id} style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'10px 16px', borderBottom:'1px solid var(--border)', gap:12 }}>
-                                  <div style={{ display:'flex', alignItems:'center', gap:10, minWidth:0 }}>
-                                    <span style={{ padding:'2px 8px', borderRadius:99, fontSize:10, fontWeight:700, flexShrink:0,
-                                      background: isRev ? 'var(--danger-bg)' : isAdj ? (amt < 0 ? 'var(--danger-bg)' : 'var(--warning-bg)') : isMem ? '#EFF6FF' : 'var(--success-bg)',
-                                      color: isRev ? 'var(--danger)' : isAdj ? (amt < 0 ? 'var(--danger)' : 'var(--warning)') : isMem ? '#3b82f6' : 'var(--success)' }}>
-                                      {isRev ? 'Reversed' : isAdj ? 'Adjustment' : isMem ? 'Membership' : 'Booking'}
-                                    </span>
-                                    <div style={{ minWidth:0 }}>
-                                      <div style={{ fontSize:12, fontWeight:500, color:'var(--text-primary)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
-                                        {isAdj ? (c.notes || 'Manual adjustment') : c.contact_name}
-                                      </div>
-                                      <div style={{ fontSize:10, color:'var(--text-muted)' }}>
-                                        {new Date(c.earned_at).toLocaleTimeString('en-US', { hour:'numeric', minute:'2-digit' })}
-                                      </div>
-                                    </div>
-                                  </div>
-                                  <span style={{ fontSize:14, fontWeight:700, flexShrink:0, color: amt < 0 ? 'var(--danger)' : 'var(--success)' }}>
-                                    {amt >= 0 ? '+' : ''}${amt.toFixed(2)}
-                                  </span>
-                                </div>
-                              )
-                            })}
-                            {entries.length === 0 && (
-                              <div style={{ padding:'10px 16px', fontSize:12, color:'var(--text-muted)' }}>No earnings yet</div>
+                    {/* Daily breakdown — days with earnings, and today */}
+                    {commByDay.filter(d => d.entries.length > 0 || d.date === today).map(({ date, entries, total }) => {
+                      const isToday = date === today
+                      return (
+                        <div key={date} style={{ ...panel, borderRadius:14, overflow:'hidden', border:`1px solid ${isToday ? 'var(--tone-blue-bd)' : 'var(--border)'}` }}>
+                          <div style={{ display:'flex', alignItems:'center', gap:10, padding: rowPad, background: isToday ? 'var(--accent-bg)' : 'var(--surface-2)' }}>
+                            <span style={{ fontSize:13, fontWeight:700, color:'var(--text-primary)' }}>
+                              {DAYS[commWeekDates.indexOf(date)]}, {fmtDate(date)}
+                            </span>
+                            {isToday && <ToneChip tone="blue" small>Today</ToneChip>}
+                            {entries.length > 0 && (
+                              <span style={{ ...num, fontSize:12, color:'var(--text-muted)' }}>{entries.length} transaction{entries.length === 1 ? '' : 's'}</span>
                             )}
+                            <span style={{ ...num, marginLeft:'auto', fontSize:13, fontWeight:800, color: total > 0 ? 'var(--tone-green-tx)' : total < 0 ? 'var(--tone-red-tx)' : 'var(--text-muted)' }}>
+                              {entries.length > 0 ? money(total) : '—'}
+                            </span>
                           </div>
-                        )
-                      })}
-                      {commByDay.every(d => d.entries.length === 0) && (
-                        <div style={{ textAlign:'center', padding:'40px 0', color:'var(--text-muted)', fontSize:13 }}>
-                          No commissions recorded for this week.
+                          {entries.length > 0 && entries.map(c => {
+                            const amt = parseFloat(c.amount || 0)
+                            const isAdj = c.event_type === 'adjustment'
+                            const k = commKind(c, amt)
+                            return (
+                              <div key={c.id} className="eval-row" style={{ display:'flex', alignItems:'center', gap: isMobile ? 10 : 14, padding: rowPad, borderTop:'1px solid var(--border)' }}>
+                                <CommTile kind={k} />
+                                <div style={{ flex:1, minWidth:0 }}>
+                                  <div style={{ fontSize:13.5, fontWeight:650, color:'var(--text-primary)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                                    {isAdj ? (c.notes || 'Manual adjustment') : c.contact_name}
+                                  </div>
+                                  <div style={{ ...num, fontSize:12, color:'var(--text-muted)', marginTop:2 }}>
+                                    {k.label} · {new Date(c.earned_at).toLocaleTimeString('en-US', { hour:'numeric', minute:'2-digit' })}
+                                  </div>
+                                </div>
+                                <span style={{ ...num, fontSize:14, fontWeight:800, flexShrink:0, color: amt < 0 ? 'var(--tone-red-tx)' : 'var(--tone-green-tx)' }}>
+                                  {signed(amt)}
+                                </span>
+                              </div>
+                            )
+                          })}
+                          {entries.length === 0 && (
+                            <div style={{ padding: rowPad, borderTop:'1px solid var(--border)', fontSize:12.5, color:'var(--text-muted)' }}>No earnings yet</div>
+                          )}
                         </div>
-                      )}
-                    </div>
+                      )
+                    })}
+                    {commByDay.every(d => d.entries.length === 0) && (
+                      <EmptyState>No commissions recorded for this week.</EmptyState>
+                    )}
 
                     {/* Full log table */}
                     {commissions.length > 0 && (
-                      <div style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius-lg)', overflow:'hidden' }}>
-                        <div style={{ padding:'12px 16px', borderBottom:'1px solid var(--border)', fontSize:11, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color:'var(--text-muted)' }}>
-                          Full breakdown
+                      <div style={{ ...panel, overflow:'hidden' }}>
+                        <div style={{ padding: headPad, borderBottom:'1px solid var(--border)', display:'flex', alignItems:'baseline', gap:10, flexWrap:'wrap' }}>
+                          <span style={{ fontSize:14, fontWeight:700 }}>Full breakdown</span>
+                          <span style={{ ...num, fontSize:12, color:'var(--text-muted)' }}>{commWeekLabel}</span>
                         </div>
-                        <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
-                          <thead>
-                            <tr style={{ background:'var(--surface-2)' }}>
-                              {['Type','Detail','Date / Time','Amount'].map((h,i) => (
-                                <th key={h} style={{ padding:'8px 14px', textAlign: i === 3 ? 'right' : 'left', fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color:'var(--text-muted)', borderBottom:'1px solid var(--border)' }}>{h}</th>
-                              ))}
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {commissions.map(c => {
-                              const amt = parseFloat(c.amount || 0)
-                              const isAdj = c.event_type === 'adjustment'
-                              const isMem = c.event_type === 'membership'
-                              const isRev = c.event_type === 'reversal'
-                              return (
-                                <tr key={c.id} style={{ borderBottom:'1px solid var(--border)' }}>
-                                  <td style={{ padding:'9px 14px' }}>
-                                    <span style={{ padding:'2px 7px', borderRadius:99, fontSize:10, fontWeight:700,
-                                      background: isRev ? 'var(--danger-bg)' : isAdj ? (amt < 0 ? 'var(--danger-bg)' : 'var(--warning-bg)') : isMem ? '#EFF6FF' : 'var(--success-bg)',
-                                      color: isRev ? 'var(--danger)' : isAdj ? (amt < 0 ? 'var(--danger)' : 'var(--warning)') : isMem ? '#3b82f6' : 'var(--success)' }}>
-                                      {isRev ? 'Reversed' : isAdj ? 'Adjustment' : isMem ? 'Membership' : 'Booking'}
-                                    </span>
-                                  </td>
-                                  <td style={{ padding:'9px 14px', color:'var(--text-secondary)' }}>
-                                    {isAdj ? (c.notes || 'Manual adjustment') : c.contact_name}
-                                  </td>
-                                  <td style={{ padding:'9px 14px', color:'var(--text-muted)', fontSize:11 }}>
-                                    {new Date(c.earned_at).toLocaleString('en-US', { month:'short', day:'numeric', hour:'numeric', minute:'2-digit' })}
-                                  </td>
-                                  <td style={{ padding:'9px 14px', textAlign:'right', fontWeight:700, color: amt < 0 ? 'var(--danger)' : 'var(--success)' }}>
-                                    {amt >= 0 ? '+' : ''}${amt.toFixed(2)}
-                                  </td>
-                                </tr>
-                              )
-                            })}
-                          </tbody>
-                        </table>
+                        <div style={{ overflowX:'auto' }}>
+                          <table className="data-table">
+                            <thead>
+                              <tr><th>Type</th><th>Detail</th><th>Date / Time</th><th style={{ textAlign:'right' }}>Amount</th></tr>
+                            </thead>
+                            <tbody>
+                              {commissions.map(c => {
+                                const amt = parseFloat(c.amount || 0)
+                                const isAdj = c.event_type === 'adjustment'
+                                const k = commKind(c, amt)
+                                return (
+                                  <tr key={c.id}>
+                                    <td><ToneChip tone={k.tone} small>{k.label}</ToneChip></td>
+                                    <td style={{ color:'var(--text-secondary)' }}>{isAdj ? (c.notes || 'Manual adjustment') : c.contact_name}</td>
+                                    <td style={{ color:'var(--text-muted)', whiteSpace:'nowrap' }}>
+                                      {new Date(c.earned_at).toLocaleString('en-US', { month:'short', day:'numeric', hour:'numeric', minute:'2-digit' })}
+                                    </td>
+                                    <td style={{ textAlign:'right', fontWeight:700, color: amt < 0 ? 'var(--tone-red-tx)' : 'var(--tone-green-tx)' }}>{signed(amt)}</td>
+                                  </tr>
+                                )
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
                       </div>
                     )}
                   </>
@@ -1000,133 +880,328 @@ export default function MyPage() {
               </div>
             )}
 
-            {/* SCORECARD */}
-            {tab === 'scorecard' && (
-              <div>
-                <div style={{ fontSize:11, color:'var(--text-muted)', marginBottom:20 }}>
-                  {scorecardLabel} . scores entered by your manager
-                </div>
+            {/* SCORECARD — the Team → Scorecards review look: score ring, rating
+                chips, Poor → Exceeds tracks. Rating math and thresholds are this
+                page's own, unchanged. */}
+            {tab === 'scorecard' && (() => {
+              const rows = SCORECARD_KPIS.map(kpi => {
+                const w = parseFloat(scWeights[kpi.id]) || kpi.weight * 100
+                const actual = kpi.id === 'attendance'
+                  ? scTotalPoints
+                  : (scActuals[kpi.id] != null ? parseFloat(scActuals[kpi.id]) : null)
+                const rating = getRating(kpi, actual, scThresholds[kpi.id])
+                const { lowerIsBetter, unit } = kpi
+                const thr = scThresholds[kpi.id] || kpi.thresholds
 
-                <div style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius-lg)', overflow: isMobile ? 'auto' : 'hidden' }}>
-                  {/* Header row */}
-                  <div className={isMobile ? 'mgrid mkeep' : undefined} style={{ display:'grid', gridTemplateColumns:'1fr 80px 110px 1fr 1fr 1fr 1fr', minWidth: isMobile ? 720 : undefined, background:'var(--surface-2)', borderBottom:'2px solid var(--border)' }}>
-                    {['KPI','Weight','Actual','Exceeds (4)','Meets (3)','Needs Improvement (2)','Poor Performance (1)'].map((h,i) => (
-                      <div key={h} style={{ padding:'10px 14px', fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color:'var(--text-muted)', textAlign: i === 0 ? 'left' : 'center' }}>{h}</div>
+                const fmt = (n) => unit === '%' ? `${n}%` : unit === 'points' ? `${n} pts` : `${n}${unit}`
+                const range = (lo, hi) => lo === hi ? fmt(lo) : `${fmt(lo)}-${fmt(hi)}`
+                let col4, col3, col2, col1
+                if (kpi.id === 'attendance') {
+                  // Exact values for attendance (lower is better, discrete points)
+                  col4 = fmt(thr.exceeds)
+                  col3 = fmt(thr.meets)
+                  col2 = fmt(thr.improvement)
+                  col1 = `${thr.improvement + 1}+ pts`
+                } else if (lowerIsBetter) {
+                  col4 = `${fmt(thr.exceeds)} or less`
+                  col3 = range(thr.exceeds + 1, thr.meets)
+                  col2 = range(thr.meets + 1, thr.improvement)
+                  col1 = `${fmt(thr.improvement + 1)}+`
+                } else {
+                  col4 = `${fmt(thr.exceeds)}+`
+                  col3 = range(thr.meets, thr.exceeds - 1)
+                  col2 = range(thr.improvement, thr.meets - 1)
+                  col1 = `Below ${fmt(thr.improvement)}`
+                }
+                return { kpi, w, actual, rating, thr, fmt, ranges: { 4: col4, 3: col3, 2: col2, 1: col1 } }
+              })
+              // Overall = the weighted average of the ratings above (the team
+              // review's formula). It waits for a scored KPI — attendance alone
+              // would read as "Exceeds" before the month's numbers are in.
+              const rated = rows.filter(r => r.rating != null && r.w > 0)
+              const wSum = rated.reduce((s, r) => s + r.w, 0)
+              const score = wSum && rows.some(r => r.kpi.id !== 'attendance' && r.actual != null)
+                ? rated.reduce((s, r) => s + r.rating * r.w, 0) / wSum : null
+              const lv = score == null ? null : score >= 3.5 ? 4 : score >= 2.5 ? 3 : score >= 1.5 ? 2 : 1
+              const lvTone = lv ? RATING_TONES[lv] : 'gray'
+              return (
+                <div style={stack}>
+                  <div style={{ ...panel, padding: isMobile ? 16 : '20px 22px', display:'flex', alignItems:'center', gap: isMobile ? 14 : 18, flexWrap:'wrap' }}>
+                    <Ring pct={score == null ? 0 : (score / 4) * 100} size={72} stroke={6} tone={lvTone}>
+                      <Face avatar={profile?.avatar} name={profile?.name || profile?.email} size={54} />
+                    </Ring>
+                    <div style={{ flex:'1 1 200px', minWidth:0 }}>
+                      <div style={{ fontSize:20, fontWeight:800, letterSpacing:'-.01em', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                        {profile?.name || profile?.email}
+                      </div>
+                      <div style={{ fontSize:13, color:'var(--text-muted)', marginTop:2 }}>Performance review · {scorecardLabel}</div>
+                      <div style={{ display:'flex', gap:6, marginTop:8, flexWrap:'wrap' }}>
+                        {lv ? <LevelChip level={lv} /> : <ToneChip tone="gray">Pending</ToneChip>}
+                      </div>
+                    </div>
+                    <div style={{ textAlign: isMobile ? 'left' : 'right' }}>
+                      <div style={eyebrow}>Overall score</div>
+                      <div style={{ ...num, fontSize: isMobile ? 32 : 38, fontWeight:800, lineHeight:1.05, letterSpacing:'-.03em', color: lv ? `var(--tone-${lvTone}-tx)` : 'var(--text-muted)' }}>
+                        {score == null ? '—' : score.toFixed(2)}
+                      </div>
+                      <div style={{ fontSize:11.5, color:'var(--text-muted)' }}>out of 4.00</div>
+                    </div>
+                  </div>
+
+                  <div style={{ ...panel, overflow:'hidden' }}>
+                    <div style={{ padding: headPad, borderBottom:'1px solid var(--border)', display:'flex', alignItems:'center', gap:10, flexWrap:'wrap' }}>
+                      <div style={{ fontSize:14, fontWeight:700 }}>KPIs</div>
+                      <span style={{ fontSize:12, color:'var(--text-muted)' }}>Each rates 1–4; the overall score is their weighted average</span>
+                      <span style={{ ...num, marginLeft:'auto', fontSize:12, color:'var(--text-muted)' }}>
+                        Total weight: {SCORECARD_KPIS.reduce((s,k) => s + (parseFloat(scWeights[k.id]) || 0), 0)}%
+                      </span>
+                    </div>
+                    {rows.map(({ kpi, w, actual, rating, thr, fmt, ranges }, idx) => (
+                      <div key={kpi.id} className="mgrid" style={{ display:'grid', gridTemplateColumns: isMobile ? 'minmax(0, 1fr)' : 'minmax(180px, 1.1fr) minmax(150px, .8fr) minmax(260px, 2fr)',
+                        gap: isMobile ? 10 : 20, alignItems:'center', padding: isMobile ? '14px 16px' : '14px 20px', borderTop: idx ? '1px solid var(--border)' : 'none' }}>
+                        <div>
+                          <div style={{ fontSize:14, fontWeight:700 }}>{kpi.label}</div>
+                          <div style={{ ...num, fontSize:11.5, color:'var(--text-muted)', marginTop:2 }}>
+                            {w}% of the score{kpi.id === 'attendance' ? ' · from your points log' : ''}
+                          </div>
+                        </div>
+                        <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+                          <span style={{ ...num, fontSize:22, fontWeight:800, letterSpacing:'-.01em', color: actual != null ? 'var(--text-primary)' : 'var(--text-muted)' }}>
+                            {actual != null ? `${actual}${kpi.unit === 'points' ? ' pts' : kpi.unit}` : '—'}
+                          </span>
+                          {rating ? <LevelChip level={rating} small /> : <ToneChip tone="gray" small>Pending</ToneChip>}
+                        </div>
+                        <KpiTrack level={rating} value={actual} thr={thr} lowerIsBetter={kpi.lowerIsBetter} fmt={fmt} ranges={ranges} />
+                      </div>
                     ))}
                   </div>
 
-                  {SCORECARD_KPIS.map((kpi, idx) => {
-                    const w = parseFloat(scWeights[kpi.id]) || kpi.weight * 100
-                    const actual = kpi.id === 'attendance'
-                      ? scTotalPoints
-                      : (scActuals[kpi.id] != null ? parseFloat(scActuals[kpi.id]) : null)
-                    const rating = getRating(kpi, actual, scThresholds[kpi.id])
-                    const ratingStyle = rating ? RATING_COLORS[rating] : null
-                    const { lowerIsBetter, unit } = kpi
-                    const thr = scThresholds[kpi.id] || kpi.thresholds
-
-                    const fmt = (n) => unit === '%' ? `${n}%` : unit === 'points' ? `${n} pts` : `${n}${unit}`
-                    const range = (lo, hi) => lo === hi ? fmt(lo) : `${fmt(lo)}-${fmt(hi)}`
-                    let col4, col3, col2, col1
-                    if (kpi.id === 'attendance') {
-                      // Exact values for attendance (lower is better, discrete points)
-                      col4 = fmt(thr.exceeds)
-                      col3 = fmt(thr.meets)
-                      col2 = fmt(thr.improvement)
-                      col1 = `${thr.improvement + 1}+ pts`
-                    } else if (lowerIsBetter) {
-                      col4 = `${fmt(thr.exceeds)} or less`
-                      col3 = range(thr.exceeds + 1, thr.meets)
-                      col2 = range(thr.meets + 1, thr.improvement)
-                      col1 = `${fmt(thr.improvement + 1)}+`
-                    } else {
-                      col4 = `${fmt(thr.exceeds)}+`
-                      col3 = range(thr.meets, thr.exceeds - 1)
-                      col2 = range(thr.improvement, thr.meets - 1)
-                      col1 = `Below ${fmt(thr.improvement)}`
-                    }
-
-                    return (
-                      <div key={kpi.id} className={isMobile ? 'mgrid mkeep' : undefined} style={{ display:'grid', gridTemplateColumns:'1fr 80px 110px 1fr 1fr 1fr 1fr', minWidth: isMobile ? 720 : undefined, borderBottom: idx < SCORECARD_KPIS.length-1 ? '1px solid var(--border)' : 'none', background: idx % 2 === 0 ? 'var(--surface)' : 'var(--surface-2)' }}>
-                        <div style={{ padding:'14px', display:'flex', flexDirection:'column', gap:4 }}>
-                          <div style={{ fontSize:13, fontWeight:600, color:'var(--text-primary)' }}>{kpi.label}</div>
-                          {rating && ratingStyle && (
-                            <div style={{ fontSize:10, fontWeight:700, padding:'2px 6px', borderRadius:4, background: ratingStyle.bg, color: ratingStyle.text, display:'inline-block', width:'fit-content' }}>
-                              {RATING_LABELS[rating]}
-                            </div>
-                          )}
-                          {actual == null && kpi.id !== 'attendance' && (
-                            <div style={{ fontSize:10, color:'var(--text-muted)' }}>Pending</div>
-                          )}
-                        </div>
-                        <div style={{ padding:'14px 8px', textAlign:'center', fontSize:12, color:'var(--text-secondary)', fontWeight:500, display:'flex', alignItems:'center', justifyContent:'center' }}>
-                          {w}%
-                        </div>
-                        <div style={{ padding:'14px 8px', textAlign:'center', display:'flex', alignItems:'center', justifyContent:'center' }}>
-                          {actual != null ? (
-                            <span style={{ fontSize:14, fontWeight:700, color: ratingStyle ? ratingStyle.text : 'var(--text-primary)' }}>
-                              {actual}{unit === 'points' ? ' pts' : unit}
-                            </span>
-                          ) : (
-                            <span style={{ fontSize:12, color:'var(--text-muted)' }}>--</span>
-                          )}
-                        </div>
-                        {[col4, col3, col2, col1].map((val, ci) => {
-                          const colRating = 4 - ci
-                          const cs = RATING_COLORS[colRating]
-                          const isMyRating = rating === colRating
-                          return (
-                            <div key={ci} style={{ padding:'14px 8px', textAlign:'center', fontSize:12, fontWeight: isMyRating ? 700 : 400,
-                              background: isMyRating ? cs.bg : 'transparent',
-                              color: isMyRating ? cs.text : 'var(--text-muted)',
-                              boxShadow: isMyRating ? `inset 0 0 0 1.5px ${cs.border}` : 'none',
-                              borderLeft:'1px solid var(--border)', display:'flex', alignItems:'center', justifyContent:'center' }}>
-                              {val}{isMyRating && ' *'}
-                            </div>
-                          )
-                        })}
-                      </div>
-                    )
-                  })}
+                  <div style={{ fontSize:11.5, color:'var(--text-muted)', display:'flex', gap:16, flexWrap:'wrap' }}>
+                    <span>Attendance auto-populated from your points log</span>
+                    <span>Other scores fill in automatically every hour from ServiceTitan and Andi</span>
+                  </div>
                 </div>
-
-                <div style={{ marginTop:16, fontSize:11, color:'var(--text-muted)', display:'flex', gap:16, flexWrap:'wrap' }}>
-                  <span>Total weight: {SCORECARD_KPIS.reduce((s,k) => s + (parseFloat(scWeights[k.id]) || 0), 0)}%</span>
-                  <span>Attendance auto-populated from your points log</span>
-                  <span>Other scores entered by your manager each month</span>
-                </div>
-              </div>
-            )}
+              )
+            })()}
           </>
         )}
+      </div>
+
+      {/* 📣 Admin floor alert */}
+      {announceOpen && (
+        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,.45)', zIndex:700, display:'flex', alignItems:'center', justifyContent:'center', padding:20 }}
+          onMouseDown={() => setAnnounceOpen(false)}>
+          <div className="modal" onMouseDown={e => e.stopPropagation()} style={{ maxWidth:420 }}>
+            <div className="modal-title" style={{ marginBottom:2 }}>Notify the team</div>
+            <div style={{ fontSize:12.5, color:'var(--text-muted)', marginBottom:16 }}>Pops on their screen like a schedule alert — with a chime.</div>
+            <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
+              <div className="form-field">
+                <label className="form-label">Who</label>
+                <label style={{ display:'flex', alignItems:'center', gap:8, fontSize:13, fontWeight:600, cursor:'pointer', padding:'6px 2px' }}>
+                  <input type="checkbox" checked={announce.all}
+                    onChange={e => setAnnounce(a => ({ ...a, all: e.target.checked }))} />
+                  Everyone on the floor
+                </label>
+                {!announce.all && (
+                  <div style={{ maxHeight:170, overflowY:'auto', border:'1px solid var(--border)', borderRadius:10, background:'var(--surface-2)', padding:'4px 10px', display:'flex', flexDirection:'column' }}>
+                    {annProfiles.map(p => (
+                      <label key={p.id} style={{ display:'flex', alignItems:'center', gap:8, fontSize:13, cursor:'pointer', padding:'5px 2px' }}>
+                        <input type="checkbox" checked={announce.ids.includes(p.id)}
+                          onChange={e => setAnnounce(a => ({ ...a, ids: e.target.checked ? [...a.ids, p.id] : a.ids.filter(x => x !== p.id) }))} />
+                        {p.name || p.email}
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div className="form-field">
+                <label className="form-label">Message</label>
+                <textarea className="form-input" rows={3} autoFocus value={announce.message}
+                  placeholder="Huddle in 5 · Pizza in the break room · Great job on the push this morning!"
+                  onChange={e => setAnnounce(a => ({ ...a, message: e.target.value }))}
+                  onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) sendAnnouncement() }} />
+                <div style={{ display:'flex', gap:4, flexWrap:'wrap', marginTop:6 }}>
+                  {['📣','🎉','👏','🔥','💪','🍕','☕','⏰','🚨','✅','🙌','😂'].map(em => (
+                    <button key={em} type="button" onClick={() => setAnnounce(a => ({ ...a, message: a.message + em }))}
+                      style={{ border:'1px solid var(--border)', background:'var(--surface-2)', borderRadius:8, padding:'3px 7px', fontSize:15, cursor:'pointer', lineHeight:1 }}>
+                      {em}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="form-field">
+                <label className="form-label">When</label>
+                <div style={{ display:'flex', gap:8, alignItems:'center', flexWrap: isMobile ? 'wrap' : undefined }}>
+                  <input className="form-input" type="datetime-local" value={announce.sendAt}
+                    min={new Date(Date.now() + 2 * 60_000).toISOString().slice(0, 16)}
+                    onChange={e => setAnnounce(a => ({ ...a, sendAt: e.target.value }))} style={{ flex:1 }} />
+                  {announce.sendAt && <button className="btn sm" onClick={() => setAnnounce(a => ({ ...a, sendAt: '' }))}>Send now instead</button>}
+                </div>
+                <div style={{ fontSize:11, color:'var(--text-muted)', marginTop:4 }}>Leave empty to send immediately.</div>
+              </div>
+              {annScheduled.length > 0 && (
+                <div style={{ border:'1px solid var(--border)', borderRadius:10, padding:'8px 12px', display:'flex', flexDirection:'column', gap:5 }}>
+                  <div style={eyebrow}>Scheduled</div>
+                  {annScheduled.map(m => (
+                    <div key={m.id} style={{ display:'flex', alignItems:'center', gap:8, fontSize:12 }}>
+                      <span style={{ ...num, fontWeight:700, flexShrink:0 }}>
+                        {new Date(m.sendAt).toLocaleString([], { month:'short', day:'numeric', hour:'numeric', minute:'2-digit' })}
+                      </span>
+                      <span style={{ color:'var(--text-muted)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', flex:1 }}>
+                        {m.to === 'all' ? 'Everyone' : m.toNames || 'Selected'} — {m.message}
+                      </span>
+                      <button onClick={() => unscheduleAnn(m.id)} title="Cancel this scheduled message" aria-label="Cancel this scheduled message"
+                        style={{ border:'none', background:'none', color:'var(--tone-red-tx)', cursor:'pointer', fontSize:15, lineHeight:1, flexShrink:0 }}>×</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {announceMsg && <div style={{ fontSize:12.5, fontWeight:700, color:'var(--tone-red-tx)' }}>{announceMsg}</div>}
+              <div style={{ display:'flex', justifyContent:'flex-end', gap:8 }}>
+                <button className="btn" onClick={() => setAnnounceOpen(false)}>Cancel</button>
+                <button className="btn primary" onClick={sendAnnouncement}
+                  disabled={announceBusy || !announce.message.trim() || (!announce.all && !announce.ids.length)}>
+                  {announceBusy ? 'Sending…' : announce.sendAt ? '📅 Schedule it' : announce.all ? 'Send to everyone' : `Send (${announce.ids.length})`}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {swapDay !== null && (
+        <ShiftSwapModal profile={profile} profiles={profiles} schedules={schedules}
+          initialDate={swapDay || undefined} onClose={() => setSwapDay(null)}
+          onSubmitted={() => { setPtoToast('Swap request sent — your co-worker has been emailed.'); setTimeout(() => setPtoToast(''), 6000) }} />
+      )}
+      {ptoDay && (
+        <PtoRequestModal initialDate={ptoDay} onClose={() => setPtoDay(null)}
+          onSubmitted={() => { setPtoToast('Request sent — your manager has been notified. Track it in the Time Off tab.'); setTimeout(() => setPtoToast(''), 6000) }} />
+      )}
+      {ptoToast && (
+        <div role="status" style={{ position:'fixed', bottom:20, right:20, left: isMobile ? 20 : undefined, zIndex:900, background:'var(--tone-green-bg)', border:'1px solid var(--tone-green-bd)', color:'var(--tone-green-tx)', borderRadius:12, padding:'11px 16px', fontSize:12.5, fontWeight:600, boxShadow:'0 12px 28px -14px rgba(15,20,40,.35)' }}>
+          ✓ {ptoToast}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// A day-type chip small enough for a month-calendar cell.
+function DayChip({ tone, tiny, children }) {
+  return (
+    <span style={{ display:'inline-block', maxWidth:'100%', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', verticalAlign:'top',
+      fontSize: tiny ? 9 : 10, fontWeight:700, borderRadius:99, padding: tiny ? '1px 5px' : '1px 7px',
+      color:`var(--tone-${tone}-tx)`, background:`var(--tone-${tone}-bg)`, border:`1px solid var(--tone-${tone}-bd)` }}>
+      {children}
+    </span>
+  )
+}
+
+// The kit's SummaryPanel on desktop. On a phone the kit stacks one zone per
+// row (My Stats ran three screens tall), so here zones sit `cols` across,
+// with hairlines between, and any index in `wide` takes a whole row.
+function Zones({ isMobile, columns, cols = 2, wide = [], children }) {
+  const zones = Children.toArray(children).filter(Boolean)
+  if (!isMobile) return <SummaryPanel columns={columns} style={{ marginBottom:0 }}>{zones}</SummaryPanel>
+  let row = 0, col = 0
+  const cells = zones.map((z, i) => {
+    const span = wide.includes(i) ? cols : 1
+    if (col + span > cols) { row++; col = 0 }
+    const cell = { z, span, top: row > 0, left: col > 0 }
+    col += span
+    if (col >= cols) { row++; col = 0 }
+    return cell
+  })
+  return (
+    <div className="mgrid" style={{ ...panel, display:'grid', gridTemplateColumns:`repeat(${cols}, minmax(0, 1fr))` }}>
+      {cells.map((c, i) => (
+        <div key={i} style={{ gridColumn: c.span > 1 ? '1 / -1' : undefined, padding: cols > 2 ? '12px 12px' : '14px 16px', minWidth:0,
+          borderTop: c.top ? '1px solid var(--border)' : 'none', borderLeft: c.left ? '1px solid var(--border)' : 'none' }}>
+          {c.z}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// The kit's Stat at phone size, for zones two or three across.
+function MiniStat({ label, value, sub, tone, size = 22 }) {
+  return (
+    <div>
+      <div style={eyebrow}>{label}</div>
+      <div style={{ ...num, fontSize:size, fontWeight:800, letterSpacing:'-.03em', lineHeight:1.1, marginTop:4,
+        color: tone ? `var(--tone-${tone}-tx)` : 'var(--text-primary)' }}>{value}</div>
+      {sub && <div style={{ fontSize:11.5, color:'var(--text-secondary)', marginTop:3 }}>{sub}</div>}
+    </div>
+  )
+}
+
+// Rating chip — the team review's LevelChip look with this page's labels.
+function LevelChip({ level, small }) {
+  return <ToneChip tone={RATING_TONES[level]} small={small}>{RATING_LABELS[level]}</ToneChip>
+}
+
+// Poor → Exceeds, worst-left / best-right (attendance included), after the
+// team review's KpiTrack. The zone comes from this page's own rating; the
+// marker interpolates inside the two middle zones and centers in the
+// open-ended outer ones. Each zone's exact range is its tooltip.
+function KpiTrack({ level, value, thr, lowerIsBetter, fmt, ranges }) {
+  let pos = null
+  if (level) {
+    const z = level - 1
+    let frac = 0.5
+    if (z === 1 || z === 2) {
+      const [lo, hi] = z === 1 ? [thr.improvement, thr.meets] : [thr.meets, thr.exceeds]
+      frac = hi === lo ? 0.5 : Math.min(0.92, Math.max(0.08, lowerIsBetter ? (lo - value) / (lo - hi) : (value - lo) / (hi - lo)))
+    }
+    pos = ((z + frac) / 4) * 100
+  }
+  const tone = level ? RATING_TONES[level] : null
+  const tip = (lv) => `${RATING_LABELS[lv]} (${lv}): ${ranges[lv]}`
+  return (
+    <div style={{ minWidth:0 }}>
+      <div className="mgrid" style={{ display:'grid', gridTemplateColumns:'repeat(4, minmax(0, 1fr))', gap:3, marginBottom:4 }}>
+        {ZONES.map((z, i) => {
+          const on = level === i + 1
+          return (
+            <span key={z} title={tip(i + 1)} style={{ fontSize:10.5, fontWeight: on ? 800 : 600, textAlign:'center', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis',
+              color: on ? `var(--tone-${RATING_TONES[i + 1]}-tx)` : 'var(--text-muted)' }}>{z}</span>
+          )
+        })}
+      </div>
+      <div style={{ position:'relative' }}>
+        <div className="mgrid" style={{ display:'grid', gridTemplateColumns:'repeat(4, minmax(0, 1fr))', gap:3 }}>
+          {ZONES.map((z, i) => {
+            const lv = i + 1
+            const t = RATING_TONES[lv]
+            return <div key={z} title={tip(lv)} style={{ height:9, borderRadius:99, background: level === lv ? `var(--tone-${t}-tx)` : `var(--tone-${t}-bg)`,
+              border:`1px solid var(--tone-${t}-bd)`, opacity: level && level !== lv ? 0.7 : 1 }} />
+          })}
+        </div>
+        {pos != null && (
+          <div style={{ position:'absolute', top:'50%', left:`${pos}%`, width:15, height:15, transform:'translate(-50%, -50%)', borderRadius:99,
+            background:'var(--surface)', border:`3px solid var(--tone-${tone}-tx)`, boxShadow:'0 1px 4px rgba(15,20,40,.25)' }} />
+        )}
+      </div>
+      <div style={{ position:'relative', height:14, marginTop:5 }}>
+        {[thr.improvement, thr.meets, thr.exceeds].map((b, i) => (
+          <span key={i} style={{ ...num, position:'absolute', left:`${(i + 1) * 25}%`, transform:'translateX(-50%)', fontSize:10, color:'var(--text-muted)', whiteSpace:'nowrap' }}>
+            {fmt(b)}
+          </span>
+        ))}
       </div>
     </div>
   )
 }
 
-function WeekNav({ weekBase, setWeekBase, weekLabel }) {
-  const nav = (dir) => {
-    const d = new Date(weekBase + 'T00:00:00')
-    d.setDate(d.getDate() + dir * 7)
-    setWeekBase(toYMD(d))
-  }
+// Commission type tile — the type's icon in its tone, as on Team → Commissions.
+function CommTile({ kind }) {
   return (
-    <div style={{ display:'flex', alignItems:'center', gap:12 }}>
-      <button onClick={() => nav(-1)} style={{ width:28, height:28, borderRadius:'50%', border:'1px solid var(--border)', background:'var(--surface)', cursor:'pointer', fontSize:14, display:'flex', alignItems:'center', justifyContent:'center', color:'var(--text-muted)' }}>{'<'}</button>
-      <span style={{ fontSize:13, fontWeight:600, color:'var(--text-primary)' }}>{weekLabel}</span>
-      <button onClick={() => nav(1)} style={{ width:28, height:28, borderRadius:'50%', border:'1px solid var(--border)', background:'var(--surface)', cursor:'pointer', fontSize:14, display:'flex', alignItems:'center', justifyContent:'center', color:'var(--text-muted)' }}>{'>'}</button>
-      <button onClick={() => setWeekBase(getTodayMonday())} style={{ fontSize:11, padding:'3px 8px', borderRadius:6, border:'1px solid var(--accent)', background:'none', color:'var(--accent)', cursor:'pointer', fontWeight:600 }}>Today</button>
-    </div>
-  )
-}
-
-// compact: a tighter tile for three-across rows on a phone.
-function StatCard({ label, value, sub, valueColor, compact }) {
-  return (
-    <div style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius-lg)', padding: compact ? '10px 10px' : '16px 18px' }}>
-      <div style={{ fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:.6, color:'var(--text-muted)', marginBottom: compact ? 4 : 8 }}>{label}</div>
-      <div style={{ fontSize: compact ? 20 : 28, fontWeight:800, letterSpacing:'-1px', color: valueColor || 'var(--text-primary)' }}>{value}</div>
-      {sub && <div style={{ fontSize:11, color:'var(--text-muted)', marginTop:4 }}>{sub}</div>}
+    <div title={kind.label} style={{ width:34, height:34, borderRadius:10, flexShrink:0, display:'flex', alignItems:'center', justifyContent:'center',
+      color:`var(--tone-${kind.tone}-tx)`, background:`var(--tone-${kind.tone}-bg)`, border:`1px solid var(--tone-${kind.tone}-bd)` }}>
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d={COMM_ICONS[kind.key]} />
+      </svg>
     </div>
   )
 }

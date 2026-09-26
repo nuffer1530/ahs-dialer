@@ -1489,9 +1489,11 @@ export default function DialerPage() {
   // Label helper
   const L = ({ text }) => <div style={{ fontSize:9, fontWeight:700, textTransform:'uppercase', letterSpacing:.7, color:'var(--text-muted)', marginBottom:3 }}>{text}</div>
 
-  const sectionCard = { background:'var(--surface)', border:'1px solid var(--border)', borderRadius:10, overflow:'hidden', marginBottom:0 }
-  const sectionHeader = { padding:'8px 14px', borderBottom:'1px solid var(--border)', display:'flex', alignItems:'center', justifyContent:'space-between', background:'var(--surface-2)' }
-  const sectionTitle = { fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:.7, color:'var(--text-muted)' }
+  // Workspace sections share the app-wide panel look (16px corners, eyebrow
+  // titles) but keep the dialer's tighter padding — it's a working screen.
+  const sectionCard = { background:'var(--surface)', border:'1px solid var(--border)', borderRadius:14, overflow:'hidden', marginBottom:0 }
+  const sectionHeader = { padding:'9px 16px', borderBottom:'1px solid var(--border)', display:'flex', alignItems:'center', justifyContent:'space-between', background:'var(--surface)' }
+  const sectionTitle = { fontSize:10.5, fontWeight:700, textTransform:'uppercase', letterSpacing:'.07em', color:'var(--text-muted)' }
 
   return (
     <div style={{ display:'flex', flex:1, overflow:'hidden', height:'100%', flexDirection:'column' }}>

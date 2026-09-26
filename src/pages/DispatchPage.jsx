@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { sb } from '../lib/supabase'
 import CommandCenter from '../components/dispatch/CommandCenter'
 import { useIsMobile } from '../lib/useIsMobile'
+import { PageTabs, Segmented, ToneChip, SummaryPanel, Stat, EmptyState, Face, eyebrow, panel, num } from '../components/ui'
 
 // Dispatch for Profit — who to send, and whether today's board agrees.
 //
@@ -13,13 +14,44 @@ import { useIsMobile } from '../lib/useIsMobile'
 // Baseball, to match the tab name. 'On the Bench' says where to route without
 // branding anyone a bad tech; 'Rookie' keeps thin data from reading as a grade.
 const TIER = {
-  green:    { color:'var(--tone-green-tx)', bg:'var(--tone-green-bg)', border:'var(--tone-green-bd)', label:'Heavy Hitter' },
-  yellow:   { color:'var(--tone-amber-tx)', bg:'var(--tone-amber-bg)', border:'var(--tone-amber-bd)', label:'In the Lineup' },
-  red:      { color:'var(--tone-red-tx)', bg:'var(--tone-red-bg)', border:'var(--tone-red-bd)', label:'On the Bench' },
-  unranked: { color:'var(--tone-gray-tx)', bg:'var(--tone-gray-bg)', border:'var(--tone-gray-bd)', label:'Rookie — no stats yet' },
+  green:    { tone:'green', label:'Heavy Hitter' },
+  yellow:   { tone:'amber', label:'In the Lineup' },
+  red:      { tone:'red',   label:'On the Bench' },
+  unranked: { tone:'gray',  label:'Rookie — no stats yet' },
 }
 
 const ST_JOB_URL = (jobId) => `https://go.servicetitan.com/#/Job/Index/${jobId}`
+
+// Row tints for the tables — a wash of the tone, so they read in dark mode too.
+const GREEN_TINT = 'color-mix(in srgb, var(--tone-green-bg) 55%, transparent)'
+const RED_TINT = 'color-mix(in srgb, var(--tone-red-bg) 55%, transparent)'
+// Face shows initials; ServiceTitan names sometimes carry a suffix ("Bryce (Plumbing)").
+const faceName = (n) => String(n || '').replace(/[^\p{L}\s'-]/gu, ' ').trim()
+// A tech's initials beside their name, for table cells. Size 20 with 6px cell
+// padding keeps a row exactly as tall as its 7px-padded text neighbours.
+function TechName({ name, children, size = 20, wrap }) {
+  return (
+    <div style={{ display:'flex', alignItems:'center', gap:7, minWidth:0 }}>
+      {name && <Face name={faceName(name)} size={size} />}
+      <span style={{ minWidth:0, ...(wrap ? {} : { overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }) }}>{name}</span>
+      {children}
+    </div>
+  )
+}
+// Skeleton blocks while a tab's first read is in flight.
+const Loading = ({ heights = [56, 280] }) => (
+  <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
+    {heights.map((h, i) => <div key={i} className="skel" style={{ height:h, borderRadius:16 }} />)}
+  </div>
+)
+// The kit's ToneChip a size down, for the flags stacked inside a Live Board
+// row — at the kit's size they'd wrap onto extra lines and grow the row.
+const MiniChip = ({ tone = 'gray', title, children }) => (
+  <span title={title} style={{ display:'inline-block', marginTop:3, marginRight:4, fontSize:9, fontWeight:700, whiteSpace:'nowrap',
+    padding:'1px 5px', borderRadius:99, color:`var(--tone-${tone}-tx)`, background:`var(--tone-${tone}-bg)`, border:`1px solid var(--tone-${tone}-bd)` }}>
+    {children}
+  </span>
+)
 
 // One <table> per arrival window means each would otherwise auto-size its own
 // columns and the groups wouldn't line up down the page. Fixed layout + one
@@ -95,10 +127,10 @@ function HoverTip({ tip }) {
   const left = tip.x + 300 > window.innerWidth ? tip.x - 296 : tip.x + 14
   return (
     <div style={{ position:'fixed', left, top: Math.min(tip.y + 14, window.innerHeight - 120), zIndex: 900,
-      maxWidth: 280, background:'var(--surface)', border:'1px solid var(--border)', borderRadius:10,
-      boxShadow:'0 10px 30px rgba(0,0,0,.25)', padding:'9px 12px', fontSize:12, lineHeight:1.5,
+      maxWidth: 280, background:'var(--surface)', border:'1px solid var(--border)', borderRadius:12,
+      boxShadow:'0 16px 40px -12px rgba(15,20,40,.4)', padding:'10px 13px', fontSize:12, lineHeight:1.5,
       color:'var(--text-primary)', pointerEvents:'none', whiteSpace:'pre-wrap' }}>
-      {tip.title && <div style={{ fontSize:10.5, fontWeight:700, color:'var(--text-muted)', marginBottom:3 }}>{tip.title}</div>}
+      {tip.title && <div style={{ fontSize:11, fontWeight:700, color:'var(--text-secondary)', marginBottom:3 }}>{tip.title}</div>}
       {tip.text}
     </div>
   )
@@ -106,10 +138,7 @@ function HoverTip({ tip }) {
 
 function TierPill({ tier }) {
   const t = TIER[tier] || TIER.unranked
-  return (
-    <span style={{ fontSize:10, fontWeight:700, color:t.color, background:t.bg, border:`1px solid ${t.border}`,
-      padding:'2px 8px', borderRadius:99, whiteSpace:'nowrap' }}>{t.label}</span>
-  )
+  return <ToneChip tone={t.tone} small>{t.label}</ToneChip>
 }
 
 // 📝 Tech Info — dispatcher intel on specific techs. Notes save per tech and
@@ -139,28 +168,29 @@ function TechInfo() {
   }
 
   if (err) return <div style={{ padding:20, color:'var(--danger)', fontSize:13 }}>{err}</div>
-  if (!data) return <div className="spinner lg" style={{ margin:'60px auto' }} />
+  if (!data) return <Loading heights={[40, 150, 150]} />
   const teams = [...new Set((data.techs || []).map(t => t.team))]
   return (
     <div>
-      <div style={{ fontSize:12, color:'var(--text-muted)', marginBottom:14 }}>
+      <div style={{ fontSize:12.5, color:'var(--text-muted)', marginBottom:16, lineHeight:1.55 }}>
         Notes for the techs dispatch actually sends (install crews excluded) — they pop up when you
         hover a 📝 name on the Batting Order. Review stats come straight from ServiceTitan and are
         weighted into the ranking (5★ reviews per jobs ran, like Membership); nobody enters them by hand.
       </div>
       {teams.map(team => (
         <div key={team} style={{ marginBottom:20 }}>
-          <div style={{ fontSize:13, fontWeight:700, marginBottom:8 }}>{team}</div>
-          <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(min(320px, 100%), 1fr))', gap:10 }}>
+          <div style={{ fontSize:14, fontWeight:700, marginBottom:10 }}>{team}</div>
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(min(320px, 100%), 1fr))', gap:12 }}>
             {(data.techs || []).filter(t => t.team === team).map(t => (
-              <div key={t.id} className="card" style={{ padding:'10px 12px' }}>
-                <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:6, gap:8 }}>
-                  <span style={{ fontSize:12.5, fontWeight:700, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{t.name}</span>
+              <div key={t.id} style={{ ...panel, padding:'12px 14px' }}>
+                <div style={{ display:'flex', alignItems:'center', marginBottom:8, gap:9 }}>
+                  <Face name={faceName(t.name)} size={26} />
+                  <span style={{ fontSize:13, fontWeight:700, flex:1, minWidth:0, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{t.name}</span>
                   <span style={{ display:'flex', alignItems:'center', gap:6, flexShrink:0 }}>
-                    {savedAt[t.id] && <span style={{ fontSize:10.5, fontWeight:700, color:'var(--success)' }}>✓ Saved</span>}
+                    {savedAt[t.id] && <span style={{ fontSize:10.5, fontWeight:700, color:'var(--tone-green-tx)' }}>✓ Saved</span>}
                     {data.reviews?.[t.id] ? (
                       <span title={`From ServiceTitan${data.reviewWindowDays ? ` — last ${data.reviewWindowDays} days` : ''}: ${data.reviews[t.id].n} reviews, ${data.reviews[t.id].n5} five-star, ${data.reviews[t.id].perJobs}% of jobs ran`}
-                        style={{ fontSize:11.5, fontWeight:700, color:'var(--tone-amber-tx)', cursor:'help' }}>
+                        style={{ ...num, fontSize:11.5, fontWeight:700, color:'var(--tone-amber-tx)', cursor:'help' }}>
                         ★ {data.reviews[t.id].avg} ({data.reviews[t.id].n})
                       </span>
                     ) : (
@@ -219,7 +249,7 @@ function BattingOrder() {
   }
 
   if (err) return <div style={{ padding:20, color:'var(--danger)', fontSize:13 }}>{err}</div>
-  if (!data) return <div className="spinner lg" style={{ margin:'60px auto' }} />
+  if (!data) return <Loading heights={[56, 320]} />
 
   const units = [...new Set((data.groups || []).map(g => g.business_unit))].sort()
   const wTotal = weights ? (weights.expectedValue + weights.closeRate + weights.membership + (weights.reviews || 0)) : 0
@@ -228,41 +258,41 @@ function BattingOrder() {
     <div>
       <HoverTip tip={tip} />
       <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', flexWrap:'wrap', gap:10, marginBottom:14 }}>
-        <div style={{ fontSize:12, color:'var(--text-muted)' }}>
+        <div style={{ fontSize:12.5, color:'var(--text-muted)', lineHeight:1.55 }}>
           Ranked by expected revenue per opportunity (close rate × average sale) within each dispatch team ·
           {data.windowDays}-day window, recent work weighted heavier · scored {ago(data.refreshedAt)}
         </div>
-        <button className="btn sm" onClick={refresh} disabled={busy}>
+        <button className="btn sm" onClick={refresh} disabled={busy} style={{ borderRadius:99 }}>
           {busy ? 'Scoring… (takes a minute)' : 'Rescore now'}
         </button>
       </div>
 
       {/* Weights */}
       {weights && (
-        <div className="card" style={{ padding:'12px 14px', marginBottom:16, display:'flex', alignItems:'center', gap:14, flexWrap:'wrap' }}>
-          <span style={{ fontSize:11, fontWeight:700, textTransform:'uppercase', letterSpacing:.5, color:'var(--text-muted)' }}>Weighting</span>
+        <div style={{ ...panel, padding:'12px 16px', marginBottom:16, display:'flex', alignItems:'center', gap:14, flexWrap:'wrap' }}>
+          <span style={eyebrow}>Weighting</span>
           {[['expectedValue','Expected value'],['closeRate','Close rate'],['membership','Membership'],['reviews','Reviews']].map(([k,label]) => (
-            <label key={k} style={{ display:'flex', alignItems:'center', gap:6, fontSize:12 }}>
+            <label key={k} style={{ display:'flex', alignItems:'center', gap:6, fontSize:12, color:'var(--text-secondary)' }}>
               {label}
               <input type="number" min="0" max="100" value={weights[k] ?? 0}
                 onChange={e => setWeights(w => ({ ...w, [k]: Number(e.target.value) }))}
-                style={{ width:58, padding:'4px 6px', border:'1px solid var(--border)', borderRadius:6,
-                  background:'var(--surface-2)', color:'var(--text-primary)', fontSize:12 }} />
+                style={{ ...num, width:58, padding:'4px 8px', border:'1px solid var(--border-strong)', borderRadius:8,
+                  background:'var(--surface-2)', color:'var(--text-primary)', fontSize:12, fontWeight:600 }} />
             </label>
           ))}
-          <span style={{ fontSize:11, color: wTotal === 100 ? 'var(--text-muted)' : 'var(--warning)' }}>
+          <span style={{ ...num, fontSize:11.5, color: wTotal === 100 ? 'var(--text-muted)' : 'var(--tone-amber-tx)', fontWeight: wTotal === 100 ? 400 : 600 }}>
             total {wTotal}{wTotal !== 100 ? ' (relative weights — needn\'t sum to 100)' : ''}
           </span>
-          <button className="btn sm" onClick={saveWeights} disabled={savingW}>
+          <button className="btn sm" onClick={saveWeights} disabled={savingW} style={{ borderRadius:99, marginLeft:'auto' }}>
             {savingW ? 'Saving…' : 'Save & rescore next run'}
           </button>
         </div>
       )}
 
       {units.length === 0 && (
-        <div className="empty-state" style={{ padding:'40px 20px', textAlign:'center', color:'var(--text-muted)', fontSize:13 }}>
+        <EmptyState>
           No scores yet. Hit <strong>Rescore now</strong> — the first run pulls 45 days from ServiceTitan and takes a minute.
-        </div>
+        </EmptyState>
       )}
 
       {units.map(bu => {
@@ -270,9 +300,9 @@ function BattingOrder() {
         const ranked = rows.filter(r => r.tier !== 'unranked').sort((a,b) => (a.rank||99) - (b.rank||99))
         const thin = rows.filter(r => r.tier === 'unranked').sort((a,b) => b.jobs - a.jobs)
         return (
-          <div key={bu} style={{ marginBottom:22 }}>
-            <div style={{ display:'flex', alignItems:'baseline', gap:9, marginBottom:8, flexWrap:'wrap' }}>
-              <span style={{ fontSize:13, fontWeight:700, color:'var(--text-primary)' }}>{bu}</span>
+          <div key={bu} style={{ ...panel, overflow:'hidden', marginBottom:16 }}>
+            <div style={{ display:'flex', alignItems:'center', gap:10, padding:'11px 16px', borderBottom:'1px solid var(--border)', flexWrap:'wrap' }}>
+              <span style={{ fontSize:14, fontWeight:700, color:'var(--text-primary)' }}>{bu}</span>
               {(() => {
                 // A tight bench is the most important thing to say out loud:
                 // ranking #1 vs #2 on a 7% gap is noise, and treating it as a
@@ -282,22 +312,18 @@ function BattingOrder() {
                 const spread = (evs[evs.length-1] - evs[0]) / evs[evs.length-1]
                 const tight = spread < 0.25
                 return (
-                  <span title={tight
+                  <ToneChip small tone={tight ? 'gray' : 'amber'} title={tight
                     ? 'These techs are within noise of each other — rank order here is not a meaningful difference'
-                    : 'There is real separation between top and bottom on this bench'}
-                    style={{ fontSize:10, fontWeight:600, padding:'2px 8px', borderRadius:99,
-                      color: tight ? 'var(--text-muted)' : 'var(--tone-amber-tx)',
-                      background: tight ? 'var(--surface-2)' : 'var(--tone-amber-bg)',
-                      border: `1px solid ${tight ? 'var(--border)' : 'var(--tone-amber-bd)'}` }}>
+                    : 'There is real separation between top and bottom on this bench'}>
                     {tight
                       ? `${Math.round(spread*100)}% spread — effectively interchangeable`
                       : `${Math.round(spread*100)}% spread`}
-                  </span>
+                  </ToneChip>
                 )
               })()}
             </div>
-            {/* Eleven columns don't fit a phone; the card scrolls sideways instead of squeezing them. */}
-            <div className="card" style={{ padding:0, overflow: isMobile ? 'auto' : 'hidden' }}>
+            {/* Eleven columns don't fit a phone; the table scrolls sideways instead of squeezing them. */}
+            <div style={isMobile ? { overflowX:'auto' } : undefined}>
               <table className="data-table" style={{ fontSize:12, tableLayout:'fixed', width:'100%', ...(isMobile ? { minWidth:860 } : {}) }}>
                 <colgroup>{BO_COLS.map(c => <col key={c.key} style={{ width:c.width }} />)}</colgroup>
                 <thead><tr>
@@ -307,23 +333,23 @@ function BattingOrder() {
                 </tr></thead>
                 <tbody>
                   {ranked.map(r => (
-                    <tr key={r.tech_id} style={{ background: r.tier === 'green' ? 'rgba(21,128,61,.04)' : 'transparent' }}>
-                      <td style={{ padding:'7px 12px', color:'var(--text-muted)' }}>{r.rank}</td>
-                      <td style={{ padding:'7px 12px', fontWeight:600, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap',
+                    <tr key={r.tech_id} style={{ background: r.tier === 'green' ? GREEN_TINT : 'transparent' }}>
+                      <td style={{ padding:'7px 14px', color:'var(--text-muted)' }}>{r.rank}</td>
+                      <td style={{ padding:'6px 14px', fontWeight:600, overflow:'hidden',
                           cursor: techNotes[r.tech_id] ? 'pointer' : 'default' }}
                         onMouseEnter={e => techNotes[r.tech_id] && showTip(e, `📝 ${r.tech_name}`, techNotes[r.tech_id])}
                         onMouseMove={e => techNotes[r.tech_id] && showTip(e, `📝 ${r.tech_name}`, techNotes[r.tech_id])}
                         onMouseLeave={() => setTip(null)}>
-                        {r.tech_name}{techNotes[r.tech_id] && <span style={{ marginLeft:5 }}>📝</span>}
+                        <TechName name={r.tech_name}>{techNotes[r.tech_id] && <span style={{ flexShrink:0 }}>📝</span>}</TechName>
                       </td>
-                      <td style={{ padding:'7px 12px' }}><TierPill tier={r.tier} /></td>
-                      <td style={{ padding:'7px 12px', textAlign:'right', fontWeight:700 }}>{money(r.expected_value)}</td>
-                      <td style={{ padding:'7px 12px', textAlign:'right' }}>{pct(r.close_rate)}</td>
-                      <td style={{ padding:'7px 12px', textAlign:'right' }}>{money(r.avg_sale)}</td>
-                      <td style={{ padding:'7px 12px', textAlign:'right', color:'var(--text-muted)' }}>{money(r.total_sold)}</td>
-                      <td style={{ padding:'7px 12px', textAlign:'right', color:'var(--text-muted)' }}>{r.opportunities ?? '—'}</td>
-                      <td style={{ padding:'7px 12px', textAlign:'right' }}>{pct(r.membership_pct)}</td>
-                      <td style={{ padding:'7px 12px', textAlign:'right' }}>
+                      <td style={{ padding:'7px 14px' }}><TierPill tier={r.tier} /></td>
+                      <td style={{ padding:'7px 14px', textAlign:'right', fontWeight:700 }}>{money(r.expected_value)}</td>
+                      <td style={{ padding:'7px 14px', textAlign:'right' }}>{pct(r.close_rate)}</td>
+                      <td style={{ padding:'7px 14px', textAlign:'right' }}>{money(r.avg_sale)}</td>
+                      <td style={{ padding:'7px 14px', textAlign:'right', color:'var(--text-muted)' }}>{money(r.total_sold)}</td>
+                      <td style={{ padding:'7px 14px', textAlign:'right', color:'var(--text-muted)' }}>{r.opportunities ?? '—'}</td>
+                      <td style={{ padding:'7px 14px', textAlign:'right' }}>{pct(r.membership_pct)}</td>
+                      <td style={{ padding:'7px 14px', textAlign:'right' }}>
                         {techReviews[r.tech_id]
                           ? <span style={{ color:'var(--tone-amber-tx)', fontWeight:700 }}
                               onMouseEnter={e => showTip(e, '⭐ Reviews (ServiceTitan)', `${techReviews[r.tech_id].n} review${techReviews[r.tech_id].n === 1 ? '' : 's'} in the window · ${techReviews[r.tech_id].n5} five-star · avg ${techReviews[r.tech_id].avg}★`)}
@@ -332,18 +358,18 @@ function BattingOrder() {
                             </span>
                           : <span style={{ color:'var(--text-muted)' }}>—</span>}
                       </td>
-                      <td style={{ padding:'7px 12px', textAlign:'right', color:'var(--text-muted)' }}>{r.jobs}</td>
+                      <td style={{ padding:'7px 14px', textAlign:'right', color:'var(--text-muted)' }}>{r.jobs}</td>
                     </tr>
                   ))}
                   {thin.map(r => (
                     <tr key={r.tech_id} style={{ opacity:.6 }}>
-                      <td style={{ padding:'7px 12px' }}>—</td>
-                      <td style={{ padding:'7px 12px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }} title={r.tech_name}>{r.tech_name}</td>
-                      <td style={{ padding:'7px 12px' }}><TierPill tier="unranked" /></td>
-                      <td colSpan={7} style={{ padding:'7px 12px', color:'var(--text-muted)', fontSize:11 }}>
+                      <td style={{ padding:'7px 14px' }}>—</td>
+                      <td style={{ padding:'6px 14px', overflow:'hidden' }} title={r.tech_name}><TechName name={r.tech_name} /></td>
+                      <td style={{ padding:'7px 14px' }}><TierPill tier="unranked" /></td>
+                      <td colSpan={7} style={{ padding:'7px 14px', color:'var(--text-muted)', fontSize:11 }}>
                         Needs 10+ jobs to rank — not a rating
                       </td>
-                      <td style={{ padding:'7px 12px', textAlign:'right', color:'var(--text-muted)' }}>{r.jobs}</td>
+                      <td style={{ padding:'7px 14px', textAlign:'right', color:'var(--text-muted)' }}>{r.jobs}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -396,7 +422,7 @@ function LiveBoard() {
   }, [load])
 
   if (err) return <div style={{ padding:20, color:'var(--danger)', fontSize:13 }}>{err}</div>
-  if (loading && !data) return <div className="spinner lg" style={{ margin:'60px auto' }} />
+  if (loading && !data) return <Loading heights={[40, 96, 110, 300]} />
 
   const allCalls = data?.calls || []
   const flagged = allCalls.filter(c => c.flags?.length)
@@ -458,21 +484,10 @@ function LiveBoard() {
   return (
     <div>
       <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', flexWrap:'wrap', gap:10, marginBottom:14 }}>
-        <div style={{ display:'flex', border:'1px solid var(--border)', borderRadius:99, overflow:'hidden', flexShrink:0 }}>
-          {[0, 1, 2].map(d => {
-            const label = d === 0 ? 'Today' : d === 1 ? 'Tomorrow'
-              : new Date(Date.now() + 2 * 864e5).toLocaleDateString('en-US', { weekday:'short', month:'short', day:'numeric' })
-            return (
-              <button key={d} onClick={() => { setDay(d); setLoading(true) }}
-                style={{ padding:'5px 13px', border:'none', cursor:'pointer', fontSize:11, fontWeight:700, whiteSpace:'nowrap',
-                  background: day === d ? 'var(--text-primary)' : 'transparent',
-                  color: day === d ? 'var(--surface)' : 'var(--text-muted)' }}>
-                {label}
-              </button>
-            )
-          })}
-        </div>
-        <div style={{ fontSize:12, color:'var(--text-muted)' }}>
+        <Segmented value={day} onChange={d => { setDay(d); setLoading(true) }}
+          options={[0, 1, 2].map(d => [d, d === 0 ? 'Today' : d === 1 ? 'Tomorrow'
+            : new Date(Date.now() + 2 * 864e5).toLocaleDateString('en-US', { weekday:'short', month:'short', day:'numeric' })])} />
+        <div style={{ ...num, fontSize:12, color:'var(--text-muted)' }}>
           {data?.counts?.total ?? 0} calls on {day === 0 ? "today's" : day === 1 ? "tomorrow's" : "that day's"} board
           {data?.counts?.unassigned > 0 && <span style={{ fontWeight:700, color:'var(--tone-amber-tx)' }}> · {data.counts.unassigned} unassigned</span>}
           {rev ? ` · ${rev.remaining} still to run · ${rev.done} done` : ''}
@@ -488,60 +503,53 @@ function LiveBoard() {
           {/* Jumping to what needs attention is the whole job — 95 calls with
               11 flagged is a lot of scrolling otherwise. On a phone the four
               views scroll sideways inside their pill. */}
-          <div style={{ display:'flex', border:'1px solid var(--border)', borderRadius:99, overflow:'hidden', ...(isMobile ? { overflowX:'auto', maxWidth:'100%' } : {}) }}>
-            {[['ontrack', `On track ${onTrack.length}`], ['flagged', `⚠️ Flagged ${flagged.length}`],
-              ['reschedule', `↻ Reschedule ${reschedule.length}`],
-              ['completed', `✓ Completed ${completed.length}`]].map(([val, label]) => (
-              <button key={val} onClick={() => setView(val)}
-                title={val === 'ontrack' ? 'Correctly assigned, still to run — nothing to act on'
+          <div style={isMobile ? { overflowX:'auto', maxWidth:'100%' } : undefined}>
+            <Segmented value={view} onChange={setView}
+              options={[['ontrack', `On track ${onTrack.length}`], ['flagged', `⚠️ Flagged ${flagged.length}`],
+                ['reschedule', `↻ Reschedule ${reschedule.length}`],
+                ['completed', `✓ Completed ${completed.length}`]].map(([val, label]) => [val,
+                <span key={val} style={num} title={val === 'ontrack' ? 'Correctly assigned, still to run — nothing to act on'
                   : val === 'reschedule' ? 'Lowest-producing calls — candidates to move if demand comes in'
-                  : val === 'completed' ? 'Finished calls and what each one produced' : undefined}
-                style={{ padding:'5px 12px', border:'none', cursor:'pointer', fontSize:11, fontWeight:600, whiteSpace:'nowrap',
-                  background: view === val ? 'var(--accent)' : 'transparent',
-                  color: view === val ? '#fff' : 'var(--text-muted)' }}>
-                {label}
-              </button>
-            ))}
+                  : val === 'completed' ? 'Finished calls and what each one produced' : undefined}>
+                  {label}
+                </span>])} />
           </div>
-          <button className="btn sm" onClick={() => load(true)}>Refresh</button>
+          <button className="btn sm" onClick={() => load(true)} style={{ borderRadius:99 }}>Refresh</button>
         </div>
       </div>
 
       {!brief?.brief && (briefBusy || briefErr) && (
-        <div className="card" style={{ padding:'13px 18px', marginBottom:14, borderLeft:'4px solid var(--accent)', fontSize:12.5,
+        <div style={{ ...panel, padding:'12px 18px', marginBottom:14, boxShadow:'inset 3px 0 0 var(--accent)', fontSize:12.5,
           color: briefErr ? 'var(--danger)' : 'var(--text-muted)' }}>
           {briefBusy
             ? 'Andi is reading the board — first analysis takes about 30 seconds…'
             : `Analysis unavailable: ${briefErr} `}
-          {!briefBusy && <button className="btn sm" style={{ marginLeft:8 }} onClick={() => loadBrief(true)}>Retry</button>}
+          {!briefBusy && <button className="btn sm" style={{ marginLeft:8, borderRadius:99 }} onClick={() => loadBrief(true)}>Retry</button>}
         </div>
       )}
 
       {brief?.brief && (
-        <div className="card" style={{ padding:'11px 15px', marginBottom:12, borderLeft:'3px solid var(--accent)' }}>
+        <div style={{ ...panel, padding:'12px 18px', marginBottom:12, boxShadow:'inset 3px 0 0 var(--accent)' }}>
           <div style={{ display:'flex', alignItems:'baseline', justifyContent:'space-between', gap:10, flexWrap:'wrap' }}>
-            <div style={{ fontSize:13, fontWeight:800, color:'var(--text-primary)' }}>
-              {day > 0 && <span style={{ fontSize:10, fontWeight:800, textTransform:'uppercase', letterSpacing:.5, padding:'2px 8px', borderRadius:99, marginRight:7, background:'var(--tone-blue-bg)', color:'var(--tone-blue-tx)', border:'1px solid var(--tone-blue-bd)', verticalAlign:'middle' }}>
-                Game plan — {day === 1 ? 'tomorrow' : '2 days out'}
+            <div style={{ fontSize:14, fontWeight:800, color:'var(--text-primary)', lineHeight:1.35 }}>
+              {day > 0 && <span style={{ marginRight:7, verticalAlign:'1px' }}>
+                <ToneChip tone="blue" small>Game plan — {day === 1 ? 'tomorrow' : '2 days out'}</ToneChip>
               </span>}{brief.brief.headline}
             </div>
             <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-              <span style={{ fontSize:10, color:'var(--text-muted)' }}>analyzed {ago(brief.generatedAt)}</span>
-              <button className="btn sm" onClick={() => loadBrief(true)} disabled={briefBusy}>
+              <span style={{ ...num, fontSize:11, color:'var(--text-muted)' }}>analyzed {ago(brief.generatedAt)}</span>
+              <button className="btn sm" onClick={() => loadBrief(true)} disabled={briefBusy} style={{ borderRadius:99 }}>
                 {briefBusy ? 'Reading the board…' : 'Re-analyze'}
               </button>
             </div>
           </div>
-          <div style={{ fontSize:11.5, color:'var(--text-muted)', marginTop:4, lineHeight:1.5 }}>{brief.brief.situation}</div>
+          <div style={{ fontSize:12, color:'var(--text-secondary)', marginTop:4, lineHeight:1.5 }}>{brief.brief.situation}</div>
           {(brief.brief.actions || []).length > 0 && (
             <div style={{ marginTop:10, display:'flex', flexDirection:'column', gap:6 }}>
               {brief.brief.actions.map((a, i) => (
                 <div key={i} style={{ display:'flex', gap:9, alignItems:'flex-start', fontSize:12 }}>
-                  <span style={{ fontSize:9, fontWeight:700, textTransform:'uppercase', flexShrink:0, padding:'2px 0', borderRadius:99, width:52, textAlign:'center', marginTop:1,
-                    color: a.priority === 'now' ? 'var(--tone-red-tx)' : a.priority === 'today' ? 'var(--tone-amber-tx)' : 'var(--text-muted)',
-                    background: a.priority === 'now' ? 'var(--tone-red-bg)' : a.priority === 'today' ? 'var(--tone-amber-bg)' : 'var(--surface-2)',
-                    border: `1px solid ${a.priority === 'now' ? 'var(--tone-red-bd)' : a.priority === 'today' ? 'var(--tone-amber-bd)' : 'var(--border)'}` }}>
-                    {a.priority}
+                  <span style={{ flexShrink:0, width:56, display:'flex', justifyContent:'center', textTransform:'capitalize' }}>
+                    <ToneChip small tone={a.priority === 'now' ? 'red' : a.priority === 'today' ? 'amber' : 'gray'}>{a.priority}</ToneChip>
                   </span>
                   <span style={{ color:'var(--text-primary)', lineHeight:1.5, flex:1 }}>{a.text}</span>
                 </div>
@@ -549,7 +557,7 @@ function LiveBoard() {
             </div>
           )}
           {((brief.brief.watchouts || []).length > 0 || (brief.brief.wins || []).length > 0) && (
-            <div style={{ marginTop:10, paddingTop:9, borderTop:'1px solid var(--border)', display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(280px, 1fr))', gap:'6px 24px', fontSize:11, lineHeight:1.5 }}>
+            <div style={{ marginTop:10, paddingTop:9, borderTop:'1px solid var(--border)', display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(280px, 1fr))', gap:'6px 24px', fontSize:11.5, lineHeight:1.5 }}>
               {(brief.brief.watchouts || []).map((w, i) => (
                 <div key={`w${i}`} style={{ display:'flex', gap:6, alignItems:'flex-start', color:'var(--text-muted)' }}>
                   <span style={{ flexShrink:0 }}>👀</span><span>{w}</span>
@@ -566,16 +574,16 @@ function LiveBoard() {
       )}
 
       {/* 🎭 Scenario AI — disruptions AND goal-seeking ("sales are down…") */}
-      {<div className="card" style={{ padding:'11px 15px', marginBottom:12 }}>
+      {<div style={{ ...panel, padding:'12px 16px', marginBottom:12 }}>
         <div style={{ display:'flex', gap:8, alignItems:'center', ...(isMobile ? { flexWrap:'wrap' } : {}) }}>
           <span style={{ fontSize:15, flexShrink:0 }}>🎭</span>
-          <input className="form-input" value={scenario} style={{ flex:1 }}
+          <input className="form-input" value={scenario} style={{ flex:1, borderRadius:99, padding:'7px 14px' }}
             placeholder={day === 0
               ? 'Run a scenario… e.g. "Arber called in sick — what do I do with his calls?"'
               : `Game-plan ${day === 1 ? 'tomorrow' : 'that day'}… e.g. "How should we set up this board for maximum profit?"`}
             onChange={e => setScenario(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') askScenario() }} />
-          <button className="btn primary sm" onClick={askScenario} disabled={scBusy || scenario.trim().length < 5} style={{ flexShrink:0 }}>
+          <button className="btn primary sm" onClick={askScenario} disabled={scBusy || scenario.trim().length < 5} style={{ flexShrink:0, borderRadius:99 }}>
             {scBusy ? 'Working the board…' : 'Walk me through it'}
           </button>
         </div>
@@ -583,12 +591,12 @@ function LiveBoard() {
         {scBusy && <div style={{ fontSize:12, color:'var(--text-muted)', marginTop:8 }}>Thinking through every assignment on the board — 15–30 seconds…</div>}
         {scPlan?.plan && (
           <div style={{ marginTop:10, paddingTop:10, borderTop:'1px solid var(--border)' }}>
-            <div style={{ fontSize:13, fontWeight:800 }}>{scPlan.plan.headline}</div>
-            <div style={{ fontSize:11.5, color:'var(--text-muted)', marginTop:3, lineHeight:1.5 }}>{scPlan.plan.situation}</div>
+            <div style={{ fontSize:14, fontWeight:800 }}>{scPlan.plan.headline}</div>
+            <div style={{ fontSize:12, color:'var(--text-secondary)', marginTop:3, lineHeight:1.5 }}>{scPlan.plan.situation}</div>
             <div style={{ marginTop:8, display:'flex', flexDirection:'column', gap:6 }}>
               {scPlan.plan.steps.map((t, i) => (
                 <div key={i} style={{ display:'flex', gap:9, alignItems:'flex-start', fontSize:12 }}>
-                  <span style={{ flexShrink:0, width:20, height:20, borderRadius:'50%', background:'var(--accent)', color:'#fff', fontSize:10.5, fontWeight:700, display:'flex', alignItems:'center', justifyContent:'center', marginTop:1 }}>{i + 1}</span>
+                  <span style={{ ...num, flexShrink:0, width:20, height:20, borderRadius:'50%', background:'var(--accent)', color:'#fff', fontSize:10.5, fontWeight:700, display:'flex', alignItems:'center', justifyContent:'center', marginTop:1 }}>{i + 1}</span>
                   <span style={{ lineHeight:1.5, flex:1, color:'var(--text-primary)' }}>{t}</span>
                 </div>
               ))}
@@ -596,7 +604,7 @@ function LiveBoard() {
             {(scPlan.plan.watchouts || []).length > 0 && (
               <div style={{ marginTop:8, paddingTop:8, borderTop:'1px solid var(--border)', display:'flex', flexDirection:'column', gap:4 }}>
                 {scPlan.plan.watchouts.map((w, i) => (
-                  <div key={i} style={{ display:'flex', gap:6, fontSize:11, color:'var(--text-muted)', lineHeight:1.5 }}>
+                  <div key={i} style={{ display:'flex', gap:6, fontSize:11.5, color:'var(--text-muted)', lineHeight:1.5 }}>
                     <span style={{ flexShrink:0 }}>👀</span><span>{w}</span>
                   </div>
                 ))}
@@ -608,22 +616,22 @@ function LiveBoard() {
 
       {/* 🧺 Unassigned tray — jobs with no tech; the staging area during a shuffle */}
       {(data?.unassigned || []).length > 0 && (
-        <div className="card" style={{ padding:'11px 15px', marginBottom:12, borderLeft:'3px solid var(--tone-amber-bd)' }}>
-          <div style={{ fontSize:10.5, fontWeight:700, textTransform:'uppercase', letterSpacing:.5, color:'var(--tone-amber-tx)', marginBottom:8 }}>
+        <div style={{ ...panel, padding:'12px 16px', marginBottom:12, boxShadow:'inset 3px 0 0 var(--tone-amber-bd)' }}>
+          <div style={{ ...eyebrow, color:'var(--tone-amber-tx)', marginBottom:8 }}>
             🧺 Unassigned tray — {data.unassigned.length} job{data.unassigned.length === 1 ? '' : 's'} with no tech
           </div>
           <div style={{ display:'flex', flexDirection:'column', gap:5 }}>
             {data.unassigned.map(u => (
               <div key={u.appointmentId} style={{ display:'flex', alignItems:'center', gap:10, fontSize:12, flexWrap:'wrap' }}>
-                <a href={ST_JOB_URL(u.jobId)} target="_blank" rel="noreferrer" style={{ fontWeight:700, color:'var(--accent)', textDecoration:'none' }}>#{u.jobNumber}</a>
+                <a href={ST_JOB_URL(u.jobId)} target="_blank" rel="noreferrer" style={{ ...num, fontWeight:700, color:'var(--accent)', textDecoration:'none' }}>#{u.jobNumber}</a>
                 <span style={{ flex:1, minWidth:140 }}>{u.jobType}</span>
-                <span style={{ color:'var(--text-muted)' }}>{windowLabel(u)}</span>
+                <span style={{ ...num, color:'var(--text-muted)' }}>{windowLabel(u)}</span>
                 {u.opportunity >= 3
-                  ? <span style={{ fontSize:10, fontWeight:700, padding:'1px 8px', borderRadius:99, background:'var(--tone-red-bg)', color:'var(--tone-red-tx)', border:'1px solid var(--tone-red-bd)' }}>🔥 opp {u.opportunity}</span>
+                  ? <ToneChip tone="red" small>🔥 opp {u.opportunity}</ToneChip>
                   : u.opportunity > 0
-                    ? <span style={{ fontSize:10, fontWeight:700, padding:'1px 8px', borderRadius:99, background:'var(--tone-amber-bg)', color:'var(--tone-amber-tx)', border:'1px solid var(--tone-amber-bd)' }}>opp {u.opportunity}</span>
-                    : <span style={{ fontSize:10, color:'var(--text-muted)' }}>routine</span>}
-                {u.canGoEarly && <span style={{ fontSize:10, fontWeight:700, color:'var(--tone-green-tx)' }}>can go early</span>}
+                    ? <ToneChip tone="amber" small>opp {u.opportunity}</ToneChip>
+                    : <span style={{ fontSize:10.5, color:'var(--text-muted)' }}>routine</span>}
+                {u.canGoEarly && <ToneChip tone="green" small>can go early</ToneChip>}
               </div>
             ))}
           </div>
@@ -633,88 +641,75 @@ function LiveBoard() {
       {/* On-hold work is parked in ST, not awaiting a tech — shown as a quiet
           count so nobody mistakes it for the unassigned tray. */}
       {(data?.onHold || []).length > 0 && (
-        <div className="card" style={{ padding:'9px 15px', marginBottom:12, display:'flex', alignItems:'center', gap:10, flexWrap:'wrap' }}>
-          <span style={{ fontSize:10.5, fontWeight:700, textTransform:'uppercase', letterSpacing:.5, color:'var(--text-muted)' }}>
+        <div style={{ ...panel, padding:'10px 16px', marginBottom:12, display:'flex', alignItems:'center', gap:10, flexWrap:'wrap' }}>
+          <span style={eyebrow}>
             On hold — {data.onHold.length} job{data.onHold.length === 1 ? '' : 's'} parked in ST
           </span>
           {data.onHold.map(h => (
             <a key={h.jobId} href={ST_JOB_URL(h.jobId)} target="_blank" rel="noreferrer"
               style={{ fontSize:12, color:'var(--text-muted)', textDecoration:'none' }}>
-              #{h.jobNumber} <span style={{ opacity:.8 }}>{h.jobType}</span>
+              <span style={num}>#{h.jobNumber}</span> <span style={{ opacity:.8 }}>{h.jobType}</span>
             </a>
           ))}
         </div>
       )}
 
       {rev && (
-        <div className="card" style={{ padding:'13px 16px', marginBottom:14, display:'flex', gap:24, flexWrap:'wrap', alignItems:'center' }}>
+        <SummaryPanel isMobile={isMobile} style={{ marginBottom:14 }}
+          columns={(rev.soldToday > 0 || rev.invoicedToday > 0) ? 'minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.6fr)' : 'minmax(0, 1fr) minmax(0, 2fr)'}>
           <div onClick={() => (rev.bookedDetail || []).length && setShowRevDetail(true)}
             title="See the jobs behind this number"
-            style={{ cursor: (rev.bookedDetail || []).length ? 'pointer' : 'default', borderRadius:8, padding:'2px 6px', margin:'-2px -6px' }}
+            style={{ cursor: (rev.bookedDetail || []).length ? 'pointer' : 'default', borderRadius:10, padding:'4px 8px', margin:'-4px -8px' }}
             onMouseEnter={e => { if ((rev.bookedDetail || []).length) e.currentTarget.style.background = 'var(--surface-2)' }}
             onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-            <div style={{ fontSize:20, fontWeight:800, color:'var(--tone-green-tx)', lineHeight:1.1 }}>{money(rev.booked)}</div>
-            <div style={{ fontSize:10, fontWeight:700, color:'var(--text-primary)', textTransform:'uppercase', letterSpacing:.5, marginTop:2 }}>
-              Expected revenue {(rev.bookedDetail || []).length > 0 && <span style={{ color:'var(--accent)', fontWeight:600, textTransform:'none' }}>· view jobs</span>}
-            </div>
-            <div style={{ fontSize:10, color:'var(--text-muted)' }}>
-              {rev.bookedJobs} install{rev.bookedJobs === 1 ? '' : 's'} finishing today
-            </div>
+            <Stat tone="green" value={money(rev.booked)}
+              label={<>Expected revenue {(rev.bookedDetail || []).length > 0 && <span style={{ color:'var(--accent)', fontWeight:600, textTransform:'none', letterSpacing:0 }}>· view jobs</span>}</>}
+              sub={`${rev.bookedJobs} install${rev.bookedJobs === 1 ? '' : 's'} finishing today`} />
           </div>
 
-          {showRevDetail && (
-            <div onClick={() => setShowRevDetail(false)}
-              style={{ position:'fixed', inset:0, background:'rgba(0,0,0,.45)', zIndex:700, display:'flex', alignItems:'center', justifyContent:'center', padding:20 }}>
-              <div onClick={e => e.stopPropagation()}
-                style={{ background:'var(--surface)', borderRadius:14, width:'100%', maxWidth:520, boxShadow:'0 12px 40px rgba(0,0,0,.25)', overflow:'hidden', display:'flex', flexDirection:'column', maxHeight:'80vh' }}>
-                <div style={{ padding:'14px 18px', borderBottom:'1px solid var(--border)', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
-                  <div>
-                    <div style={{ fontSize:14, fontWeight:700 }}>Expected revenue — the receipts</div>
-                    <div style={{ fontSize:11, color:'var(--text-muted)', marginTop:1 }}>Installs whose final day is today · invoice counts once, on the finish day</div>
-                  </div>
-                  <button className="btn sm" onClick={() => setShowRevDetail(false)}>Close</button>
-                </div>
-                <div style={{ overflowY:'auto' }}>
-                  {(rev.bookedDetail || []).map((j, i) => (
-                    <a key={i} href={j.jobId ? ST_JOB_URL(j.jobId) : undefined} target="_blank" rel="noopener noreferrer"
-                      title="Open this job in ServiceTitan"
-                      style={{ display:'flex', alignItems:'center', gap:10, padding:'10px 18px', borderBottom:'1px solid var(--border)', textDecoration:'none', color:'var(--text-primary)' }}
-                      onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
-                      onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-                      <span style={{ fontWeight:700, color:'var(--accent)', flexShrink:0, fontSize:12 }}>#{j.jobNumber || j.jobId} ↗</span>
-                      <span style={{ flex:1, minWidth:0, fontSize:12, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
-                        {j.jobType || 'Install'}{j.tech ? <span style={{ color:'var(--text-muted)' }}> · {j.tech}</span> : null}
-                      </span>
-                      <span style={{ fontWeight:800, fontSize:13, color:'var(--tone-green-tx)', flexShrink:0, fontVariantNumeric:'tabular-nums' }}>{money(j.amount)}</span>
-                    </a>
-                  ))}
-                </div>
-                <div style={{ padding:'11px 18px', borderTop:'1px solid var(--border)', display:'flex', justifyContent:'space-between', fontSize:13, fontWeight:800 }}>
-                  <span>Total</span><span style={{ color:'var(--tone-green-tx)' }}>{money(rev.booked)}</span>
-                </div>
-              </div>
-            </div>
-          )}
-
           {(rev.soldToday > 0 || rev.invoicedToday > 0) && (
-            <>
-              <div style={{ width:1, alignSelf:'stretch', background:'var(--border)' }} />
-              <div>
-                <div style={{ fontSize:20, fontWeight:800, color:'var(--accent)', lineHeight:1.1 }}>{money(rev.soldToday)}</div>
-                <div style={{ fontSize:10, fontWeight:700, color:'var(--text-primary)', textTransform:'uppercase', letterSpacing:.5, marginTop:2 }}>
-                  Sold so far
-                </div>
-                <div style={{ fontSize:10, color:'var(--text-muted)' }}>
-                  from calls completed today{rev.invoicedToday ? ` · ${money(rev.invoicedToday)} invoiced` : ''}
-                </div>
-              </div>
-            </>
+            <Stat tone="blue" label="Sold so far" value={money(rev.soldToday)}
+              sub={`from calls completed today${rev.invoicedToday ? ` · ${money(rev.invoicedToday)} invoiced` : ''}`} />
           )}
 
-          <div style={{ flex:1, minWidth:210, fontSize:10, color:'var(--text-muted)', lineHeight:1.6 }}>
+          <div style={{ fontSize:11.5, color:'var(--text-muted)', lineHeight:1.6 }}>
             <strong>Expected revenue</strong> is the invoiced value of installs whose last day is today —
             a multi-day install counts once, on the day it finishes.<br />
             <strong>Sold so far</strong> is actual, from work already completed today.
+          </div>
+        </SummaryPanel>
+      )}
+
+      {rev && showRevDetail && (
+        <div onClick={() => setShowRevDetail(false)}
+          style={{ position:'fixed', inset:0, background:'rgba(0,0,0,.45)', zIndex:700, display:'flex', alignItems:'center', justifyContent:'center', padding:20 }}>
+          <div onClick={e => e.stopPropagation()}
+            style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:18, width:'100%', maxWidth:520, boxShadow:'0 24px 60px -20px rgba(15,20,40,.45)', overflow:'hidden', display:'flex', flexDirection:'column', maxHeight:'80vh' }}>
+            <div style={{ padding:'14px 18px', borderBottom:'1px solid var(--border)', display:'flex', alignItems:'center', justifyContent:'space-between', gap:12 }}>
+              <div>
+                <div style={{ fontSize:15, fontWeight:700 }}>Expected revenue — the receipts</div>
+                <div style={{ fontSize:11.5, color:'var(--text-muted)', marginTop:1 }}>Installs whose final day is today · invoice counts once, on the finish day</div>
+              </div>
+              <button className="btn sm" onClick={() => setShowRevDetail(false)} style={{ borderRadius:99 }}>Close</button>
+            </div>
+            <div style={{ overflowY:'auto' }}>
+              {(rev.bookedDetail || []).map((j, i) => (
+                <a key={i} href={j.jobId ? ST_JOB_URL(j.jobId) : undefined} target="_blank" rel="noopener noreferrer"
+                  title="Open this job in ServiceTitan"
+                  style={{ display:'flex', alignItems:'center', gap:10, padding:'10px 18px', borderBottom:'1px solid var(--border)', textDecoration:'none', color:'var(--text-primary)' }}
+                  onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
+                  onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                  <span style={{ ...num, fontWeight:700, color:'var(--accent)', flexShrink:0, fontSize:12 }}>#{j.jobNumber || j.jobId} ↗</span>
+                  <span style={{ flex:1, minWidth:0, fontSize:12, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                    {j.jobType || 'Install'}{j.tech ? <span style={{ color:'var(--text-muted)' }}> · {j.tech}</span> : null}
+                  </span>
+                  <span style={{ ...num, fontWeight:800, fontSize:13, color:'var(--tone-green-tx)', flexShrink:0 }}>{money(j.amount)}</span>
+                </a>
+              ))}
+            </div>
+            <div style={{ padding:'11px 18px', borderTop:'1px solid var(--border)', display:'flex', justifyContent:'space-between', fontSize:13, fontWeight:800 }}>
+              <span>Total</span><span style={{ ...num, color:'var(--tone-green-tx)' }}>{money(rev.booked)}</span>
+            </div>
           </div>
         </div>
       )}
@@ -727,42 +722,37 @@ function LiveBoard() {
       )}
 
       {view === 'flagged' && flagged.length === 0 && (
-        <div className="card" style={{ padding:'22px 16px', textAlign:'center', color:'var(--tone-green-tx)', fontSize:13 }}>
-          ✓ Nothing flagged right now — every high-opportunity call is on a capable tech.
-        </div>
+        <div style={{ marginBottom:12 }}><EmptyState>
+          <span style={{ color:'var(--tone-green-tx)' }}>✓ Nothing flagged right now — every high-opportunity call is on a capable tech.</span>
+        </EmptyState></div>
       )}
 
       {view === 'ontrack' && onTrack.length === 0 && allCalls.length > 0 && (
-        <div className="card" style={{ padding:'22px 16px', textAlign:'center', color:'var(--text-muted)', fontSize:13 }}>
+        <div style={{ marginBottom:12 }}><EmptyState>
           Every call on the board is either flagged, a reschedule candidate, or already done.
-        </div>
+        </EmptyState></div>
       )}
 
       {view === 'completed' && completed.length === 0 && (
-        <div className="card" style={{ padding:'22px 16px', textAlign:'center', color:'var(--text-muted)', fontSize:13 }}>
+        <div style={{ marginBottom:12 }}><EmptyState>
           Nothing has finished yet today.
-        </div>
+        </EmptyState></div>
       )}
 
       {(data?.swaps || []).length > 0 && view === 'flagged' && (
         <div style={{ marginBottom:16 }}>
           {data.swaps.map((sw, i) => (
-            <div key={i} className="card" style={{ padding:'12px 15px', marginBottom:9, borderLeft:'3px solid var(--accent)' }}>
+            <div key={i} style={{ ...panel, padding:'12px 18px', marginBottom:10, boxShadow:'inset 3px 0 0 var(--accent)' }}>
               <div style={{ display:'flex', alignItems:'baseline', justifyContent:'space-between', gap:10, flexWrap:'wrap' }}>
-                <div style={{ fontSize:12.5, fontWeight:700, color:'var(--text-primary)' }}>🔁 {sw.text}</div>
-                {sw.upside > 0 && (
-                  <span style={{ fontSize:11, fontWeight:700, color:'var(--tone-green-tx)', background:'var(--tone-green-bg)',
-                    border:'1px solid #BBE3C9', padding:'2px 8px', borderRadius:99, whiteSpace:'nowrap' }}>
-                    +{money(sw.upside)} expected
-                  </span>
-                )}
+                <div style={{ fontSize:13, fontWeight:700, color:'var(--text-primary)' }}>🔁 {sw.text}</div>
+                {sw.upside > 0 && <ToneChip tone="green">+{money(sw.upside)} expected</ToneChip>}
               </div>
               {/* The reasoning matters more than the recommendation — a
                   dispatcher who can't see WHY won't trust it, and shouldn't. */}
-              <ul style={{ margin:'7px 0 0 0', padding:'0 0 0 16px', fontSize:11, color:'var(--text-secondary)', lineHeight:1.65 }}>
+              <ul style={{ margin:'7px 0 0 0', padding:'0 0 0 16px', fontSize:11.5, color:'var(--text-secondary)', lineHeight:1.65 }}>
                 {(sw.why || []).map((w, k) => <li key={k}>{w}</li>)}
               </ul>
-              <div style={{ fontSize:10, color:'var(--text-muted)', marginTop:6 }}>
+              <div style={{ ...eyebrow, marginTop:6 }}>
                 {sw.businessUnit}
               </div>
             </div>
@@ -771,31 +761,29 @@ function LiveBoard() {
       )}
 
       {flagged.length === 0 && calls.length > 0 && (
-        <div className="card" style={{ padding:'14px 16px', marginBottom:16, fontSize:13, color:'var(--tone-green-tx)' }}>
+        <div style={{ ...panel, padding:'12px 18px', marginBottom:16, fontSize:13, fontWeight:600, color:'var(--tone-green-tx)' }}>
           ✓ No mismatches — every high-opportunity call today is on a capable tech.
         </div>
       )}
 
       {groups.map(([label, list]) => (
       <div key={label} style={{ marginBottom:22 }}>
-        <div style={{ display:'flex', alignItems:'baseline', gap:8, marginBottom:8,
-          borderBottom:'2px solid var(--border)', paddingBottom:5 }}>
-          <span style={{ fontSize:14, fontWeight:800, color:'var(--text-primary)' }}>{label}</span>
-          <span style={{ fontSize:11, color:'var(--text-muted)' }}>
+        <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:8, flexWrap:'wrap',
+          borderBottom:'1px solid var(--border)', paddingBottom:6 }}>
+          <span style={{ ...num, fontSize:15, fontWeight:800, color:'var(--text-primary)' }}>{label}</span>
+          <span style={{ ...num, fontSize:12, color:'var(--text-muted)' }}>
             {list.length} call{list.length === 1 ? '' : 's'}
-            {list.some(c => c.flags?.length) ? ` · ${list.filter(c => c.flags?.length).length} flagged` : ''}
           </span>
+          {list.some(c => c.flags?.length) && <ToneChip tone="red" small>{list.filter(c => c.flags?.length).length} flagged</ToneChip>}
         </div>
         {byTeam(list).map(([team, tlist]) => (
-        <div key={team} style={{ marginBottom:10 }}>
-          <div style={{ display:'flex', alignItems:'baseline', gap:7, margin:'0 0 4px 2px' }}>
-            <span style={{ fontSize:11, fontWeight:700, color:'var(--text-secondary)' }}>{team}</span>
-            <span style={{ fontSize:10, color:'var(--text-muted)' }}>
-              {tlist.length}
-              {tlist.some(c => c.flags?.length) ? ` · ${tlist.filter(c => c.flags?.length).length} flagged` : ''}
-            </span>
+        <div key={team} style={{ marginBottom:12 }}>
+          <div style={{ display:'flex', alignItems:'center', gap:7, margin:'0 0 5px 2px', flexWrap:'wrap' }}>
+            <span style={{ fontSize:12, fontWeight:700, color:'var(--text-secondary)' }}>{team}</span>
+            <span style={{ ...num, fontSize:11, color:'var(--text-muted)' }}>{tlist.length}</span>
+            {tlist.some(c => c.flags?.length) && <ToneChip tone="red" small>{tlist.filter(c => c.flags?.length).length} flagged</ToneChip>}
           </div>
-      <div className="card" style={{ padding:0, overflow: isMobile ? 'auto' : 'hidden' }}>
+      <div style={{ ...panel, overflow: isMobile ? 'auto' : 'hidden' }}>
         <table className="data-table" style={{ fontSize:12, tableLayout:'fixed', width:'100%', ...(isMobile ? { minWidth:640 } : {}) }}>
           <colgroup>{LB_COLS.map(c => <col key={c.key} style={{ width:c.width }} />)}</colgroup>
           <thead><tr>
@@ -806,9 +794,9 @@ function LiveBoard() {
           <tbody>
             {tlist.map((c, i) => (
               <tr key={`${c.appointmentId}-${i}`} style={{
-                background: c.flags?.length ? 'rgba(185,28,28,.04)' : 'transparent',
+                background: c.flags?.length ? RED_TINT : 'transparent',
                 opacity: c.actionable ? 1 : .55 }}>
-                <td style={{ padding:'7px 12px' }}>
+                <td style={{ padding:'7px 14px' }}>
                   <a href={ST_JOB_URL(c.jobId)} target="_blank" rel="noopener noreferrer"
                      title="Open this job in ServiceTitan"
                      style={{ fontWeight:600, color:'var(--accent)', textDecoration:'none' }}>
@@ -819,47 +807,34 @@ function LiveBoard() {
                       notes signal is invisible on the calls it didn't flag and
                       it looks like the notes aren't being read at all. */}
                   {c.status && c.status !== 'Scheduled' && (
-                    <span title={c.status === 'Done' ? 'Finished — nothing to change here'
-                      : c.status === 'Working' ? 'Tech is on site' : c.status}
-                      style={{ display:'inline-block', marginTop:3, marginRight:4, fontSize:9, fontWeight:700,
-                        padding:'1px 5px', borderRadius:99,
-                        color: c.status === 'Done' ? 'var(--tone-green-tx)' : 'var(--text-muted)',
-                        background: c.status === 'Done' ? 'var(--tone-green-bg)' : 'var(--surface-2)',
-                        border: `1px solid ${c.status === 'Done' ? 'var(--tone-green-bd)' : 'var(--border)'}` }}>
+                    <MiniChip tone={c.status === 'Done' ? 'green' : 'gray'}
+                      title={c.status === 'Done' ? 'Finished — nothing to change here'
+                        : c.status === 'Working' ? 'Tech is on site' : c.status}>
                       {c.status.toLowerCase()}
-                    </span>
+                    </MiniChip>
                   )}
                   {c.windowPassed && c.actionable && (
-                    <span title="Arrival window has closed and this hasn't been dispatched"
-                      style={{ display:'inline-block', marginTop:3, marginRight:4, fontSize:9, fontWeight:700,
-                        color:'var(--tone-amber-tx)', background:'var(--tone-amber-bg)', border:'1px solid #F0DCA8',
-                        padding:'1px 5px', borderRadius:99 }}>
+                    <MiniChip tone="amber" title="Arrival window has closed and this hasn't been dispatched">
                       window passed
-                    </span>
+                    </MiniChip>
                   )}
                   {c.sticky && (
-                    <span title="Follow-up / financing call — stays with this tech, and doesn't use a capacity slot"
-                      style={{ display:'inline-block', marginTop:3, marginRight:4, fontSize:9, fontWeight:700,
-                        color:'var(--text-muted)', background:'var(--surface-2)', border:'1px solid var(--border)',
-                        padding:'1px 5px', borderRadius:99 }}>
+                    <MiniChip title="Follow-up / financing call — stays with this tech, and doesn't use a capacity slot">
                       stays with tech
-                    </span>
+                    </MiniChip>
                   )}
                   {c.systemAge != null && (
-                    <span title="Age of the system, read from the job notes"
-                      style={{ display:'inline-block', marginTop:3, fontSize:9, fontWeight:700,
-                        color:'var(--tone-amber-tx)', background:'var(--tone-amber-bg)', border:'1px solid #F0DCA8',
-                        padding:'1px 5px', borderRadius:99 }}>
+                    <MiniChip tone="amber" title="Age of the system, read from the job notes">
                       ~{c.systemAge} yr system
-                    </span>
+                    </MiniChip>
                   )}
                 </td>
-                <td style={{ padding:'7px 12px' }}>{c.techName}</td>
-                <td style={{ padding:'7px 12px' }}><TierPill tier={c.techTier} /></td>
+                <td style={{ padding:'7px 14px' }}><TechName name={c.techName} wrap /></td>
+                <td style={{ padding:'7px 14px' }}><TierPill tier={c.techTier} /></td>
                 <td title={c.bookedRevenue
                     ? `Sold work — ${money(c.bookedRevenue)} invoiced`
                     : ((c.opportunityReasons || []).join(' · ') || 'no opportunity signals')}
-                  style={{ padding:'7px 12px', textAlign:'right', fontWeight:700, cursor:'help',
+                  style={{ padding:'7px 14px', textAlign:'right', fontWeight:700, cursor:'help',
                   color: c.opportunity >= 3 ? 'var(--tone-red-tx)' : 'var(--text-muted)' }}>
                   {c.opportunity}
                   {(c.bookedRevenue > 0 || c.expectedRevenue > 0) && (
@@ -868,7 +843,7 @@ function LiveBoard() {
                     </div>
                   )}
                 </td>
-                <td style={{ padding:'7px 12px' }}>
+                <td style={{ padding:'7px 14px' }}>
                   {c.outcome && view === 'completed' && (
                     <div style={{ fontSize:11, fontWeight:600, lineHeight:1.5,
                       color: c.outcome.kind === 'sold' ? 'var(--tone-green-tx)'
@@ -906,9 +881,9 @@ function LiveBoard() {
       ))}
 
       {calls.length === 0 && (
-        <div className="card" style={{ padding:'26px 12px', textAlign:'center', color:'var(--text-muted)', fontSize:13 }}>
+        <EmptyState>
           Nothing assigned on today's board yet.
-        </div>
+        </EmptyState>
       )}
     </div>
   )
@@ -929,7 +904,7 @@ function ByJobType() {
   }, [])
 
   if (err) return <div style={{ padding:20, color:'var(--danger)', fontSize:13 }}>{err}</div>
-  if (!data) return <div className="spinner lg" style={{ margin:'60px auto' }} />
+  if (!data) return <Loading heights={[40, 44, 220]} />
 
   const types = (data.types || []).filter(t => t.toLowerCase().includes(q.toLowerCase()))
   const rows = (data.rows || []).filter(r => r.job_type === pick)
@@ -937,35 +912,35 @@ function ByJobType() {
 
   return (
     <div>
-      <div style={{ fontSize:12, color:'var(--text-muted)', marginBottom:12 }}>
+      <div style={{ fontSize:12.5, color:'var(--text-muted)', marginBottom:12, lineHeight:1.55 }}>
         Who to send for a specific job type. Opportunity counts are shown because samples here are
         small — a tech may only see a given job type a handful of times in the window.
       </div>
 
-      <div style={{ display:'flex', gap:10, flexWrap:'wrap', marginBottom:14 }}>
+      <div style={{ display:'flex', gap:10, flexWrap:'wrap', marginBottom:16 }}>
         <input className="form-input" placeholder="Filter job types…" value={q}
-          onChange={e => setQ(e.target.value)} style={{ maxWidth:240, fontSize:12, padding:'6px 10px' }} />
+          onChange={e => setQ(e.target.value)} style={{ maxWidth:240, fontSize:12.5, padding:'7px 14px', borderRadius:99 }} />
         <select className="form-input" value={pick} onChange={e => setPick(e.target.value)}
-          style={{ maxWidth:360, fontSize:12, padding:'6px 10px' }}>
+          style={{ maxWidth:360, fontSize:12.5, padding:'7px 14px', borderRadius:99 }}>
           <option value="">Select a job type… ({types.length})</option>
           {types.map(t => <option key={t} value={t}>{t}</option>)}
         </select>
       </div>
 
       {!pick && (
-        <div className="empty-state" style={{ padding:'36px 20px', textAlign:'center', color:'var(--text-muted)', fontSize:13 }}>
+        <EmptyState>
           Pick a job type to see who closes it best.
-        </div>
+        </EmptyState>
       )}
 
       {pick && rows.length === 0 && (
-        <div className="empty-state" style={{ padding:'36px 20px', textAlign:'center', color:'var(--text-muted)', fontSize:13 }}>
+        <EmptyState>
           Nobody has run this job type enough times to rank.
-        </div>
+        </EmptyState>
       )}
 
       {pick && rows.length > 0 && (
-        <div className="card" style={{ padding:0, overflow: isMobile ? 'auto' : 'hidden' }}>
+        <div style={{ ...panel, overflow: isMobile ? 'auto' : 'hidden' }}>
           <table className="data-table" style={{ fontSize:12, ...(isMobile ? { minWidth:760 } : {}) }}>
             <thead><tr>
               <th style={{width:34}}>#</th><th>Technician</th><th>Team</th>
@@ -978,28 +953,29 @@ function ByJobType() {
             </tr></thead>
             <tbody>
               {rows.map((r, i) => (
-                <tr key={r.tech_id} style={{ background: i === 0 ? 'rgba(21,128,61,.05)' : 'transparent', opacity: r.thin ? .72 : 1 }}>
-                  <td style={{ padding:'7px 12px', color:'var(--text-muted)' }}>{i + 1}</td>
-                  <td style={{ padding:'7px 12px', fontWeight:600 }}>
-                    {r.tech_name}
-                    {i === 0 && <span style={{ marginLeft:6, fontSize:9, fontWeight:700, color:'var(--tone-green-tx)', background:'var(--tone-green-bg)', border:'1px solid #BBE3C9', padding:'1px 6px', borderRadius:99 }}>TOP</span>}
+                <tr key={r.tech_id} style={{ background: i === 0 ? GREEN_TINT : 'transparent', opacity: r.thin ? .72 : 1 }}>
+                  <td style={{ padding:'7px 14px', color:'var(--text-muted)' }}>{i + 1}</td>
+                  <td style={{ padding:'6px 14px', fontWeight:600 }}>
+                    <TechName name={r.tech_name} wrap>
+                      {i === 0 && <span style={{ flexShrink:0 }}><ToneChip tone="green" small>Top</ToneChip></span>}
+                    </TechName>
                   </td>
-                  <td style={{ padding:'7px 12px', fontSize:11, color:'var(--text-muted)' }}>{r.team}</td>
-                  <td style={{ padding:'7px 12px', textAlign:'right', fontWeight:700 }}>{money(r.expected_value)}</td>
-                  <td style={{ padding:'7px 12px', textAlign:'right' }}>{pct(r.close_rate)}</td>
-                  <td style={{ padding:'7px 12px', textAlign:'right' }}>{money(r.avg_sale)}</td>
-                  <td style={{ padding:'7px 12px', textAlign:'right', color:'var(--text-muted)' }}>{money(r.total_sold)}</td>
-                  <td style={{ padding:'7px 12px', textAlign:'right', fontWeight:600 }}>
+                  <td style={{ padding:'7px 14px', fontSize:11, color:'var(--text-muted)' }}>{r.team}</td>
+                  <td style={{ padding:'7px 14px', textAlign:'right', fontWeight:700 }}>{money(r.expected_value)}</td>
+                  <td style={{ padding:'7px 14px', textAlign:'right' }}>{pct(r.close_rate)}</td>
+                  <td style={{ padding:'7px 14px', textAlign:'right' }}>{money(r.avg_sale)}</td>
+                  <td style={{ padding:'7px 14px', textAlign:'right', color:'var(--text-muted)' }}>{money(r.total_sold)}</td>
+                  <td style={{ padding:'7px 14px', textAlign:'right', fontWeight:600 }}>
                     {r.opportunities}
-                    {r.thin && <span title="Thin sample — read with caution" style={{ marginLeft:4, color:'var(--warning)' }}>*</span>}
+                    {r.thin && <span title="Thin sample — read with caution" style={{ marginLeft:4, color:'var(--tone-amber-tx)' }}>*</span>}
                   </td>
-                  <td style={{ padding:'7px 12px', textAlign:'right', color:'var(--text-muted)' }}>{r.won}</td>
+                  <td style={{ padding:'7px 14px', textAlign:'right', color:'var(--text-muted)' }}>{r.won}</td>
                 </tr>
               ))}
             </tbody>
           </table>
           {rows.some(r => r.thin) && (
-            <div style={{ padding:'8px 12px', fontSize:10, color:'var(--text-muted)', borderTop:'1px solid var(--border)' }}>
+            <div style={{ padding:'9px 14px', fontSize:11, color:'var(--text-muted)', borderTop:'1px solid var(--border)' }}>
               * fewer than 8 opportunities — treat as a hint, not a verdict
             </div>
           )}
@@ -1087,14 +1063,14 @@ function DecisionMaker() {
 
   return (
     <div style={{ maxWidth:900 }}>
-      <div style={{ fontSize:12, color:'var(--text-muted)', marginBottom:14 }}>
+      <div style={{ fontSize:12.5, color:'var(--text-muted)', marginBottom:14, lineHeight:1.55 }}>
         A call just came in — where does it go? Enter the job and address; this scores every tech on the
         right bench against the current board (earning power on this work, capacity, drive time) and tells
         you whether to book it, book-and-bump, or hold for the next open day.
       </div>
 
       {/* Not a .card — that has overflow:hidden, which clipped the dropdowns. */}
-      <div style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius-lg)', padding:'16px 18px', marginBottom:18 }}>
+      <div style={{ ...panel, padding:'16px 20px', marginBottom:18 }}>
         <div className="form-field" style={{ position:'relative' }}>
           <label className="form-label">Job type</label>
           <input className="form-input" value={jobType} autoFocus autoComplete="off"
@@ -1104,8 +1080,8 @@ function DecisionMaker() {
             onKeyDown={e => { if (e.key === 'Enter') { setShowTypes(false); decide() } if (e.key === 'Escape') setShowTypes(false) }}
             placeholder="e.g. Plumbing - Tankless Water Heater Estimate" />
           {showTypes && typeMatches.length > 0 && (
-            <div style={{ position:'absolute', top:'100%', left:0, right:0, zIndex:30, marginTop:2, maxHeight:260, overflowY:'auto',
-              background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius)', boxShadow:'0 6px 20px rgba(0,0,0,.14)' }}>
+            <div style={{ position:'absolute', top:'100%', left:0, right:0, zIndex:30, marginTop:4, maxHeight:260, overflowY:'auto',
+              background:'var(--surface)', border:'1px solid var(--border)', borderRadius:12, boxShadow:'0 16px 40px -12px rgba(15,20,40,.35)' }}>
               {typeMatches.map((t, i) => (
                 <div key={i} onMouseDown={() => { setJobType(t); setShowTypes(false) }}
                   style={{ padding:'8px 13px', fontSize:13, cursor:'pointer', borderBottom: i < typeMatches.length-1 ? '1px solid var(--border)' : 'none' }}
@@ -1127,9 +1103,9 @@ function DecisionMaker() {
             onKeyDown={e => { if (e.key === 'Enter') { setShowSuggests(false); decide() } if (e.key === 'Escape') setShowSuggests(false) }}
             placeholder="Start typing — a full address, street + city, or a zip" />
           {showSuggests && suggests.length > 0 && (
-            <div style={{ position:'absolute', top:'100%', left:0, right:0, zIndex:20, marginTop:2,
-              background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius)',
-              boxShadow:'0 6px 20px rgba(0,0,0,.14)', overflow:'hidden' }}>
+            <div style={{ position:'absolute', top:'100%', left:0, right:0, zIndex:20, marginTop:4,
+              background:'var(--surface)', border:'1px solid var(--border)', borderRadius:12,
+              boxShadow:'0 16px 40px -12px rgba(15,20,40,.35)', overflow:'hidden' }}>
               {suggests.map((sg, i) => (
                 <div key={i} onMouseDown={() => pickSuggest(sg)}
                   style={{ padding:'9px 13px', fontSize:13, cursor:'pointer', borderBottom: i < suggests.length-1 ? '1px solid var(--border)' : 'none' }}
@@ -1163,8 +1139,8 @@ function DecisionMaker() {
             Must run today — override the worth-it math and find the least-bad slot
           </label>
           <div style={{ display:'flex', gap:8 }}>
-            {(jobType || address || res) && <button className="btn" onClick={clearAll}>Clear</button>}
-            <button className="btn primary" onClick={decide} disabled={busy || !jobType.trim()}>
+            {(jobType || address || res) && <button className="btn" onClick={clearAll} style={{ borderRadius:99 }}>Clear</button>}
+            <button className="btn primary" onClick={decide} disabled={busy || !jobType.trim()} style={{ borderRadius:99 }}>
               {busy ? 'Working it out…' : 'Where should this go?'}
             </button>
           </div>
@@ -1175,7 +1151,7 @@ function DecisionMaker() {
 
       {res && rec && (
         <>
-          <div className="card" style={{ padding:'16px 18px', marginBottom:16, borderLeft:`4px solid ${rs.color}`, background:rs.bg }}>
+          <div style={{ ...panel, padding:'16px 20px', marginBottom:16, background:rs.bg, border:`1px solid ${rs.border}`, boxShadow:`inset 4px 0 0 ${rs.color}` }}>
             <div style={{ fontSize:16, fontWeight:800, color:rs.color }}>{rs.icon} {rec.text}</div>
             {rec.tech && (
               <div style={{ fontSize:12, color:'var(--text-secondary)', marginTop:6, lineHeight:1.6 }}>
@@ -1222,10 +1198,10 @@ function DecisionMaker() {
             )}
           </div>
 
-          <div style={{ fontSize:11, fontWeight:700, textTransform:'uppercase', letterSpacing:.5, color:'var(--text-muted)', marginBottom:8 }}>
+          <div style={{ ...eyebrow, marginBottom:8 }}>
             Full bench ranking
           </div>
-          <div className="card" style={{ padding:0, overflow: isMobile ? 'auto' : 'hidden' }}>
+          <div style={{ ...panel, overflow: isMobile ? 'auto' : 'hidden' }}>
             <table className="data-table" style={{ fontSize:12, ...(isMobile ? { minWidth:620 } : {}) }}>
               <thead><tr>
                 <th>Technician</th><th>Team</th>
@@ -1238,32 +1214,37 @@ function DecisionMaker() {
                 {(res.options || []).map((o) => {
                   const chosen = o.techId === res.recommendation?.tech?.techId
                   return (
-                  <tr key={o.techId} style={{ background: chosen ? 'rgba(21,128,61,.06)' : 'transparent' }}>
-                    <td style={{ padding:'7px 12px', fontWeight:600 }}>
-                      {o.techName}{chosen && <span style={{ marginLeft:6, fontSize:9, fontWeight:700, color:'var(--tone-green-tx)' }}>PICK</span>}
-                      {/* Each row explains its own cost, so the ranking and the
-                          recommendation can never look contradictory: the top
-                          earner may be un-bumpable while #2 has a routine call
-                          worth trading — which is a better decision, not a bug. */}
-                      <div style={{ fontSize:10, fontWeight:400, color:'var(--text-muted)', marginTop:1 }}>
-                        {o.allDayInstall
-                          ? `on an all-day install (${o.allDayInstall}) — not available today`
-                          : o.hasRoom
-                          ? `has room${o.openWindows?.length ? ` · ${o.openWindows.slice(0, 2).join(', ')} look open` : ''}`
-                          : o.bump ? `full — would bump #${o.bump.jobNumber} (${o.bump.why})`
-                          : 'full — nothing movable today'}
-                        {o.callsRun > 0 ? ` · ${o.callsRun} call${o.callsRun === 1 ? '' : 's'} already run today` : ''}
+                  <tr key={o.techId} style={{ background: chosen ? GREEN_TINT : 'transparent' }}>
+                    <td style={{ padding:'7px 14px', fontWeight:600 }}>
+                      <div style={{ display:'flex', alignItems:'center', gap:9 }}>
+                        <Face name={faceName(o.techName)} size={24} />
+                        <div style={{ minWidth:0 }}>
+                          {o.techName}{chosen && <span style={{ marginLeft:6 }}><ToneChip tone="green" small>Pick</ToneChip></span>}
+                          {/* Each row explains its own cost, so the ranking and the
+                              recommendation can never look contradictory: the top
+                              earner may be un-bumpable while #2 has a routine call
+                              worth trading — which is a better decision, not a bug. */}
+                          <div style={{ fontSize:10, fontWeight:400, color:'var(--text-muted)', marginTop:1 }}>
+                            {o.allDayInstall
+                              ? `on an all-day install (${o.allDayInstall}) — not available today`
+                              : o.hasRoom
+                              ? `has room${o.openWindows?.length ? ` · ${o.openWindows.slice(0, 2).join(', ')} look open` : ''}`
+                              : o.bump ? `full — would bump #${o.bump.jobNumber} (${o.bump.why})`
+                              : 'full — nothing movable today'}
+                            {o.callsRun > 0 ? ` · ${o.callsRun} call${o.callsRun === 1 ? '' : 's'} already run today` : ''}
+                          </div>
+                        </div>
                       </div>
                     </td>
-                    <td style={{ padding:'7px 12px', fontSize:11, color:'var(--text-muted)' }}>
+                    <td style={{ padding:'7px 14px', fontSize:11, color:'var(--text-muted)' }}>
                       {o.team}{o.onThisJobType ? '' : ' *'}
                     </td>
-                    <td style={{ padding:'7px 12px', textAlign:'right', fontWeight:700 }}>{money(o.expectedValue)}</td>
-                    <td style={{ padding:'7px 12px', textAlign:'right' }}>{o.closeRate}%</td>
-                    <td style={{ padding:'7px 12px', textAlign:'right', color: o.hasRoom ? 'var(--text-muted)' : 'var(--tone-amber-tx)', fontWeight: o.hasRoom ? 400 : 700 }}>
+                    <td style={{ padding:'7px 14px', textAlign:'right', fontWeight:700 }}>{money(o.expectedValue)}</td>
+                    <td style={{ padding:'7px 14px', textAlign:'right' }}>{o.closeRate}%</td>
+                    <td style={{ padding:'7px 14px', textAlign:'right', color: o.hasRoom ? 'var(--text-muted)' : 'var(--tone-amber-tx)', fontWeight: o.hasRoom ? 400 : 700 }}>
                       {o.allDayInstall ? 'install' : `${o.load}/${o.cap}${o.hasRoom ? '' : ' full'}`}
                     </td>
-                    <td style={{ padding:'7px 12px', textAlign:'right', color:'var(--text-muted)' }}>
+                    <td style={{ padding:'7px 14px', textAlign:'right', color:'var(--text-muted)' }}>
                       {o.driveMinutes == null ? '—' : `${o.driveMinutes} min`}
                     </td>
                   </tr>
@@ -1273,7 +1254,7 @@ function DecisionMaker() {
             </table>
           </div>
           {(res.options || []).some(o => !o.onThisJobType) && (
-            <div style={{ fontSize:10, color:'var(--text-muted)', marginTop:6 }}>
+            <div style={{ fontSize:11, color:'var(--text-muted)', marginTop:6 }}>
               * bench-average earning power — not enough of this exact job type to rank them on it specifically
             </div>
           )}
@@ -1294,17 +1275,11 @@ export default function DispatchPage() {
   return (
     <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden' }}>
       {/* Six tabs. On a phone the bar scrolls sideways rather than wrapping into three lines. */}
-      <div style={{ background:'var(--surface)', borderBottom:'1px solid var(--border)', flexShrink:0, padding:'0 24px', display:'flex', gap:4, ...(isMobile ? { padding:'0 12px', overflowX:'auto', whiteSpace:'nowrap' } : {}) }}>
-        {[['center','Command Center'],['order','Batting Order'],['jobtype','By Job Type'],['live','Live Board Analyzer'],['decide','Decision Maker'],['techinfo','Tech Info']].map(([id,label]) => (
-          <button key={id} onClick={() => setTab(id)}
-            style={{ padding:'12px 14px', border:'none', background:'transparent', cursor:'pointer', fontSize:13,
-              fontWeight: tab===id ? 700 : 500, color: tab===id ? 'var(--accent)' : 'var(--text-muted)',
-              borderBottom: `2px solid ${tab===id ? 'var(--accent)' : 'transparent'}`, ...(isMobile ? { flexShrink:0 } : {}) }}>
-            {label}
-          </button>
-        ))}
+      <div style={{ background:'var(--surface)', borderBottom:'1px solid var(--border)', flexShrink:0, padding: isMobile ? '0 12px' : '0 24px' }}>
+        <PageTabs value={tab} onChange={setTab}
+          tabs={[['center','Command Center'],['order','Batting Order'],['jobtype','By Job Type'],['live','Live Board Analyzer'],['decide','Decision Maker'],['techinfo','Tech Info']]} />
       </div>
-      <div style={{ flex:1, overflow:'auto', padding:'20px 24px', background:'var(--bg)', ...(isMobile ? { padding:'14px 12px' } : {}) }}>
+      <div style={{ flex:1, overflow:'auto', padding: isMobile ? 12 : 24, background:'var(--bg)' }}>
         {tab === 'center' ? <CommandCenter /> : tab === 'order' ? <BattingOrder /> : tab === 'jobtype' ? <ByJobType /> : tab === 'decide' ? <DecisionMaker /> : tab === 'techinfo' ? <TechInfo /> : <LiveBoard />}
       </div>
     </div>

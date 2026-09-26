@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react'
 import { sb } from '../lib/supabase'
 import { confirmDlg } from '../lib/dialogs'
+import { useIsMobile } from '../lib/useIsMobile'
+import { ToneChip, EmptyState, eyebrow, panel, num } from './ui'
 
 // Settings → Knowledge: what Ask Andi knows. Every save writes a revision
 // (who/when/what changed) — the ledger of what the assistant is being fed.
@@ -39,6 +41,7 @@ export default function KnowledgeTab() {
   const [importMsg, setImportMsg] = useState('')
   const [gaps, setGaps] = useState([])
   const [gapsOpen, setGapsOpen] = useState(false)
+  const isMobile = useIsMobile()
 
   const load = () => authed('/api/kb/list').then(d => setArticles(d.articles)).catch(e => setErr(e.message))
   useEffect(() => {
@@ -84,8 +87,19 @@ export default function KnowledgeTab() {
     catch (e) { setErr(e.message) }
   }
 
-  if (err && !articles) return <div style={{ padding: 20, color: 'var(--danger)', fontSize: 13 }}>{err}</div>
-  if (!articles) return <div className="spinner lg" style={{ margin: '60px auto' }} />
+  const pad = isMobile ? 12 : 24
+  const redNote = { padding: '10px 14px', borderRadius: 12, fontSize: 12.5, background: 'var(--tone-red-bg)', border: '1px solid var(--tone-red-bd)', color: 'var(--tone-red-tx)' }
+  if (err && !articles) return <div style={{ padding: pad }}><div style={redNote}>{err}</div></div>
+  if (!articles) return (
+    <div style={{ flex: 1, overflowY: 'auto' }}>
+      <div style={{ padding: pad, maxWidth: 1100, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <div className="skel" style={{ height: 38, borderRadius: 99 }} />
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))', gap: 12 }}>
+          {[0, 1, 2, 3, 4, 5].map(i => <div key={i} className="skel" style={{ height: 118, borderRadius: 16 }} />)}
+        </div>
+      </div>
+    </div>
+  )
 
   const shown = articles.filter(a =>
     (filter === 'all' || a.category === filter) &&
@@ -93,40 +107,44 @@ export default function KnowledgeTab() {
 
   return (
     <div style={{ flex: 1, overflowY: 'auto' }}>
-    <div style={{ padding: 24, maxWidth: 1100, margin: '0 auto' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14, flexWrap: 'wrap' }}>
-        <div style={{ fontSize: 12, color: 'var(--text-muted)', flex: 1, minWidth: 260 }}>
+    <div style={{ padding: pad, maxWidth: 1100, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 16 }}>
+      {/* Toolbar: what this tab is, then search / filter / import / new. */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+        <div style={{ fontSize: 12.5, color: 'var(--text-muted)', flex: 1, minWidth: 260, lineHeight: 1.5 }}>
           Everything Ask Andi is allowed to say about company facts lives here. Edits go live on the very
           next answer; every save keeps a revision with who changed what.
         </div>
-        <input className="form-input" placeholder="Search…" value={search} onChange={e => setSearch(e.target.value)} style={{ width: 180 }} />
-        <select className="form-input" value={filter} onChange={e => setFilter(e.target.value)} style={{ width: 170 }}>
+        <input className="form-input" placeholder="Search…" value={search} onChange={e => setSearch(e.target.value)}
+          style={{ width: isMobile ? '100%' : 180, borderRadius: 99, padding: '7px 14px' }} />
+        <select className="form-input" value={filter} onChange={e => setFilter(e.target.value)}
+          style={{ width: isMobile ? '100%' : 170, borderRadius: 99, padding: '7px 14px' }}>
           <option value="all">All categories</option>
           {CATEGORIES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
         </select>
-        <button className="btn" onClick={importWebsite} disabled={importing}>
+        <button className="btn" onClick={importWebsite} disabled={importing} style={{ borderRadius: 99 }}>
           {importing ? 'Importing…' : 'Import website'}
         </button>
-        <button className="btn primary" onClick={() => openEdit(null)}>+ New article</button>
+        <button className="btn primary" onClick={() => openEdit(null)} style={{ borderRadius: 99 }}>+ New article</button>
       </div>
-      {importMsg && <div style={{ fontSize:12, fontWeight:600, marginBottom:10, color: importMsg.startsWith('✓') ? 'var(--success)' : 'var(--tone-red-tx)' }}>{importMsg}</div>}
+      {importMsg && <div style={{ fontSize: 12, fontWeight: 600, color: importMsg.startsWith('✓') ? 'var(--tone-green-tx)' : 'var(--tone-red-tx)' }}>{importMsg}</div>}
 
       {gaps.length > 0 && (
-        <div className="card" style={{ padding:'10px 14px', marginBottom:12, borderLeft:'3px solid var(--tone-amber-bd)' }}>
-          <div onClick={() => setGapsOpen(o => !o)} style={{ display:'flex', alignItems:'center', gap:8, cursor:'pointer' }}>
-            <span style={{ fontSize:12.5, fontWeight:700 }}>
-              {gaps.length} question{gaps.length === 1 ? '' : 's'} the knowledge base couldn't answer (last 30 days)
+        <div style={{ ...panel, overflow: 'hidden' }}>
+          <div onClick={() => setGapsOpen(o => !o)} style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', cursor: 'pointer', padding: isMobile ? '12px 14px' : '12px 20px' }}>
+            <ToneChip tone="amber">{gaps.length}</ToneChip>
+            <span style={{ fontSize: 13.5, fontWeight: 700 }}>
+              question{gaps.length === 1 ? '' : 's'} the knowledge base couldn't answer (last 30 days)
             </span>
-            <span style={{ fontSize:11, color:'var(--text-muted)' }}>— your "what to write next" list</span>
-            <span style={{ marginLeft:'auto', fontSize:11, color:'var(--text-muted)' }}>{gapsOpen ? '▾ hide' : '▸ show'}</span>
+            <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>— your "what to write next" list</span>
+            <span style={{ marginLeft: 'auto', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>{gapsOpen ? '▾ hide' : '▸ show'}</span>
           </div>
           {gapsOpen && (
-            <div style={{ marginTop:8, display:'flex', flexDirection:'column', gap:5, maxHeight:220, overflowY:'auto' }}>
-              {gaps.map(g => (
-                <div key={g.id} style={{ display:'flex', alignItems:'center', gap:8, fontSize:12 }}>
-                  <span style={{ flex:1 }}>{g.question}</span>
-                  {g.helpful === false && <span title="Rep gave this answer a thumbs-down" style={{ flexShrink:0 }}>👎</span>}
-                  <span style={{ fontSize:10.5, color:'var(--text-muted)', flexShrink:0 }}>
+            <div style={{ maxHeight: 220, overflowY: 'auto', borderTop: '1px solid var(--border)' }}>
+              {gaps.map((g, i) => (
+                <div key={g.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, padding: isMobile ? '8px 14px' : '8px 20px', borderTop: i ? '1px solid var(--border)' : 'none' }}>
+                  <span style={{ flex: 1 }}>{g.question}</span>
+                  {g.helpful === false && <span title="Rep gave this answer a thumbs-down" style={{ flexShrink: 0 }}>👎</span>}
+                  <span style={{ ...num, fontSize: 11, color: 'var(--text-muted)', flexShrink: 0 }}>
                     {g.rep_name || 'someone'} · {String(g.created_at).slice(5, 10)}
                   </span>
                 </div>
@@ -137,36 +155,33 @@ export default function KnowledgeTab() {
       )}
 
       {shown.length === 0 && (
-        <div style={{ padding: '40px 20px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>
+        <EmptyState>
           Nothing here yet — hit <b>New article</b>. Good starters: the dispatch fee policy, service areas,
           and your top three phone objections.
-        </div>
+        </EmptyState>
       )}
 
       {CATEGORIES.filter(([v]) => shown.some(a => a.category === v)).map(([v, label]) => (
-        <div key={v} style={{ marginBottom: 22 }}>
-          <div style={{ fontSize: 12, fontWeight: 800, textTransform: 'uppercase', letterSpacing: .6, color: 'var(--text-muted)', marginBottom: 8 }}>
-            {label} <span style={{ fontWeight: 600 }}>· {shown.filter(a => a.category === v).length}</span>
+        <div key={v}>
+          <div style={{ ...eyebrow, marginBottom: 10 }}>
+            {label} <span style={{ ...num, fontWeight: 600 }}>· {shown.filter(a => a.category === v).length}</span>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))', gap: 10 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))', gap: 12 }}>
             {shown.filter(a => a.category === v).map(a => (
-              <div key={a.id} className="card" onClick={() => openEdit(a)}
-                onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--accent)'; e.currentTarget.style.transform = 'translateY(-1px)' }}
-                onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.transform = 'none' }}
-                style={{ padding: '12px 14px', cursor: 'pointer', opacity: a.active ? 1 : .55, transition: 'all .1s',
-                  display: 'flex', flexDirection: 'column', gap: 6, minHeight: 110 }}>
-                <div style={{ fontSize: 13, fontWeight: 700, lineHeight: 1.35 }}>{a.title}</div>
-                <div style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.5, flex: 1,
+              <div key={a.id} className="lift-hover" onClick={() => openEdit(a)}
+                style={{ ...panel, padding: '14px 16px', cursor: 'pointer', opacity: a.active ? 1 : .55,
+                  display: 'flex', flexDirection: 'column', gap: 6, minHeight: 118 }}>
+                <div style={{ fontSize: 13.5, fontWeight: 700, lineHeight: 1.35 }}>{a.title}</div>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.5, flex: 1,
                   display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
                   {a.body.replace(/<[^>]*>/g, ' ').slice(0, 220)}
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 9.5, color: 'var(--text-muted)' }}>
-                  <span>{String(a.updated_at).slice(0, 10)}</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--text-muted)' }}>
+                  <span style={num}>{String(a.updated_at).slice(0, 10)}</span>
                   {a.updated_by && <span>· {a.updated_by}</span>}
                   {!a.active && (
-                    <span style={{ marginLeft: 'auto', fontWeight: 700, color: 'var(--tone-amber-tx)' }}>hidden</span>
+                    <span style={{ marginLeft: 'auto' }}><ToneChip tone="amber" small>Hidden</ToneChip></span>
                   )}
-                  
                 </div>
               </div>
             ))}
@@ -175,11 +190,12 @@ export default function KnowledgeTab() {
       ))}
 
       {edit && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.45)', zIndex: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.45)', zIndex: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: isMobile ? 12 : 20 }}
           onMouseDown={() => setEdit(null)}>
           <div onMouseDown={e => e.stopPropagation()}
-            style={{ background: 'var(--surface)', borderRadius: 14, width: '100%', maxWidth: 640, maxHeight: '88vh', overflowY: 'auto', boxShadow: '0 12px 40px rgba(0,0,0,.25)', padding: '20px 22px' }}>
-            <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 14 }}>{edit.id ? 'Edit article' : 'New article'}</div>
+            style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 18, width: '100%', maxWidth: 640, maxHeight: '88vh', overflowY: 'auto',
+              boxShadow: '0 24px 60px -20px rgba(15, 20, 40, .35)', padding: isMobile ? 16 : '22px 24px' }}>
+            <div style={{ fontSize: 17, fontWeight: 700, letterSpacing: '-.01em', marginBottom: 16 }}>{edit.id ? 'Edit article' : 'New article'}</div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 200px', gap: 10 }}>
                 <div className="form-field">
@@ -219,7 +235,7 @@ export default function KnowledgeTab() {
                     <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 180, overflowY: 'auto' }}>
                       {revs.length === 0 && <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>No previous versions.</div>}
                       {revs.map(r => (
-                        <details key={r.id} style={{ fontSize: 11.5, border: '1px solid var(--border)', borderRadius: 8, padding: '6px 10px' }}>
+                        <details key={r.id} style={{ fontSize: 11.5, border: '1px solid var(--border)', borderRadius: 10, padding: '6px 10px' }}>
                           <summary style={{ cursor: 'pointer', fontWeight: 600 }}>
                             {String(r.edited_at).slice(0, 16).replace('T', ' ')} · {r.edited_by || 'unknown'}{r.note ? ` — ${r.note}` : ''}
                           </summary>
@@ -230,11 +246,10 @@ export default function KnowledgeTab() {
                   )}
                 </div>
               )}
-              {err && <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--tone-red-tx)' }}>{err}</div>}
+              {err && <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--tone-red-tx)' }}>{err}</div>}
               <div style={{ display: 'flex', gap: 8 }}>
                 {edit.id && (
-                  <button className="btn" onClick={() => { const a = articles.find(x => x.id === edit.id); if (a) { remove(a); setEdit(null) } }}
-                    style={{ color: 'var(--danger)' }}>Delete</button>
+                  <button className="btn danger" onClick={() => { const a = articles.find(x => x.id === edit.id); if (a) { remove(a); setEdit(null) } }}>Delete</button>
                 )}
                 <div style={{ display: 'flex', gap: 8, marginLeft: 'auto' }}>
                   <button className="btn" onClick={() => setEdit(null)}>Cancel</button>

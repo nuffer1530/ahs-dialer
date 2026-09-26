@@ -5,6 +5,7 @@ import { toast } from '../lib/dialogs'
 import { sb } from '../lib/supabase'
 import { useAuth } from '../lib/AuthContext'
 import Avatar from './Avatar'
+import { PillNav } from './ui'
 
 const START_HOUR = 6
 const END_HOUR = 21
@@ -498,29 +499,18 @@ export default function GraphicalSchedule({ profiles, onUpdate }) {
 
       {/* Date nav bar */}
       <div style={{ padding:'12px 24px', borderBottom:'1px solid var(--border)', display:'flex', alignItems:'center', justifyContent:'space-between', background:'var(--surface)', flexShrink:0 }}>
-        <div style={{ display:'flex', alignItems:'center', gap:10 }}>
-          <button onClick={prevDay} style={{ width:32, height:32, border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface-2)', cursor:'pointer', fontSize:16, color:'var(--text-secondary)', display:'flex', alignItems:'center', justifyContent:'center' }}
-            onMouseEnter={e => e.currentTarget.style.background='var(--border)'}
-            onMouseLeave={e => e.currentTarget.style.background='var(--surface-2)'}>‹</button>
-          <div style={{ fontSize:14, fontWeight:500, color:'var(--text-primary)', minWidth:260, textAlign:'center' }}>
-            {formatDate(date)}
-            {isToday && <span style={{ marginLeft:8, fontSize:11, fontWeight:600, color:'#2a78d6', background:'#2a78d618', padding:'2px 8px', borderRadius:99 }}>Today</span>}
-          </div>
-          <button onClick={nextDay} style={{ width:32, height:32, border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface-2)', cursor:'pointer', fontSize:16, color:'var(--text-secondary)', display:'flex', alignItems:'center', justifyContent:'center' }}
-            onMouseEnter={e => e.currentTarget.style.background='var(--border)'}
-            onMouseLeave={e => e.currentTarget.style.background='var(--surface-2)'}>›</button>
+        <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+          <PillNav label={<>{formatDate(date)}{isToday && <span style={{ marginLeft:8, fontSize:10.5, fontWeight:700, color:'var(--accent-text)', background:'var(--accent-bg)', padding:'2px 8px', borderRadius:99 }}>Today</span>}</>}
+            onPrev={prevDay} onNext={nextDay} minWidth={260} />
           {!isToday && (
-            <button onClick={goToday}
-              style={{ padding:'6px 12px', fontSize:12, fontWeight:600, border:'1px solid var(--accent)', borderRadius:'var(--radius)', background:'var(--accent-bg)', color:'var(--accent)', cursor:'pointer' }}>
-              Today
-            </button>
+            <button className="btn sm" onClick={goToday} style={{ borderRadius:99 }}>Today</button>
           )}
         </div>
 
         {/* Legend + bulk add */}
         <div style={{ display:'flex', gap:14, alignItems:'center', flexWrap:'wrap' }}>
           {isAdmin && (
-            <button className="btn sm primary"
+            <button className="btn sm primary" style={{ borderRadius:99 }}
               onClick={() => { setBulkForm({ type: 'meeting', all: true, profileIds: [], startTime: '09:00', durationMin: 15, note: '', repeat: false }); setBulkModal(true) }}>
               ＋ Add event
             </button>

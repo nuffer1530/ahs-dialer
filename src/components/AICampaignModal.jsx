@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { sb } from '../lib/supabase'
 import { useData } from '../lib/DataContext'
 import Modal from './Modal'
+import { Stat, ToneChip, eyebrow, num } from './ui'
 
 // AI Campaign builder. Three steps in one modal:
 //   1) describe   — type who you want to reach
@@ -33,6 +34,31 @@ async function authFetch(path, body) {
   const data = await res.json().catch(() => ({}))
   if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`)
   return data
+}
+
+const fmt = (v) => (typeof v === 'number' ? v.toLocaleString('en-US') : v)
+const stepHeading = { display: 'block', fontSize: 14, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 8 }
+const stepRule = { borderTop: '1px solid var(--border)', marginTop: 16, paddingTop: 16 }
+const cellTh = { position: 'sticky', top: 0, zIndex: 1, padding: '8px 12px' }
+const cellTd = { padding: '6px 12px' }
+
+const CheckIcon = () => (
+  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>
+)
+
+// Step heading: a numbered dot (a check once that step is behind you) and an
+// eyebrow label.
+function StepLabel({ n, label, done }) {
+  const t = done ? 'green' : 'blue'
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+      <span aria-hidden="true" style={{ ...num, width: 20, height: 20, borderRadius: 99, flexShrink: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+        fontSize: 10.5, fontWeight: 800, color: `var(--tone-${t}-tx)`, background: `var(--tone-${t}-bg)`, border: `1px solid var(--tone-${t}-bd)` }}>
+        {done ? <CheckIcon /> : n}
+      </span>
+      <span style={eyebrow}>Step {n} · {label}</span>
+    </div>
+  )
 }
 
 export default function AICampaignModal({ onClose, onCreated }) {
@@ -80,59 +106,62 @@ export default function AICampaignModal({ onClose, onCreated }) {
   return (
     <Modal title="Build a campaign with AI" onClose={onClose} width={620}>
       {/* Step 1 — describe */}
+      <StepLabel n={1} label="Describe" done={!!plan} />
       <div className="form-field">
-        <label className="form-label">Who do you want to reach?</label>
-        <textarea className="form-input" value={request} autoFocus
+        <label htmlFor="ai-campaign-request" style={stepHeading}>Who do you want to reach?</label>
+        <textarea id="ai-campaign-request" className="form-input" value={request} autoFocus
           onChange={e => setRequest(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) doPlan() }}
           placeholder="e.g. Members whose HVAC maintenance is due in the next 3 months"
           style={{ minHeight: 70 }} />
-        <div style={{ fontSize: 11, color: 'var(--text-muted)', margin: '12px 0 8px' }}>Try one of these</div>
+        <div style={{ fontSize: 11.5, color: 'var(--text-muted)', margin: '12px 0 8px' }}>Try one of these</div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
           {EXAMPLES.map(x => (
             <button key={x} type="button" onClick={() => { setRequest(x); reset() }}
-              style={{ fontSize: 12, padding: '7px 13px', borderRadius: 99, border: '1px solid var(--border)', background: 'var(--surface-2)', color: 'var(--text-muted)', cursor: 'pointer', transition: 'all .1s', lineHeight: 1.3 }}
+              style={{ fontSize: 12, padding: '6px 12px', borderRadius: 99, border: '1px solid var(--border)', background: 'var(--surface-2)', color: 'var(--text-secondary)', cursor: 'pointer', transition: 'border-color .12s, color .12s', lineHeight: 1.3, textAlign: 'left' }}
               onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--accent)'; e.currentTarget.style.color = 'var(--accent)' }}
-              onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text-muted)' }}>
+              onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text-secondary)' }}>
               {x}
             </button>
           ))}
         </div>
       </div>
-      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
+      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
         <button className="btn primary" onClick={doPlan} disabled={busy === 'plan' || !request.trim()}>
           {busy === 'plan' ? 'Reading…' : 'Interpret request'}
         </button>
       </div>
 
       {err && (
-        <div style={{ background: 'var(--danger-bg)', border: '1px solid var(--danger)', borderRadius: 'var(--radius)', padding: '10px 12px', fontSize: 12, color: 'var(--danger)', marginBottom: 12 }}>
+        <div style={{ background: 'var(--tone-red-bg)', border: '1px solid var(--tone-red-bd)', borderRadius: 12, padding: '10px 12px', fontSize: 12.5, color: 'var(--tone-red-tx)', marginTop: 12 }}>
           {err}
         </div>
       )}
 
       {/* Step 2 — readback + preview */}
       {plan && (
-        <div style={{ borderTop: '1px solid var(--border)', paddingTop: 14, marginBottom: 4 }}>
+        <div style={stepRule}>
+          <StepLabel n={2} label="Review" done={!!preview} />
           {unsupported ? (
-            <div style={{ background: 'var(--warning-bg, #fdf6e3)', border: '1px solid var(--warning)', borderRadius: 'var(--radius)', padding: '10px 12px', fontSize: 13 }}>
-              <strong>I can't build that one from ServiceTitan.</strong>
-              <div style={{ marginTop: 4, color: 'var(--text-muted)' }}>{plan.note || 'No matching data source for this request.'}</div>
+            <div style={{ background: 'var(--tone-amber-bg)', border: '1px solid var(--tone-amber-bd)', borderRadius: 12, padding: '12px 14px', fontSize: 13, color: 'var(--text-primary)' }}>
+              <strong style={{ color: 'var(--tone-amber-tx)' }}>I can't build that one from ServiceTitan.</strong>
+              <div style={{ marginTop: 4, color: 'var(--text-secondary)' }}>{plan.note || 'No matching data source for this request.'}</div>
               <div style={{ marginTop: 6, fontSize: 12, color: 'var(--text-muted)' }}>
                 I can do: expiring/cancelled memberships, maintenance due, past-job follow-up, and tagged customers.
               </div>
             </div>
           ) : (
             <>
-              <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: .5, color: 'var(--text-muted)', marginBottom: 6 }}>
-                Here's what I'll pull · {RECIPE_LABELS[plan.recipe] || plan.recipe}
+              <div style={{ ...stepHeading, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                Here's what I'll pull
+                <ToneChip tone="blue" small>{RECIPE_LABELS[plan.recipe] || plan.recipe}</ToneChip>
               </div>
-              <div style={{ background: 'var(--surface-2)', borderRadius: 'var(--radius)', padding: '12px 14px', fontSize: 13, lineHeight: 1.5, marginBottom: 12 }}>
+              <div style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 12, padding: '12px 14px', fontSize: 13, lineHeight: 1.55, color: 'var(--text-primary)' }}>
                 {plan.readback}
               </div>
 
               {!preview && (
-                <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>
                   <button className="btn primary" onClick={doPreview} disabled={busy === 'preview'}>
                     {busy === 'preview' ? 'Searching ServiceTitan — can take a minute…' : 'Preview audience'}
                   </button>
@@ -143,38 +172,40 @@ export default function AICampaignModal({ onClose, onCreated }) {
         </div>
       )}
 
-      {/* Preview results */}
+      {/* Step 3 — preview results, then create */}
       {preview && (
-        <div style={{ marginTop: 6 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 8, marginBottom: 12 }}>
+        <div style={stepRule}>
+          <StepLabel n={3} label="Create" />
+          {/* Tiles bottom-align their stat so the numbers line up even if a label wraps. */}
+          <div className="mgrid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 8, marginBottom: 10 }}>
             {[
-              ['Dialable', preview.stats.dialable, 'success'],
+              ['Dialable', preview.stats.dialable, 'green'],
               ['Matched', preview.stats.matched, null],
-              ['DNC skipped', preview.stats.dncSkipped, null],
-              ['Already in Andi', preview.stats.dupSkipped, null],
-            ].map(([l, v, c]) => (
-              <div key={l} style={{ textAlign: 'center', padding: '8px 4px', background: 'var(--surface-2)', borderRadius: 'var(--radius)' }}>
-                <div style={{ fontSize: 18, fontWeight: 700, color: c ? `var(--${c})` : 'var(--text-primary)' }}>{v}</div>
-                <div style={{ fontSize: 9, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: .5, marginTop: 2 }}>{l}</div>
+              ['DNC skipped', preview.stats.dncSkipped, 'gray'],
+              ['Already in Andi', preview.stats.dupSkipped, 'gray'],
+            ].map(([l, v, t]) => (
+              <div key={l} style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 12, padding: '12px 14px', minWidth: 0, display: 'flex', alignItems: 'flex-end' }}>
+                <Stat label={l} value={fmt(v)} tone={t || undefined} />
               </div>
             ))}
           </div>
-          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 10 }}>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12 }}>
             {preview.stats.noPhone > 0 && `${preview.stats.noPhone} had no phone number. `}
             {preview.stats.truncated && `Capped at the first ${preview.stats.resolved} of ${preview.stats.matched} matches — narrow the request for the rest. `}
           </div>
 
           {preview.stats.dialable > 0 ? (
             <>
-              <div style={{ maxHeight: 180, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 'var(--radius)', marginBottom: 14 }}>
-                <table className="data-table" style={{ fontSize: 11 }}>
-                  <thead><tr><th>Name</th><th>Phone</th><th>Why</th></tr></thead>
+              <div style={{ ...eyebrow, marginBottom: 6 }}>Sample · {fmt(preview.sample.length)} of {fmt(preview.stats.dialable)}</div>
+              <div style={{ maxHeight: 180, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 12, marginBottom: 14 }}>
+                <table className="data-table" style={{ fontSize: 11.5 }}>
+                  <thead><tr><th style={cellTh}>Name</th><th style={cellTh}>Phone</th><th style={cellTh}>Why</th></tr></thead>
                   <tbody>
                     {preview.sample.map((r, i) => (
                       <tr key={i}>
-                        <td style={{ padding: '5px 10px' }}>{r.name || '—'}</td>
-                        <td style={{ padding: '5px 10px' }}>{r.phone}</td>
-                        <td style={{ padding: '5px 10px', color: 'var(--text-muted)' }}>{r.reason}</td>
+                        <td style={{ ...cellTd, fontWeight: 600 }}>{r.name || '—'}</td>
+                        <td style={{ ...cellTd, whiteSpace: 'nowrap' }}>{r.phone}</td>
+                        <td style={{ ...cellTd, color: 'var(--text-muted)' }}>{r.reason}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -205,7 +236,7 @@ export default function AICampaignModal({ onClose, onCreated }) {
               </div>
             </>
           ) : (
-            <div style={{ fontSize: 13, color: 'var(--text-muted)', padding: '8px 0' }}>
+            <div style={{ fontSize: 13, color: 'var(--text-muted)', padding: '14px 16px', background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 12, textAlign: 'center' }}>
               No dialable contacts matched. Try widening the time window or a different request.
             </div>
           )}

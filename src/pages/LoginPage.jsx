@@ -55,12 +55,12 @@ export default function LoginPage() {
         </div>
 
         <div className="card" style={{ padding:28 }}>
-          <h2 style={{ fontSize:18, fontWeight:600, marginBottom:20, textAlign:'center' }}>
+          <h2 style={{ fontSize:20, fontWeight:800, letterSpacing:'-.01em', marginBottom:20, textAlign:'center' }}>
             {mode === 'login' ? 'Sign in' : mode === 'signup' ? 'Create account' : 'Reset password'}
           </h2>
 
-          {err && <div style={{ background:'var(--danger-bg)', color:'var(--danger)', padding:'10px 14px', borderRadius:'var(--radius)', marginBottom:14, fontSize:13 }}>{err}</div>}
-          {msg && <div style={{ background:'var(--success-bg)', color:'var(--success)', padding:'10px 14px', borderRadius:'var(--radius)', marginBottom:14, fontSize:13 }}>{msg}</div>}
+          {err && <div role="alert" style={{ background:'var(--tone-red-bg)', border:'1px solid var(--tone-red-bd)', color:'var(--tone-red-tx)', padding:'10px 14px', borderRadius:10, marginBottom:14, fontSize:13 }}>{err}</div>}
+          {msg && <div role="status" style={{ background:'var(--tone-green-bg)', border:'1px solid var(--tone-green-bd)', color:'var(--tone-green-tx)', padding:'10px 14px', borderRadius:10, marginBottom:14, fontSize:13 }}>{msg}</div>}
 
           <form onSubmit={handleSubmit}>
             <div className="form-field">
