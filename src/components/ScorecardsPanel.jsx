@@ -82,6 +82,21 @@ export const fmtKpi = (kpi, v) => {
 }
 const fmtThr = (kpi, v) => (kpi.unit === '$' ? money(Number(v) || 0) : kpi.unit === '%' ? `${v}%` : kpi.unit === 'pts' ? `${v} pt${Number(v) === 1 ? '' : 's'}` : `${v}`)
 
+// One CSR's month scored exactly like this panel (same KPIs, rules and 3.00
+// Meets cut) — the CSR Home uses it so the two can't disagree. `row` is their
+// scorecard_actuals row; no row = no score (attendance alone would read as
+// "Exceeds" before the month's numbers are in).
+export function scoreMonth(row, attendance, weights, thresholds) {
+  const w = { ...DEFAULT_WEIGHTS, ...(weights || {}) }
+  const t = { ...DEFAULT_THRESHOLDS, ...(thresholds || {}) }
+  const actuals = row ? { attendance: attendance || 0, booking_pct: row.booking_pct, booked_calls: row.booked_calls, call_quality: row.call_quality, memberships: row.memberships } : null
+  const score = actuals ? overallScore(actuals, w, t) : null
+  return {
+    score, level: levelOf(score),
+    kpis: KPIS.map(k => ({ ...k, value: actuals ? actuals[k.id] : null, rating: actuals ? rateKpi(k, actuals[k.id], t[k.id]) : null, weight: Number(w[k.id]) || 0 })),
+  }
+}
+
 export function LevelChip({ level, small, short }) {
   if (!level) return <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>No data</span>
   const { tone } = LEVELS[level]

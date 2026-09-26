@@ -5388,19 +5388,28 @@ async function ceoBuildFast() {
       loadAdminAgents(supabase), ceoReps(), tvJobTypeNames(),
     ])
     const norm = (x) => String(x || '').trim().toLowerCase()
-    // Calls: booking %, CSR outbounds, missed (unbooked) lead calls.
+    // Calls: booking %, CSR outbounds, missed (unbooked) lead calls. Also
+    // tallied per ST agent for the CSR Home's "your day" (same definition as
+    // the scorecard: Booked / (Booked + Unbooked) inbound lead calls).
     let booked = 0, outbounds = 0, missed = 0
+    const byAgent = {}
+    const bump = (ag, k) => {
+      if (ag.id == null) return
+      const a = byAgent[String(ag.id)] || (byAgent[String(ag.id)] = { booked: 0, missed: 0, outbounds: 0 })
+      a[k]++
+    }
     for (const c of calls) {
       const lc = c.leadCall || c
       if (admins.isAdminCall(lc)) continue
       const ag = lc.agent || lc.createdBy || {}
       if ((lc.direction || '') === 'Outbound') {
         if (reps.ids.has(String(ag.id)) || reps.names.has(norm(ag.name))) outbounds++
+        bump(ag, 'outbounds')
         continue
       }
       if ((lc.direction || '') !== 'Inbound') continue
-      if (lc.callType === 'Booked') booked++
-      else if (lc.callType === 'Unbooked') missed++
+      if (lc.callType === 'Booked') { booked++; bump(ag, 'booked') }
+      else if (lc.callType === 'Unbooked') { missed++; bump(ag, 'missed') }
     }
     // Revenue today + opportunities (non-install job invoiced ≥ $90, or a
     // non-install estimate presented; one job = one opportunity).
@@ -5438,6 +5447,7 @@ async function ceoBuildFast() {
       at: Date.now(),
       data: {
         booking: { booked, leadCalls: booked + missed, pct: booked + missed > 0 ? Math.round(booked / (booked + missed) * 100) : null },
+        byAgent,
         csrOutbounds: outbounds,
         leads, leadsByTrade, revToday: Math.round(revToday),
         opps: { total: CEO_OPP_TRADES.reduce((a, t) => a + (oppsByTrade[t] || 0), 0), byTrade: oppsByTrade },
@@ -13277,6 +13287,114 @@ const homeEffDays = (fromYmd, toYmd) => {
   }
   return n
 }
+
+// ── Home for the phones and the board (Sep 2026) ────────────────────────────
+// Everyone who isn't an owner, admin or operations manager lands on a "your
+// day" Home: CSRs get their shift, today's numbers, where the 3-day board
+// needs bookings, the month's scorecard inputs, pay, their latest call review
+// and time off. Dispatchers get the same personal block; their dispatch
+// numbers come from /api/dispatch/center. Every piece degrades to null on its
+// own — one slow source never blanks the page.
+app.get('/api/home/me', async (req, res) => {
+  const prof = await requireUser(req, res)
+  if (!prof) return
+  try {
+    const today = tvDenverDate()
+    const monthStart = today.slice(0, 8) + '01'
+    const dayIso = tvBounds(today)
+    const dow = new Date(`${today}T12:00:00Z`).getUTCDay()          // 0 Sun
+    const monday = new Date(`${today}T12:00:00Z`); monday.setUTCDate(monday.getUTCDate() - ((dow + 6) % 7))
+    const weekStart = monday.toISOString().slice(0, 10)
+    const weekIso = tvBounds(weekStart), monthIso = tvBounds(monthStart)
+    const plus7 = new Date(`${today}T12:00:00Z`); plus7.setUTCDate(plus7.getUTCDate() + 7)
+    const repName = prof.name || prof.email
+    const safe = (p) => p.then(r => r?.data ?? null).catch(() => null)
+
+    // Today's ST lead calls per agent ride the CEO board's live tier.
+    await Promise.race([ceoBuildFast().catch(() => {}), new Promise(r => setTimeout(r, 6_000))])
+
+    const [scheds, tasks, logs, sc, pts, wts, thr, comm, ev, pto, maps, allMaps, reps, board] = await Promise.all([
+      safe(supabase.from('schedules').select('date, shift_start, shift_end, lunch_start, lunch_end, break1_start, break2_start, day_type, published_at')
+        .eq('profile_id', prof.id).gte('date', today).lte('date', plus7.toISOString().slice(0, 10)).order('date')),
+      safe(supabase.from('call_tasks').select('talk_seconds').eq('agent_profile_id', prof.id).eq('state', 'answered').gte('answered_at', dayIso).limit(2000)),
+      safe(supabase.from('call_logs').select('outcome').eq('rep', repName).gte('created_at', dayIso).limit(2000)),
+      safe(supabase.from('scorecard_actuals').select('booking_pct, booked_calls, call_quality, memberships').eq('profile_id', prof.id).eq('month', monthStart).maybeSingle()),
+      safe(supabase.from('attendance_points').select('points').eq('profile_id', prof.id).gte('date', monthStart)),
+      safe(supabase.from('app_settings').select('value').eq('key', 'scorecard_weights').maybeSingle()),
+      safe(supabase.from('app_settings').select('value').eq('key', 'scorecard_thresholds').maybeSingle()),
+      safe(supabase.from('commissions').select('amount, earned_at').eq('profile_id', prof.id).gte('earned_at', Date.parse(weekIso) < Date.parse(monthIso) ? weekIso : monthIso).limit(5000)),
+      safe(supabase.from('call_evaluations').select('pct, summary, call_at, contact_name').eq('profile_id', prof.id).order('call_at', { ascending: false }).limit(1).maybeSingle()),
+      safe(supabase.from('pto_requests').select('date, end_date, kind, status').eq('profile_id', prof.id).or(`date.gte.${today},end_date.gte.${today},status.eq.pending`).order('date').limit(4)),
+      safe(supabase.from('csr_st_users').select('st_user_id').eq('profile_id', prof.id)),
+      safe(supabase.from('csr_st_users').select('profile_id, st_user_id')),
+      safe(supabase.from('profiles').select('id, role').eq('active', true).eq('role', 'rep')),
+      Promise.race([getBoard3Day().catch(() => null), new Promise(r => setTimeout(() => r(null), 8_000))]),
+    ])
+
+    const parse = (row) => { try { return row?.value ? JSON.parse(row.value) : null } catch { return null } }
+    const pub = (scheds || []).filter(r => r.published_at)
+    const shiftOf = (r) => r && ({ date: r.date, start: r.shift_start, end: r.shift_end, lunchStart: r.lunch_start, lunchEnd: r.lunch_end, dayType: r.day_type || null })
+
+    // Today on the phones: ST lead calls (booking %) + Andi's own telephony.
+    const byAgent = _ceoFast.data?.byAgent || null
+    const sum = (ids) => ids.reduce((a, id) => { const x = byAgent?.[String(id)]; if (x) { a.booked += x.booked; a.missed += x.missed; a.outbounds += x.outbounds } return a }, { booked: 0, missed: 0, outbounds: 0 })
+    const myIds = (maps || []).map(m => m.st_user_id)
+    const st = byAgent && myIds.length ? sum(myIds) : null
+    let rank = null
+    if (byAgent && st) {
+      const repIds = new Set((reps || []).map(r => String(r.id)))
+      const idsBy = new Map()
+      for (const m of (allMaps || [])) {
+        if (!repIds.has(String(m.profile_id))) continue
+        const a = idsBy.get(String(m.profile_id)) || []; a.push(m.st_user_id); idsBy.set(String(m.profile_id), a)
+      }
+      const board2 = [...idsBy.entries()].map(([pid, ids]) => ({ pid, ...sum(ids) })).filter(x => x.booked + x.missed > 0)
+      if (!board2.some(x => x.pid === String(prof.id)) && st.booked + st.missed > 0) board2.push({ pid: String(prof.id), ...st })
+      board2.sort((a, b) => b.booked - a.booked)
+      const i = board2.findIndex(x => x.pid === String(prof.id))
+      if (i >= 0) rank = { place: i + 1, of: board2.length }
+    }
+    const talk = (tasks || []).map(t => Number(t.talk_seconds) || 0).filter(Boolean)
+    const fb = _ceoFast.data?.booking || null
+
+    const amt = (rows, fromIso) => Math.round((rows || []).filter(c => Date.parse(c.earned_at) >= Date.parse(fromIso)).reduce((a, c) => a + (Number(c.amount) || 0), 0) * 100) / 100
+
+    // Where the board needs bookings: open cells, today first.
+    let needs = null
+    if (board?.board) {
+      needs = []
+      for (const row of board.board) {
+        (row.days || []).forEach((d, i) => {
+          if (d.oppWatch) needs.push({ trade: row.trade, day: i, date: board.dates?.[i] || null, needed: 0, pct: d.pct, status: d.status, oppWatch: true })
+          else if (d.needed > 0) needs.push({ trade: row.trade, day: i, date: board.dates?.[i] || null, needed: d.needed, pct: d.pct, status: d.status })
+        })
+      }
+    }
+
+    res.json({
+      asOf: new Date().toISOString(), today, weekStart, monthStart,
+      name: prof.name || prof.email, role: prof.role,
+      shift: shiftOf(pub.find(r => r.date === today)) || null,
+      upcoming: pub.filter(r => r.date > today).slice(0, 5).map(shiftOf),
+      stats: {
+        st: st ? { booked: st.booked, unbooked: st.missed, leadCalls: st.booked + st.missed, pct: st.booked + st.missed ? Math.round(st.booked / (st.booked + st.missed) * 100) : null, outbounds: st.outbounds } : null,
+        stMapped: myIds.length > 0,
+        handled: (tasks || []).length, avgTalkSec: talk.length ? Math.round(talk.reduce((a, b) => a + b, 0) / talk.length) : null,
+        dials: (logs || []).length, dialBooked: (logs || []).filter(l => l.outcome === 'Booked').length,
+        team: fb ? { booked: fb.booked, leadCalls: fb.leadCalls, pct: fb.pct } : null,
+        rank,
+      },
+      month: { actuals: sc || null, attendance: (pts || []).reduce((a, p) => a + (Number(p.points) || 0), 0), weights: parse(wts), thresholds: parse(thr) },
+      pay: comm ? { today: amt(comm, dayIso), week: amt(comm, weekIso), month: amt(comm, monthIso) } : null,
+      eval: ev || null,
+      pto: pto || [],
+      board: needs ? { dates: board.dates || [], target: board.target ?? null, needs } : null,
+    })
+  } catch (e) {
+    console.error('home/me:', e.message)
+    res.status(500).json({ error: e.message })
+  }
+})
 
 app.get('/api/home', async (req, res) => {
   const prof = await requireHomeUser(req, res)

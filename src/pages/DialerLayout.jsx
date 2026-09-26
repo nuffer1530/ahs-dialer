@@ -163,13 +163,11 @@ function DialerLayoutInner() {
   // (app_settings 'leadership_viewers') — this just controls nav visibility.
   const isLeader = isAdmin && ['brandynnuffer@gmail.com', 'brandyn.nuffer@awesomeservice.com']
     .includes((profile?.email || '').toLowerCase())
-  // Home (redesign stage 2) is for people who run the business; the owner
-  // and operations managers land on it. Everyone else still lands on the
-  // dialer, and Phones is one click away for all.
-  const homeAllowed = isAdmin || isOpsManager || canDispatch
-  // Brandyn (Sep 26): opening Andi should land on Home. People who take
-  // inbound calls still start on the dialer — that's where their phone work is.
-  const landOnHome = homeAllowed && (isLeader || isOpsManager || !profile?.inbound_skill)
+  // Everyone lands on Home when they open Andi (Brandyn, Sep 26, 2026):
+  // owners, admins and ops managers get the business Home, CSRs and
+  // dispatchers their own day (HomePage picks). An incoming call rings on
+  // every page and answering opens the dialer, so starting on Home never
+  // costs a call. Phones is one click away.
   const { contacts, syncStatus, reload } = useData()
   const { cancelAutoWrap, callStatus, callDuration, incomingCall } = usePhone()
   const navigate = useNavigate()
@@ -484,10 +482,10 @@ function DialerLayoutInner() {
         <Routes>
           {/* A phone is for looking, not dialing — the dialer is desktop-only. */}
           <Route path="/" element={
-            !landed && landOnHome && !location.search ? <Navigate to="/home" replace />
-            : isHandheld ? <Navigate to={homeAllowed ? '/home' : '/analytics'} replace />
+            !landed && !location.search ? <Navigate to="/home" replace />
+            : isHandheld ? <Navigate to="/home" replace />
             : <DialerPage />} />
-          {homeAllowed && <Route path="/home" element={<HomePage />} />}
+          <Route path="/home" element={<HomePage />} />
           {isAdmin && <Route path="/campaigns" element={<div style={{ flex: 1, overflowY: 'auto', background: 'var(--bg)' }}><CampaignsPage /></div>} />}
           {/* Operations managers are field-side: call-center pages bounce home. */}
           <Route path="/live" element={isOpsManager ? <Navigate to="/" replace /> : <LivePage />} />

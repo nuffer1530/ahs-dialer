@@ -5,10 +5,10 @@
 
 export const HUBS = [
   {
-    // Stage 2: the landing page for people who run the business (CSRs keep
-    // landing on the dialer until their "my day" Home ships).
+    // Everyone's landing page: the business Home for owners, admins and ops
+    // managers; "your day" for CSRs and dispatchers (Sep 26, 2026).
     id: 'home', label: 'Home', icon: 'home',
-    tabs: [{ to: '/home', label: 'Home', gate: c => c.isAdmin || c.isOpsManager || c.canDispatch }],
+    tabs: [{ to: '/home', label: 'Home' }],
   },
   {
     id: 'phones', label: 'Phones', icon: 'phone',

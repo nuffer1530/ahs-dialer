@@ -5,10 +5,12 @@ import { useIsMobile } from '../lib/useIsMobile'
 import { useOpenLeads } from '../lib/useOpenLeads'
 import { Segmented, eyebrow, panel } from '../components/ui'
 import { Icon } from '../components/shell/icons'
+import { useAuth } from '../lib/AuthContext'
+import MyDayHome from '../components/home/MyDayHome'
 
-// Home (redesign stage 2): the landing page for owners, admins, dispatchers
-// and operations managers. Everything on it comes from /api/home, which
-// reuses what Andi already computes — the TV month cache (sold, close,
+// Home (redesign stage 2): the landing page for owners, admins and
+// operations managers (CSRs and dispatchers get components/home/MyDayHome).
+// Everything on it comes from /api/home, which reuses what Andi already computes — the TV month cache (sold, close,
 // opportunities, clubs), the 3-day board (capacity), the CEO board's live
 // tier (booking today), Field Pro, PTO and the LT agenda's coaching focus.
 // Ops managers see their own trades and no call center.
@@ -135,7 +137,15 @@ const since = (iso) => {
   return s < 3600 ? `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}` : `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`
 }
 
+// Owners, admins and operations managers get the business Home below; CSRs
+// and dispatchers get their own day (components/home/MyDayHome).
 export default function HomePage() {
+  const { isAdmin, isOpsManager, isDispatcher } = useAuth()
+  if (isAdmin || isOpsManager) return <BusinessHome />
+  return <MyDayHome dispatcher={isDispatcher} />
+}
+
+function BusinessHome() {
   const navigate = useNavigate()
   const isMobile = useIsMobile()
   const openLeads = useOpenLeads()
