@@ -56,9 +56,13 @@ export function AuthProvider({ children }) {
 
   const isAdmin = profile?.role === 'admin'
   const isDispatcher = profile?.role === 'dispatcher'
+  // Operations managers (Dean, Dale, Cedric) run the field side: department
+  // TVs, the technician team, scorecards, the 3-day board and manual dialing —
+  // nothing call-center.
+  const isOpsManager = profile?.role === 'ops_manager'
 
   return (
-    <AuthContext.Provider value={{ user, profile, loading, isAdmin, isDispatcher, refreshProfile: () => fetchProfile(user?.id) }}>
+    <AuthContext.Provider value={{ user, profile, loading, isAdmin, isDispatcher, isOpsManager, refreshProfile: () => fetchProfile(user?.id) }}>
       {children}
     </AuthContext.Provider>
   )

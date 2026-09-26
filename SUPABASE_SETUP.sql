@@ -865,3 +865,11 @@ do $$ begin
     alter publication supabase_realtime add table campaigns;
   end if;
 end $$;
+
+-- ── Operations Manager role (Sep 25, 2026) ──────────────────────────────────
+-- Field-side managers (Dean, Cedric, Dale): department TVs, Team → Technicians,
+-- the 3-day board and manual dialing — nothing call-center. Supersedes the
+-- role check above. Tech scorecard rules live in app_settings
+-- 'tech_scorecard_rules'; monthly tech snapshots in 'tech_month_YYYY-MM'.
+alter table profiles drop constraint if exists profiles_role_check;
+alter table profiles add constraint profiles_role_check check (role in ('rep', 'admin', 'dispatcher', 'ops_manager'));

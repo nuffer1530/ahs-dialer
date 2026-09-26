@@ -1548,6 +1548,7 @@ export default function AdminPage() {
                     <select className="form-input" value={invRole} onChange={e => setInvRole(e.target.value)} style={{ width:130 }}>
                       <option value="rep">Rep</option>
                       <option value="dispatcher">Dispatcher</option>
+                      <option value="ops_manager">Operations Manager</option>
                       <option value="admin">Admin</option>
                     </select>
                     <button className="btn primary" onClick={sendInvite} disabled={invBusy || !invEmail.trim()} style={{ borderRadius:99 }}>
@@ -1644,6 +1645,7 @@ export default function AdminPage() {
                   <select className="form-input" value={editProfile.role || 'rep'} onChange={e => setEditProfile(p => ({ ...p, role: e.target.value }))}>
                     <option value="rep">Rep — can dial, view dashboard, see all stats</option>
                     <option value="dispatcher">Dispatcher — everything a rep has, plus Dispatch for Profit</option>
+                    <option value="ops_manager">Operations Manager — department TVs, technician team & scorecards, 3-day board, manual dialing (no call center)</option>
                     <option value="admin">Admin — full access including uploads and user management</option>
                   </select>
                 </div>

@@ -161,7 +161,8 @@ export default function WarRoomPage() {
       // instead of an empty board.
       sb.from('profiles').select('*').eq('active', true),
     ]).then(([l, t, a, p]) => {
-      setLogs(l.data || []); setTasks(t.data || []); setLiveCalls(a.data || []); setProfiles(p.data || [])
+      // Operations managers are field-side, not floor staff.
+      setLogs(l.data || []); setTasks(t.data || []); setLiveCalls(a.data || []); setProfiles((p.data || []).filter(x => x.role !== 'ops_manager'))
     })
 
     const upsert = (setter, key) => (payload) => setter(prev => {
@@ -176,7 +177,7 @@ export default function WarRoomPage() {
     // all) — statuses then freeze until someone refreshes. Poll profiles
     // every 30s as the guaranteed floor.
     const pollProfiles = () => sb.from('profiles').select('*').eq('active', true)
-      .then(({ data }) => { if (data) setProfiles(data) })
+      .then(({ data }) => { if (data) setProfiles(data.filter(x => x.role !== 'ops_manager')) })
     const tp = setInterval(pollProfiles, 30_000)
 
     const ch = sb.channel('warroom')

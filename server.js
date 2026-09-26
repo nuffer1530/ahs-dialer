@@ -1666,6 +1666,19 @@ async function requireAdmin(req, res) {
   return prof
 }
 
+// Admins plus the field-side operations managers — technician team routes.
+async function requireFieldLead(req, res) {
+  const token = (req.headers.authorization || '').replace(/^Bearer\s+/i, '')
+  if (!token) { res.status(401).json({ error: 'Not signed in' }); return null }
+  const { data: { user }, error } = await supabase.auth.getUser(token)
+  if (error || !user) { res.status(401).json({ error: 'Invalid session' }); return null }
+  const { data: prof } = await supabase.from('profiles').select('id, name, role, active').eq('id', user.id).maybeSingle()
+  if (!['admin', 'ops_manager'].includes(prof?.role) || prof?.active === false) {
+    res.status(403).json({ error: 'Admins and operations managers only' }); return null
+  }
+  return prof
+}
+
 // Any signed-in ACTIVE user — the gate for self-service routes (PTO etc.).
 async function requireUser(req, res) {
   const token = (req.headers.authorization || '').replace(/^Bearer\s+/i, '')
@@ -2219,7 +2232,7 @@ app.post('/api/admin/user/invite', async (req, res) => {
   const admin = await requireAdmin(req, res)
   if (!admin) return
   const email = String(req.body?.email || '').trim().toLowerCase()
-  const role = ['admin', 'dispatcher'].includes(req.body?.role) ? req.body.role : 'rep'
+  const role = ['admin', 'dispatcher', 'ops_manager'].includes(req.body?.role) ? req.body.role : 'rep'
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
     return res.status(400).json({ error: 'Enter a valid email address' })
   }
@@ -4769,6 +4782,11 @@ async function tvBuildSlow() {
       const installersByTrade = {}
       _tvMonth = { at: Date.now(), data: { dept: w.dept, techsByTrade: byTrade, installersByTrade } }
       await tvPersist('tv_month_cache', _tvMonth)
+      // Technician scorecards keep a copy per month — the last refresh of a
+      // month becomes that month's scorecard.
+      supabase.from('app_settings').upsert({ key: `tech_month_${monthStart.slice(0, 7)}`,
+        value: JSON.stringify({ at: _tvMonth.at, month: monthStart.slice(0, 7), techsByTrade: byTrade }) }, { onConflict: 'key' })
+        .then(({ error }) => { if (error) console.warn('tech month snapshot:', error.message) })
     }
 
     if (Date.now() - _tvYear.at > 6 * 3600_000) {
@@ -13021,6 +13039,48 @@ app.post('/api/st/audience/build', async (req, res) => {
     console.error('audience/build error:', err.message)
     res.status(500).json({ error: err.message })
   }
+})
+
+// ── Technician scorecards (Team → Technicians) ───────────────────────────────
+// The monthly per-tech numbers the department TVs already compute (sold,
+// ServiceTitan close rate, non-comp memberships, 5★, jobs, avg ticket) for
+// the current month, or the saved copy of an earlier month. Admins and
+// operations managers only.
+app.get('/api/team/tech-scorecards', async (req, res) => {
+  if (!(await requireFieldLead(req, res))) return
+  try {
+    const nowYm = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Denver', year: 'numeric', month: '2-digit' }).format(new Date()).slice(0, 7)
+    const month = /^\d{4}-\d{2}$/.test(String(req.query.month || '')) ? String(req.query.month) : nowYm
+    const [yy, mm] = month.split('-').map(Number)
+    const prevYm = new Date(Date.UTC(yy, mm - 2, 1)).toISOString().slice(0, 7)
+    const load = async (key) => {
+      const { data } = await supabase.from('app_settings').select('value').eq('key', key).maybeSingle()
+      try { return data?.value ? JSON.parse(data.value) : null } catch { return null }
+    }
+    let cur = null
+    if (month === nowYm) {
+      const m = _tvMonth?.data?.techsByTrade ? _tvMonth : await load('tv_month_cache')
+      if (m?.data?.techsByTrade) cur = { at: m.at, techsByTrade: m.data.techsByTrade }
+    }
+    if (!cur) cur = await load(`tech_month_${month}`)
+    const prev = await load(`tech_month_${prevYm}`)
+    const { data: snaps } = await supabase.from('app_settings').select('key').like('key', 'tech_month_%')
+    const months = [...new Set([nowYm, ...(snaps || []).map(r => r.key.replace('tech_month_', ''))])].sort().reverse()
+    const flat = (tb) => Object.entries(tb || {}).flatMap(([trade, rows]) => (rows || []).map(x => ({
+      id: String(x.id), name: x.name, trade, sold: x.sold || 0, soldCount: x.soldCount || 0,
+      closeRate: x.closeRate == null ? null : Math.round(x.closeRate * 1000) / 10, opps: x.opps || 0, closed: x.soldJobs || 0,
+      memberships: x.memberships || 0, fiveStar: x.fiveStar || 0, jobs: x.jobs || 0, avgTicket: x.avgTicket || 0,
+    })))
+    // Share of the month elapsed (Denver days) — lets the page judge the
+    // current month on pace instead of against full-month targets.
+    const dim = new Date(Date.UTC(yy, mm, 0)).getUTCDate()
+    const dayNow = Number(new Intl.DateTimeFormat('en-US', { timeZone: 'America/Denver', day: 'numeric' }).format(new Date()))
+    res.json({
+      month, months, isCurrent: month === nowYm, asOf: cur?.at || null,
+      elapsed: month === nowYm ? Math.min(1, Math.max(0.03, dayNow / dim)) : 1,
+      techs: flat(cur?.techsByTrade), prevTechs: flat(prev?.techsByTrade), prevMonth: prevYm,
+    })
+  } catch (e) { res.status(500).json({ error: e.message }) }
 })
 
 // ─────────────────────────────────────────────

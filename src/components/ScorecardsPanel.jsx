@@ -30,7 +30,7 @@ const DEFAULT_THRESHOLDS = {
   call_quality: { exceeds: 95,  meets: 90,  improvement: 85 },
   memberships:  { exceeds: 5,   meets: 3,   improvement: 2  },
 }
-const LEVELS = {
+export const LEVELS = {
   4: { label: 'Exceeds', tone: 'green' },
   3: { label: 'Meets', tone: 'blue' },
   2: { label: 'Needs improvement', tone: 'amber' },
@@ -51,7 +51,7 @@ const shiftMonth = ({ year, month }, d) => {
 }
 const toNum = (v) => (v === '' || v == null || Number.isNaN(Number(v)) ? null : Number(v))
 
-function rateKpi(kpi, value, thr) {
+export function rateKpi(kpi, value, thr) {
   const v = toNum(value)
   if (v == null || !thr) return null
   if (kpi.lowerIsBetter) return v <= thr.exceeds ? 4 : v <= thr.meets ? 3 : v <= thr.improvement ? 2 : 1
@@ -66,17 +66,19 @@ function overallScore(actuals, weights, thresholds) {
   }
   return tw ? sum / tw : null
 }
-const levelOf = (score) => (score == null ? null : score >= 3.5 ? 4 : score >= 2.5 ? 3 : score >= 1.5 ? 2 : 1)
-const fmtKpi = (kpi, v) => {
+export const levelOf = (score) => (score == null ? null : score >= 3.5 ? 4 : score >= 2.5 ? 3 : score >= 1.5 ? 2 : 1)
+const money = (n) => (Math.abs(n) >= 10000 ? `$${Math.round(n / 1000)}k` : `$${Math.round(n).toLocaleString('en-US')}`)
+export const fmtKpi = (kpi, v) => {
   const n = toNum(v)
   if (n == null) return '—'
+  if (kpi.unit === '$') return `$${Math.round(n).toLocaleString('en-US')}`
   if (kpi.unit === '%') return `${Math.round(n)}%`
   if (kpi.unit === 'pts') return `${+n.toFixed(1)} pt${n === 1 ? '' : 's'}`
   return `${Math.round(n)}`
 }
-const fmtThr = (kpi, v) => (kpi.unit === '%' ? `${v}%` : kpi.unit === 'pts' ? `${v} pt${Number(v) === 1 ? '' : 's'}` : `${v}`)
+const fmtThr = (kpi, v) => (kpi.unit === '$' ? money(Number(v) || 0) : kpi.unit === '%' ? `${v}%` : kpi.unit === 'pts' ? `${v} pt${Number(v) === 1 ? '' : 's'}` : `${v}`)
 
-function LevelChip({ level, small, short }) {
+export function LevelChip({ level, small, short }) {
   if (!level) return <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>No data</span>
   const { tone } = LEVELS[level]
   const label = short && level === 2 ? 'Needs impr.' : LEVELS[level].label
@@ -88,7 +90,7 @@ function LevelChip({ level, small, short }) {
   )
 }
 
-function ScoreDelta({ now, prev, vs }) {
+export function ScoreDelta({ now, prev, vs }) {
   if (now == null || prev == null) return null
   const d = Math.round((now - prev) * 100) / 100
   const t = d > 0 ? 'green' : d < 0 ? 'red' : 'gray'
@@ -101,7 +103,7 @@ function ScoreDelta({ now, prev, vs }) {
 }
 
 // Four-step "signal" for compact rows: filled up to the level, in its tone.
-function LevelPips({ level }) {
+export function LevelPips({ level }) {
   const tone = level ? LEVELS[level].tone : 'gray'
   return (
     <span style={{ display: 'inline-flex', gap: 2, alignItems: 'flex-end' }} aria-label={level ? LEVELS[level].label : 'No data'}>
@@ -117,7 +119,7 @@ function LevelPips({ level }) {
 // Poor → Exceeds, always worst-left / best-right (attendance included). The
 // marker interpolates inside the two middle zones; the open-ended outer zones
 // just center it.
-function KpiTrack({ kpi, value, thr }) {
+export function KpiTrack({ kpi, value, thr }) {
   const level = rateKpi(kpi, value, thr)
   let pos = null
   if (level) {

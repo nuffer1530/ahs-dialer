@@ -187,7 +187,7 @@ function SearchSelect({ label, value, onChange, options, placeholder, disabled }
 
 export default function DialerPage() {
   const { contacts, setContacts, campaigns, dncSet } = useData()
-  const { profile } = useAuth()
+  const { profile, isOpsManager } = useAuth()
   const currentRep = profile?.name || profile?.email || 'Unknown'
 
   // Queue & contact state
@@ -992,6 +992,7 @@ export default function DialerPage() {
   // works even for a rep who never looks at the sidebar — "Next pending" is
   // what actually drives their day.
   const navNextPending = async () => {
+    if (isOpsManager) return
     try {
       const { data: lead } = await sb.from('st_leads').select('id')
         .is('resolved_at', null).is('claimed_by', null)
@@ -1034,6 +1035,7 @@ export default function DialerPage() {
   // toggling a queue says "serve me again."
   useEffect(() => { setAutoServePaused(false) }, [profile?.status, skillsMode, activeCampOrder])
   useEffect(() => {
+    if (isOpsManager) return   // no queues for operations managers — manual dialing only
     if (autoServePaused) return
     if (saving) return   // logOutcome is mid-flight and serves the next lead itself
     if (incomingCall || callStatus) return
@@ -1508,6 +1510,9 @@ export default function DialerPage() {
         {/* Collapse toggle. Carries a dot when leads are waiting — with the rail
             collapsed this button is the only thing on screen that could tell a
             rep a paid lead is sitting there. */}
+        {/* Paid leads and campaign queues are call-center work — operations
+            managers dial manually. */}
+        {!isOpsManager && (<>
         <button onClick={() => setQueueCollapsed(p => !p)}
           title={openLeadCount > 0 ? `${openLeadCount} paid lead${openLeadCount === 1 ? '' : 's'} waiting` : 'Show leads'}
           style={{ position:'relative', width:28, height:28, border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface-2)', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', fontSize:12, color:'var(--text-muted)', flexShrink:0 }}>
@@ -1517,6 +1522,7 @@ export default function DialerPage() {
           )}
         </button>
         <QueueSelector />
+        </>)}
         <button onClick={() => setShowDialpad(true)}
           style={{ display:'flex', alignItems:'center', gap:5, padding:'5px 12px', background: twilioReady ? 'var(--success)' : 'var(--border)', border:'none', borderRadius:'var(--radius)', cursor: twilioReady ? 'pointer' : 'not-allowed', fontSize:11, fontWeight:600, color:'#fff' }}>
           <svg width="12" height="12" viewBox="0 0 24 24" fill="white"><path d="M6.6 10.8c1.4 2.8 3.8 5.1 6.6 6.6l2.2-2.2c.3-.3.7-.4 1-.2 1.1.4 2.3.6 3.6.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1C10.6 21 3 13.4 3 4c0-.6.4-1 1-1h3.5c.6 0 1 .4 1 1 0 1.3.2 2.5.6 3.6.1.3 0 .7-.2 1L6.6 10.8z"/></svg>
@@ -1628,8 +1634,8 @@ export default function DialerPage() {
             is worth far more showing the handful of paid leads that are on a
             clock. Outbound contacts are still reachable via Next pending and
             the ServiceTitan search in the header. */}
-        <aside style={{ width: queueCollapsed ? 0 : 232, minWidth: queueCollapsed ? 0 : 232, flexShrink:0, background:'var(--surface)', borderRight:'1px solid var(--border)', display:'flex', flexDirection:'column', overflow:'hidden', transition:'width .2s, min-width .2s' }}>
-          <LeadsRail currentRep={currentRep} onOpenContact={openPromotedContact} />
+        <aside style={{ width: queueCollapsed || isOpsManager ? 0 : 232, minWidth: queueCollapsed || isOpsManager ? 0 : 232, flexShrink:0, background:'var(--surface)', borderRight:'1px solid var(--border)', display:'flex', flexDirection:'column', overflow:'hidden', transition:'width .2s, min-width .2s' }}>
+          {!isOpsManager && <LeadsRail currentRep={currentRep} onOpenContact={openPromotedContact} />}
         </aside>
 
         {/* == MAIN WORKSPACE == */}
@@ -1674,13 +1680,15 @@ export default function DialerPage() {
                 {autoServePaused ? 'Taking a breather' : 'Ready to dial'}
               </div>
               <div style={{ fontSize:12.5, color:'var(--text-muted)', marginTop:6 }}>
-                {autoServePaused
+                {isOpsManager
+                  ? 'Search a customer in ServiceTitan above, or use Manual Dial.'
+                  : autoServePaused
                   ? 'Auto-serve is paused because you closed the last contact.'
                   : profile?.status === 'Available'
                     ? 'Waiting for the next call or lead — work serves itself while you’re Available.'
                     : 'Go Available and work will find you — inbound first, then your campaigns in priority order.'}
               </div>
-              {autoServePaused && (
+              {autoServePaused && !isOpsManager && (
                 <button className="btn primary" style={{ padding:'11px 30px', fontSize:13, fontWeight:700, marginTop:20 }}
                   onClick={() => setAutoServePaused(false)}>
                   Serve me the next lead

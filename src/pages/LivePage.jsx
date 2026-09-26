@@ -179,7 +179,7 @@ export default function LivePage() {
       sb.from('active_calls').select('*').is('ended_at', null).order('started_at', { ascending: false }),
     ]).then(([{ data: logsData }, { data: profilesData }, { data: taskData }, { data: callData }]) => {
       setLogs(logsData || [])
-      setProfiles(profilesData || [])
+      setProfiles((profilesData || []).filter(x => x.role !== 'ops_manager'))   // field-side, not floor staff
       setTasks(taskData || [])
       setLiveCalls(callData || [])
       setLoading(false)

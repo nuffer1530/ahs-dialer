@@ -172,17 +172,17 @@ const NAV_ICONS = {
 }
 
 const NAV_ITEMS = [
-  { to:'/', label:'Dialer', iconKey:'dialer', end:true },
+  { to:'/', label:'Dialer', iconKey:'dialer', end:true, ops:true },
   { to:'/live', label:'Live Dashboard', iconKey:'live' },
-  { to:'/callboard', label:'Call Board', iconKey:'board' },
+  { to:'/callboard', label:'Call Board', iconKey:'board', ops:true },
   { to:'/dispatch', label:'Dispatch', iconKey:'dispatch', dispatchOnly:true },
   { to:'/analytics', label:'Analytics', iconKey:'analytics' },
   { to:'/recordings', label:'Recordings', iconKey:'recordings' },
   { to:'/attendance', label:'WFM', iconKey:'wfm', adminOnly:true },
-  { to:'/team', label:'Team', iconKey:'wfm', teamLead:true },
+  { to:'/team', label:'Team', iconKey:'wfm', teamLead:true, ops:true },
   { to:'/leadership', label:'Leadership', iconKey:'leadership', leaderOnly:true },
   { to:'/warroom', label:'Call Center TV', iconKey:'tv' },
-  { to:'/tv/hvac', label:'Department TV', iconKey:'tv', deptTv:true },
+  { to:'/tv/hvac', label:'Department TV', iconKey:'tv', deptTv:true, ops:true },
 ]
 
 const MY_PAGE_ITEM = { to:'/mypage', label:'My Page', iconKey:'mypage' }
@@ -305,10 +305,16 @@ function OutboundNudge({ agentStatus }) {
 
 // Phone-only bottom tabs: the four places a manager opens from a phone, plus
 // "More" for the drawer. Desktop keeps the sidebar; wall routes have neither.
-function MobileTabBar({ isAdmin, canDispatch, isLeader, onMore }) {
+function MobileTabBar({ isAdmin, canDispatch, isLeader, isOpsManager, onMore }) {
   const location = useLocation()
   const navigate = useNavigate()
-  const items = isAdmin || canDispatch
+  const items = isOpsManager
+    ? [
+        { to: '/team', label: 'Team', iconKey: 'wfm' },
+        { to: '/callboard', label: 'Call Board', iconKey: 'board' },
+        { to: '/tv/hvac', label: 'Dept TV', iconKey: 'tv' },
+      ]
+    : isAdmin || canDispatch
     ? [
         { to: '/analytics', label: 'Dashboard', iconKey: 'analytics' },
         ...(canDispatch ? [{ to: '/dispatch', label: 'Dispatch', iconKey: 'dispatch' }] : []),
@@ -348,7 +354,7 @@ export default function DialerLayout() {
 }
 
 function DialerLayoutInner() {
-  const { profile, isAdmin, isDispatcher } = useAuth()
+  const { profile, isAdmin, isDispatcher, isOpsManager } = useAuth()
   useEffect(() => { loadOpsConfig() }, [])   // pull admin thresholds into the live bindings
   // Deploy watcher: open tabs run old code until reloaded, which turned every
   // fix into 'hard refresh first'. Poll the bundle name; when it changes, show
@@ -703,7 +709,7 @@ function DialerLayoutInner() {
 
         {/* Nav links */}
         <div style={{ flex:1, overflowY:'auto', padding:'10px 8px', display:'flex', flexDirection:'column' }}>
-          {NAV_ITEMS.filter(n => (!n.adminOnly || isAdmin) && (!n.dispatchOnly || canDispatch) && (!n.leaderOnly || isLeader) && (!n.teamLead || isAdmin || (profile?.leads_teams || []).length > 0) && (!n.deptTv || isAdmin || canDispatch || (profile?.leads_teams || []).length > 0)).map(({ to, label, iconKey, end }) => (
+          {NAV_ITEMS.filter(n => (!isOpsManager || n.ops) && (!n.adminOnly || isAdmin) && (!n.dispatchOnly || canDispatch) && (!n.leaderOnly || isLeader) && (!n.teamLead || isAdmin || isOpsManager || (profile?.leads_teams || []).length > 0) && (!n.deptTv || isAdmin || isOpsManager || canDispatch || (profile?.leads_teams || []).length > 0)).map(({ to, label, iconKey, end }) => (
             <NavLink key={to} to={to} end={end} style={navLinkStyle} title={navCollapsed ? label : undefined}
               onMouseEnter={e => { const isActive = e.currentTarget.style.fontWeight === '600'; handleNavHover(e, isActive) }}
               onMouseLeave={e => { const isActive = e.currentTarget.style.fontWeight === '600'; handleNavLeave(e, isActive) }}>
@@ -727,6 +733,7 @@ function DialerLayoutInner() {
             </NavLink>
           ))}
 
+          {!isOpsManager && (<>
           {/* My Page — above settings */}
           <div style={{ height:1, background:'var(--border)', margin:'8px 0' }} />
           <NavLink to={MY_PAGE_ITEM.to} style={navLinkStyle} title={navCollapsed ? MY_PAGE_ITEM.label : undefined}
@@ -750,6 +757,8 @@ function DialerLayoutInner() {
               </>
             )}
           </NavLink>
+
+          </>)}
 
           {/* Settings — everyone: reps manage their own name, avatar and
               password there; the admin-only cards are gated inside the page. */}
@@ -787,7 +796,7 @@ function DialerLayoutInner() {
         {/* Bottom: status changer (primary) + theme toggle */}
         <div style={{ borderTop:'1px solid var(--border)', padding:'10px 8px', flexShrink:0, display:'flex', flexDirection:'column', gap:8 }}>
           {/* Status changer — primary place to set status */}
-          <div ref={sidebarStatusRef} style={{ position:'relative' }}>
+          <div ref={sidebarStatusRef} style={{ position:'relative', display: isOpsManager ? 'none' : undefined }}>
             <button ref={sidebarBtnRef} onClick={toggleSidebarStatus}
               title={navCollapsed ? `${currentStatusObj.value} · ${fmtDur(statusDuration)}` : undefined}
               style={{ width:'100%', padding: navCollapsed ? '8px 0' : '7px 10px', background:'var(--surface-2)', border:'1px solid var(--border)', borderRadius:'var(--radius)', cursor:'pointer', display:'flex', alignItems:'center', justifyContent: navCollapsed ? 'center' : 'space-between', gap:8 }}>
@@ -883,8 +892,8 @@ function DialerLayoutInner() {
             <div style={{ position:'absolute', bottom:-1, right:-1, width:9, height:9, borderRadius:'50%', background:currentStatusObj.color, border:'2px solid var(--surface)' }} />
           </div>
           <div style={{ textAlign:'left', lineHeight:1.2 }}>
-            <div style={{ fontSize:11, fontWeight:700, color:'var(--text-primary)', whiteSpace:'nowrap' }}>{currentStatusObj.value}</div>
-            <div style={{ fontSize:10, color:'var(--text-muted)', fontVariantNumeric:'tabular-nums' }}>{fmtDur(statusDuration)}</div>
+            <div style={{ fontSize:11, fontWeight:700, color:'var(--text-primary)', whiteSpace:'nowrap' }}>{isOpsManager ? (profile?.name || 'Operations') : currentStatusObj.value}</div>
+            <div style={{ fontSize:10, color:'var(--text-muted)', fontVariantNumeric:'tabular-nums' }}>{isOpsManager ? 'Operations Manager' : fmtDur(statusDuration)}</div>
           </div>
         </button>
 
@@ -902,6 +911,7 @@ function DialerLayoutInner() {
               </div>
             </div>
 
+            {!isOpsManager && (<>
             {/* Status list */}
             <div style={{ padding:'6px 0', borderBottom:'1px solid var(--border)' }}>
               <div style={{ fontSize:9, fontWeight:700, textTransform:'uppercase', letterSpacing:.7, color:'var(--text-muted)', padding:'4px 14px 6px' }}>Set status</div>
@@ -917,14 +927,18 @@ function DialerLayoutInner() {
               ))}
             </div>
 
+            </>)}
             {/* Links */}
             <div style={{ padding:'6px 0', borderBottom:'1px solid var(--border)' }}>
-              {[
+              {(isOpsManager ? [
+                { to:'/team', label:'Team' },
+                { to:'/settings', label:'Settings' },
+              ] : [
                 { to:'/mypage', label:'My Page' },
                 { to:'/mypage?tab=commissions', label:'Commissions' },
                 { to:'/mypage?tab=scorecard', label:'Scorecard' },
                 { to:'/settings', label:'Settings' },
-              ].map(({ to, label }) => (
+              ]).map(({ to, label }) => (
                 <button key={label} onClick={() => { navigate(to); setShowStatusMenu(false) }}
                   onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
                   onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
@@ -948,28 +962,29 @@ function DialerLayoutInner() {
         </div>
         )}
         <GlobalIncomingCall />
-        <OutboundNudge agentStatus={agentStatus} />
-        <ScheduleAlerts />
+        {!isOpsManager && <OutboundNudge agentStatus={agentStatus} />}
+        {!isOpsManager && <ScheduleAlerts />}
         <div style={isMobile && !isWall ? { flex:1, minHeight:0, display:'flex', flexDirection:'column', overflow:'hidden' } : { display:'contents' }}>
         <Routes>
           {/* A phone is for looking, not dialing — the dialer is desktop-only. */}
-          <Route path="/" element={isHandheld ? <Navigate to="/analytics" replace /> : <DialerPage />} />
-          <Route path="/live" element={<LivePage />} />
+          <Route path="/" element={isHandheld ? <Navigate to={isOpsManager ? '/team' : '/analytics'} replace /> : <DialerPage />} />
+          {/* Operations managers are field-side: call-center pages bounce home. */}
+          <Route path="/live" element={isOpsManager ? <Navigate to="/" replace /> : <LivePage />} />
           <Route path="/callboard" element={<CallBoardPage />} />
           {canDispatch && <Route path="/dispatch" element={<DispatchPage />} />}
-          <Route path="/analytics" element={<DashboardPage />} />
-          <Route path="/recordings" element={<RecordingsPage />} />
+          <Route path="/analytics" element={isOpsManager ? <Navigate to="/" replace /> : <DashboardPage />} />
+          <Route path="/recordings" element={isOpsManager ? <Navigate to="/" replace /> : <RecordingsPage />} />
           {isAdmin && <Route path="/attendance" element={<AttendancePage />} />}
-          {(isAdmin || (profile?.leads_teams || []).length > 0) && <Route path="/team" element={<TeamPage />} />}
+          {(isAdmin || isOpsManager || (profile?.leads_teams || []).length > 0) && <Route path="/team" element={<TeamPage />} />}
           {isLeader && <Route path="/leadership" element={<LeadershipPage />} />}
-          <Route path="/warroom" element={<WarRoomPage />} />
+          <Route path="/warroom" element={isOpsManager ? <Navigate to="/" replace /> : <WarRoomPage />} />
           {isLeader && <Route path="/tv/ceo" element={<CEOTVPage />} />}
           <Route path="/tv/:trade" element={<DeptTVPage />} />
-          <Route path="/mypage" element={<MyPage />} />
+          <Route path="/mypage" element={isOpsManager ? <Navigate to="/team" replace /> : <MyPage />} />
           <Route path="/settings" element={<AdminPage />} />
         </Routes>
         </div>
-        {isMobile && !isWall && <MobileTabBar isAdmin={isAdmin} canDispatch={canDispatch} isLeader={isLeader} onMore={() => setMobileNav(true)} />}
+        {isMobile && !isWall && <MobileTabBar isAdmin={isAdmin} canDispatch={canDispatch} isLeader={isLeader} isOpsManager={isOpsManager} onMore={() => setMobileNav(true)} />}
       </div>
     </div>
   )
