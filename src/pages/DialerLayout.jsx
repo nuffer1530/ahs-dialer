@@ -158,7 +158,9 @@ function DialerLayoutInner() {
   // and operations managers land on it. Everyone else still lands on the
   // dialer, and Phones is one click away for all.
   const homeAllowed = isAdmin || isOpsManager || canDispatch
-  const landOnHome = isLeader || isOpsManager
+  // Brandyn (Sep 26): opening Andi should land on Home. People who take
+  // inbound calls still start on the dialer — that's where their phone work is.
+  const landOnHome = homeAllowed && (isLeader || isOpsManager || !profile?.inbound_skill)
   const { contacts, syncStatus, reload } = useData()
   const { cancelAutoWrap, callStatus, callDuration, incomingCall } = usePhone()
   const navigate = useNavigate()
@@ -376,14 +378,11 @@ function DialerLayoutInner() {
   }
 
   const currentStatusObj = statusOptions.find(s => s.value === agentStatus) || statusOptions[statusOptions.length - 1]
-  // First load only: the owner and ops managers start on Home. Later clicks on
-  // Phones ('/') must still open the dialer, so this runs once.
-  const landedRef = useRef(false)
-  useEffect(() => {
-    if (landedRef.current || !profile?.id) return
-    landedRef.current = true
-    if (landOnHome && location.pathname === '/' && !location.search) navigate('/home', { replace: true })
-  }, [profile?.id])   // eslint-disable-line react-hooks/exhaustive-deps
+  // First load only: decided in the route itself (below), before the dialer
+  // ever mounts — no flash of the dialer, no redirect racing the page. Later
+  // clicks on Phones ('/') open the dialer as usual.
+  const [landed, setLanded] = useState(false)
+  useEffect(() => { setLanded(true) }, [])
 
   // Mobile: the sidebar becomes a slide-over drawer; navigating closes it.
   useEffect(() => { setMobileNav(false) }, [location.pathname])
@@ -475,7 +474,10 @@ function DialerLayoutInner() {
         <div style={isMobile && !isWall ? { flex:1, minHeight:0, display:'flex', flexDirection:'column', overflow:'hidden' } : { display:'contents' }}>
         <Routes>
           {/* A phone is for looking, not dialing — the dialer is desktop-only. */}
-          <Route path="/" element={isHandheld ? <Navigate to={homeAllowed ? '/home' : '/analytics'} replace /> : <DialerPage />} />
+          <Route path="/" element={
+            !landed && landOnHome && !location.search ? <Navigate to="/home" replace />
+            : isHandheld ? <Navigate to={homeAllowed ? '/home' : '/analytics'} replace />
+            : <DialerPage />} />
           {homeAllowed && <Route path="/home" element={<HomePage />} />}
           {/* Operations managers are field-side: call-center pages bounce home. */}
           <Route path="/live" element={isOpsManager ? <Navigate to="/" replace /> : <LivePage />} />
