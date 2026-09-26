@@ -299,14 +299,16 @@ export default function MyDayHome({ dispatcher, manager }) {
       { label: 'Techs out', value: center ? String((center.techOut || []).length) : '—', sub: (center?.techOut || []).map(t => t.name || t.techName).filter(Boolean).slice(0, 2).join(', ') || 'Everyone’s in' },
     ]
     const onFloor = (m.floor?.agents || []).length
+    const briefShown = !!(m.morning?.briefs?.call_center || (m.morning?.pending || []).includes('call_center'))
     const needsYou = [
       ...(m.pto || []).map(p => ({ key: `pto${p.profile_id}${p.date}`, icon: 'user', tone: 'blue', title: `${p.name} · ${weekday(p.date, { month: 'short', day: 'numeric' })}${p.end_date && p.end_date !== p.date ? `–${weekday(p.end_date, { month: 'short', day: 'numeric' })}` : ''}`, sub: `${cap(String(p.kind || 'time off').replace(/_/g, ' '))} request`, to: '/mypage?tab=time-off' })),
       openLeads ? { key: 'leads', icon: 'phone', tone: 'amber', title: `${openLeads} paid lead${openLeads === 1 ? '' : 's'} waiting`, sub: 'First to open one claims it', to: '/' } : null,
     ].filter(Boolean)
     return (
       <div style={{ flex: 1, overflowY: 'auto', background: 'var(--bg)' }}>
-        <div style={{ padding: isMobile ? '12px 12px 24px' : '20px 26px 96px', display: 'flex', flexDirection: 'column', gap: 16, maxWidth: 1480 }}>
-          <section style={{ ...panel, borderRadius: 18, padding: isMobile ? '18px 18px' : '22px 26px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div style={{ padding: isMobile ? '12px 12px 24px' : '20px 26px 96px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <section style={{ ...panel, borderRadius: 18, overflow: 'hidden', display: 'grid', gridTemplateColumns: isMobile || !briefShown ? 'minmax(0, 1fr)' : 'minmax(0, 1fr) minmax(0, 1fr)' }}>
+          <div style={{ padding: isMobile ? '18px 18px' : '22px 26px', display: 'flex', flexDirection: 'column', gap: 10 }}>
             <div style={{ ...eyebrow, display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap' }}>
               <span style={{ width: 7, height: 7, borderRadius: 99, background: 'var(--signal)' }} />
               Call center & dispatch · {weekday(me.today, { weekday: 'long', month: 'short', day: 'numeric' })}
@@ -324,42 +326,48 @@ export default function MyDayHome({ dispatcher, manager }) {
               <a href="/live" onClick={(e) => { e.preventDefault(); go('/live') }} className="btn" style={{ borderRadius: 99, height: 38, padding: '0 16px', fontSize: 13 }}>Live floor</a>
               <a href="/callboard" onClick={(e) => { e.preventDefault(); go('/callboard') }} className="btn" style={{ borderRadius: 99, height: 38, padding: '0 16px', fontSize: 13 }}>3-day board</a>
             </div>
+          </div>
+          {briefShown && (
+            <div style={{ background: 'var(--surface-2)', borderLeft: isMobile ? 'none' : '1px solid var(--border)', borderTop: isMobile ? '1px solid var(--border)' : 'none', padding: isMobile ? '16px 18px' : '20px 24px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+              <MorningBrief bare morning={m.morning} scopeKey="call_center" coachTo="/team" onGo={go} isMobile={isMobile} />
+            </div>
+          )}
           </section>
 
           <section aria-label="Today" style={{ ...panel, borderRadius: 18, display: 'grid', gridTemplateColumns: isMobile ? 'minmax(0, 1fr)' : `repeat(${kpis.length}, minmax(0, 1fr))` }}>
             {kpis.map((k, i) => <Kpi key={k.label} {...k} first={i === 0} isMobile={isMobile} />)}
           </section>
 
-          <MorningBrief morning={m.morning} scopeKey="call_center" coachTo="/team" onGo={go} isMobile={isMobile} />
-
+          {/* Two columns that stack on their own — no holes beside a short section. */}
           <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'minmax(0, 1fr)' : 'minmax(0, 1.25fr) minmax(0, 1fr)', gap: 16, alignItems: 'start' }}>
-            <Section title="The floor today" sub="ServiceTitan lead calls" link={['Live', '/live']} onGo={go}>
-              <FloorTable reps={m.reps} goal={goal} thr={thr.booking_pct} isMobile={isMobile} />
-            </Section>
-            <Section title="Next up" sub={cards.length > 3 ? `${cards.length - 3} more` : null} link={['Command Center', '/dispatch']} onGo={go}>
-              <NextUp center={center} go={go} max={3} />
-            </Section>
-          </div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'minmax(0, 1fr)' : 'minmax(0, 1.25fr) minmax(0, 1fr)', gap: 16, alignItems: 'start' }}>
-            <Section title="Coverage" sub="booked % of capacity" link={['3-day board', '/callboard']} onGo={go}>
-              <Coverage cov={center?.coverage} />
-            </Section>
-            <Section title="Needs you" sub={needsYou.length ? `${needsYou.length} item${needsYou.length === 1 ? '' : 's'}` : null}>
-              {needsYou.length ? needsYou.map((n, i) => (
-                <a key={n.key} href={n.to} onClick={(e) => { e.preventDefault(); go(n.to) }}
-                  style={{ display: 'flex', alignItems: 'center', gap: 12, paddingTop: i ? 10 : 0, borderTop: i ? '1px solid var(--border)' : 'none', color: 'inherit', textDecoration: 'none' }}>
-                  <span style={{ width: 32, height: 32, borderRadius: 10, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: `var(--tone-${n.tone}-bg)`, color: `var(--tone-${n.tone}-tx)` }}>
-                    <Icon name={n.icon} size={16} />
-                  </span>
-                  <span style={{ flex: 1, minWidth: 0, lineHeight: 1.3 }}>
-                    <span style={{ display: 'block', fontSize: 13.5, fontWeight: 600 }}>{n.title}</span>
-                    <span style={{ display: 'block', fontSize: 12, color: 'var(--text-muted)' }}>{n.sub}</span>
-                  </span>
-                  <Icon name="arrowRight" size={15} style={{ color: 'var(--text-muted)' }} />
-                </a>
-              )) : <Empty>Nothing waiting on you — no time-off requests or unclaimed paid leads.</Empty>}
-            </Section>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0 }}>
+              <Section title="The floor today" sub="ServiceTitan lead calls" link={['Live', '/live']} onGo={go}>
+                <FloorTable reps={m.reps} goal={goal} thr={thr.booking_pct} isMobile={isMobile} />
+              </Section>
+              <Section title="Coverage" sub="booked % of capacity" link={['3-day board', '/callboard']} onGo={go}>
+                <Coverage cov={center?.coverage} />
+              </Section>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0 }}>
+              <Section title="Next up" sub={cards.length > 3 ? `${cards.length - 3} more` : null} link={['Command Center', '/dispatch']} onGo={go}>
+                <NextUp center={center} go={go} max={3} />
+              </Section>
+              <Section title="Needs you" sub={needsYou.length ? `${needsYou.length} item${needsYou.length === 1 ? '' : 's'}` : null}>
+                {needsYou.length ? needsYou.map((n, i) => (
+                  <a key={n.key} href={n.to} onClick={(e) => { e.preventDefault(); go(n.to) }}
+                    style={{ display: 'flex', alignItems: 'center', gap: 12, paddingTop: i ? 10 : 0, borderTop: i ? '1px solid var(--border)' : 'none', color: 'inherit', textDecoration: 'none' }}>
+                    <span style={{ width: 32, height: 32, borderRadius: 10, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: `var(--tone-${n.tone}-bg)`, color: `var(--tone-${n.tone}-tx)` }}>
+                      <Icon name={n.icon} size={16} />
+                    </span>
+                    <span style={{ flex: 1, minWidth: 0, lineHeight: 1.3 }}>
+                      <span style={{ display: 'block', fontSize: 13.5, fontWeight: 600 }}>{n.title}</span>
+                      <span style={{ display: 'block', fontSize: 12, color: 'var(--text-muted)' }}>{n.sub}</span>
+                    </span>
+                    <Icon name="arrowRight" size={15} style={{ color: 'var(--text-muted)' }} />
+                  </a>
+                )) : <Empty>Nothing waiting on you — no time-off requests or unclaimed paid leads.</Empty>}
+              </Section>
+            </div>
           </div>
         </div>
       </div>
@@ -382,7 +390,7 @@ export default function MyDayHome({ dispatcher, manager }) {
     ]
     return (
       <div style={{ flex: 1, overflowY: 'auto', background: 'var(--bg)' }}>
-        <div style={{ padding: isMobile ? '12px 12px 24px' : '20px 26px 96px', display: 'flex', flexDirection: 'column', gap: 16, maxWidth: 1480 }}>
+        <div style={{ padding: isMobile ? '12px 12px 24px' : '20px 26px 96px', display: 'flex', flexDirection: 'column', gap: 16 }}>
           <section style={{ ...panel, borderRadius: 18, padding: isMobile ? '18px 18px' : '22px 26px', display: 'flex', flexDirection: 'column', gap: 10 }}>
             <div style={{ ...eyebrow, display: 'flex', alignItems: 'center', gap: 7 }}>
               <span style={{ width: 7, height: 7, borderRadius: 99, background: 'var(--signal)' }} />
@@ -453,7 +461,7 @@ export default function MyDayHome({ dispatcher, manager }) {
 
   return (
     <div style={{ flex: 1, overflowY: 'auto', background: 'var(--bg)' }}>
-      <div style={{ padding: isMobile ? '12px 12px 24px' : '20px 26px 96px', display: 'flex', flexDirection: 'column', gap: 16, maxWidth: 1480 }}>
+      <div style={{ padding: isMobile ? '12px 12px 24px' : '20px 26px 96px', display: 'flex', flexDirection: 'column', gap: 16 }}>
 
         {/* Greeting + today's read, booking ring on the right */}
         <section style={{ ...panel, borderRadius: 18, overflow: 'hidden', display: 'grid', gridTemplateColumns: isMobile ? 'minmax(0, 1fr)' : 'minmax(0, 1fr) 300px' }}>
@@ -495,80 +503,81 @@ export default function MyDayHome({ dispatcher, manager }) {
           {kpis.map((k, i) => <Kpi key={k.label} {...k} first={i === 0} isMobile={isMobile} />)}
         </section>
 
-        {/* Where to book + your queue */}
+        {/* Two columns that stack on their own — no holes beside a short section:
+            where to book and your month on the left; queue, latest review and
+            what's coming up on the right. */}
         <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'minmax(0, 1fr)' : 'minmax(0, 1.4fr) minmax(0, 1fr)', gap: 16, alignItems: 'start' }}>
-          <Section title="Where we need bookings" sub="open slots on the 3-day board" link={['3-day board', '/callboard']} onGo={go}>
-            <BoardNeeds board={me.board} />
-            <div style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.5 }}>When a customer is flexible on the day, offer these first. “Full” still books strong calls — dispatch makes room.</div>
-          </Section>
-          <Section title="Your queue" link={isMobile ? null : ['Open the dialer', '/']} onGo={go}>
-            {[
-              { icon: 'phone', label: 'Paid leads waiting', value: openLeads, sub: 'First to open one claims it', tone: openLeads ? 'amber' : null },
-              { icon: 'refresh', label: 'Callbacks due today', value: queue.callbacks, sub: 'On leads you’ve claimed', tone: queue.callbacks ? 'amber' : null },
-              ...queue.camps.map(c => ({ icon: 'calls', label: c.name, value: c.left, sub: c.on ? 'left to work · switched on' : 'left to work · switch it on in the dialer', tone: c.on ? 'blue' : null })),
-            ].map((r, i) => (
-              <div key={r.label + i} style={{ display: 'flex', alignItems: 'center', gap: 12, paddingTop: i ? 10 : 0, borderTop: i ? '1px solid var(--border)' : 'none' }}>
-                <span style={{ width: 32, height: 32, borderRadius: 10, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: `var(--tone-${r.tone || 'gray'}-bg)`, color: `var(--tone-${r.tone || 'gray'}-tx)` }}>
-                  <Icon name={r.icon} size={16} />
-                </span>
-                <span style={{ flex: 1, minWidth: 0, lineHeight: 1.3 }}>
-                  <span style={{ display: 'block', fontSize: 13.5, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.label}</span>
-                  <span style={{ display: 'block', fontSize: 12, color: 'var(--text-muted)' }}>{r.sub}</span>
-                </span>
-                <span style={{ ...mono, fontSize: 20, fontWeight: 600 }}>{r.value}</span>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0 }}>
+            <Section title="Where we need bookings" sub="open slots on the 3-day board" link={['3-day board', '/callboard']} onGo={go}>
+              <BoardNeeds board={me.board} />
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.5 }}>When a customer is flexible on the day, offer these first. “Full” still books strong calls — dispatch makes room.</div>
+            </Section>
+            <Section title="Your month" sub="scorecard" link={['My scorecard', '/mypage?tab=scorecard']} onGo={go}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                <Ring pct={month.score == null ? 0 : (month.score / 4) * 100} size={64} stroke={6} tone={month.level ? LEVELS[month.level].tone : 'gray'}>
+                  <div style={{ ...mono, fontSize: 15, fontWeight: 600, color: month.level ? `var(--tone-${LEVELS[month.level].tone}-tx)` : 'var(--text-muted)' }}>{month.score == null ? '—' : month.score.toFixed(2)}</div>
+                </Ring>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <LevelChip level={month.level} />
+                  <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>out of 4.00 · 3.00 meets</span>
+                </div>
               </div>
-            ))}
-            {!queue.camps.length && <Empty>No outbound campaigns assigned to you.</Empty>}
-          </Section>
-        </div>
-
-        {/* Month + latest review + coming up */}
-        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'minmax(0, 1fr)' : 'repeat(3, minmax(0, 1fr))', gap: 16, alignItems: 'start' }}>
-          <Section title="Your month" sub="scorecard" link={['My scorecard', '/mypage?tab=scorecard']} onGo={go}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-              <Ring pct={month.score == null ? 0 : (month.score / 4) * 100} size={64} stroke={6} tone={month.level ? LEVELS[month.level].tone : 'gray'}>
-                <div style={{ ...mono, fontSize: 15, fontWeight: 600, color: month.level ? `var(--tone-${LEVELS[month.level].tone}-tx)` : 'var(--text-muted)' }}>{month.score == null ? '—' : month.score.toFixed(2)}</div>
-              </Ring>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                <LevelChip level={month.level} />
-                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>out of 4.00 · 3.00 meets</span>
+              <div style={{ display: 'flex', flexDirection: 'column' }}>
+                {month.kpis.filter(k => k.weight > 0).map((k, i) => (
+                  <div key={k.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0', borderTop: i ? '1px solid var(--border)' : 'none', fontSize: 13 }}>
+                    <span style={{ flex: 1, minWidth: 0 }}>{k.short}</span>
+                    <span style={{ ...mono, fontWeight: 600 }}>{k.value == null ? '—' : fmtKpi(k, k.value)}</span>
+                    <LevelPips level={k.rating} />
+                  </div>
+                ))}
               </div>
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column' }}>
-              {month.kpis.filter(k => k.weight > 0).map((k, i) => (
-                <div key={k.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0', borderTop: i ? '1px solid var(--border)' : 'none', fontSize: 13 }}>
-                  <span style={{ flex: 1, minWidth: 0 }}>{k.short}</span>
-                  <span style={{ ...mono, fontWeight: 600 }}>{k.value == null ? '—' : fmtKpi(k, k.value)}</span>
-                  <LevelPips level={k.rating} />
+            </Section>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0 }}>
+            <Section title="Your queue" link={isMobile ? null : ['Open the dialer', '/']} onGo={go}>
+              {[
+                { icon: 'phone', label: 'Paid leads waiting', value: openLeads, sub: 'First to open one claims it', tone: openLeads ? 'amber' : null },
+                { icon: 'refresh', label: 'Callbacks due today', value: queue.callbacks, sub: 'On leads you’ve claimed', tone: queue.callbacks ? 'amber' : null },
+                ...queue.camps.map(c => ({ icon: 'calls', label: c.name, value: c.left, sub: c.on ? 'left to work · switched on' : 'left to work · switch it on in the dialer', tone: c.on ? 'blue' : null })),
+              ].map((r, i) => (
+                <div key={r.label + i} style={{ display: 'flex', alignItems: 'center', gap: 12, paddingTop: i ? 10 : 0, borderTop: i ? '1px solid var(--border)' : 'none' }}>
+                  <span style={{ width: 32, height: 32, borderRadius: 10, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: `var(--tone-${r.tone || 'gray'}-bg)`, color: `var(--tone-${r.tone || 'gray'}-tx)` }}>
+                    <Icon name={r.icon} size={16} />
+                  </span>
+                  <span style={{ flex: 1, minWidth: 0, lineHeight: 1.3 }}>
+                    <span style={{ display: 'block', fontSize: 13.5, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.label}</span>
+                    <span style={{ display: 'block', fontSize: 12, color: 'var(--text-muted)' }}>{r.sub}</span>
+                  </span>
+                  <span style={{ ...mono, fontSize: 20, fontWeight: 600 }}>{r.value}</span>
                 </div>
               ))}
-            </div>
-          </Section>
+              {!queue.camps.length && <Empty>No outbound campaigns assigned to you.</Empty>}
+            </Section>
+            <Section title="Latest call review" link={['My call evals', '/mypage?tab=call-evals']} onGo={go}>
+              {me.eval ? (
+                <>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
+                    <span style={{ ...mono, fontSize: 32, fontWeight: 600, letterSpacing: '-.03em', color: qaLevel ? `var(--tone-${LEVELS[qaLevel].tone}-tx)` : 'var(--text-primary)' }}>{Math.round(me.eval.pct)}</span>
+                    <span style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>/ 100 · {me.eval.contact_name || 'call'} · {weekday(String(me.eval.call_at || '').slice(0, 10), { month: 'short', day: 'numeric' })}</span>
+                  </div>
+                  {me.eval.summary && (
+                    <div style={{ fontSize: 13, lineHeight: 1.55, color: 'var(--text-secondary)', display: '-webkit-box', WebkitLineClamp: 5, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{me.eval.summary}</div>
+                  )}
+                </>
+              ) : <Empty>No calls reviewed yet. Reviews land here as calls are scored.</Empty>}
+            </Section>
 
-          <Section title="Latest call review" link={['My call evals', '/mypage?tab=call-evals']} onGo={go}>
-            {me.eval ? (
-              <>
-                <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
-                  <span style={{ ...mono, fontSize: 32, fontWeight: 600, letterSpacing: '-.03em', color: qaLevel ? `var(--tone-${LEVELS[qaLevel].tone}-tx)` : 'var(--text-primary)' }}>{Math.round(me.eval.pct)}</span>
-                  <span style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>/ 100 · {me.eval.contact_name || 'call'} · {weekday(String(me.eval.call_at || '').slice(0, 10), { month: 'short', day: 'numeric' })}</span>
-                </div>
-                {me.eval.summary && (
-                  <div style={{ fontSize: 13, lineHeight: 1.55, color: 'var(--text-secondary)', display: '-webkit-box', WebkitLineClamp: 5, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{me.eval.summary}</div>
-                )}
-              </>
-            ) : <Empty>No calls reviewed yet. Reviews land here as calls are scored.</Empty>}
-          </Section>
-
-          <Section title="Coming up" link={['My schedule', '/mypage?tab=my-schedule']} onGo={go}>
-            <ComingUp me={me} />
-            {me.pay && (
-              <a href="/mypage?tab=commissions" onClick={(e) => { e.preventDefault(); go('/mypage?tab=commissions') }}
-                style={{ display: 'flex', alignItems: 'baseline', gap: 8, fontSize: 12.5, color: 'var(--text-secondary)', textDecoration: 'none', paddingTop: 8, borderTop: '1px solid var(--border)' }}>
-                Pay this month <span style={{ ...mono, fontWeight: 600, color: 'var(--text-primary)' }}>{cents(me.pay.month)}</span>
-                <span style={{ marginLeft: 'auto', color: 'var(--accent)', fontWeight: 600 }}>My pay →</span>
-              </a>
-            )}
-          </Section>
+            <Section title="Coming up" link={['My schedule', '/mypage?tab=my-schedule']} onGo={go}>
+              <ComingUp me={me} />
+              {me.pay && (
+                <a href="/mypage?tab=commissions" onClick={(e) => { e.preventDefault(); go('/mypage?tab=commissions') }}
+                  style={{ display: 'flex', alignItems: 'baseline', gap: 8, fontSize: 12.5, color: 'var(--text-secondary)', textDecoration: 'none', paddingTop: 8, borderTop: '1px solid var(--border)' }}>
+                  Pay this month <span style={{ ...mono, fontWeight: 600, color: 'var(--text-primary)' }}>{cents(me.pay.month)}</span>
+                  <span style={{ marginLeft: 'auto', color: 'var(--accent)', fontWeight: 600 }}>My pay →</span>
+                </a>
+              )}
+            </Section>
+          </div>
         </div>
       </div>
     </div>

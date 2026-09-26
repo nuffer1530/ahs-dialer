@@ -1653,6 +1653,27 @@ app.get('/api/st/health', async (req, res) => {
 // admin. These routes use the service key, which bypasses RLS entirely, so the
 // check here is the ONLY thing standing between the anon internet and the
 // user table. Never mount an /api/admin route without it.
+// "View as" (an admin previewing Andi as someone else — src/lib/preview.js):
+// a GET from a real admin carrying X-View-As ("id:<profile uuid>" or
+// "role:<role>") is answered as that person or role would see it. Anything
+// but a GET is refused while previewing — the preview never changes data.
+// Returns false only when it has already answered (the refusal).
+const VIEW_AS_ROLES = ['rep', 'dispatcher', 'ops_manager', 'call_center_manager', 'admin']
+async function applyViewAs(req, res, prof) {
+  const v = String(req.headers['x-view-as'] || '')
+  if (!v || prof?.role !== 'admin' || prof?.active === false) return prof
+  if (req.method !== 'GET' && req.method !== 'HEAD') { res.status(403).json({ error: 'Preview is read-only — exit the preview to make changes' }); return false }
+  if (v.startsWith('role:')) {
+    const role = v.slice(5)
+    return VIEW_AS_ROLES.includes(role) ? { ...prof, role, home_view: null, _preview: true } : prof
+  }
+  if (v.startsWith('id:')) {
+    const { data } = await supabase.from('profiles').select('*').eq('id', v.slice(3)).maybeSingle()
+    return data ? { ...data, _preview: true } : prof
+  }
+  return prof
+}
+
 async function requireAdmin(req, res) {
   const token = (req.headers.authorization || '').replace(/^Bearer\s+/i, '')
   if (!token) { res.status(401).json({ error: 'Not signed in' }); return null }
@@ -1660,8 +1681,10 @@ async function requireAdmin(req, res) {
   const { data: { user }, error } = await supabase.auth.getUser(token)
   if (error || !user) { res.status(401).json({ error: 'Invalid session' }); return null }
 
-  const { data: prof } = await supabase
+  let { data: prof } = await supabase
     .from('profiles').select('id, name, role, active').eq('id', user.id).maybeSingle()
+  prof = await applyViewAs(req, res, prof)
+  if (prof === false) return null
   if (prof?.role !== 'admin' || prof?.active === false) {
     res.status(403).json({ error: 'Admins only' }); return null
   }
@@ -1677,8 +1700,10 @@ async function requireCallCenterAdmin(req, res) {
   if (!token) { res.status(401).json({ error: 'Not signed in' }); return null }
   const { data: { user }, error } = await supabase.auth.getUser(token)
   if (error || !user) { res.status(401).json({ error: 'Invalid session' }); return null }
-  const { data: prof } = await supabase
+  let { data: prof } = await supabase
     .from('profiles').select('id, name, role, active').eq('id', user.id).maybeSingle()
+  prof = await applyViewAs(req, res, prof)
+  if (prof === false) return null
   if (!['admin', 'call_center_manager'].includes(prof?.role) || prof?.active === false) {
     res.status(403).json({ error: 'Admins or call center managers only' }); return null
   }
@@ -1691,7 +1716,9 @@ async function requireFieldLead(req, res) {
   if (!token) { res.status(401).json({ error: 'Not signed in' }); return null }
   const { data: { user }, error } = await supabase.auth.getUser(token)
   if (error || !user) { res.status(401).json({ error: 'Invalid session' }); return null }
-  const { data: prof } = await supabase.from('profiles').select('id, name, role, active').eq('id', user.id).maybeSingle()
+  let { data: prof } = await supabase.from('profiles').select('id, name, role, active').eq('id', user.id).maybeSingle()
+  prof = await applyViewAs(req, res, prof)
+  if (prof === false) return null
   if (!['admin', 'ops_manager'].includes(prof?.role) || prof?.active === false) {
     res.status(403).json({ error: 'Admins and operations managers only' }); return null
   }
@@ -1704,7 +1731,9 @@ async function requireUser(req, res) {
   if (!token) { res.status(401).json({ error: 'Not signed in' }); return null }
   const { data: { user }, error } = await supabase.auth.getUser(token)
   if (error || !user) { res.status(401).json({ error: 'Invalid session' }); return null }
-  const { data: prof } = await supabase.from('profiles').select('*').eq('id', user.id).maybeSingle()
+  let { data: prof } = await supabase.from('profiles').select('*').eq('id', user.id).maybeSingle()
+  prof = await applyViewAs(req, res, prof)
+  if (prof === false) return null
   if (!prof || prof.active === false) { res.status(403).json({ error: 'No active profile' }); return null }
   return prof
 }
@@ -1718,16 +1747,23 @@ async function requireDispatch(req, res) {
   const token = (req.headers.authorization || '').replace(/^Bearer\s+/i, '')
   if (!token) { res.status(401).json({ error: 'Not signed in' }); return null }
   const hit = _dispatchAuth.get(token)
-  if (hit && hit.expires > Date.now()) return hit.prof
-  const { data: { user }, error } = await supabase.auth.getUser(token)
-  if (error || !user) { res.status(401).json({ error: 'Invalid session' }); return null }
-  const { data: prof } = await supabase
-    .from('profiles').select('id, role, active, name, email').eq('id', user.id).maybeSingle()
+  let prof = hit && hit.expires > Date.now() ? hit.prof : null
+  if (!prof) {
+    const { data: { user }, error } = await supabase.auth.getUser(token)
+    if (error || !user) { res.status(401).json({ error: 'Invalid session' }); return null }
+    const { data } = await supabase
+      .from('profiles').select('id, role, active, name, email').eq('id', user.id).maybeSingle()
+    prof = data
+    if (prof && prof.active !== false) {
+      if (_dispatchAuth.size > 500) _dispatchAuth.clear()
+      _dispatchAuth.set(token, { prof, expires: Date.now() + 60_000 })   // the real person; a preview is applied per request
+    }
+  }
+  prof = await applyViewAs(req, res, prof)
+  if (prof === false) return null
   if (!['admin', 'dispatcher', 'call_center_manager'].includes(prof?.role) || prof?.active === false) {
     res.status(403).json({ error: 'Admins or dispatchers only' }); return null
   }
-  if (_dispatchAuth.size > 500) _dispatchAuth.clear()
-  _dispatchAuth.set(token, { prof, expires: Date.now() + 60_000 })
   return prof
 }
 
@@ -12019,8 +12055,10 @@ async function requireLeadership(req, res) {
   if (!token) { res.status(401).json({ error: 'Not signed in' }); return null }
   const { data: { user }, error } = await supabase.auth.getUser(token)
   if (error || !user) { res.status(401).json({ error: 'Invalid session' }); return null }
-  const { data: prof } = await supabase
+  let { data: prof } = await supabase
     .from('profiles').select('id, name, role, active').eq('id', user.id).maybeSingle()
+  prof = await applyViewAs(req, res, prof)
+  if (prof === false) return null
   if (prof?.role !== 'admin' || prof?.active === false) {
     res.status(403).json({ error: 'Admins only' }); return null
   }
@@ -12030,7 +12068,9 @@ async function requireLeadership(req, res) {
     const arr = JSON.parse(data?.value || 'null')
     if (Array.isArray(arr) && arr.length) viewers = arr.map(s => String(s).toLowerCase())
   } catch {}
-  if (!viewers.includes((user.email || '').toLowerCase())) {
+  // A preview as someone else is judged by their email, not the admin's.
+  const whoEmail = prof._preview && prof.email ? prof.email : user.email
+  if (!viewers.includes((whoEmail || '').toLowerCase())) {
     res.status(403).json({ error: 'Not authorized for leadership reports' }); return null
   }
   return prof
@@ -13380,7 +13420,9 @@ async function requireHomeUser(req, res) {
   if (!token) { res.status(401).json({ error: 'Not signed in' }); return null }
   const { data: { user }, error } = await supabase.auth.getUser(token)
   if (error || !user) { res.status(401).json({ error: 'Invalid session' }); return null }
-  const { data: prof } = await supabase.from('profiles').select('id, name, email, role, active').eq('id', user.id).maybeSingle()
+  let { data: prof } = await supabase.from('profiles').select('id, name, email, role, active').eq('id', user.id).maybeSingle()
+  prof = await applyViewAs(req, res, prof)
+  if (prof === false) return null
   if (!['admin', 'ops_manager', 'dispatcher', 'call_center_manager'].includes(prof?.role) || prof?.active === false) {
     res.status(403).json({ error: 'Home is for admins, dispatchers and operations managers' }); return null
   }

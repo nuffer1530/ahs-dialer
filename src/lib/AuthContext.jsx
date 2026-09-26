@@ -1,12 +1,20 @@
-import { createContext, useContext, useEffect, useState } from 'react'
+import { createContext, useContext, useEffect, useRef, useState } from 'react'
 import { sb } from './supabase'
+import { applyPreview, loadPreview, savePreview } from './preview'
 
 const AuthContext = createContext(null)
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null)
-  const [profile, setProfile] = useState(null)
+  let [profile, setProfile] = useState(null)
   const [loading, setLoading] = useState(true)
+  // Whose profile has finished loading. Right after sign-in the session
+  // arrives before the profile row, and the first screen used to be picked
+  // with no role — phones landed on Calls instead of Home. App waits on this.
+  const [profileFor, setProfileFor] = useState(null)
+  // "View as" (lib/preview.js): the person or sample role an admin is
+  // previewing, kept for this tab only.
+  const [viewAs, setViewAsState] = useState(loadPreview)
 
   useEffect(() => {
     sb.auth.getSession().then(({ data: { session } }) => {
@@ -17,7 +25,7 @@ export function AuthProvider({ children }) {
     const { data: { subscription } } = sb.auth.onAuthStateChange((_event, session) => {
       setUser(session?.user ?? null)
       if (session?.user) fetchProfile(session.user.id)
-      else { setProfile(null); setLoading(false) }
+      else { setProfile(null); setLoading(false); savePreview(null); applyPreview(null); setViewAsState(null) }   // signing out ends any preview
     })
     return () => subscription.unsubscribe()
   }, [])
@@ -51,8 +59,21 @@ export function AuthProvider({ children }) {
     }
 
     setProfile(data)
+    setProfileFor(userId)
     setLoading(false)
   }
+
+  // Only a real admin can preview. The guards switch during render (not in an
+  // effect) so no page mounted under the preview can write before they're on.
+  const realProfile = profile
+  const realIsAdmin = realProfile?.role === 'admin'
+  const preview = realIsAdmin && viewAs ? viewAs : null
+  const applied = useRef(undefined)
+  const previewKey = preview ? `${preview._sample ? 'role' : 'id'}:${preview._sample ? preview.role : preview.id}` : null
+  if (applied.current !== previewKey) { applyPreview(preview); applied.current = previewKey }
+  const setViewAs = (who) => { savePreview(who); applyPreview(realIsAdmin ? who : null); setViewAsState(who) }
+  // Everything below describes whoever the app is showing.
+  profile = preview || realProfile
 
   const isAdmin = profile?.role === 'admin'
   const isDispatcher = profile?.role === 'dispatcher'
@@ -68,7 +89,8 @@ export function AuthProvider({ children }) {
   const canManageCallCenter = isAdmin || isCallCenterManager
 
   return (
-    <AuthContext.Provider value={{ user, profile, loading, isAdmin, isDispatcher, isOpsManager, isCallCenterManager, canManageCallCenter, refreshProfile: () => fetchProfile(user?.id) }}>
+    <AuthContext.Provider value={{ user, profile, loading, isAdmin, isDispatcher, isOpsManager, isCallCenterManager, canManageCallCenter, refreshProfile: () => fetchProfile(user?.id),
+      realProfile, realIsAdmin, previewing: !!preview, viewAs: preview, setViewAs, profileReady: !!user && profileFor === user.id }}>
       {children}
     </AuthContext.Provider>
   )

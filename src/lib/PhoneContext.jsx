@@ -19,7 +19,8 @@ import { startRingback, stopRingback } from './ringback'
 const PhoneContext = createContext(null)
 
 export function PhoneProvider({ children }) {
-  const { profile } = useAuth()
+  // The admin's own line — never the person being previewed (lib/preview.js).
+  const { realProfile: profile } = useAuth()
   const { contacts, setContacts } = useData()
   // Wall displays (department TVs, War Room) are logged in but nobody answers
   // a phone there. Registering a Device grabs the microphone, which the TV

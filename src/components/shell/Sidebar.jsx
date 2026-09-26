@@ -55,7 +55,7 @@ function RailLink({ to, label, icon, active, collapsed, badge, dot, onNavigate, 
 export default function Sidebar({
   hubs, pathname, collapsed, onToggleCollapse, drawer, badges = {},
   profile, roleText, statusColor, tvBoards, meLinks, ptoApprovals, alerts = [],
-  onNavigate, onOpenPalette, darkMode, onToggleTheme, onSignOut,
+  onNavigate, onOpenPalette, darkMode, onToggleTheme, onSignOut, onViewAs,
   // Phones have no dock, so the drawer's menu carries the status picker.
   statusOptions, currentStatus, onSetStatus,
 }) {
@@ -196,6 +196,13 @@ export default function Sidebar({
               </a>
             ))}
           </div>
+          {/* Admins: see Andi as another person or role (read-only preview). */}
+          {onViewAs && (
+            <button type="button" role="menuitem" className="pop-item" onClick={() => { onViewAs(); me.setOpen(false) }}>
+              <Icon name="user" size={15} style={{ color: 'var(--text-muted)' }} />
+              <span style={{ flex: 1 }}>View as…</span>
+            </button>
+          )}
           <button type="button" role="menuitem" className="pop-item" onClick={() => { onToggleTheme(); me.setOpen(false) }}>
             <Icon name={darkMode ? 'sun' : 'moon'} size={15} style={{ color: 'var(--text-muted)' }} />
             <span style={{ flex: 1 }}>{darkMode ? 'Light mode' : 'Dark mode'}</span>

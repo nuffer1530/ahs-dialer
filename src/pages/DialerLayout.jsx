@@ -35,6 +35,7 @@ import Sidebar from '../components/shell/Sidebar'
 import TopBar from '../components/shell/TopBar'
 import PhoneDock from '../components/shell/PhoneDock'
 import CommandPalette from '../components/shell/CommandPalette'
+import ViewAsPicker, { ROLE_NAMES } from '../components/shell/ViewAsPicker'
 import MobileTabBar from '../components/shell/MobileTabBar'
 import { visibleHubs, hubForPath, tvBoards, meLinks, roleLabel, OTHER_TITLES } from '../components/shell/nav'
 
@@ -137,7 +138,8 @@ export default function DialerLayout() {
 }
 
 function DialerLayoutInner() {
-  const { profile, isAdmin, isDispatcher, isOpsManager, isCallCenterManager, canManageCallCenter } = useAuth()
+  const { profile, isAdmin, isDispatcher, isOpsManager, isCallCenterManager, canManageCallCenter, realProfile, realIsAdmin, previewing, viewAs, setViewAs } = useAuth()
+  const [viewAsOpen, setViewAsOpen] = useState(false)
   useEffect(() => { loadOpsConfig() }, [])   // pull admin thresholds into the live bindings
   // Deploy watcher: open tabs run old code until reloaded, which turned every
   // fix into 'hard refresh first'. Poll the bundle name; when it changes, show
@@ -231,24 +233,27 @@ function DialerLayoutInner() {
     localStorage.setItem('andi-theme', next)
   }
 
+  // Status tracking is always the signed-in person's own (realProfile) —
+  // a "View as" preview must never read or write someone else's status.
+  const me = realProfile || profile
   useEffect(() => {
-    if (profile?.status) {
-      setAgentStatus(profile.status)
+    if (me?.status) {
+      setAgentStatus(me.status)
       if (statusTimerRef.current) clearInterval(statusTimerRef.current)
-      statusStartRef.current = profile.status_since ? new Date(profile.status_since).getTime() : Date.now()
+      statusStartRef.current = me.status_since ? new Date(me.status_since).getTime() : Date.now()
       setStatusDuration(Math.floor((Date.now() - statusStartRef.current) / 1000))
       statusTimerRef.current = setInterval(() => {
         setStatusDuration(Math.floor((Date.now() - statusStartRef.current) / 1000))
       }, 1000)
     }
-  }, [profile])
+  }, [me])
 
   useEffect(() => {
-    if (!profile?.id) return
+    if (!me?.id) return
     const channel = sb.channel('nav-status')
       .on('postgres_changes', {
         event: 'UPDATE', schema: 'public', table: 'profiles',
-        filter: `id=eq.${profile.id}`
+        filter: `id=eq.${me.id}`
       }, payload => {
         if (payload.new?.status) {
           setAgentStatus(payload.new.status)
@@ -263,7 +268,7 @@ function DialerLayoutInner() {
       })
       .subscribe()
     return () => sb.removeChannel(channel)
-  }, [profile?.id])
+  }, [me?.id])
 
   useEffect(() => {
     const onKey = (e) => {
@@ -315,17 +320,17 @@ function DialerLayoutInner() {
       const d = new Date()
       const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
       const { data: sched } = await sb.from('schedules').select('shift_start, day_type')
-        .eq('profile_id', profile.id).eq('date', today).maybeSingle()
+        .eq('profile_id', me.id).eq('date', today).maybeSingle()
       if (!sched || !sched.shift_start || ['pto', 'sick', 'holiday', 'off'].includes(sched.day_type)) return
 
       // Only the FIRST Available of the day is their arrival — check before the
       // new status_event is inserted below.
       const { data: prior } = await sb.from('status_events').select('id')
-        .eq('profile_id', profile.id).eq('status', 'Available').gte('started_at', today + 'T00:00:00').limit(1)
+        .eq('profile_id', me.id).eq('status', 'Available').gte('started_at', today + 'T00:00:00').limit(1)
       if (prior && prior.length) return
       // One auto late point per day.
       const { data: existing } = await sb.from('attendance_points').select('id')
-        .eq('profile_id', profile.id).eq('date', today).eq('reason', 'late').limit(1)
+        .eq('profile_id', me.id).eq('date', today).eq('reason', 'late').limit(1)
       if (existing && existing.length) return
 
       const [sh, sm] = sched.shift_start.split(':').map(Number)
@@ -335,7 +340,7 @@ function DialerLayoutInner() {
 
       const fmt = t => t.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       await sb.from('attendance_points').insert({
-        profile_id: profile.id, date: today, points: 0.5, reason: 'late', auto_generated: true, created_by: profile.id,
+        profile_id: me.id, date: today, points: 0.5, reason: 'late', auto_generated: true, created_by: me.id,
         notes: `Auto: went available at ${fmt(arrival)}, scheduled ${fmt(shiftStart)} (${GRACE_MINUTES}-min grace)`,
       })
     } catch (e) { console.warn('late arrival check:', e.message) }
@@ -361,21 +366,21 @@ function DialerLayoutInner() {
     // Wrap Up included, clears it.
     const patch = { status: newStatus, status_since: now }
     if (newStatus !== 'On Call') patch.interaction_type = null
-    await sb.from('profiles').update(patch).eq('id', profile.id)
-    syncWorkerActivity(profile.id, newStatus)
+    await sb.from('profiles').update(patch).eq('id', me.id)
+    syncWorkerActivity(me.id, newStatus)
     // Check tardiness before inserting the new Available event (so it's not
     // counted as a prior arrival).
     if (newStatus === 'Available') await recordLateArrival(now)
     const { data: evt } = await sb.from('status_events').insert({
-      profile_id: profile.id, status: newStatus, started_at: now
+      profile_id: me.id, status: newStatus, started_at: now
     }).select().single()
     if (evt) currentEventRef.current = evt.id
   }
 
   const signOut = async () => {
     const now = new Date().toISOString()
-    await sb.from('profiles').update({ status: 'Offline', status_since: now, interaction_type: null }).eq('id', profile.id)
-    syncWorkerActivity(profile.id, 'Offline')
+    await sb.from('profiles').update({ status: 'Offline', status_since: now, interaction_type: null }).eq('id', me.id)
+    syncWorkerActivity(me.id, 'Offline')
     if (currentEventRef.current) {
       await sb.from('status_events').update({ ended_at: now }).eq('id', currentEventRef.current)
       currentEventRef.current = null
@@ -412,7 +417,11 @@ function DialerLayoutInner() {
     statusColor: isOpsManager ? null : currentStatusObj.color, tvBoards: boards, meLinks: mine, ptoApprovals,
     alerts: canManageCallCenter ? alerts : [], onNavigate: (to) => navigate(to), onOpenPalette: () => setPaletteOpen(true),
     darkMode, onToggleTheme: toggleTheme, onSignOut: signOut,
+    onViewAs: realIsAdmin && !isMobile ? () => setViewAsOpen(true) : undefined,
   }
+  // "View as" — land on their Home, the way they'd open Andi.
+  const startPreview = (who) => { setViewAs(who); setViewAsOpen(false); navigate('/home') }
+  const endPreview = () => { setViewAs(null); setViewAsOpen(false); navigate('/home') }
   const paletteItems = [
     ...hubs.flatMap(h => h.tabs.map(t => ({ id: `go:${t.to}`, label: h.tabs.length > 1 ? `${h.label} · ${t.label}` : h.label, keywords: t.label, group: 'Go to', icon: h.icon, run: () => navigate(t.to) }))),
     ...boards.map(b => ({ id: `tv:${b.to}`, label: `${b.label} TV`, group: 'TV boards', icon: 'tv', run: () => navigate(b.to) })),
@@ -420,6 +429,8 @@ function DialerLayoutInner() {
     ...(isOpsManager ? [] : statusOptions.map(o => ({ id: `status:${o.value}`, label: `Set status: ${o.value}`, keywords: 'status', group: 'Actions', icon: 'phone', run: () => updateStatus(o.value) }))),
     { id: 'theme', label: darkMode ? 'Switch to light mode' : 'Switch to dark mode', keywords: 'theme dark light', group: 'Actions', icon: darkMode ? 'sun' : 'moon', run: toggleTheme },
     ...(updateReady ? [{ id: 'reload', label: 'Reload to get the latest Andi', group: 'Actions', icon: 'refresh', run: () => window.location.reload() }] : []),
+    ...(realIsAdmin ? [{ id: 'viewas', label: 'View Andi as…', keywords: 'preview role impersonate see as', group: 'Actions', icon: 'user', run: () => setViewAsOpen(true) }] : []),
+    ...(previewing ? [{ id: 'exitpreview', label: 'Exit preview', keywords: 'view as back to me', group: 'Actions', icon: 'arrowRight', run: endPreview }] : []),
     { id: 'signout', label: 'Sign out', group: 'Actions', icon: 'logout', run: signOut },
   ]
   // Phone tab bar: the hubs this role opens most from a phone, then More.
@@ -469,6 +480,15 @@ function DialerLayoutInner() {
             </button>
           </div>
         )}
+        {/* "View as" preview — always visible while it's on. */}
+        {previewing && !isWall && (
+          <div role="status" style={{ background:'var(--signal)', color:'#0D1013', padding:'7px 16px', display:'flex', alignItems:'center', justifyContent:'center', gap:12, fontSize:12.5, fontWeight:600, flexShrink:0, zIndex:200, flexWrap:'wrap' }}>
+            <span>Previewing as <b>{viewAs?.name || viewAs?.email}</b> · {ROLE_NAMES[viewAs?.role] || viewAs?.role} — read-only, nothing here is saved.</span>
+            <button onClick={() => setViewAsOpen(true)} style={{ background:'rgba(13,16,19,.12)', color:'#0D1013', border:'none', borderRadius:99, padding:'4px 12px', fontSize:12, fontWeight:700, cursor:'pointer' }}>Switch</button>
+            <button onClick={endPreview} style={{ background:'#0D1013', color:'#fff', border:'none', borderRadius:99, padding:'4px 14px', fontSize:12, fontWeight:700, cursor:'pointer' }}>Exit preview</button>
+          </div>
+        )}
+        {realIsAdmin && <ViewAsPicker open={viewAsOpen} onClose={() => setViewAsOpen(false)} onPick={startPreview} onExit={endPreview} me={realProfile} current={viewAs} />}
         {!isWall && <AskAndi />}
         <DialogHost />
         {!isWall && (

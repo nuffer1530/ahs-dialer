@@ -36,7 +36,7 @@ async function fetchHome() {
 
 // Cumulative sold vs the straight-line plan, with today's gap and where this
 // pace ends the month.
-function PaceChart({ series, plan, daysInMonth, dayOfMonth, label }) {
+function PaceChart({ series, plan, daysInMonth, dayOfMonth, label, workdaysLeft }) {
   const W = 420, H = 150, L = 22, R = 12, T = 18, Bm = 26
   const last = series[series.length - 1]?.v || 0
   const projected = dayOfMonth ? Math.round(last / dayOfMonth * daysInMonth) : 0
@@ -79,6 +79,11 @@ function PaceChart({ series, plan, daysInMonth, dayOfMonth, label }) {
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><span style={{ width: 14, borderTop: '2px dashed var(--text-muted)' }} />Plan</span>
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><span style={{ width: 14, borderTop: '2px dotted var(--signal)' }} />At this pace: <b style={mono}>{kMoney(projected)}</b></span>
       </div>
+      {workdaysLeft > 0 && plan > last && (
+        <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', paddingTop: 6, borderTop: '1px solid var(--border)', marginTop: 2 }}>
+          To hit plan: <b style={{ ...mono, color: 'var(--text-primary)' }}>{kMoney((plan - last) / workdaysLeft)}</b> a selling day for the {workdaysLeft} left
+        </div>
+      )}
     </div>
   )
 }
@@ -166,6 +171,15 @@ function BusinessHome() {
     mq.addEventListener?.('change', on)
     return () => mq.removeEventListener?.('change', on)
   }, [])
+  // Very wide screens fit all four trades' tech lists side by side.
+  const [xwide, setXwide] = useState(() => typeof window !== 'undefined' && window.matchMedia?.('(min-width: 1760px)').matches)
+  useEffect(() => {
+    const mq = window.matchMedia?.('(min-width: 1760px)')
+    if (!mq) return
+    const on = () => setXwide(mq.matches)
+    mq.addEventListener?.('change', on)
+    return () => mq.removeEventListener?.('change', on)
+  }, [])
 
   useEffect(() => {
     let dead = false
@@ -233,7 +247,7 @@ function BusinessHome() {
 
   return (
     <div style={{ flex: 1, overflowY: 'auto', background: 'var(--bg)' }}>
-      <div style={{ padding: isMobile ? '12px 12px 24px' : '20px 26px 96px', display: 'flex', flexDirection: 'column', gap: 16, maxWidth: 1480 }}>
+      <div style={{ padding: isMobile ? '12px 12px 24px' : '20px 26px 96px', display: 'flex', flexDirection: 'column', gap: 16 }}>
 
         {scopes && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
@@ -251,10 +265,10 @@ function BusinessHome() {
                 ? <>Morning brief · {new Date(`${data.morning.date}T12:00:00Z`).toLocaleDateString('en-US', { weekday: 'long', timeZone: 'UTC' })}’s results</>
                 : <>{new Date(`${data.today}T12:00:00Z`).toLocaleDateString('en-US', { weekday: 'long', timeZone: 'UTC' })} brief · {updated}</>}
             </div>
-            <h2 className="disp" style={{ margin: 0, fontSize: isMobile ? 24 : 30, lineHeight: 1.14, fontWeight: 700, letterSpacing: '-.025em', maxWidth: 680, textWrap: 'balance' }}>
+            <h2 className="disp" style={{ margin: 0, fontSize: isMobile ? 23 : morningBrief ? 27 : 30, lineHeight: 1.14, fontWeight: 700, letterSpacing: '-.025em', maxWidth: 760, textWrap: 'balance' }}>
               {morningBrief ? morningBrief.headline : scope === 'all' ? data.brief.headline : `${scope} is ${kMoney(Math.abs(view.sold - view.pacedPlan))} ${view.sold >= view.pacedPlan ? 'ahead of' : 'behind'} its plan for ${data.monthName}.`}
             </h2>
-            {morningBrief ? <BriefBody brief={morningBrief} coachTo={leverTo} onGo={navigate} isMobile={isMobile} /> : briefPending && (
+            {morningBrief ? <BriefBody brief={morningBrief} coachTo={leverTo} onGo={navigate} /> : briefPending && (
               <div style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>Writing this morning’s brief from yesterday’s numbers…</div>
             )}
             <p style={{ margin: 0, fontSize: 14.5, lineHeight: 1.6, color: 'var(--text-secondary)', maxWidth: 620, display: morningBrief ? 'none' : undefined }}>
@@ -272,8 +286,8 @@ function BusinessHome() {
               <a href="/callboard" onClick={(e) => { e.preventDefault(); navigate('/callboard') }} className="btn" style={{ borderRadius: 99, height: 38, padding: '0 16px', fontSize: 13 }}>3-day board</a>
             </div>
           </div>
-          <div style={{ background: 'var(--surface-2)', borderLeft: isMobile ? 'none' : '1px solid var(--border)', borderTop: isMobile ? '1px solid var(--border)' : 'none', padding: isMobile ? '16px 18px' : '18px 22px' }}>
-            <PaceChart series={view.series} plan={view.plan} daysInMonth={data.daysInMonth} dayOfMonth={data.dayOfMonth} label={scope === 'all' ? data.monthName : scope} />
+          <div style={{ background: 'var(--surface-2)', borderLeft: isMobile ? 'none' : '1px solid var(--border)', borderTop: isMobile ? '1px solid var(--border)' : 'none', padding: isMobile ? '16px 18px' : '18px 22px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+            <PaceChart series={view.series} plan={view.plan} daysInMonth={data.daysInMonth} dayOfMonth={data.dayOfMonth} label={scope === 'all' ? data.monthName : scope} workdaysLeft={data.workdaysLeft} />
           </div>
         </section>
 
@@ -304,8 +318,11 @@ function BusinessHome() {
           </section>
         )}
 
-        {/* Departments + Needs you */}
-        <div style={{ display: 'grid', gridTemplateColumns: wide && !isMobile ? 'minmax(0, 1fr) 320px' : 'minmax(0, 1fr)', gap: 16, alignItems: 'start' }}>
+        {/* Two columns that stack independently, so a short section never
+            leaves a hole beside a tall one: the department view on the left,
+            what needs you on the right. One column below 1380px (side first). */}
+        <div style={{ display: 'grid', gridTemplateColumns: wide && !isMobile ? 'minmax(0, 1fr) 360px' : 'minmax(0, 1fr)', gap: 16, alignItems: 'start' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0 }}>
           <section style={{ ...panel, borderRadius: 18, overflow: 'hidden' }}>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, padding: '15px 20px 11px', flexWrap: 'wrap' }}>
               <h3 className="disp" style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>{view.rows.length > 1 ? 'Departments' : view.rows[0]?.trade}</h3>
@@ -370,6 +387,44 @@ function BusinessHome() {
             </div>
           </section>
 
+            {glanceTrades.length > 0 && (
+          <section style={{ ...panel, borderRadius: 18, padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
+              <h3 className="disp" style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>Your techs</h3>
+              <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>this month · top 3 and the lowest</span>
+            </div>
+            {/* Rows always fill: 4 trades → 4 across (very wide) or 2 × 2. */}
+            <div style={{ display: 'grid', gridTemplateColumns: `repeat(${isMobile ? 1 : glanceTrades.length >= 4 ? (xwide ? 4 : 2) : glanceTrades.length}, minmax(0, 1fr))`, gap: '14px 28px' }}>
+            {glanceTrades.map(t => {
+              const g = data.glance[t]
+              const row = (x, rank, low) => (
+                <div key={x.id} style={{ display: 'grid', gridTemplateColumns: '22px minmax(0, 1fr) 58px 52px 44px', gap: 8, alignItems: 'center', fontSize: 13, padding: '5px 0', borderTop: low ? '1px dashed var(--border)' : 'none', marginTop: low ? 4 : 0 }}>
+                  <span style={{ ...mono, fontSize: 11.5, color: low ? 'var(--tone-red-tx)' : 'var(--text-muted)' }}>{low ? 'low' : rank}</span>
+                  <span style={{ fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{x.name}</span>
+                  <span style={{ ...mono, textAlign: 'right' }}>{kMoney(x.sold)}</span>
+                  <span style={{ ...mono, textAlign: 'right', color: 'var(--text-secondary)' }}>{pct(x.closeRate)}</span>
+                  <span style={{ ...mono, textAlign: 'right', color: fpTone(x.fieldPro) }}>{x.fieldPro ?? '—'}</span>
+                </div>
+              )
+              return (
+                <div key={t}>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 2 }}>
+                    <span style={{ fontSize: 13, fontWeight: 700 }}>{t}</span>
+                    <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>{g.count} techs · sold · close · Field Pro</span>
+                    <a href={`/tv/${TV_SLUG[t]}`} onClick={(e) => { e.preventDefault(); navigate(`/tv/${TV_SLUG[t]}`) }} style={{ marginLeft: 'auto', fontSize: 12, fontWeight: 600, color: 'var(--accent)', textDecoration: 'none' }}>TV →</a>
+                  </div>
+                  {g.top.map((x, i) => row(x, i + 1, false))}
+                  {g.low && row(g.low, null, true)}
+                </div>
+              )
+            })}
+            </div>
+            <a href="/team" onClick={(e) => { e.preventDefault(); navigate('/team') }} style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--accent)', textDecoration: 'none' }}>All scorecards →</a>
+          </section>
+            )}
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0, order: wide && !isMobile ? 0 : -1 }}>
           <section aria-label="Needs you" style={{ display: 'grid', gridTemplateColumns: wide || isMobile ? 'minmax(0, 1fr)' : 'repeat(auto-fill, minmax(300px, 1fr))', gap: 10, alignContent: 'start', alignItems: 'start' }}>
             <div style={{ gridColumn: '1 / -1', display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', padding: '0 4px' }}>
               <h3 className="disp" style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>Needs you</h3>
@@ -379,70 +434,36 @@ function BusinessHome() {
               <div style={{ ...panel, borderRadius: 16, padding: '18px 16px', fontSize: 13, color: 'var(--text-muted)' }}>Nothing waiting on you right now.</div>
             )}
           </section>
-        </div>
-
-        {/* Coach this week + the techs at a glance */}
-        {(coachRows.length > 0 || glanceTrades.length > 0) && (
-          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'minmax(0, 1fr)' : 'minmax(0, 1fr) minmax(0, 1fr)', gap: 16, alignItems: 'start' }}>
-            <section style={{ ...panel, borderRadius: 18, padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}>
-              <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
-                <h3 className="disp" style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>Coach this week</h3>
-                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>below goal close, biggest gap first</span>
-                <a href="/team" onClick={(e) => { e.preventDefault(); navigate('/team') }} style={{ marginLeft: 'auto', fontSize: 12.5, fontWeight: 600, color: 'var(--accent)', textDecoration: 'none' }}>Coaching & evals →</a>
-              </div>
-              {coachRows.length ? coachRows.map((c, i) => (
-                <a key={c.id} href="/team" onClick={(e) => { e.preventDefault(); navigate('/team') }} className="lift-hover"
-                  style={{ display: 'flex', flexDirection: 'column', gap: 3, padding: '10px 12px', borderRadius: 12, border: '1px solid var(--border)', color: 'inherit', textDecoration: 'none' }}>
-                  <span style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-                    <span style={{ fontSize: 14, fontWeight: 600 }}>{c.name}</span>
-                    {data.trades.length > 1 && <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>{c.trade}</span>}
-                    <span style={{ ...mono, marginLeft: 'auto', fontSize: 12.5, fontWeight: 600, color: 'var(--tone-red-tx)' }}>≈ {kMoney(c.gap)} left</span>
+            {coachRows.length > 0 && (
+          <section style={{ ...panel, borderRadius: 18, padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
+              <h3 className="disp" style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>Coach this week</h3>
+              <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>below goal close, biggest gap first</span>
+              <a href="/team" onClick={(e) => { e.preventDefault(); navigate('/team') }} style={{ marginLeft: 'auto', fontSize: 12.5, fontWeight: 600, color: 'var(--accent)', textDecoration: 'none' }}>Coaching & evals →</a>
+            </div>
+            {coachRows.length ? coachRows.map((c, i) => (
+              <a key={c.id} href="/team" onClick={(e) => { e.preventDefault(); navigate('/team') }} className="lift-hover"
+                style={{ display: 'flex', flexDirection: 'column', gap: 3, padding: '10px 12px', borderRadius: 12, border: '1px solid var(--border)', color: 'inherit', textDecoration: 'none' }}>
+                <span style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                  <span style={{ fontSize: 14, fontWeight: 600 }}>{c.name}</span>
+                  {data.trades.length > 1 && <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>{c.trade}</span>}
+                  <span style={{ ...mono, marginLeft: 'auto', fontSize: 12.5, fontWeight: 600, color: 'var(--tone-red-tx)' }}>≈ {kMoney(c.gap)} left</span>
+                </span>
+                <span style={{ fontSize: 12.5, color: 'var(--text-secondary)' }}>
+                  Closing <b style={{ ...mono, fontWeight: 600 }}>{pct(c.closeRate)}</b> of {c.opps} opportunities vs {pct(c.closeGoal)} · avg ticket {kMoney(c.avgTicket)}
+                </span>
+                {(c.steps?.length > 0 || c.fieldPro != null) && (
+                  <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                    Field Pro {c.fieldPro != null ? <b style={{ ...mono, fontWeight: 600, color: fpTone(c.fieldPro) }}>{c.fieldPro}</b> : '—'}
+                    {c.steps?.length ? ` · weakest: ${c.steps.map(s => `${s.step} ${s.score}`).join(', ')}` : c.fieldProCalls === 0 ? ' · no recordings this month' : ''}
                   </span>
-                  <span style={{ fontSize: 12.5, color: 'var(--text-secondary)' }}>
-                    Closing <b style={{ ...mono, fontWeight: 600 }}>{pct(c.closeRate)}</b> of {c.opps} opportunities vs {pct(c.closeGoal)} · avg ticket {kMoney(c.avgTicket)}
-                  </span>
-                  {(c.steps?.length > 0 || c.fieldPro != null) && (
-                    <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                      Field Pro {c.fieldPro != null ? <b style={{ ...mono, fontWeight: 600, color: fpTone(c.fieldPro) }}>{c.fieldPro}</b> : '—'}
-                      {c.steps?.length ? ` · weakest: ${c.steps.map(s => `${s.step} ${s.score}`).join(', ')}` : c.fieldProCalls === 0 ? ' · no recordings this month' : ''}
-                    </span>
-                  )}
-                </a>
-              )) : <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>Every tech with 5+ opportunities is at or above their close goal this month.</div>}
-            </section>
-
-            <section style={{ ...panel, borderRadius: 18, padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 }}>
-              <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
-                <h3 className="disp" style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>Your techs</h3>
-                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>this month · top 3 and the lowest</span>
-              </div>
-              {glanceTrades.map(t => {
-                const g = data.glance[t]
-                const row = (x, rank, low) => (
-                  <div key={x.id} style={{ display: 'grid', gridTemplateColumns: '22px minmax(0, 1fr) 58px 52px 44px', gap: 8, alignItems: 'center', fontSize: 13, padding: '5px 0', borderTop: low ? '1px dashed var(--border)' : 'none', marginTop: low ? 4 : 0 }}>
-                    <span style={{ ...mono, fontSize: 11.5, color: low ? 'var(--tone-red-tx)' : 'var(--text-muted)' }}>{low ? 'low' : rank}</span>
-                    <span style={{ fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{x.name}</span>
-                    <span style={{ ...mono, textAlign: 'right' }}>{kMoney(x.sold)}</span>
-                    <span style={{ ...mono, textAlign: 'right', color: 'var(--text-secondary)' }}>{pct(x.closeRate)}</span>
-                    <span style={{ ...mono, textAlign: 'right', color: fpTone(x.fieldPro) }}>{x.fieldPro ?? '—'}</span>
-                  </div>
-                )
-                return (
-                  <div key={t}>
-                    <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 2 }}>
-                      <span style={{ fontSize: 13, fontWeight: 700 }}>{t}</span>
-                      <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>{g.count} techs · sold · close · Field Pro</span>
-                      <a href={`/tv/${TV_SLUG[t]}`} onClick={(e) => { e.preventDefault(); navigate(`/tv/${TV_SLUG[t]}`) }} style={{ marginLeft: 'auto', fontSize: 12, fontWeight: 600, color: 'var(--accent)', textDecoration: 'none' }}>TV →</a>
-                    </div>
-                    {g.top.map((x, i) => row(x, i + 1, false))}
-                    {g.low && row(g.low, null, true)}
-                  </div>
-                )
-              })}
-              <a href="/team" onClick={(e) => { e.preventDefault(); navigate('/team') }} style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--accent)', textDecoration: 'none' }}>All scorecards →</a>
-            </section>
+                )}
+              </a>
+            )) : <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>Every tech with 5+ opportunities is at or above their close goal this month.</div>}
+          </section>
+            )}
           </div>
-        )}
+        </div>
 
         {/* Live floor */}
         {data.floor && (

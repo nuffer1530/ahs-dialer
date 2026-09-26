@@ -6,12 +6,14 @@ import WelcomePage from './pages/WelcomePage'
 import DialerLayout from './pages/DialerLayout'
 
 export default function App() {
-  const { user, loading } = useAuth()
+  const { user, loading, profileReady } = useAuth()
   // Invited users land signed-in but with no password of their own yet —
   // hold them on the setup screen (whatever URL they arrived at) until done.
   const needsSetup = Boolean(user?.user_metadata?.invited && !user?.user_metadata?.setup_done)
 
-  if (loading) return (
+  // Signed in but the profile row isn't here yet: hold on the loader so the
+  // first screen is picked with the right role (Home, not Calls).
+  if (loading || (user && !profileReady)) return (
     // The heartbeat IS the loader — the waveform drawing itself says "working."
     <div style={{ display:'flex', alignItems:'center', justifyContent:'center', height:'100vh', flexDirection:'column', gap:14 }}>
       <div className="pulse-mark" style={{ width:64, height:64, borderRadius:14, background:'#111318', display:'flex', alignItems:'center', justifyContent:'center' }}>
