@@ -15,6 +15,7 @@ import { buildDepartmentBrief, buildTechnicianPerformance, buildOpenEstimates, b
 import { gatherWeeklyFacts, generateAgendaAI, renderLeadershipHtml, latestCompletedSunday, upcomingSunday } from './lib/leadershipReport.js'
 import { parseAdpUpload, aggregateAdpActuals, REGISTER_BURDEN_DEFAULTS } from './lib/adpInvoice.js'
 import { fetchSalesCloseInputs, computeSalesClose, rollupSalesClose, techStats } from './lib/salesClose.js'
+import { createFieldPro } from './lib/fieldPro.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
@@ -4688,6 +4689,29 @@ async function tvBuildDay() {
   } finally { _tvDayBusy = false }
 }
 
+// Tech composite for the department TVs (and the company board's re-score).
+// Each piece is normalized to the best in the group. History: 55/20/15/10 →
+// 30/30/20/20 → 40/30/20/10 → 40/30/15/15 → 45/25/15/15 → 40/30/20/10; Field
+// Pro joined Sep 25 2026 at 20%, taken evenly from the other four (Brandyn).
+const TV_TECH_W = { sold: 0.35, close: 0.25, clubs: 0.15, five: 0.05, fieldPro: 0.20 }
+function tvTechMaxes(rows) {
+  return {
+    sold: Math.max(1, ...rows.map(x => x.sold)),
+    close: Math.max(0.01, ...rows.map(x => x.closeRate || 0)),
+    clubs: Math.max(1, ...rows.map(x => x.memberships)),
+    five: Math.max(1, ...rows.map(x => x.fiveStar)),
+    fieldPro: Math.max(1, ...rows.map(x => x.fieldPro || 0)),
+    // No Field Pro data at all (a new month before anyone records, or a cache
+    // built before Field Pro): score on the other four, rescaled to 100.
+    fieldProLive: rows.some(x => x.fieldPro != null),
+  }
+}
+const tvTechScore = (x, mx) => Math.round(100 * (
+  TV_TECH_W.sold * (x.sold / mx.sold) + TV_TECH_W.close * ((x.closeRate || 0) / mx.close)
+  + TV_TECH_W.clubs * (x.memberships / mx.clubs) + TV_TECH_W.five * (x.fiveStar / mx.five)
+  + (mx.fieldProLive ? TV_TECH_W.fieldPro * ((x.fieldPro || 0) / mx.fieldPro) : 0)
+) / (mx.fieldProLive ? 1 : 1 - TV_TECH_W.fieldPro))
+
 async function tvBuildSlow() {
   if (_tvSlowBusy) return
   _tvSlowBusy = true
@@ -4764,17 +4788,21 @@ async function tvBuildSlow() {
           closeRate: c.rate, opps: c.opps,
         })
       }
-      for (const t of Object.values(TV_TRADES)) {
-        const maxSold = Math.max(1, ...byTrade[t].map(x => x.sold))
-        const maxClose = Math.max(0.01, ...byTrade[t].map(x => x.closeRate || 0))
-        const maxMem = Math.max(1, ...byTrade[t].map(x => x.memberships))
-        const maxFive = Math.max(1, ...byTrade[t].map(x => x.fiveStar))
-        for (const x of byTrade[t]) {
-          x.score = Math.round(100 * (
-            // Brandyn, Sep 25 2026: sold 40 · close 30 · clubs 20 · 5★ 10.
-            0.40 * (x.sold / maxSold) + 0.30 * ((x.closeRate || 0) / maxClose)
-            + 0.20 * (x.memberships / maxMem) + 0.10 * (x.fiveStar / maxFive)))
+      // Field Pro (Siro) month score per tech — Siro's own scorecard number
+      // when the read token has synced it, else the recordings' average.
+      // Once Field Pro has data for the month, a tech who recorded nothing
+      // shows 0 calls and earns no Field Pro credit.
+      try {
+        const fp = await fieldPro.monthScores(monthStart.slice(0, 7))
+        for (const rows of Object.values(byTrade)) for (const x of rows) {
+          const f = fp.get(String(x.id))
+          x.fieldPro = f ? f.score : (fp.tracked ? 0 : null)
+          x.fieldProCalls = f ? f.calls : 0
         }
+      } catch (e) { console.warn('tv month field pro:', e.message) }
+      for (const t of Object.values(TV_TRADES)) {
+        const mx = tvTechMaxes(byTrade[t])
+        for (const x of byTrade[t]) x.score = tvTechScore(x, mx)
         byTrade[t].sort((a, b) => b.score - a.score)
       }
       // Installer section pulled from the boards (Brandyn, Sep 10) —
@@ -4863,14 +4891,8 @@ app.get('/api/tv/department/:trade', async (req, res) => {
       techs = Object.entries(month?.techsByTrade || {}).flatMap(([t, rows]) => rows.map(x => ({ ...x, trade: t })))
       // Per-trade scores were normalized within each trade; re-normalize
       // company-wide with the same weights so the ranking is apples-to-apples.
-      const maxSold = Math.max(1, ...techs.map(x => x.sold))
-      const maxClose = Math.max(0.01, ...techs.map(x => x.closeRate || 0))
-      const maxMem = Math.max(1, ...techs.map(x => x.memberships))
-      const maxFive = Math.max(1, ...techs.map(x => x.fiveStar))
-      for (const x of techs) {
-        x.score = Math.round(100 * (0.40 * (x.sold / maxSold) + 0.30 * ((x.closeRate || 0) / maxClose)
-          + 0.20 * (x.memberships / maxMem) + 0.10 * (x.fiveStar / maxFive)))
-      }
+      const mx = tvTechMaxes(techs)
+      for (const x of techs) x.score = tvTechScore(x, mx)
       techs.sort((a, b) => b.score - a.score)
       installers = Object.entries(month?.installersByTrade || {}).flatMap(([t, rows]) => rows.map(x => ({ ...x, trade: t })))
       const maxEff = Math.max(0.01, ...installers.map(x => x.efficiency || 0))
@@ -11599,6 +11621,7 @@ const digestDeps = (dateStr) => ({
   stGet, stPageAll, supabase, tenantId: ST_TENANT_ID,
   anthropicKey: ANTHROPIC_KEY, dateStr,
   getBoard3Day: build3DayBoard,   // today's capacity → "what to fill this morning"
+  getFieldPro: (d, techs) => fieldPro.digestFacts(d, techs),   // yesterday's Field Pro recordings
 })
 
 // Yesterday in Denver, as YYYY-MM-DD.
@@ -13070,6 +13093,7 @@ app.get('/api/team/tech-scorecards', async (req, res) => {
       id: String(x.id), name: x.name, trade, sold: x.sold || 0, soldCount: x.soldCount || 0,
       closeRate: x.closeRate == null ? null : Math.round(x.closeRate * 1000) / 10, opps: x.opps || 0, closed: x.soldJobs || 0,
       memberships: x.memberships || 0, fiveStar: x.fiveStar || 0, jobs: x.jobs || 0, avgTicket: x.avgTicket || 0,
+      fieldPro: x.fieldPro ?? null, fieldProCalls: x.fieldProCalls || 0,
     })))
     // Share of the month elapsed (Denver days) — lets the page judge the
     // current month on pace instead of against full-month targets.
@@ -13081,6 +13105,133 @@ app.get('/api/team/tech-scorecards', async (req, res) => {
       techs: flat(cur?.techsByTrade), prevTechs: flat(prev?.techsByTrade), prevMonth: prevYm,
     })
   } catch (e) { res.status(500).json({ error: e.message }) }
+})
+
+// ═══════════════════════════════ Field Pro (Siro) ═══════════════════════════
+// In-home recordings for field techs — see lib/fieldPro.js for the two Siro
+// credentials and the sync. Team → Technicians reads it through these routes
+// (the siro_* tables are service-key only).
+const fieldPro = createFieldPro({
+  supabase, stGet, tenantId: ST_TENANT_ID, sendResend, techMeta: tvTechMeta, anthropicKey: ANTHROPIC_KEY,
+  orgToken: process.env.SIRO_API_TOKEN, clientId: process.env.SIRO_CLIENT_ID, clientSecret: process.env.SIRO_CLIENT_SECRET,
+})
+const fpMonth = (q) => (/^\d{4}-\d{2}$/.test(String(q || '')) ? String(q) : new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Denver' }).format(new Date()).slice(0, 7))
+
+// Which trades this person oversees (ops managers → their trades from
+// app_settings.field_ops_managers; admins → all). Drives default filters.
+app.get('/api/team/field-context', async (req, res) => {
+  const prof = await requireFieldLead(req, res)
+  if (!prof) return
+  try {
+    const all = ['HVAC', 'Plumbing', 'Electrical', 'Garage Doors']
+    if (prof.role === 'admin') return res.json({ role: prof.role, trades: all })
+    const [{ data: me }, { data: m }] = await Promise.all([
+      supabase.from('profiles').select('email, name').eq('id', prof.id).maybeSingle(),
+      supabase.from('app_settings').select('value').eq('key', 'field_ops_managers').maybeSingle(),
+    ])
+    let mgrs = {}
+    try { mgrs = JSON.parse(m?.value || '{}') } catch {}
+    const email = String(me?.email || '').toLowerCase()
+    const mine = all.filter(t => String(mgrs[t]?.email || '').toLowerCase() === email)
+    res.json({ role: prof.role, trades: mine.length ? mine : all })
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
+
+app.get('/api/team/tech-coaching', async (req, res) => {
+  if (!(await requireFieldLead(req, res))) return
+  try { res.json(await fieldPro.coaching(fpMonth(req.query.month), { refresh: req.query.refresh === '1' })) }
+  catch (e) { res.status(500).json({ error: e.message }) }
+})
+
+// The month's recordings (light rows) — optionally one tech's.
+app.get('/api/team/tech-recordings', async (req, res) => {
+  if (!(await requireFieldLead(req, res))) return
+  try {
+    const ym = fpMonth(req.query.month)
+    const [y, m] = ym.split('-').map(Number)
+    const next = new Date(Date.UTC(y, m, 1)).toISOString().slice(0, 7)
+    const out = []
+    for (let from = 0; from < 20_000; from += 1000) {
+      let q = supabase.from('siro_recordings')
+        .select('id, st_tech_id, tech_name, trade, recorded_at, duration_sec, result, evaluation_score, job_number, customer_name, followup_ids, summary')
+        .gte('recorded_at', tvBounds(`${ym}-01`)).lt('recorded_at', tvBounds(`${next}-01`))
+        .order('recorded_at', { ascending: false }).range(from, from + 999)
+      if (req.query.tech) q = q.eq('st_tech_id', String(req.query.tech))
+      const { data, error } = await q
+      if (error) throw new Error(error.message)
+      out.push(...(data || []))
+      if (!data || data.length < 1000) break
+    }
+    // One line of Siro's summary for the row; the rest loads on open.
+    const line = (sum) => {
+      const s = (sum || []).find(x => /outcome/i.test(x.name)) || (sum || []).find(x => /need/i.test(x.name)) || (sum || [])[0]
+      return s ? String(s.content || '').replace(/\s+/g, ' ').slice(0, 220) : ''
+    }
+    res.json({ month: ym, rows: out.map(({ summary, followup_ids, ...r }) => ({ ...r, followups: (followup_ids || []).length, line: line(summary) })) })
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
+
+// One recording: Siro's summary sections, its own scorecard (fetched from
+// Siro on first open, then kept), and any Re-Engage follow-ups.
+app.get('/api/team/tech-recording/:id', async (req, res) => {
+  if (!(await requireFieldLead(req, res))) return
+  try {
+    const { data: rec } = await supabase.from('siro_recordings').select('*').eq('id', req.params.id).maybeSingle()
+    if (!rec) return res.status(404).json({ error: 'Recording not found' })
+    const [scorecard, { data: fus }] = await Promise.all([
+      fieldPro.recordingScorecard(rec).catch(e => { console.warn('recording scorecard:', e.message); return null }),
+      supabase.from('siro_followups').select('id, followup_type, score, status, context, created_at, emailed_at').eq('recording_id', rec.id),
+    ])
+    const { scorecard: _, ...rest } = rec
+    res.json({ ...rest, scorecard, followups: (fus || []).map(f => ({ ...f, context: {
+      follow_up_summary: f.context?.follow_up_summary, follow_up_time: f.context?.follow_up_time,
+      scope_cost_summary: f.context?.scope_cost_summary, objection_summary: f.context?.objection_summary,
+      overall_cost: f.context?.overall_cost,
+    } })) })
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
+
+// Admin: sync status + a manual run.
+app.get('/api/admin/field-pro/status', async (req, res) => {
+  if (!(await requireAdmin(req, res))) return
+  try {
+    const [{ data: st }, { count: recs }, { count: fus }, { count: mailed }, { data: cfg }] = await Promise.all([
+      supabase.from('sync_state').select('*').eq('key', 'siro_recordings').maybeSingle(),
+      supabase.from('siro_recordings').select('id', { count: 'exact', head: true }),
+      supabase.from('siro_followups').select('id', { count: 'exact', head: true }),
+      supabase.from('siro_followups').select('id', { count: 'exact', head: true }).not('email_to', 'is', null),
+      supabase.from('app_settings').select('value').eq('key', 'reengage_emails').maybeSingle(),
+    ])
+    res.json({ lastSync: st?.last_synced_at || null, recordings: recs, followups: fus, emailed: mailed,
+      readToken: await fieldPro.hasReadToken().catch(() => false), reengage: (() => { try { return JSON.parse(cfg?.value || '{}') } catch { return null } })() })
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
+app.post('/api/admin/field-pro/sync', async (req, res) => {
+  if (!(await requireAdmin(req, res))) return
+  try {
+    const recordings = await fieldPro.syncRecordings()
+    const scorecards = await fieldPro.syncTechScorecards(fpMonth(req.body?.month))
+    res.json({ recordings, scorecards })
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
+// Admin: what a Re-Engage email looks like (?id=<followup id>, else newest).
+app.get('/api/admin/reengage-preview', async (req, res) => {
+  if (!(await requireAdmin(req, res))) return
+  try {
+    let q = supabase.from('siro_followups').select('*')
+    q = req.query.id ? q.eq('id', String(req.query.id)) : q.order('created_at', { ascending: false }).limit(1)
+    const { data } = await q
+    const f = data?.[0]
+    if (!f) return res.status(404).send('No follow-ups yet')
+    const [{ data: rec }, { data: m }] = await Promise.all([
+      supabase.from('siro_recordings').select('web_url').eq('id', f.recording_id).maybeSingle(),
+      supabase.from('app_settings').select('value').eq('key', 'field_ops_managers').maybeSingle(),
+    ])
+    let mgrs = {}
+    try { mgrs = JSON.parse(m?.value || '{}') } catch {}
+    const { subject, html } = fieldPro.reengageEmail(f, rec, { manager: mgrs[f.trade] || null })
+    res.type('html').send(`<p style="font:13px -apple-system,Arial;color:#64748B">Subject: <b>${String(subject).replace(/</g, '&lt;')}</b></p>${html}`)
+  } catch (e) { res.status(500).send(e.message) }
 })
 
 // ─────────────────────────────────────────────
@@ -13109,6 +13260,29 @@ if (SYNC_INTERVAL_MIN > 0) {
   console.log(`Commission sync every ${SYNC_INTERVAL_MIN}m`)
 } else {
   console.log('Commission sync disabled (COMMISSION_SYNC_MINUTES=0)')
+}
+
+// ── Field Pro (Siro): recordings + follow-ups every 10 min (Re-Engage
+// emails right after), per-rubric scorecards hourly (+ last month during the
+// first 3 days so its final numbers settle). Replica-safe: upserts and a
+// per-follow-up email claim.
+if (process.env.SIRO_API_TOKEN || process.env.SIRO_CLIENT_ID) {
+  const fpTick = async () => {
+    await fieldPro.syncRecordings()
+    await fieldPro.refreshFollowupStatuses()   // a lead marked done in Siro never gets emailed
+    await fieldPro.sendReengageEmails().catch(e => console.warn('re-engage emails:', e.message))
+  }
+  const fpScTick = async () => {
+    const ym = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Denver' }).format(new Date())
+    await fieldPro.syncTechScorecards(ym.slice(0, 7))
+    if (Number(ym.slice(8, 10)) <= 3) {
+      const [y, m] = ym.split('-').map(Number)
+      await fieldPro.syncTechScorecards(new Date(Date.UTC(y, m - 2, 1)).toISOString().slice(0, 7))
+    }
+  }
+  setTimeout(() => { fpTick(); setInterval(fpTick, 10 * 60_000) }, 45_000)
+  setTimeout(() => { fpScTick(); setInterval(fpScTick, 60 * 60_000) }, 120_000)
+  console.log('Field Pro sync every 10m (scorecards hourly)')
 }
 
 // ── Lead inbox poll. Faster than the commission sync because these are paid

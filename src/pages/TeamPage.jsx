@@ -4,6 +4,7 @@ import { useIsMobile } from '../lib/useIsMobile'
 import CallEvalsTab from '../components/CallEvalsTab'
 import ScorecardsPanel from '../components/ScorecardsPanel'
 import TechScorecardsPanel from '../components/TechScorecardsPanel'
+import TechCoachingPanel from '../components/TechCoachingPanel'
 import CommissionReport from '../components/CommissionReport'
 import { PageTabs, Segmented } from '../components/ui'
 
@@ -11,11 +12,10 @@ import { PageTabs, Segmented } from '../components/ui'
 // the team(s) you lead. Call Center: admins, or a profile whose leads_teams
 // includes it. Technicians: admins and operations managers (the server's
 // requireFieldLead gate) — ops managers see only this team, never the call
-// center. Field Pro coaching & evals join the technician tabs once Siro's
-// scorecard API is connected.
+// center. Technician coaching & evals come from Field Pro (Siro).
 const TEAMS = [
   { id: 'call_center', label: 'Call Center', tabs: [['coaching', 'Coaching & Evals'], ['scorecards', 'Scorecards'], ['commissions', 'Commissions']] },
-  { id: 'technicians', label: 'Technicians', tabs: [['scorecards', 'Scorecards']] },
+  { id: 'technicians', label: 'Technicians', tabs: [['coaching', 'Coaching & Evals'], ['scorecards', 'Scorecards']] },
 ]
 
 // A crashed tab must say WHAT crashed, not white-screen the page.
@@ -71,6 +71,7 @@ export default function TeamPage() {
         {team === 'call_center' && tab === 'coaching' && <TabBoundary><CallEvalsTab profile={profile} isAdmin={true} defaultView="snapshots" /></TabBoundary>}
         {team === 'call_center' && tab === 'scorecards' && <TabBoundary><ScorecardsPanel /></TabBoundary>}
         {team === 'call_center' && tab === 'commissions' && <TabBoundary><CommissionReport /></TabBoundary>}
+        {team === 'technicians' && tab === 'coaching' && <TabBoundary key="tech-coach"><TechCoachingPanel /></TabBoundary>}
         {team === 'technicians' && tab === 'scorecards' && <TabBoundary key="tech"><TechScorecardsPanel /></TabBoundary>}
       </div>
     </div>

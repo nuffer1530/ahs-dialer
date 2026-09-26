@@ -873,3 +873,38 @@ end $$;
 -- 'tech_scorecard_rules'; monthly tech snapshots in 'tech_month_YYYY-MM'.
 alter table profiles drop constraint if exists profiles_role_check;
 alter table profiles add constraint profiles_role_check check (role in ('rep', 'admin', 'dispatcher', 'ops_manager'));
+
+-- ── Field Pro (Siro) mirror (Sep 25, 2026) ─────────────────────────────────
+-- Written/read only by server.js (lib/fieldPro.js) with the service key:
+-- RLS on, NO policies. siro_auth holds the read-only OAuth app (client id/
+-- secret + current read token) — never expose it to the browser.
+create table if not exists siro_auth (
+  id text primary key default 'default', client_id text, client_secret text, owner_user_id text, bound_user_id text,
+  access_token text, access_token_id text, expires_at timestamptz, created_at timestamptz default now(), updated_at timestamptz default now()
+);
+alter table siro_auth enable row level security;
+create table if not exists siro_recordings (
+  id text primary key, siro_user_id text, st_tech_id text, tech_name text, trade text, title text,
+  recorded_at timestamptz, siro_updated_at timestamptz, duration_sec integer, result text, evaluation_score numeric,
+  summary jsonb, st_job_id text, job_number text, followup_ids text[], scorecard jsonb, scorecard_synced_at timestamptz,
+  synced_at timestamptz default now(), web_url text, customer_name text, st_customer_id text
+);
+create index if not exists siro_recordings_recorded_idx on siro_recordings (recorded_at);
+create index if not exists siro_recordings_tech_idx on siro_recordings (st_tech_id, recorded_at);
+alter table siro_recordings enable row level security;
+create table if not exists siro_followups (
+  id text primary key, recording_id text, siro_user_id text, st_tech_id text, tech_name text, trade text,
+  followup_type text, score integer, status text, context jsonb, thinking text, st_job_id text, job_number text,
+  st_customer_id text, customer_name text, created_at timestamptz, siro_updated_at timestamptz,
+  emailed_at timestamptz, email_to text[], email_error text, email_attempts integer default 0, synced_at timestamptz default now()
+);
+create index if not exists siro_followups_created_idx on siro_followups (created_at);
+alter table siro_followups enable row level security;
+create table if not exists siro_tech_scorecards (
+  month text not null, st_tech_id text not null, siro_user_id text, tech_name text, trade text, points numeric,
+  evaluated integer, total integer, won integer, sections jsonb, synced_at timestamptz default now(),
+  primary key (month, st_tech_id)
+);
+alter table siro_tech_scorecards enable row level security;
+-- Settings: field_ops_managers (trade → {name, email}) and reengage_emails
+-- ({enabled, since, startAt, minScore, to[]}) live in app_settings.

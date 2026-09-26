@@ -9,9 +9,11 @@ import { LEVELS, levelOf, rateKpi, fmtKpi, LevelChip, ScoreDelta, LevelPips, Kpi
 // scorecards: each KPI rates 1–4 against thresholds, the overall score is the
 // weighted average. The numbers are the department TVs' monthly per-tech
 // figures (/api/team/tech-scorecards). Weights default to the TV ranking
-// (sold 40 · close 30 · clubs 20 · 5★ 10). Dollar and count targets are per
-// trade — an HVAC tech's month isn't a garage tech's — and the current month
-// is judged on pace (targets × share of the month gone).
+// (sold 35 · close 25 · clubs 15 · 5★ 5 · Field Pro 20). Dollar and count
+// targets are per trade — an HVAC tech's month isn't a garage tech's — and
+// the current month is judged on pace (targets × share of the month gone).
+// Field Pro = the tech's Siro scorecard score (0–100) for the month; once
+// Field Pro has data, a tech who recorded nothing scores 0.
 
 const TRADES = ['HVAC', 'Plumbing', 'Electrical', 'Garage Doors']
 const KPIS = [
@@ -19,9 +21,12 @@ const KPIS = [
   { id: 'closeRate', label: 'Close rate', short: 'Close rate', unit: '%' },
   { id: 'memberships', label: 'Memberships sold', short: 'Clubs', unit: '', paced: true, perTrade: true },
   { id: 'fiveStar', label: '5★ reviews', short: '5★ reviews', unit: '', paced: true, perTrade: true },
+  { id: 'fieldPro', label: 'Field Pro score', short: 'Field Pro', unit: '' },
 ]
-const DEFAULT_WEIGHTS = { sold: 40, closeRate: 30, memberships: 20, fiveStar: 10 }
+const DEFAULT_WEIGHTS = { sold: 35, closeRate: 25, memberships: 15, fiveStar: 5, fieldPro: 20 }
 const DEFAULT_CLOSE = { exceeds: 80, meets: 70, improvement: 60 }
+// Siro's bands: 80+ strong, 50–79 developing, under 50 a gap.
+const DEFAULT_FIELD_PRO = { exceeds: 80, meets: 65, improvement: 50 }
 const RULES_KEY = 'tech_scorecard_rules'
 const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December']
 const monthName = (ym) => { const [y, m] = ym.split('-').map(Number); return `${MONTHS[m - 1]} ${y}` }
@@ -42,12 +47,12 @@ function seedThresholds(techs, elapsed) {
       byTrade[t][k.id] = { exceeds: e, meets: m, improvement: i }
     }
   }
-  return { weights: { ...DEFAULT_WEIGHTS }, closeRate: { ...DEFAULT_CLOSE }, byTrade }
+  return { weights: { ...DEFAULT_WEIGHTS }, closeRate: { ...DEFAULT_CLOSE }, fieldPro: { ...DEFAULT_FIELD_PRO }, byTrade }
 }
 
 // Thresholds for one tech's KPI, paced for a month in progress.
 function thrFor(rules, kpi, trade, elapsed) {
-  const base = kpi.perTrade ? rules.byTrade?.[trade]?.[kpi.id] : rules.closeRate
+  const base = kpi.perTrade ? rules.byTrade?.[trade]?.[kpi.id] : rules[kpi.id]
   if (!base) return null
   if (!kpi.paced || elapsed >= 1) return base
   const f = (v) => (kpi.unit === '$' ? Math.round((v * elapsed) / 100) * 100 : Math.round(v * elapsed * 10) / 10)
@@ -99,7 +104,7 @@ function TechCard({ t, score, prevScore, vs, rules, elapsed, onOpen }) {
       <div style={{ display: 'flex', flexDirection: 'column', gap: 7, borderTop: '1px solid var(--border)', paddingTop: 12 }}>
         {KPIS.map(k => (
           <div key={k.id} className="mgrid" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto 34px', alignItems: 'center', gap: 10, fontSize: 12.5 }}>
-            <span style={{ color: 'var(--text-secondary)' }}>{k.short}{k.id === 'closeRate' && t.opps ? <span style={{ color: 'var(--text-muted)' }}> · {t.closed}/{t.opps}</span> : null}</span>
+            <span style={{ color: 'var(--text-secondary)' }}>{k.short}{k.id === 'closeRate' && t.opps ? <span style={{ color: 'var(--text-muted)' }}> · {t.closed}/{t.opps}</span> : k.id === 'fieldPro' && t.fieldPro != null ? <span style={{ color: 'var(--text-muted)' }}> · {t.fieldProCalls} call{t.fieldProCalls === 1 ? '' : 's'}</span> : null}</span>
             <span style={{ ...num, fontWeight: 700 }}>{fmtKpi(k, t[k.id])}</span>
             <span style={{ display: 'flex', justifyContent: 'flex-end' }}><LevelPips level={rateKpi(k, t[k.id], thrFor(rules, k, t.trade, elapsed))} /></span>
           </div>
@@ -117,7 +122,7 @@ function RulesEditor({ rules, setRules, onSave, saving }) {
   const input = { width: '100%', padding: '6px 8px', fontSize: 13, fontWeight: 600, textAlign: 'center', border: '1px solid var(--border-strong)', borderRadius: 8, background: 'var(--surface)', color: 'var(--text-primary)' }
   const total = KPIS.reduce((t, k) => t + (Number(rules.weights?.[k.id]) || 0), 0)
   const setThr = (trade, id, key, v) => setRules(r => {
-    if (!trade) return { ...r, closeRate: { ...r.closeRate, [key]: parseFloat(v) || 0 } }
+    if (!trade) return { ...r, [id]: { ...r[id], [key]: parseFloat(v) || 0 } }
     return { ...r, byTrade: { ...r.byTrade, [trade]: { ...r.byTrade[trade], [id]: { ...r.byTrade[trade][id], [key]: parseFloat(v) || 0 } } } }
   })
   // A plain function, not a component — a component defined in here would
@@ -150,7 +155,8 @@ function RulesEditor({ rules, setRules, onSave, saving }) {
       <div style={{ overflowX: 'auto' }}>
         <div className="mgrid" style={{ display: 'grid', gridTemplateColumns: 'minmax(180px, 1.4fr) repeat(3, minmax(80px, 1fr))', gap: '8px 12px', alignItems: 'center', minWidth: 520 }}>
           {['Target', 'Exceeds', 'Meets', 'Needs impr.'].map((h, i) => <div key={h} style={{ ...eyebrow, textAlign: i ? 'center' : 'left' }}>{h}</div>)}
-          {row('close', 'Close rate (%)', 'all trades', rules.closeRate)}
+          {row('close', 'Close rate (%)', 'all trades', rules.closeRate, null, 'closeRate')}
+          {row('fieldPro', 'Field Pro score', 'all trades', rules.fieldPro, null, 'fieldPro')}
           {TRADES.map(t => KPIS.filter(k => k.perTrade).map(k => row(t + k.id, `${k.label}${k.unit === '$' ? ' ($)' : ''}`, t, rules.byTrade?.[t]?.[k.id], t, k.id)))}
         </div>
       </div>
@@ -171,6 +177,12 @@ export default function TechScorecardsPanel() {
   const [selected, setSelected] = useState(null)
   const [showRules, setShowRules] = useState(false)
   const [saving, setSaving] = useState(false)
+
+  // Ops managers land on their own trade.
+  useEffect(() => {
+    sb.auth.getSession().then(({ data: { session } }) => fetch('/api/team/field-context', { headers: { Authorization: `Bearer ${session?.access_token}` } }))
+      .then(r => r.json()).then(c => { if (c?.trades?.length === 1) setTrade(c.trades[0]) }).catch(() => {})
+  }, [])
 
   useEffect(() => {
     sb.from('app_settings').select('value').eq('key', RULES_KEY).maybeSingle()
@@ -196,7 +208,10 @@ export default function TechScorecardsPanel() {
   useEffect(() => {
     if (rules || !data || !rulesLoaded) return
     const seeded = seedThresholds(data.techs || [], data.elapsed || 1)
-    setRules(savedRules ? { ...seeded, ...savedRules, byTrade: { ...seeded.byTrade, ...(savedRules.byTrade || {}) } } : seeded)
+    // Rules saved before Field Pro existed carry 4-KPI weights — move them to
+    // the current defaults so Field Pro counts here the way it does on the TVs.
+    const weights = savedRules?.weights && savedRules.weights.fieldPro != null ? savedRules.weights : { ...DEFAULT_WEIGHTS }
+    setRules(savedRules ? { ...seeded, ...savedRules, weights, fieldPro: savedRules.fieldPro || seeded.fieldPro, byTrade: { ...seeded.byTrade, ...(savedRules.byTrade || {}) } } : seeded)
   }, [data, savedRules, rules, rulesLoaded])
 
   const saveRules = async () => {
@@ -236,7 +251,10 @@ export default function TechScorecardsPanel() {
     sold: techs.reduce((a, t) => a + t.sold, 0),
     opps: techs.reduce((a, t) => a + t.opps, 0), closed: techs.reduce((a, t) => a + t.closed, 0),
     memberships: techs.reduce((a, t) => a + t.memberships, 0), fiveStar: techs.reduce((a, t) => a + t.fiveStar, 0),
+    fieldProCalls: techs.reduce((a, t) => a + (t.fieldProCalls || 0), 0),
   }
+  // Call-weighted, like Siro's own team number.
+  totals.fieldPro = totals.fieldProCalls ? Math.round(techs.reduce((a, t) => a + (t.fieldPro || 0) * (t.fieldProCalls || 0), 0) / totals.fieldProCalls) : null
   const divider = isMobile ? { borderTop: '1px solid var(--border)' } : { borderLeft: '1px solid var(--border)' }
 
   return (
@@ -259,7 +277,7 @@ export default function TechScorecardsPanel() {
 
       {data.isCurrent && elapsed < 1 && (
         <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12 }}>
-          Month in progress — sold, clubs and reviews are judged on pace ({Math.round(elapsed * 100)}% of the month gone). Close rate is judged as is.
+          Month in progress — sold, clubs and reviews are judged on pace ({Math.round(elapsed * 100)}% of the month gone). Close rate and Field Pro are judged as is.
         </div>
       )}
 
@@ -295,7 +313,7 @@ export default function TechScorecardsPanel() {
                   <div>
                     <div style={{ fontSize: 14, fontWeight: 700 }}>{k.label}</div>
                     <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 2 }}>
-                      {Number(rules.weights?.[k.id]) || 0}% of the score{k.id === 'closeRate' ? ` · ${sel.t.closed} of ${sel.t.opps} opportunities` : k.paced && elapsed < 1 ? ' · targets on pace' : ''}
+                      {Number(rules.weights?.[k.id]) || 0}% of the score{k.id === 'closeRate' ? ` · ${sel.t.closed} of ${sel.t.opps} opportunities` : k.id === 'fieldPro' ? ` · ${sel.t.fieldProCalls || 0} recorded call${sel.t.fieldProCalls === 1 ? '' : 's'} (Siro)` : k.paced && elapsed < 1 ? ' · targets on pace' : ''}
                     </div>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -331,6 +349,7 @@ export default function TechScorecardsPanel() {
                 ['Close rate', totals.opps ? `${Math.round((totals.closed / totals.opps) * 100)}% · ${totals.closed}/${totals.opps}` : '—'],
                 ['Memberships sold', totals.memberships],
                 ['5★ reviews', totals.fiveStar],
+                ['Field Pro avg', totals.fieldPro == null ? '—' : `${totals.fieldPro} · ${totals.fieldProCalls} calls`],
               ].map(([l, v]) => (
                 <div key={l} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 8 }}>
                   <span style={{ fontWeight: 600 }}>{l}</span><span style={{ ...num, fontWeight: 700 }}>{v}</span>

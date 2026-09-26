@@ -206,7 +206,7 @@ export default function DeptTVPage() {
   }, [data, trade.key])
   // Bold each column's best — "a bold on the numbers who are the highest".
   const maxes = useMemo(() => {
-    const cols = ['score','sold','avgTicket','closeRate','fiveStar','memberships']
+    const cols = ['score','sold','avgTicket','closeRate','fiveStar','memberships','fieldPro']
     const m = {}
     for (const c of cols) m[c] = Math.max(0, ...techs.map(x => Number(x[c]) || 0))
     m.ytdSold = Math.max(0, ...techs.map(x => Number(x.ytd?.sold) || 0))
@@ -236,10 +236,10 @@ export default function DeptTVPage() {
       : (f.text || ''),
   })), [data])
   // Ranking rows: split the panel evenly; type grows with the row (capped so
-  // the 11 columns still fit the width).
+  // the 12 columns still fit the width).
   const TH_H = 44, BASE_ROW = 52
   const rowH = techs.length && tableH ? Math.max(44, Math.min(118, (tableH - TH_H) / techs.length)) : BASE_ROW
-  // …and never wider than the panel: if the 11 columns overflow, step the
+  // …and never wider than the panel: if the 12 columns overflow, step the
   // type down until they fit (re-checked whenever the board resizes).
   const [kW, setKW] = useState(1.35)
   useEffect(() => { setKW(1.35) }, [trade.key, box.w, box.h])
@@ -358,6 +358,7 @@ export default function DeptTVPage() {
                   {th('Close rate')}
                   {th('5★')}
                   {th('Clubs')}
+                  {th('Field Pro')}
                   {th('YTD sold')}
                   {th('YTD 5★')}
                   {th('YTD clubs')}
@@ -377,13 +378,15 @@ export default function DeptTVPage() {
                     {cell(x.closeRate, x.closeRate === maxes.closeRate && maxes.closeRate > 0, fmtPct, C.amber)}
                     {cell(x.fiveStar, x.fiveStar === maxes.fiveStar && maxes.fiveStar > 0, fmtN, C.amber)}
                     {cell(x.memberships, x.memberships === maxes.memberships && maxes.memberships > 0, fmtN, C.purple)}
+                    {/* Field Pro (Siro) month score, 0–100; "—" = no recorded calls this month (counts as 0 in the score). */}
+                    {cell(x.fieldProCalls ? x.fieldPro : null, !!x.fieldProCalls && x.fieldPro === maxes.fieldPro && maxes.fieldPro > 0, fmtN, C.blue)}
                     {cell(x.ytd?.sold, (x.ytd?.sold || 0) === maxes.ytdSold && maxes.ytdSold > 0, fmtMoney, C.green)}
                     {cell(x.ytd?.fiveStar, (x.ytd?.fiveStar || 0) === maxes.ytdFive && maxes.ytdFive > 0, fmtN, C.amber)}
                     {cell(x.ytd?.memberships, (x.ytd?.memberships || 0) === maxes.ytdMem && maxes.ytdMem > 0, fmtN, C.purple)}
                   </tr>
                 ))}
                 {!techs.length && (
-                  <tr><td colSpan={11} style={{ padding:24, textAlign:'center', color:C.dim, fontSize:15 }}>
+                  <tr><td colSpan={12} style={{ padding:24, textAlign:'center', color:C.dim, fontSize:15 }}>
                     {data ? 'No tech activity yet this month.' : 'Loading the month…'}
                   </td></tr>
                 )}
