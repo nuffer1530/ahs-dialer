@@ -245,6 +245,38 @@ function BusinessHome() {
     { label: 'Clubs sold', value: String(view.clubs), delta: null, good: true, sub: 'service techs · this month', bar: null },
   ].filter(Boolean)
 
+  // The live floor strip — at the bottom of the left column on wide screens
+  // (so both columns end together), at the bottom of the page otherwise.
+  const floorEl = data.floor ? (
+      <section aria-label="Live floor" style={{ ...panel, borderRadius: 18, padding: isMobile ? '14px 16px' : '14px 20px', display: 'flex', alignItems: 'center', gap: 18, flexWrap: isMobile ? 'wrap' : 'nowrap' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 150 }}>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 12, fontWeight: 700, color: 'var(--tone-green-tx)' }}>
+            <span style={{ width: 7, height: 7, borderRadius: 99, background: '#1FA36B', boxShadow: '0 0 0 3px rgba(31,163,107,.18)' }} />Live floor
+          </span>
+          <span style={{ ...mono, fontSize: 14, fontWeight: 600 }}>{data.floor.queued} waiting{data.floor.queued ? ` · ${Math.floor(data.floor.longestWaitSec / 60)}:${String(data.floor.longestWaitSec % 60).padStart(2, '0')} longest` : ''}</span>
+          {data.floor.booking && <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Booked today: {data.floor.booking.booked} of {data.floor.booking.leadCalls}</span>}
+        </div>
+        {!isMobile && <div style={{ width: 1, alignSelf: 'stretch', background: 'var(--border)' }} />}
+        <div style={{ display: 'flex', gap: 8, flex: 1, minWidth: 0, overflowX: 'auto', paddingBottom: 2 }}>
+          {data.floor.agents.length ? data.floor.agents.map(a => (
+            <div key={a.id} style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '5px 12px 5px 5px', borderRadius: 99, background: 'var(--surface-2)', border: '1px solid var(--border)', flexShrink: 0 }}>
+              <span style={{ position: 'relative', width: 28, height: 28, borderRadius: 99, background: 'var(--border)', fontSize: 11, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                {String(a.name || '?').split(/\s+/).map(w => w[0]).slice(0, 2).join('').toUpperCase()}
+                <span style={{ position: 'absolute', right: -1, bottom: -1, width: 9, height: 9, borderRadius: 99, background: STATUS_TONE[a.status] || '#9AA0A6', border: '2px solid var(--surface-2)' }} />
+              </span>
+              <span style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.2 }}>
+                <span style={{ fontSize: 12.5, fontWeight: 600 }}>{String(a.name || '').split(/\s+/)[0]}</span>
+                <span style={{ ...mono, fontSize: 11.5, color: a.status === 'On Call' ? 'var(--accent)' : 'var(--text-muted)' }}>{a.status}{a.since ? ` · ${since(a.since)}` : ''}</span>
+              </span>
+            </div>
+          )) : <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>Nobody’s signed in on the phones.</span>}
+        </div>
+        <a href="/warroom" onClick={(e) => { e.preventDefault(); navigate('/warroom') }} className="btn" style={{ borderRadius: 99, flexShrink: 0 }}>
+          <Icon name="tv" size={14} /> Put on TV
+        </a>
+      </section>
+  ) : null
+
   return (
     <div style={{ flex: 1, overflowY: 'auto', background: 'var(--bg)' }}>
       <div style={{ padding: isMobile ? '12px 12px 24px' : '20px 26px 96px', display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -422,6 +454,7 @@ function BusinessHome() {
             <a href="/team" onClick={(e) => { e.preventDefault(); navigate('/team') }} style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--accent)', textDecoration: 'none' }}>All scorecards →</a>
           </section>
             )}
+            {wide && !isMobile && floorEl}
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0, order: wide && !isMobile ? 0 : -1 }}>
@@ -442,59 +475,30 @@ function BusinessHome() {
               <a href="/team" onClick={(e) => { e.preventDefault(); navigate('/team') }} style={{ marginLeft: 'auto', fontSize: 12.5, fontWeight: 600, color: 'var(--accent)', textDecoration: 'none' }}>Coaching & evals →</a>
             </div>
             {coachRows.length ? coachRows.map((c, i) => (
+              // Two short lines per tech — the column is narrow, and wrapped
+              // cards made it run far past the left side (Brandyn, Sep 26).
               <a key={c.id} href="/team" onClick={(e) => { e.preventDefault(); navigate('/team') }} className="lift-hover"
-                style={{ display: 'flex', flexDirection: 'column', gap: 3, padding: '10px 12px', borderRadius: 12, border: '1px solid var(--border)', color: 'inherit', textDecoration: 'none' }}>
-                <span style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-                  <span style={{ fontSize: 14, fontWeight: 600 }}>{c.name}</span>
-                  {data.trades.length > 1 && <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>{c.trade}</span>}
-                  <span style={{ ...mono, marginLeft: 'auto', fontSize: 12.5, fontWeight: 600, color: 'var(--tone-red-tx)' }}>≈ {kMoney(c.gap)} left</span>
+                title={[`Avg ticket ${kMoney(c.avgTicket)}`, c.steps?.length ? `Weakest Field Pro steps: ${c.steps.map(s => `${s.step} ${s.score}`).join(', ')}` : null].filter(Boolean).join(' · ')}
+                style={{ display: 'flex', flexDirection: 'column', gap: 2, padding: '8px 12px', borderRadius: 12, border: '1px solid var(--border)', color: 'inherit', textDecoration: 'none', minWidth: 0 }}>
+                <span style={{ display: 'flex', alignItems: 'baseline', gap: 8, minWidth: 0 }}>
+                  <span style={{ fontSize: 13.5, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.name}</span>
+                  {data.trades.length > 1 && <span style={{ fontSize: 11.5, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{c.trade}</span>}
+                  <span style={{ ...mono, marginLeft: 'auto', fontSize: 12.5, fontWeight: 600, color: 'var(--tone-red-tx)', whiteSpace: 'nowrap' }}>≈ {kMoney(c.gap)}</span>
                 </span>
-                <span style={{ fontSize: 12.5, color: 'var(--text-secondary)' }}>
-                  Closing <b style={{ ...mono, fontWeight: 600 }}>{pct(c.closeRate)}</b> of {c.opps} opportunities vs {pct(c.closeGoal)} · avg ticket {kMoney(c.avgTicket)}
+                <span style={{ fontSize: 12, color: 'var(--text-secondary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  <b style={{ ...mono, fontWeight: 600 }}>{pct(c.closeRate)}</b> of {c.opps} vs {pct(c.closeGoal)}
+                  <span style={{ color: 'var(--text-muted)' }}> · Field Pro </span>
+                  {c.fieldProCalls > 0 && c.fieldPro != null ? <b style={{ ...mono, fontWeight: 600, color: fpTone(c.fieldPro) }}>{c.fieldPro}</b> : <span style={{ color: 'var(--text-muted)' }}>—</span>}
+                  {c.steps?.[0] && <span style={{ color: 'var(--text-muted)' }}> · {c.steps[0].step}</span>}
                 </span>
-                {(c.steps?.length > 0 || c.fieldPro != null) && (
-                  <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                    Field Pro {c.fieldPro != null ? <b style={{ ...mono, fontWeight: 600, color: fpTone(c.fieldPro) }}>{c.fieldPro}</b> : '—'}
-                    {c.steps?.length ? ` · weakest: ${c.steps.map(s => `${s.step} ${s.score}`).join(', ')}` : c.fieldProCalls === 0 ? ' · no recordings this month' : ''}
-                  </span>
-                )}
               </a>
             )) : <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>Every tech with 5+ opportunities is at or above their close goal this month.</div>}
           </section>
             )}
           </div>
         </div>
+        {!(wide && !isMobile) && floorEl}
 
-        {/* Live floor */}
-        {data.floor && (
-          <section aria-label="Live floor" style={{ ...panel, borderRadius: 18, padding: isMobile ? '14px 16px' : '14px 20px', display: 'flex', alignItems: 'center', gap: 18, flexWrap: isMobile ? 'wrap' : 'nowrap' }}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 150 }}>
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 12, fontWeight: 700, color: 'var(--tone-green-tx)' }}>
-                <span style={{ width: 7, height: 7, borderRadius: 99, background: '#1FA36B', boxShadow: '0 0 0 3px rgba(31,163,107,.18)' }} />Live floor
-              </span>
-              <span style={{ ...mono, fontSize: 14, fontWeight: 600 }}>{data.floor.queued} waiting{data.floor.queued ? ` · ${Math.floor(data.floor.longestWaitSec / 60)}:${String(data.floor.longestWaitSec % 60).padStart(2, '0')} longest` : ''}</span>
-              {data.floor.booking && <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Booked today: {data.floor.booking.booked} of {data.floor.booking.leadCalls}</span>}
-            </div>
-            {!isMobile && <div style={{ width: 1, alignSelf: 'stretch', background: 'var(--border)' }} />}
-            <div style={{ display: 'flex', gap: 8, flex: 1, minWidth: 0, overflowX: 'auto', paddingBottom: 2 }}>
-              {data.floor.agents.length ? data.floor.agents.map(a => (
-                <div key={a.id} style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '5px 12px 5px 5px', borderRadius: 99, background: 'var(--surface-2)', border: '1px solid var(--border)', flexShrink: 0 }}>
-                  <span style={{ position: 'relative', width: 28, height: 28, borderRadius: 99, background: 'var(--border)', fontSize: 11, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    {String(a.name || '?').split(/\s+/).map(w => w[0]).slice(0, 2).join('').toUpperCase()}
-                    <span style={{ position: 'absolute', right: -1, bottom: -1, width: 9, height: 9, borderRadius: 99, background: STATUS_TONE[a.status] || '#9AA0A6', border: '2px solid var(--surface-2)' }} />
-                  </span>
-                  <span style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.2 }}>
-                    <span style={{ fontSize: 12.5, fontWeight: 600 }}>{String(a.name || '').split(/\s+/)[0]}</span>
-                    <span style={{ ...mono, fontSize: 11.5, color: a.status === 'On Call' ? 'var(--accent)' : 'var(--text-muted)' }}>{a.status}{a.since ? ` · ${since(a.since)}` : ''}</span>
-                  </span>
-                </div>
-              )) : <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>Nobody’s signed in on the phones.</span>}
-            </div>
-            <a href="/warroom" onClick={(e) => { e.preventDefault(); navigate('/warroom') }} className="btn" style={{ borderRadius: 99, flexShrink: 0 }}>
-              <Icon name="tv" size={14} /> Put on TV
-            </a>
-          </section>
-        )}
       </div>
     </div>
   )
