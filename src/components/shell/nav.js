@@ -1,7 +1,7 @@
 // Andi's navigation model (redesign stage 1, Sep 2026): the old 13 sidebar
 // items regrouped into hubs. Every page and every role gate is the same as
 // before — a hub just groups routes, and its tabs show in the top bar.
-// ctx = { isAdmin, isOpsManager, canDispatch, isLeader, leadsTeams, isHandheld }
+// ctx = { isAdmin, isOpsManager, isCallCenterManager, canManageCallCenter, canDispatch, isLeader, leadsTeams, isHandheld }
 
 export const HUBS = [
   {
@@ -16,7 +16,7 @@ export const HUBS = [
       // A phone is for looking, not dialing — the dialer is desktop-only.
       { to: '/', label: 'Dialer', end: true, gate: c => !c.isHandheld },
       // Stage 3: campaigns live where they're dialed (was Settings → Campaigns).
-      { to: '/campaigns', label: 'Campaigns', gate: c => c.isAdmin },
+      { to: '/campaigns', label: 'Campaigns', gate: c => c.canManageCallCenter },
     ],
   },
   {
@@ -37,8 +37,8 @@ export const HUBS = [
   {
     id: 'team', label: 'Team', icon: 'team',
     tabs: [
-      { to: '/team', label: 'Coaching & scorecards', gate: c => c.isAdmin || c.isOpsManager || c.leadsTeams },
-      { to: '/attendance', label: 'WFM', gate: c => c.isAdmin },
+      { to: '/team', label: 'Coaching & scorecards', gate: c => c.canManageCallCenter || c.isOpsManager || c.leadsTeams },
+      { to: '/attendance', label: 'WFM', gate: c => c.canManageCallCenter },
     ],
   },
   {
@@ -66,7 +66,7 @@ export function hubForPath(hubs, pathname) {
 
 // Wall boards, opened from one launcher instead of three sidebar items.
 export function tvBoards(ctx) {
-  const deptTv = ctx.isAdmin || ctx.isOpsManager || ctx.canDispatch || ctx.leadsTeams
+  const deptTv = ctx.canManageCallCenter || ctx.isOpsManager || ctx.canDispatch || ctx.leadsTeams
   return [
     { to: '/warroom', label: 'Call Center', gate: !ctx.isOpsManager },
     { to: '/tv/company', label: 'Company', gate: deptTv },
@@ -100,6 +100,7 @@ export const OTHER_TITLES = { '/mypage': 'My Page', '/settings': 'Settings' }
 export function roleLabel(ctx, profile) {
   if (ctx.isOpsManager) return 'Operations manager'
   if (ctx.isAdmin) return ctx.isLeader ? 'Owner' : 'Admin'
+  if (ctx.isCallCenterManager) return 'Call center manager'
   if (ctx.canDispatch) return 'Dispatcher'
   return (profile?.leads_teams || []).length ? 'Team lead' : 'Customer service'
 }

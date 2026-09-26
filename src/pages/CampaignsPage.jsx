@@ -47,7 +47,8 @@ const Chevron = ({ open }) => (
 
 export default function CampaignsPage() {
   const { contacts, setContacts, campaigns, setCampaigns, dncSet } = useData()
-  const { isAdmin } = useAuth()
+  // Call-center admin tools: admins and call center managers.
+  const { canManageCallCenter: isAdmin } = useAuth()
   const navigate = useNavigate()
   const isMobile = useIsMobile()
   const [showModal, setShowModal] = useState(false)

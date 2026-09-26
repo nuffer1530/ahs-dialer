@@ -115,7 +115,8 @@ const POINT_REASONS = [
 ]
 
 export default function AttendancePage() {
-  const { profile, isAdmin } = useAuth()
+  // Call-center admin tools: admins and call center managers.
+  const { profile, canManageCallCenter: isAdmin } = useAuth()
   // Phone layout: below 768px the tabs scroll, toolbars wrap, and wide tables
   // scroll inside their card instead of stretching the page. Desktop untouched.
   const isMobile = useIsMobile()
@@ -504,7 +505,7 @@ export default function AttendancePage() {
   // Memoized: a fresh array identity every render made GraphicalSchedule's
   // block-rebuild effect refire after each drag-save and snap blocks back to
   // its stale local data (Deanna: breaks "bounce back").
-  const schedProfiles = useMemo(() => profiles.filter(p => p.role !== 'admin'), [profiles])
+  const schedProfiles = useMemo(() => profiles.filter(p => p.role !== 'admin' && p.role !== 'call_center_manager'), [profiles])
 
   const getSchedule = (profileId, date) => schedules.find(s => s.profile_id === profileId && s.date === date)
   const getEvents = (profileId, date) => statusEvents.filter(e => e.profile_id === profileId && e.started_at.startsWith(date)).sort((a, b) => new Date(a.started_at) - new Date(b.started_at))

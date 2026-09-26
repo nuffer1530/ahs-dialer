@@ -138,7 +138,8 @@ const money = (n) => `${n < 0 ? '−' : ''}$${Math.abs(n).toFixed(2)}`    // $12
 const signed = (n) => `${n < 0 ? '−' : '+'}$${Math.abs(n).toFixed(2)}`  // +$12.00 / −$5.00
 
 export default function MyPage() {
-  const { profile, isAdmin } = useAuth()
+  // Call-center admin tools: admins and call center managers.
+  const { profile, canManageCallCenter: isAdmin } = useAuth()
   const isMobile = useIsMobile()
   const [searchParams, setSearchParams] = useSearchParams()
   const VALID_TABS = ['my-schedule', 'team-schedule', 'stats', 'commissions', 'scorecard', 'call-evals', 'time-off']

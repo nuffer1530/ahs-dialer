@@ -914,3 +914,20 @@ alter table siro_tech_scorecards enable row level security;
 -- role; 'dispatch_manager' = the call center & dispatch manager view (Brittany).
 -- Set in Settings → Users → edit. Applied via migration profiles_home_view.
 alter table public.profiles add column if not exists home_view text;
+
+-- ── Call center manager role (Sep 26, 2026) ──────────────────────────────────
+-- profiles.role = 'call_center_manager' (Deanna): admin-level for the call
+-- center and dispatch. The admin-only WFM/campaign policies admit it too.
+-- Applied via migration call_center_manager_role_policies.
+alter policy "Admins manage attendance points" on public.attendance_points
+  using (exists (select 1 from public.profiles where profiles.id = auth.uid() and profiles.role in ('admin', 'call_center_manager')));
+alter policy "Admins can manage csr_campaigns" on public.csr_campaigns
+  using (exists (select 1 from public.profiles where profiles.id = auth.uid() and profiles.role in ('admin', 'call_center_manager')));
+alter policy "Admins manage publishes" on public.schedule_publishes
+  using (exists (select 1 from public.profiles where profiles.id = auth.uid() and profiles.role in ('admin', 'call_center_manager')));
+alter policy "Admins manage schedules" on public.schedules
+  using (exists (select 1 from public.profiles where profiles.id = auth.uid() and profiles.role in ('admin', 'call_center_manager')));
+alter policy "Admins read all status events" on public.status_events
+  using (exists (select 1 from public.profiles where profiles.id = auth.uid() and profiles.role in ('admin', 'call_center_manager')));
+alter policy "Admins manage status options" on public.status_options
+  using (exists (select 1 from public.profiles where profiles.id = auth.uid() and profiles.role in ('admin', 'call_center_manager')));

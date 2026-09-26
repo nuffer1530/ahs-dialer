@@ -86,7 +86,8 @@ function SectionHead({ title, desc, isMobile, children }) {
 export default function LivePage() {
   const navigate = useNavigate()
   const { contacts } = useData()
-  const { isAdmin, profile: myProfile } = useAuth()
+  // Call-center admin tools: admins and call center managers.
+  const { canManageCallCenter: isAdmin, profile: myProfile } = useAuth()
   const { callTeammate, twilioReady, callStatus } = usePhone()
   const isMobile = useIsMobile()
 

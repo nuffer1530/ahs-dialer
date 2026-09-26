@@ -60,7 +60,8 @@ const PERIODS = [['today', 'Today'], ['7d', '7 days'], ['30d', '30 days'], ['all
 
 export default function RecordingsPage() {
   const { profile } = useAuth()
-  const isAdmin = profile?.role === 'admin'
+  // Call-center admin tools: admins and call center managers.
+  const isAdmin = ['admin', 'call_center_manager'].includes(profile?.role)
   // Phone layout (≤768px): filters share rows, list rows stack into two
   // lines, and anything tappable clears 40px.
   const isMobile = useIsMobile()

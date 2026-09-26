@@ -137,7 +137,7 @@ export default function DialerLayout() {
 }
 
 function DialerLayoutInner() {
-  const { profile, isAdmin, isDispatcher, isOpsManager } = useAuth()
+  const { profile, isAdmin, isDispatcher, isOpsManager, isCallCenterManager, canManageCallCenter } = useAuth()
   useEffect(() => { loadOpsConfig() }, [])   // pull admin thresholds into the live bindings
   // Deploy watcher: open tabs run old code until reloaded, which turned every
   // fix into 'hard refresh first'. Poll the bundle name; when it changes, show
@@ -158,7 +158,7 @@ function DialerLayoutInner() {
     const t = setInterval(check, 4 * 60_000)
     return () => clearInterval(t)
   }, [])
-  const canDispatch = isAdmin || isDispatcher
+  const canDispatch = isAdmin || isDispatcher || isCallCenterManager
   // Leadership page is owner-only by default; server enforces the real list
   // (app_settings 'leadership_viewers') — this just controls nav visibility.
   const isLeader = isAdmin && ['brandynnuffer@gmail.com', 'brandyn.nuffer@awesomeservice.com']
@@ -199,7 +199,7 @@ function DialerLayoutInner() {
   // claim-on-open, first rep there wins) and it clears the moment the inbox
   // empties — including when a booking is dismissed inside ServiceTitan.
   const openLeads = useOpenLeads()
-  const ptoApprovals = usePtoApprovals(profile?.id, isAdmin)
+  const ptoApprovals = usePtoApprovals(profile?.id, canManageCallCenter)
   const [statusOptions, setStatusOptions] = useState(DEFAULT_STATUS_OPTIONS)
 
   // Load custom statuses from app_settings
@@ -274,7 +274,7 @@ function DialerLayoutInner() {
   }, [])
 
   useEffect(() => {
-    if (!isAdmin) return
+    if (!canManageCallCenter) return
     const checkAlerts = async () => {
       const { data: profiles } = await sb.from('profiles').select('id, name, status, status_since').eq('active', true).neq('status', 'Offline')
       if (!profiles) return
@@ -297,7 +297,7 @@ function DialerLayoutInner() {
     checkAlerts()
     const interval = setInterval(checkAlerts, 60000)
     return () => clearInterval(interval)
-  }, [isAdmin])
+  }, [canManageCallCenter])
 
   const fmtDur = (secs) => {
     const h = Math.floor(secs / 3600)
@@ -395,7 +395,7 @@ function DialerLayoutInner() {
   useEffect(() => { setMobileNav(false) }, [location.pathname])
 
   // ── Navigation model (redesign stage 1): hubs instead of 13 sidebar items.
-  const navCtx = { isAdmin, isOpsManager, canDispatch, isLeader, isHandheld, leadsTeams: (profile?.leads_teams || []).length > 0 }
+  const navCtx = { isAdmin, isOpsManager, isCallCenterManager, canManageCallCenter, canDispatch, isLeader, isHandheld, leadsTeams: (profile?.leads_teams || []).length > 0 }
   const hubs = visibleHubs(navCtx)
   const hub = hubForPath(hubs, location.pathname)
   const boards = tvBoards(navCtx)
@@ -410,7 +410,7 @@ function DialerLayoutInner() {
   const railProps = {
     hubs, pathname: location.pathname, badges: { phones: openLeads }, profile, roleText,
     statusColor: isOpsManager ? null : currentStatusObj.color, tvBoards: boards, meLinks: mine, ptoApprovals,
-    alerts: isAdmin ? alerts : [], onNavigate: (to) => navigate(to), onOpenPalette: () => setPaletteOpen(true),
+    alerts: canManageCallCenter ? alerts : [], onNavigate: (to) => navigate(to), onOpenPalette: () => setPaletteOpen(true),
     darkMode, onToggleTheme: toggleTheme, onSignOut: signOut,
   }
   const paletteItems = [
@@ -486,15 +486,15 @@ function DialerLayoutInner() {
             : isHandheld ? <Navigate to="/home" replace />
             : <DialerPage />} />
           <Route path="/home" element={<HomePage />} />
-          {isAdmin && <Route path="/campaigns" element={<div style={{ flex: 1, overflowY: 'auto', background: 'var(--bg)' }}><CampaignsPage /></div>} />}
+          {canManageCallCenter && <Route path="/campaigns" element={<div style={{ flex: 1, overflowY: 'auto', background: 'var(--bg)' }}><CampaignsPage /></div>} />}
           {/* Operations managers are field-side: call-center pages bounce home. */}
           <Route path="/live" element={isOpsManager ? <Navigate to="/" replace /> : <LivePage />} />
           <Route path="/callboard" element={<CallBoardPage />} />
           {canDispatch && <Route path="/dispatch" element={<DispatchPage />} />}
           <Route path="/analytics" element={isOpsManager ? <Navigate to="/" replace /> : <DashboardPage />} />
           <Route path="/recordings" element={isOpsManager ? <Navigate to="/" replace /> : <RecordingsPage />} />
-          {isAdmin && <Route path="/attendance" element={<AttendancePage />} />}
-          {(isAdmin || isOpsManager || (profile?.leads_teams || []).length > 0) && <Route path="/team" element={<TeamPage />} />}
+          {canManageCallCenter && <Route path="/attendance" element={<AttendancePage />} />}
+          {(canManageCallCenter || isOpsManager || (profile?.leads_teams || []).length > 0) && <Route path="/team" element={<TeamPage />} />}
           {isLeader && <Route path="/leadership/*" element={<LeadershipPage />} />}
           <Route path="/warroom" element={isOpsManager ? <Navigate to="/" replace /> : <WarRoomPage />} />
           {isLeader && <Route path="/tv/ceo" element={<CEOTVPage />} />}

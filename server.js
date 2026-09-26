@@ -1287,7 +1287,7 @@ async function importStBookedJobs() {
   const { data: profs } = await supabase.from('profiles').select('id, name, email, role')
   // Admins book jobs while managing the floor — that's not commissionable
   // CSR work (Brandyn, Aug 30: leave admins off job commissions).
-  const admin = new Set((profs || []).filter(p => p.role === 'admin').map(p => p.id))
+  const admin = new Set((profs || []).filter(p => p.role === 'admin' || p.role === 'call_center_manager').map(p => p.id))
   const profOf = new Map((maps || []).map(m => [String(m.st_user_id), m.profile_id]))
   const nameOf = new Map((profs || []).map(p => [p.id, p.name || p.email]))
   const mine = jobs.filter(j => {
@@ -1544,7 +1544,7 @@ app.post('/api/st/membership/sell', async (req, res) => {
   const { data: caller } = await supabase
     .from('profiles').select('id, name, email, role, active').eq('id', user.id).maybeSingle()
   if (!caller || caller.active === false) return res.status(403).json({ error: 'Inactive user' })
-  if (!MEMBERSHIP_SALE_ALL_REPS && caller.role !== 'admin') {
+  if (!MEMBERSHIP_SALE_ALL_REPS && !['admin', 'call_center_manager'].includes(caller.role)) {
     return res.status(403).json({ error: 'Selling memberships is limited to admins right now' })
   }
 
@@ -1667,6 +1667,23 @@ async function requireAdmin(req, res) {
   return prof
 }
 
+// Call center managers (Sep 2026): admin-level for everything call center and
+// dispatch — people, schedules, campaigns, QA, routing, the knowledge base,
+// the 3-day board — but not pay setup, the field side (technicians, Field
+// Pro), system tools or owner pages, and never over an admin account.
+async function requireCallCenterAdmin(req, res) {
+  const token = (req.headers.authorization || '').replace(/^Bearer\s+/i, '')
+  if (!token) { res.status(401).json({ error: 'Not signed in' }); return null }
+  const { data: { user }, error } = await supabase.auth.getUser(token)
+  if (error || !user) { res.status(401).json({ error: 'Invalid session' }); return null }
+  const { data: prof } = await supabase
+    .from('profiles').select('id, name, role, active').eq('id', user.id).maybeSingle()
+  if (!['admin', 'call_center_manager'].includes(prof?.role) || prof?.active === false) {
+    res.status(403).json({ error: 'Admins or call center managers only' }); return null
+  }
+  return prof
+}
+
 // Admins plus the field-side operations managers — technician team routes.
 async function requireFieldLead(req, res) {
   const token = (req.headers.authorization || '').replace(/^Bearer\s+/i, '')
@@ -1705,7 +1722,7 @@ async function requireDispatch(req, res) {
   if (error || !user) { res.status(401).json({ error: 'Invalid session' }); return null }
   const { data: prof } = await supabase
     .from('profiles').select('id, role, active, name, email').eq('id', user.id).maybeSingle()
-  if (!['admin', 'dispatcher'].includes(prof?.role) || prof?.active === false) {
+  if (!['admin', 'dispatcher', 'call_center_manager'].includes(prof?.role) || prof?.active === false) {
     res.status(403).json({ error: 'Admins or dispatchers only' }); return null
   }
   if (_dispatchAuth.size > 500) _dispatchAuth.clear()
@@ -1782,7 +1799,7 @@ app.post('/api/pto/cancel', async (req, res) => {
     const { data: row } = await supabase.from('pto_requests').select('*').eq('id', id).maybeSingle()
     if (!row) return res.status(404).json({ error: 'Request not found' })
     const isRequester = row.profile_id === me.id
-    const isManager = row.manager_id === me.id || me.role === 'admin'
+    const isManager = row.manager_id === me.id || ['admin', 'call_center_manager'].includes(me.role)
     if (!isRequester && !isManager) return res.status(403).json({ error: 'Not yours to cancel' })
     const lastDay = row.end_date || row.date
     if (row.status === 'approved' && lastDay < new Date().toISOString().slice(0, 10)) {
@@ -1837,7 +1854,7 @@ app.post('/api/pto/decide', async (req, res) => {
     const { data: row } = await supabase.from('pto_requests').select('*').eq('id', id).maybeSingle()
     if (!row) return res.status(404).json({ error: 'Request not found' })
     if (row.status !== 'pending') return res.status(400).json({ error: `Already ${row.status}` })
-    if (row.manager_id !== me.id && me.role !== 'admin') return res.status(403).json({ error: "Only this person's manager (or an admin) can decide" })
+    if (row.manager_id !== me.id && !['admin', 'call_center_manager'].includes(me.role)) return res.status(403).json({ error: "Only this person's manager (or an admin) can decide" })
 
     const { error } = await supabase.from('pto_requests').update({
       status: decision, decided_by: me.id, decided_at: new Date().toISOString(),
@@ -1941,7 +1958,7 @@ app.get('/api/kb/list', async (req, res) => {
 })
 
 app.post('/api/kb/save', async (req, res) => {
-  const prof = await requireAdmin(req, res)
+  const prof = await requireCallCenterAdmin(req, res)
   if (!prof) return
   try {
     const { id, title, body, category, active, note } = req.body || {}
@@ -1975,7 +1992,7 @@ app.post('/api/kb/save', async (req, res) => {
 })
 
 app.post('/api/kb/delete', async (req, res) => {
-  if (!(await requireAdmin(req, res))) return
+  if (!(await requireCallCenterAdmin(req, res))) return
   try {
     await supabase.from('kb_articles').delete().eq('id', String(req.body?.id || ''))
     res.json({ ok: true })
@@ -1983,7 +2000,7 @@ app.post('/api/kb/delete', async (req, res) => {
 })
 
 app.get('/api/kb/revisions', async (req, res) => {
-  if (!(await requireAdmin(req, res))) return
+  if (!(await requireCallCenterAdmin(req, res))) return
   try {
     const { data } = await supabase.from('kb_revisions').select('*')
       .eq('article_id', String(req.query.articleId || '')).order('edited_at', { ascending: false }).limit(30)
@@ -2006,7 +2023,7 @@ const htmlToText = (html) => {
 }
 
 app.post('/api/kb/import-website', async (req, res) => {
-  const prof = await requireAdmin(req, res)
+  const prof = await requireCallCenterAdmin(req, res)
   if (!prof) return
   try {
     const rootUrl = String(req.body?.url || 'https://awesomeservice.com').replace(/\/$/, '')
@@ -2072,7 +2089,7 @@ app.post('/api/kb/import-website', async (req, res) => {
 // Knowledge gaps: real questions the KB couldn't cover (or answers that got a
 // thumbs-down) — the "what to write next" list.
 app.get('/api/kb/gaps', async (req, res) => {
-  if (!(await requireAdmin(req, res))) return
+  if (!(await requireCallCenterAdmin(req, res))) return
   try {
     const since = new Date(Date.now() - 30 * 864e5).toISOString()
     const { data } = await supabase.from('assistant_logs')
@@ -2180,7 +2197,7 @@ app.post('/api/assistant/feedback', async (req, res) => {
 })
 
 app.post('/api/admin/notify-floor', async (req, res) => {
-  const prof = await requireAdmin(req, res)
+  const prof = await requireCallCenterAdmin(req, res)
   if (!prof) return
   try {
     const message = String(req.body?.message || '').trim().slice(0, 300)
@@ -2212,7 +2229,7 @@ app.post('/api/admin/notify-floor', async (req, res) => {
 })
 
 app.get('/api/admin/notify-floor/scheduled', async (req, res) => {
-  if (!(await requireAdmin(req, res))) return
+  if (!(await requireCallCenterAdmin(req, res))) return
   try {
     const list = await loadFloorScheduled()
     res.json({ items: list.filter(x => Date.parse(x.sendAt) > Date.now()).sort((a, b) => Date.parse(a.sendAt) - Date.parse(b.sendAt)) })
@@ -2220,7 +2237,7 @@ app.get('/api/admin/notify-floor/scheduled', async (req, res) => {
 })
 
 app.post('/api/admin/notify-floor/unschedule', async (req, res) => {
-  if (!(await requireAdmin(req, res))) return
+  if (!(await requireCallCenterAdmin(req, res))) return
   try {
     const id = String(req.body?.id || '')
     const list = await loadFloorScheduled()
@@ -2230,10 +2247,12 @@ app.post('/api/admin/notify-floor/unschedule', async (req, res) => {
 })
 
 app.post('/api/admin/user/invite', async (req, res) => {
-  const admin = await requireAdmin(req, res)
+  const admin = await requireCallCenterAdmin(req, res)
   if (!admin) return
   const email = String(req.body?.email || '').trim().toLowerCase()
-  const role = ['admin', 'dispatcher', 'ops_manager'].includes(req.body?.role) ? req.body.role : 'rep'
+  // Only an admin can make an admin; call center managers can invite anyone else.
+  const grantable = admin.role === 'admin' ? ['admin', 'call_center_manager', 'dispatcher', 'ops_manager'] : ['call_center_manager', 'dispatcher', 'ops_manager']
+  const role = grantable.includes(req.body?.role) ? req.body.role : 'rep'
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
     return res.status(400).json({ error: 'Enter a valid email address' })
   }
@@ -2308,7 +2327,7 @@ app.post('/api/admin/user/invite', async (req, res) => {
 // Their call_logs and commissions are intentionally left untouched — they're
 // historical pay records. Reversible via /reactivate.
 app.post('/api/admin/user/deactivate', async (req, res) => {
-  const admin = await requireAdmin(req, res)
+  const admin = await requireCallCenterAdmin(req, res)
   if (!admin) return
 
   const { userId } = req.body
@@ -2319,6 +2338,7 @@ app.post('/api/admin/user/deactivate', async (req, res) => {
     const { data: target } = await supabase
       .from('profiles').select('id, name, email, role').eq('id', userId).maybeSingle()
     if (!target) return res.status(404).json({ error: 'User not found' })
+    if (target.role === 'admin' && admin.role !== 'admin') return res.status(403).json({ error: 'Only an admin can remove an admin' })
 
     // Don't allow removing the last admin — it would lock everyone out of /settings.
     if (target.role === 'admin') {
@@ -2374,11 +2394,13 @@ app.post('/api/admin/user/deactivate', async (req, res) => {
 // ── Reactivate: restore login and visibility. Campaign assignments were
 // dropped on deactivate and must be reassigned by hand.
 app.post('/api/admin/user/reactivate', async (req, res) => {
-  const admin = await requireAdmin(req, res)
+  const admin = await requireCallCenterAdmin(req, res)
   if (!admin) return
 
   const { userId } = req.body
   if (!userId) return res.status(400).json({ error: 'userId required' })
+  const { data: tgt } = await supabase.from('profiles').select('role').eq('id', userId).maybeSingle()
+  if (tgt?.role === 'admin' && admin.role !== 'admin') return res.status(403).json({ error: 'Only an admin can restore an admin' })
 
   try {
     const { error: banErr } = await supabase.auth.admin.updateUserById(userId, { ban_duration: 'none' })
@@ -2988,6 +3010,29 @@ async function computeWeather() {
   _wxCache = { data, expires: Date.now() + 15 * 60_000 }
   return data
 }
+
+// Set someone else's password from Settings → Users (replaces the
+// admin-change-password edge function, which no longer exists). Call center
+// managers can't set an admin's password.
+app.post('/api/admin/user/password', async (req, res) => {
+  const me = await requireCallCenterAdmin(req, res)
+  if (!me) return
+  const { userId, newPassword } = req.body || {}
+  if (!userId || typeof newPassword !== 'string' || newPassword.length < 6) {
+    return res.status(400).json({ error: 'Password must be at least 6 characters' })
+  }
+  try {
+    const { data: target } = await supabase.from('profiles').select('id, role').eq('id', userId).maybeSingle()
+    if (!target) return res.status(404).json({ error: 'User not found' })
+    if (target.role === 'admin' && me.role !== 'admin') return res.status(403).json({ error: "Only an admin can change an admin's password" })
+    const { error } = await supabase.auth.admin.updateUserById(userId, { password: newPassword })
+    if (error) throw error
+    res.json({ ok: true })
+  } catch (e) {
+    console.error('user/password:', e.message)
+    res.status(500).json({ error: e.message })
+  }
+})
 app.get('/api/weather', async (req, res) => {
   try {
     if (_wxCache && _wxCache.expires > Date.now()) return res.json(_wxCache.data)
@@ -3217,7 +3262,7 @@ app.get('/api/board/config', async (req, res) => {
   res.json({ trades: BOARD_TRADES, callsPerTech: cpt, default: 3 })
 })
 app.post('/api/board/config', async (req, res) => {
-  const admin = await requireAdmin(req, res)
+  const admin = await requireCallCenterAdmin(req, res)
   if (!admin) return
   const clean = {}
   BOARD_TRADES.forEach(t => { const v = Number(req.body?.callsPerTech?.[t]); if (v > 0) clean[t] = v })
@@ -3908,7 +3953,7 @@ app.post('/api/twilio/live-transcript', async (req, res) => {
 // it happens, straight from the same in-memory stream that feeds the notes
 // and the coach. Nothing new is recorded; the tail dies with the call.
 app.get('/api/live-calls', async (req, res) => {
-  if (!(await requireAdmin(req, res))) return
+  if (!(await requireCallCenterAdmin(req, res))) return
   const calls = [..._liveTx.entries()].map(([sid, e]) => ({
     id: sid, contactId: e.contactId || null, phone: e.phone || null,
     rep: e.repName || null, contactName: e.contactName || null,
@@ -3918,7 +3963,7 @@ app.get('/api/live-calls', async (req, res) => {
 })
 
 app.get('/api/live-calls/:sid/transcript', async (req, res) => {
-  if (!(await requireAdmin(req, res))) return
+  if (!(await requireCallCenterAdmin(req, res))) return
   const e = _liveTx.get(String(req.params.sid || ''))
   if (!e) return res.json({ active: false, lines: [] })
   res.json({
@@ -5622,7 +5667,7 @@ async function evalsBetween(startIso, endIso, cols) {
 // immediately, such as Shelly"), and the page opens instantly instead of
 // re-running the AI every time one more call gets scored.
 app.get('/api/admin/csr-coaching', async (req, res) => {
-  const prof = await requireAdmin(req, res)
+  const prof = await requireCallCenterAdmin(req, res)
   if (!prof) return
   try {
     const month = /^\d{4}-\d{2}$/.test(String(req.query.month || '')) ? String(req.query.month) : (() => {
@@ -5826,11 +5871,11 @@ app.get('/api/admin/csr-coaching', async (req, res) => {
 })
 
 app.get('/api/admin/call-eval-config', async (req, res) => {
-  if (!(await requireAdmin(req, res))) return
+  if (!(await requireCallCenterAdmin(req, res))) return
   res.json({ cfg: await getEvalCfg(), defaultSections: DEFAULT_EVAL_SECTIONS })
 })
 app.post('/api/admin/call-eval-config', async (req, res) => {
-  if (!(await requireAdmin(req, res))) return
+  if (!(await requireCallCenterAdmin(req, res))) return
   try {
     const { sections, minSeconds, enabled } = req.body || {}
     const cleaned = cleanEvalSections(sections)
@@ -7574,12 +7619,12 @@ app.post('/api/twilio/routing/voicemail-done', async (req, res) => {
 
 // ── Admin: read/write the routing config ────────────────────────────────────
 app.get('/api/admin/call-routing', async (req, res) => {
-  if (!(await requireAdmin(req, res))) return
+  if (!(await requireCallCenterAdmin(req, res))) return
   const cfg = await getRouting()
   res.json({ cfg, state: routingStateNow(cfg), musicOptions: Object.keys(HOLD_MUSIC), voices: ROUTING_VOICES })
 })
 app.post('/api/admin/call-routing', async (req, res) => {
-  if (!(await requireAdmin(req, res))) return
+  if (!(await requireCallCenterAdmin(req, res))) return
   try {
     const cfg = mergeRouting(req.body?.cfg)
     const { error } = await supabase.from('app_settings')
@@ -8260,7 +8305,7 @@ app.post('/api/swaps/peer', async (req, res) => {
       if (mgr?.email) approvers = [mgr.email]
     }
     if (!approvers.length) {
-      const { data: admins } = await supabase.from('profiles').select('email').eq('role', 'admin').eq('active', true)
+      const { data: admins } = await supabase.from('profiles').select('email').in('role', ['admin', 'call_center_manager']).eq('active', true)
       approvers = (admins || []).map(a => a.email).filter(Boolean)
     }
     for (const to of approvers) {
@@ -8285,7 +8330,7 @@ app.post('/api/swaps/decide', async (req, res) => {
     const { data: row } = await supabase.from('shift_swaps').select('*').eq('id', id).maybeSingle()
     if (!row) return res.status(404).json({ error: 'Swap not found' })
     if (row.status !== 'pending_manager') return res.status(400).json({ error: `Not awaiting management (${row.status.replace('_', ' ')})` })
-    if (row.manager_id !== me.id && me.role !== 'admin') return res.status(403).json({ error: "Only this person's manager (or an admin) can decide" })
+    if (row.manager_id !== me.id && !['admin', 'call_center_manager'].includes(me.role)) return res.status(403).json({ error: "Only this person's manager (or an admin) can decide" })
 
     const [reqrRow, tgtRow] = await Promise.all([
       supabase.from('profiles').select('id, name, email').eq('id', row.requester_id).maybeSingle().then(r => r.data),
@@ -8339,7 +8384,7 @@ app.post('/api/swaps/cancel', async (req, res) => {
     const { id } = req.body || {}
     const { data: row } = await supabase.from('shift_swaps').select('*').eq('id', id).maybeSingle()
     if (!row) return res.status(404).json({ error: 'Swap not found' })
-    if (row.requester_id !== me.id && me.role !== 'admin') return res.status(403).json({ error: 'Not yours to cancel' })
+    if (row.requester_id !== me.id && !['admin', 'call_center_manager'].includes(me.role)) return res.status(403).json({ error: 'Not yours to cancel' })
     if (!['pending_peer', 'pending_manager'].includes(row.status)) return res.status(400).json({ error: `Already ${row.status}` })
     await supabase.from('shift_swaps').update({ status: 'canceled', decided_by: me.name || me.email, decided_at: new Date().toISOString() }).eq('id', id)
     res.json({ ok: true })
@@ -8355,7 +8400,7 @@ app.get('/api/swaps/mine', async (req, res) => {
       supabase.from('shift_swaps').select('*')
         .or(`requester_id.eq.${me.id},target_id.eq.${me.id}`)
         .gte('created_at', since).order('created_at', { ascending: false }).limit(30),
-      me.role === 'admin'
+      ['admin', 'call_center_manager'].includes(me.role)
         ? supabase.from('shift_swaps').select('*').eq('status', 'pending_manager').order('created_at', { ascending: false })
         : supabase.from('shift_swaps').select('*').eq('status', 'pending_manager').eq('manager_id', me.id).order('created_at', { ascending: false }),
     ])
@@ -11383,7 +11428,7 @@ async function sendResend({ to, subject, html }) {
 // week — shift, breaks, lunch, daily and weekly hours — straight from the
 // same schedules rows the WFM grid shows.
 app.post('/api/schedule/publish', async (req, res) => {
-  const prof = await requireAdmin(req, res)
+  const prof = await requireCallCenterAdmin(req, res)
   if (!prof) return
   try {
     const weekStart = String(req.body?.weekStart || '')
@@ -11491,7 +11536,7 @@ async function buildBoardEmail() {
 // misconfigured scheduler from a broken one is to wait until 7am and see
 // whether anything arrives — which is how the first morning was lost.
 app.get('/api/board/email/status', async (req, res) => {
-  if (!(await requireAdmin(req, res))) return
+  if (!(await requireCallCenterAdmin(req, res))) return
   try {
     const { data: row } = await supabase.from('app_settings')
       .select('value').eq('key', BOARD_EMAIL_SENT_KEY).maybeSingle()
@@ -11517,7 +11562,7 @@ app.get('/api/board/email/status', async (req, res) => {
 
 // Preview only — renders and returns the HTML, sends nothing.
 app.get('/api/board/email/preview', async (req, res) => {
-  if (!(await requireAdmin(req, res))) return
+  if (!(await requireCallCenterAdmin(req, res))) return
   try {
     const { html } = await buildBoardEmail()
     res.set('Content-Type', 'text/html; charset=utf-8').send(html)
@@ -11530,7 +11575,7 @@ app.get('/api/board/email/preview', async (req, res) => {
 // Explicit send. `to` is required — there is deliberately no default recipient,
 // so a stray call can't reach the leadership list.
 app.post('/api/board/email/test', async (req, res) => {
-  if (!(await requireAdmin(req, res))) return
+  if (!(await requireCallCenterAdmin(req, res))) return
   try {
     const to = (req.body?.to || '').toString().trim()
     if (!to) return res.status(400).json({ error: 'A recipient is required.' })
@@ -12956,7 +13001,7 @@ Return ONLY a JSON object, no markdown:
 }
 
 app.post('/api/st/audience/plan', async (req, res) => {
-  if (!(await requireAdmin(req, res))) return
+  if (!(await requireCallCenterAdmin(req, res))) return
   try {
     const request = (req.body?.request || '').toString().slice(0, 1000)
     if (!request.trim()) return res.status(400).json({ error: 'Describe who you want to reach.' })
@@ -12990,7 +13035,7 @@ async function allContactPhones() {
 }
 
 app.post('/api/st/audience/build', async (req, res) => {
-  if (!(await requireAdmin(req, res))) return
+  if (!(await requireCallCenterAdmin(req, res))) return
   try {
     const plan = req.body?.plan
     const commit = req.body?.commit === true
@@ -13249,7 +13294,7 @@ async function requireHomeUser(req, res) {
   const { data: { user }, error } = await supabase.auth.getUser(token)
   if (error || !user) { res.status(401).json({ error: 'Invalid session' }); return null }
   const { data: prof } = await supabase.from('profiles').select('id, name, email, role, active').eq('id', user.id).maybeSingle()
-  if (!['admin', 'ops_manager', 'dispatcher'].includes(prof?.role) || prof?.active === false) {
+  if (!['admin', 'ops_manager', 'dispatcher', 'call_center_manager'].includes(prof?.role) || prof?.active === false) {
     res.status(403).json({ error: 'Home is for admins, dispatchers and operations managers' }); return null
   }
   return prof
@@ -13360,7 +13405,7 @@ app.get('/api/home/me', async (req, res) => {
     // Call center & dispatch manager view (profiles.home_view): the live
     // floor, every CSR's day from ServiceTitan, and time off waiting on them.
     let manager = null
-    if (req.query.manager === '1' && ['admin', 'dispatcher'].includes(prof.role)) {
+    if (req.query.manager === '1' && ['admin', 'dispatcher', 'call_center_manager'].includes(prof.role)) {
       const [floorProfs, queued, ptoMine] = await Promise.all([
         safe(supabase.from('profiles').select('id, name, email, role, status, status_since').eq('active', true)),
         safe(supabase.from('call_tasks').select('queued_at').eq('state', 'queued').is('ended_at', null)),

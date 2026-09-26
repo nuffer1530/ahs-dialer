@@ -137,7 +137,8 @@ function PhoneCell({ trade, date, dayLabel, d, onDrill, first }) {
 }
 
 export default function CallBoardPage() {
-  const { isAdmin, profile } = useAuth()
+  // Call-center admin tools: admins and call center managers.
+  const { canManageCallCenter: isAdmin, profile } = useAuth()
   const [data, setData] = useState(null)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)

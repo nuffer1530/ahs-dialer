@@ -62,7 +62,8 @@ function isoToInterval(iso) {
 }
 
 export default function GraphicalSchedule({ profiles, onUpdate }) {
-  const { profile, isAdmin } = useAuth()
+  // Call-center admin tools: admins and call center managers.
+  const { profile, canManageCallCenter: isAdmin } = useAuth()
   const containerRef = useRef(null)
   const [date, setDate] = useState(localYMD())
   const [schedules, setSchedules] = useState([])

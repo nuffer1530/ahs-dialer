@@ -55,7 +55,7 @@ function Notice({ tone = 'amber', children, style }) {
   )
 }
 
-const ROLE_CHIP = { admin: ['blue', 'Admin'], dispatcher: ['purple', 'Dispatcher'], rep: ['gray', 'Rep'] }
+const ROLE_CHIP = { admin: ['blue', 'Admin'], call_center_manager: ['green', 'Call Center Mgr'], ops_manager: ['amber', 'Ops Manager'], dispatcher: ['purple', 'Dispatcher'], rep: ['gray', 'Rep'] }
 
 const EMOJIS = {
   '🔥 Hype': ['🔥','⚡','💥','🚀','🎯','💪','👊','🏆','👑','💎','🌟','⭐','🔑','💰','🎰','🃏'],
@@ -545,7 +545,11 @@ function FloorTicker() {
 }
 
 export default function AdminPage() {
-  const { profile, isAdmin, isOpsManager, refreshProfile } = useAuth()
+  const { profile, isAdmin, isOpsManager, isCallCenterManager, canManageCallCenter, refreshProfile } = useAuth()
+  // Call center managers get the call-center settings (people, statuses, floor
+  // TV, knowledge, routing, QA) — not commission setup or thresholds — and
+  // never act on an admin's account.
+  const canCC = canManageCallCenter
   const { campaigns } = useData()
   const isMobile = useIsMobile()
   const [settingsTab, setSettingsTab] = useState(() => new URLSearchParams(window.location.search).get('tab') || 'users')
@@ -600,13 +604,13 @@ export default function AdminPage() {
   const [dirSaving, setDirSaving] = useState(false)
   const [dirMsg, setDirMsg] = useState('')
   useEffect(() => {
-    if (settingsTab !== 'users' || !isAdmin || directory !== null) return
+    if (settingsTab !== 'users' || !canCC || directory !== null) return
     sb.from('app_settings').select('value').eq('key', 'company_directory').maybeSingle().then(({ data }) => {
       let d = []
       try { d = JSON.parse(data?.value || '[]') } catch {}
       setDirectory(Array.isArray(d) ? d : [])
     })
-  }, [settingsTab, isAdmin, directory])
+  }, [settingsTab, canCC, directory])
   const saveDirectory = async () => {
     setDirSaving(true)
     const clean = (directory || [])
@@ -668,7 +672,7 @@ export default function AdminPage() {
   }, [profile])
 
   useEffect(() => {
-    if (!isAdmin) { setLoading(false); return }
+    if (!canCC) { setLoading(false); return }
     Promise.all([
       sb.from('profiles').select('*').order('name'),
       sb.from('csr_campaigns').select('*'),
@@ -677,7 +681,7 @@ export default function AdminPage() {
       setCsrCampaigns(csrCampData || [])
       setLoading(false)
     })
-  }, [isAdmin])
+  }, [canCC])
 
   useEffect(() => {
     if (settingsTab !== 'ops' || !isAdmin || opsForm) return
@@ -808,11 +812,16 @@ export default function AdminPage() {
         const { error } = await sb.auth.updateUser({ password: newPw })
         if (error) throw error
       } else {
-        // Admin changing someone else's password via admin API
-        const { error } = await sb.functions.invoke('admin-change-password', {
-          body: { userId: pwModal.profileId, newPassword: newPw }
+        // Someone else's password: the server sets it with the service key
+        // (admins, and call center managers for non-admin accounts).
+        const { data: { session } } = await sb.auth.getSession()
+        const r = await fetch('/api/admin/user/password', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session?.access_token}` },
+          body: JSON.stringify({ userId: pwModal.profileId, newPassword: newPw }),
         })
-        if (error) throw error
+        const d = await r.json().catch(() => ({}))
+        if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`)
       }
       setPwMsg('✓ Password changed successfully!')
       setNewPw('')
@@ -1063,6 +1072,8 @@ export default function AdminPage() {
   // Scorecard KPIs — single source of truth
   const TABS = isAdmin
     ? [{ id:'users', label:'Users' }, { id:'commission', label:'Commission' }, { id:'statuses', label:'Statuses' }, { id:'floortv', label:'Floor TV' }, { id:'ops', label:'Thresholds' }, { id:'knowledge', label:'Knowledge' }, { id:'routing', label:'Call Routing' }, { id:'callqa', label:'Call QA' }]
+    : isCallCenterManager
+    ? [{ id:'users', label:'Users' }, { id:'statuses', label:'Statuses' }, { id:'floortv', label:'Floor TV' }, { id:'knowledge', label:'Knowledge' }, { id:'routing', label:'Call Routing' }, { id:'callqa', label:'Call QA' }]
     // Operations managers aren't paid CSR commissions — profile only.
     : isOpsManager ? [{ id:'users', label:'My Profile' }]
     : [{ id:'users', label:'My Profile' }, { id:'commission', label:'My Earnings' }]
@@ -1082,7 +1093,7 @@ export default function AdminPage() {
       {settingsTab === 'campaigns' && <Navigate to="/campaigns" replace />}
 
 
-      {settingsTab === 'floortv' && isAdmin && (
+      {settingsTab === 'floortv' && canCC && (
         <div style={{ flex:1, overflowY:'auto', padding: isMobile ? 12 : 24 }}>
           <FloorTicker />
         </div>
@@ -1091,7 +1102,7 @@ export default function AdminPage() {
 
 
       {/* Statuses tab — admin only */}
-      {settingsTab === 'statuses' && isAdmin && (
+      {settingsTab === 'statuses' && canCC && (
         <div style={{ flex:1, overflowY:'auto', padding: isMobile ? 12 : 24, display:'flex', flexDirection:'column', gap:16 }}>
           <Section flush title="Status customization" desc="Changes save automatically. Locked statuses cannot be removed."
             actions={<SaveNote muted={savingStatuses} error={statusSaveMsg.startsWith('Error')}>{savingStatuses ? 'Saving…' : statusSaveMsg}</SaveNote>}>
@@ -1337,11 +1348,11 @@ export default function AdminPage() {
 
 
       {/* Users tab */}
-      {settingsTab === 'knowledge' && isAdmin && <KnowledgeTab />}
+      {settingsTab === 'knowledge' && canCC && <KnowledgeTab />}
 
-      {settingsTab === 'routing' && isAdmin && <CallRoutingTab />}
+      {settingsTab === 'routing' && canCC && <CallRoutingTab />}
 
-      {settingsTab === 'callqa' && isAdmin && <CallQATab />}
+      {settingsTab === 'callqa' && canCC && <CallQATab />}
 
       {settingsTab === 'ops' && isAdmin && (
         <div style={{ flex:1, overflowY:'auto', padding: isMobile ? 12 : 24, display:'flex', flexDirection:'column', gap:16 }}>
@@ -1532,8 +1543,8 @@ export default function AdminPage() {
               onDone={d => { setPickerSelected(d); setCropSrc(null) }} />
           )}
 
-          {/* ADMIN ONLY — User Management */}
-          {isAdmin && (
+          {/* User management — admins and call center managers */}
+          {canCC && (
             <>
               {msg && <Notice tone={msg.startsWith('Error') ? 'red' : 'green'}>{msg}</Notice>}
               <Section flush title="User management" desc="Invite by email below — they set their own name and password"
@@ -1553,7 +1564,8 @@ export default function AdminPage() {
                       <option value="rep">Rep</option>
                       <option value="dispatcher">Dispatcher</option>
                       <option value="ops_manager">Operations Manager</option>
-                      <option value="admin">Admin</option>
+                      <option value="call_center_manager">Call Center Manager</option>
+                      {isAdmin && <option value="admin">Admin</option>}
                     </select>
                     <button className="btn primary" onClick={sendInvite} disabled={invBusy || !invEmail.trim()} style={{ borderRadius:99 }}>
                       {invBusy ? 'Sending…' : 'Send invite'}
@@ -1610,15 +1622,19 @@ export default function AdminPage() {
                             </div>
                             <div>
                               <div style={{ display:'flex', gap:6, flexWrap:'wrap', justifyContent: isMobile ? 'flex-start' : 'flex-end' }}>
-                                {removed ? (
+                                {removed && !isAdmin && p.role === 'admin' ? (
+                                  <span style={{ fontSize:12, color:'var(--text-muted)' }}>Admin account</span>
+                                ) : removed ? (
                                   <button className="btn sm" disabled={busyUser === p.id} onClick={() => setUserActive(p, true)}>
                                     {busyUser === p.id ? 'Restoring…' : 'Restore'}
                                   </button>
+                                ) : !isAdmin && p.role === 'admin' ? (
+                                  <span style={{ fontSize:12, color:'var(--text-muted)' }}>Admin account</span>
                                 ) : (
                                   <>
                                     <button className="btn sm" onClick={() => openEdit(p)}>Edit</button>
                                     <button className="btn sm" onClick={() => { setPwModal({ profileId: p.id, name: p.name || p.email }); setNewPw(''); setPwMsg('') }}>Password</button>
-                                    <button className="btn sm" onClick={() => { setCommAdjModal({ profileId: p.id, name: p.name || p.email }); setCommAdjAmount(''); setCommAdjNote('') }}>Adjust</button>
+                                    {isAdmin && <button className="btn sm" onClick={() => { setCommAdjModal({ profileId: p.id, name: p.name || p.email }); setCommAdjAmount(''); setCommAdjNote('') }}>Adjust</button>}
                                     {p.id !== profile?.id && (
                                       <button className="btn sm danger" disabled={busyUser === p.id} onClick={() => setUserActive(p, false)}>
                                         {busyUser === p.id ? 'Removing…' : 'Remove'}
@@ -1650,7 +1666,8 @@ export default function AdminPage() {
                     <option value="rep">Rep — can dial, view dashboard, see all stats</option>
                     <option value="dispatcher">Dispatcher — everything a rep has, plus Dispatch for Profit</option>
                     <option value="ops_manager">Operations Manager — department TVs, technician team & scorecards, 3-day board, manual dialing (no call center)</option>
-                    <option value="admin">Admin — full access including uploads and user management</option>
+                    <option value="call_center_manager">Call Center Manager — runs the call center & dispatch: people, WFM, campaigns, QA, routing, Command Center (no pay setup or field side)</option>
+                    {(isAdmin || editProfile.role === 'admin') && <option value="admin">Admin — full access including uploads and user management</option>}
                   </select>
                 </div>
                 {['admin', 'dispatcher'].includes(editProfile.role) && (
@@ -1742,7 +1759,7 @@ export default function AdminPage() {
           )}
 
           {/* ── COMPANY DIRECTORY ── */}
-          {isAdmin && (
+          {canCC && (
             <Section title="Company directory" desc="Numbers every CSR can dial from Manual Dial — techs, warehouse, vendors, the office next door"
               actions={<SaveNote>{dirMsg}</SaveNote>}
               bodyStyle={{ display:'flex', flexDirection:'column', gap:8 }}>
@@ -1777,7 +1794,7 @@ export default function AdminPage() {
       {pwModal && (
         <Modal title={pwModal === 'me' ? 'Change My Password' : `Change Password — ${pwModal.name}`} onClose={() => { setPwModal(null); setNewPw(''); setPwMsg('') }} width={380}>
           <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
-            {!isAdmin || pwModal === 'me' ? (
+            {!canCC || pwModal === 'me' ? (
               <div style={{ fontSize:13, color:'var(--text-secondary)' }}>Enter a new password for your account.</div>
             ) : (
               <div style={{ fontSize:13, color:'var(--text-secondary)' }}>Set a new password for <strong>{pwModal.name}</strong>. They will need to use this to log in next time.</div>

@@ -60,9 +60,15 @@ export function AuthProvider({ children }) {
   // TVs, the technician team, scorecards, the 3-day board and manual dialing —
   // nothing call-center.
   const isOpsManager = profile?.role === 'ops_manager'
+  // Call center managers (Deanna, Sep 2026) run the call center and dispatch
+  // with admin-level tools there — people, WFM, campaigns, QA, routing — but
+  // not pay setup, the field side, system settings or owner pages.
+  // canManageCallCenter is the gate for those call-center admin tools.
+  const isCallCenterManager = profile?.role === 'call_center_manager'
+  const canManageCallCenter = isAdmin || isCallCenterManager
 
   return (
-    <AuthContext.Provider value={{ user, profile, loading, isAdmin, isDispatcher, isOpsManager, refreshProfile: () => fetchProfile(user?.id) }}>
+    <AuthContext.Provider value={{ user, profile, loading, isAdmin, isDispatcher, isOpsManager, isCallCenterManager, canManageCallCenter, refreshProfile: () => fetchProfile(user?.id) }}>
       {children}
     </AuthContext.Provider>
   )

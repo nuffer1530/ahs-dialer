@@ -37,8 +37,11 @@ export default function TeamPage() {
   const isMobile = useIsMobile()
   const isAdmin = profile?.role === 'admin'
   const isOps = profile?.role === 'ops_manager'
+  // Call center managers get the whole call center team, never the field.
+  const isCCM = profile?.role === 'call_center_manager'
   const myTeams = isAdmin ? TEAMS
     : isOps ? TEAMS.filter(t => t.id === 'technicians')
+    : isCCM ? TEAMS.filter(t => t.id === 'call_center')
     : TEAMS.filter(t => t.id !== 'technicians' && (profile?.leads_teams || []).includes(t.id))
   const [teamPick, setTeamPick] = useState(null)
   const [tabPick, setTabPick] = useState(null)
