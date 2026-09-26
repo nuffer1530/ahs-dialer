@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { sb } from '../lib/supabase'
 import { toast } from '../lib/dialogs'
 import { useIsMobile } from '../lib/useIsMobile'
-import { Segmented, Ring, PillNav, Face, ToneChip, eyebrow, num, panel } from './ui'
+import { Segmented, Ring, PillNav, Face, ToneChip, eyebrow, num, mono, panel } from './ui'
 import { LEVELS, levelOf, rateKpi, fmtKpi, LevelChip, ScoreDelta, LevelPips, KpiTrack } from './ScorecardsPanel'
 
 // Team → Technicians → Scorecards. Service technicians, scored like the CSR
@@ -95,7 +95,7 @@ function TechCard({ t, score, prevScore, vs, rules, elapsed, onOpen }) {
           </div>
         </div>
         <div style={{ textAlign: 'right' }}>
-          <div style={{ ...num, fontSize: 28, fontWeight: 800, lineHeight: 1, letterSpacing: '-.02em', color: lv ? `var(--tone-${LEVELS[lv].tone}-tx)` : 'var(--text-muted)' }}>
+          <div style={{ ...mono, fontSize: 28, fontWeight: 600, lineHeight: 1, color: lv ? `var(--tone-${LEVELS[lv].tone}-tx)` : 'var(--text-muted)' }}>
             {score == null ? '—' : score.toFixed(2)}
           </div>
           <div style={{ fontSize: 10.5, color: 'var(--text-muted)', marginTop: 3 }}>out of 4.00</div>
@@ -138,7 +138,7 @@ function RulesEditor({ rules, setRules, onSave, saving }) {
   return (
     <div style={{ ...panel, padding: '16px 20px', marginBottom: 18 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12, flexWrap: 'wrap' }}>
-        <div style={{ fontSize: 14, fontWeight: 700 }}>Technician scoring rules</div>
+        <div className="disp" style={{ fontSize: 14, fontWeight: 700 }}>Technician scoring rules</div>
         <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Full-month targets — the current month is judged on pace</span>
         <span style={{ ...num, marginLeft: 'auto', fontSize: 12, fontWeight: 700, color: total === 100 ? 'var(--tone-green-tx)' : 'var(--tone-red-tx)' }}>Weights total {total}%</span>
         <button className="btn sm primary" disabled={saving} onClick={onSave}>{saving ? 'Saving…' : 'Save rules'}</button>
@@ -287,7 +287,7 @@ export default function TechScorecardsPanel() {
           <div style={{ ...panel, padding: isMobile ? 16 : '20px 22px', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 18, flexWrap: 'wrap' }}>
             <TechRing name={sel.t.name} score={sel.s} size={72} stroke={6} />
             <div style={{ flex: '1 1 220px', minWidth: 0 }}>
-              <div style={{ fontSize: 20, fontWeight: 800, letterSpacing: '-.01em' }}>{sel.t.name}</div>
+              <div className="disp" style={{ fontSize: 20, fontWeight: 700, letterSpacing: '-.015em' }}>{sel.t.name}</div>
               <div style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 2 }}>{sel.t.trade} service technician · {monthName(month)}</div>
               <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
                 <LevelChip level={levelOf(sel.s)} />
@@ -296,7 +296,7 @@ export default function TechScorecardsPanel() {
             </div>
             <div style={{ textAlign: 'right' }}>
               <div style={eyebrow}>Overall score</div>
-              <div style={{ ...num, fontSize: 38, fontWeight: 800, lineHeight: 1.05, letterSpacing: '-.03em', color: levelOf(sel.s) ? `var(--tone-${LEVELS[levelOf(sel.s)].tone}-tx)` : 'var(--text-muted)' }}>{sel.s == null ? '—' : sel.s.toFixed(2)}</div>
+              <div style={{ ...mono, fontSize: 38, fontWeight: 600, lineHeight: 1.05, color: levelOf(sel.s) ? `var(--tone-${LEVELS[levelOf(sel.s)].tone}-tx)` : 'var(--text-muted)' }}>{sel.s == null ? '—' : sel.s.toFixed(2)}</div>
               <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>out of 4.00</div>
             </div>
           </div>
@@ -317,7 +317,7 @@ export default function TechScorecardsPanel() {
                     </div>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <span style={{ ...num, fontSize: 22, fontWeight: 800 }}>{fmtKpi(k, v)}</span>
+                    <span style={{ ...mono, fontSize: 22, fontWeight: 600 }}>{fmtKpi(k, v)}</span>
                     <LevelChip level={rateKpi(k, v, thr)} small />
                   </div>
                   {thr ? <KpiTrack kpi={k} value={v} thr={thr} /> : <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Set a target in Scoring rules</span>}
@@ -334,7 +334,7 @@ export default function TechScorecardsPanel() {
           <div style={{ ...panel, marginBottom: 18, display: 'grid', gridTemplateColumns: isMobile ? 'minmax(0, 1fr)' : 'minmax(270px, 300px) minmax(0, 1fr) minmax(240px, 290px)' }}>
             <div style={{ padding: '20px 22px', display: 'flex', alignItems: 'center', gap: 18 }}>
               <Ring pct={teamAvg == null ? 0 : (teamAvg / 4) * 100} size={92} stroke={8} tone={lv ? LEVELS[lv].tone : 'gray'}>
-                <div style={{ ...num, fontSize: 22, fontWeight: 800, color: lv ? `var(--tone-${LEVELS[lv].tone}-tx)` : 'var(--text-muted)' }}>{teamAvg == null ? '—' : teamAvg.toFixed(2)}</div>
+                <div style={{ ...mono, fontSize: 22, fontWeight: 600, color: lv ? `var(--tone-${LEVELS[lv].tone}-tx)` : 'var(--text-muted)' }}>{teamAvg == null ? '—' : teamAvg.toFixed(2)}</div>
               </Ring>
               <div>
                 <div style={eyebrow}>{trade === 'all' ? 'Field team score' : `${trade} score`}</div>

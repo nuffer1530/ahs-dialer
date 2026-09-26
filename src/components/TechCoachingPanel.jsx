@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { sb } from '../lib/supabase'
 import { useIsMobile } from '../lib/useIsMobile'
 import CoachingSnapshots, { fieldTone } from './CoachingSnapshots'
-import { Segmented, PillNav, Ring, ToneChip, eyebrow, num, panel } from './ui'
+import { Segmented, PillNav, Ring, ToneChip, eyebrow, num, mono, panel } from './ui'
 
 // Team → Technicians → Coaching & Evals. Field Pro (Siro) records each tech's
 // conversation in the customer's home and scores it on the trade's scorecard;
@@ -82,11 +82,11 @@ function Summary({ rows, isMobile }) {
       <div style={{ padding: '16px 20px', minWidth: 0, display: 'flex', gap: 28, ...divider }}>
         <div>
           <div style={eyebrow}>Won on the call</div>
-          <div style={{ ...num, fontSize: 26, fontWeight: 800, marginTop: 6, color: 'var(--tone-green-tx)' }}>{won}</div>
+          <div style={{ ...mono, fontSize: 26, fontWeight: 600, marginTop: 6, color: 'var(--tone-green-tx)' }}>{won}</div>
         </div>
         <div>
           <div style={eyebrow}>Re-Engage leads</div>
-          <div style={{ ...num, fontSize: 26, fontWeight: 800, marginTop: 6, color: fus ? 'var(--tone-amber-tx)' : 'var(--text-primary)' }}>{fus}</div>
+          <div style={{ ...mono, fontSize: 26, fontWeight: 600, marginTop: 6, color: fus ? 'var(--tone-amber-tx)' : 'var(--text-primary)' }}>{fus}</div>
         </div>
       </div>
     </div>

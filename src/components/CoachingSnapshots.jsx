@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Segmented, Ring } from './ui'
+import { Segmented, Ring, mono } from './ui'
 
 // Moved to the shared kit (ui.jsx); re-exported so existing imports keep working.
 export { Segmented, Ring }
@@ -171,7 +171,7 @@ function CsrCard({ c, vs, onOpen, K = KINDS.csr }) {
           </div>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
-          <div style={{ ...num, fontSize: 28, fontWeight: 800, lineHeight: 1, letterSpacing: '-.02em', color: `var(--tone-${t}-tx)` }}>
+          <div style={{ ...mono, fontSize: 28, fontWeight: 600, lineHeight: 1, color: `var(--tone-${t}-tx)` }}>
             {c.qa}<span style={{ fontSize: 15, fontWeight: 700 }}>{K.unit || <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>/100</span>}</span>
           </div>
           <Spark points={c.trend} tone={K.tone} />
@@ -232,7 +232,7 @@ function TeamPanel({ team, generatedAt, busy, onRegenerate, onPrint, isMobile, K
       gridTemplateColumns: isMobile ? 'minmax(0, 1fr)' : 'minmax(270px, 300px) minmax(0, 1fr) minmax(240px, 290px)' }}>
       <div style={{ padding: '20px 22px', display: 'flex', alignItems: 'center', gap: 18 }}>
         <Ring pct={team.qa} size={92} stroke={8} tone={K === KINDS.csr ? undefined : K.tone(team.qa)}>
-          <div style={{ ...num, fontSize: 24, fontWeight: 800, letterSpacing: '-.02em', color: `var(--tone-${K.tone(team.qa)}-tx)` }}>
+          <div style={{ ...mono, fontSize: 24, fontWeight: 600, color: `var(--tone-${K.tone(team.qa)}-tx)` }}>
             {team.qa ?? '—'}<span style={{ fontSize: 13 }}>{K.unit}</span>
           </div>
         </Ring>

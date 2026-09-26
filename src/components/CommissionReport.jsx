@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react'
 import { sb } from '../lib/supabase'
 import { useIsMobile } from '../lib/useIsMobile'
 import { Segmented } from './CoachingSnapshots'
+import { mono } from './ui'
 
 // Commission payouts — team money. Lives on the Team page; Settings keeps only
 // configuration. A summary panel (total vs the prior period, split by type,
@@ -260,7 +261,7 @@ export default function CommissionReport() {
             gridTemplateColumns: isMobile ? 'minmax(0, 1fr)' : 'minmax(260px, 300px) minmax(0, 1fr) minmax(0, 1fr)' }}>
             <div style={{ padding: '20px 22px' }}>
               <div style={eyebrow}>{repFilter === 'all' ? 'Total paid' : `Paid to ${repFilter}`}</div>
-              <div style={{ ...num, fontSize: 34, fontWeight: 800, letterSpacing: '-.03em', lineHeight: 1.1, margin: '6px 0 4px', color: 'var(--tone-green-tx)' }}>
+              <div style={{ ...mono, fontSize: 34, fontWeight: 600, lineHeight: 1.1, margin: '6px 0 4px', color: 'var(--tone-green-tx)' }}>
                 {money(total)}
               </div>
               <div style={{ ...num, fontSize: 13, color: 'var(--text-secondary)', marginBottom: 8 }}>

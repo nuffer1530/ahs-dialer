@@ -5,6 +5,7 @@ import { toast } from '../lib/dialogs'
 import { useIsMobile } from '../lib/useIsMobile'
 import Avatar from './Avatar'
 import { Ring, Segmented } from './CoachingSnapshots'
+import { mono } from './ui'
 
 // Team → Scorecards. Opens on the whole team for the month (team panel + one
 // card per CSR); a card opens that rep's review. KPI actuals are filled by
@@ -199,7 +200,7 @@ function RepCard({ rep, actuals, score, prevScore, vs, thresholds, onOpen }) {
           </div>
         </div>
         <div style={{ textAlign: 'right' }}>
-          <div style={{ ...num, fontSize: 28, fontWeight: 800, lineHeight: 1, letterSpacing: '-.02em', color: lv ? `var(--tone-${LEVELS[lv].tone}-tx)` : 'var(--text-muted)' }}>
+          <div style={{ ...mono, fontSize: 28, fontWeight: 600, lineHeight: 1, color: lv ? `var(--tone-${LEVELS[lv].tone}-tx)` : 'var(--text-muted)' }}>
             {score == null ? '—' : score.toFixed(2)}
           </div>
           <div style={{ fontSize: 10.5, color: 'var(--text-muted)', marginTop: 3 }}>out of 4.00</div>
@@ -236,7 +237,7 @@ function TeamPanel({ reps, data, weights, thresholds, vs, isMobile }) {
       gridTemplateColumns: isMobile ? 'minmax(0, 1fr)' : 'minmax(270px, 300px) minmax(0, 1fr) minmax(240px, 290px)' }}>
       <div style={{ padding: '20px 22px', display: 'flex', alignItems: 'center', gap: 18 }}>
         <Ring pct={avg == null ? 0 : (avg / 4) * 100} size={92} stroke={8} tone={lv ? LEVELS[lv].tone : 'gray'}>
-          <div style={{ ...num, fontSize: 22, fontWeight: 800, letterSpacing: '-.02em', color: lv ? `var(--tone-${LEVELS[lv].tone}-tx)` : 'var(--text-muted)' }}>
+          <div style={{ ...mono, fontSize: 22, fontWeight: 600, color: lv ? `var(--tone-${LEVELS[lv].tone}-tx)` : 'var(--text-muted)' }}>
             {avg == null ? '—' : avg.toFixed(2)}
           </div>
         </Ring>
@@ -292,7 +293,7 @@ function RulesEditor({ weights, thresholds, setWeights, setThresholds, onSave, s
   return (
     <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 16, padding: '16px 20px', marginBottom: 18 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12, flexWrap: 'wrap' }}>
-        <div style={{ fontSize: 14, fontWeight: 700 }}>Scoring rules</div>
+        <div className="disp" style={{ fontSize: 14, fontWeight: 700 }}>Scoring rules</div>
         <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Apply to every CSR, every month</span>
         <span style={{ ...num, marginLeft: 'auto', fontSize: 12, fontWeight: 700, color: total === 100 ? 'var(--tone-green-tx)' : 'var(--tone-red-tx)' }}>
           Weights total {total}%{total === 100 ? '' : ' — should be 100%'}
@@ -428,7 +429,7 @@ function ReviewView({ rep, month, data, weights, thresholds, vs, editable, onBac
         display: 'flex', alignItems: 'center', gap: 18, flexWrap: 'wrap' }}>
         <RepRing rep={rep} score={score} size={72} stroke={6} />
         <div style={{ flex: '1 1 220px', minWidth: 0 }}>
-          <div style={{ fontSize: 20, fontWeight: 800, letterSpacing: '-.01em' }}>{rep.name || rep.email}</div>
+          <div className="disp" style={{ fontSize: 20, fontWeight: 700, letterSpacing: '-.015em' }}>{rep.name || rep.email}</div>
           <div style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 2 }}>Performance review · {monthLabel}</div>
           <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
             <LevelChip level={lv} />
@@ -437,7 +438,7 @@ function ReviewView({ rep, month, data, weights, thresholds, vs, editable, onBac
         </div>
         <div style={{ textAlign: 'right' }}>
           <div style={eyebrow}>Overall score</div>
-          <div style={{ ...num, fontSize: 38, fontWeight: 800, lineHeight: 1.05, letterSpacing: '-.03em', color: lv ? `var(--tone-${LEVELS[lv].tone}-tx)` : 'var(--text-muted)' }}>
+          <div style={{ ...mono, fontSize: 38, fontWeight: 600, lineHeight: 1.05, color: lv ? `var(--tone-${LEVELS[lv].tone}-tx)` : 'var(--text-muted)' }}>
             {score == null ? '—' : score.toFixed(2)}
           </div>
           <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>out of 4.00</div>
@@ -449,7 +450,7 @@ function ReviewView({ rep, month, data, weights, thresholds, vs, editable, onBac
 
       <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 16, marginBottom: 16, overflow: 'hidden' }}>
         <div style={{ padding: '12px 20px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-          <div style={{ fontSize: 14, fontWeight: 700 }}>KPIs</div>
+          <div className="disp" style={{ fontSize: 14, fontWeight: 700 }}>KPIs</div>
           <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
             {editable ? 'This month is past the automatic fill — numbers can be corrected by hand.'
               : `Filled automatically every hour from ServiceTitan and Andi${synced ? ` · last update ${synced}` : ''}`}
@@ -473,7 +474,7 @@ function ReviewView({ rep, month, data, weights, thresholds, vs, editable, onBac
                   <input type="number" value={edits[k.id]} onChange={e => setEdits(x => ({ ...x, [k.id]: e.target.value }))} aria-label={k.label}
                     style={{ width: 90, padding: '6px 8px', fontSize: 15, fontWeight: 700, textAlign: 'center', border: '1px solid var(--border-strong)', borderRadius: 8, background: 'var(--surface)', color: 'var(--text-primary)' }} />
                 ) : (
-                  <span style={{ ...num, fontSize: 22, fontWeight: 800, letterSpacing: '-.01em' }}>{fmtKpi(k, v)}</span>
+                  <span style={{ ...mono, fontSize: 22, fontWeight: 600, letterSpacing: '-.01em' }}>{fmtKpi(k, v)}</span>
                 )}
                 <LevelChip level={lvK} small />
               </div>
@@ -485,7 +486,7 @@ function ReviewView({ rep, month, data, weights, thresholds, vs, editable, onBac
 
       <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 16, padding: '16px 20px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-          <div style={{ fontSize: 14, fontWeight: 700 }}>Manager notes</div>
+          <div className="disp" style={{ fontSize: 14, fontWeight: 700 }}>Manager notes</div>
           <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Printed on the review</span>
           <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--tone-green-tx)' }}>{savedAt && !saving ? 'Saved' : ''}</span>
           <button className="btn sm primary" disabled={saving} onClick={save}>{saving ? 'Saving…' : editable ? 'Save review' : 'Save notes'}</button>

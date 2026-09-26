@@ -55,7 +55,7 @@ export default function TeamPage() {
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-      <div style={{ background: 'var(--surface)', borderBottom: '1px solid var(--border)', flexShrink: 0, padding: isMobile ? '0 12px' : '0 24px', display: 'flex', gap: 12, alignItems: 'center' }}>
+      <div style={{ background: 'var(--bg)', flexShrink: 0, padding: isMobile ? '6px 12px 0' : '10px 24px 0', display: 'flex', gap: 12, alignItems: 'center' }}>
         <PageTabs tabs={TABS} value={tab} onChange={setTab} />
         {myTeams.length > 1 ? (
           <div style={{ marginLeft: 'auto', flexShrink: 0 }}>

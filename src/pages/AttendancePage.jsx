@@ -8,7 +8,7 @@ import { ATTENDANCE_DEFAULTS, invalidateOpsConfig, loadOpsConfig } from '../lib/
 import Modal from '../components/Modal'
 import GraphicalSchedule from '../components/GraphicalSchedule'
 import Avatar from '../components/Avatar'
-import { PageTabs, PillNav, SummaryPanel, Stat, Ring, ToneChip, Bar, Face, eyebrow, num, panel } from '../components/ui'
+import { PageTabs, PillNav, Segmented, SummaryPanel, Stat, Ring, ToneChip, Bar, Face, eyebrow, num, panel } from '../components/ui'
 
 const DAYS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun']
 const GRACE = 5
@@ -148,12 +148,24 @@ export default function AttendancePage() {
     return toYMD(monday)
   }
 
-  const [tab, setTab] = useState(() => new URLSearchParams(window.location.search).get('tab') || 'schedule')
+  // Schedule and the old Graphical tab are one Schedule tab now (redesign
+  // stage 5): a week grid and a day timeline of the same shifts. Old
+  // ?tab=graphical links land on the timeline.
+  const [tab, setTab] = useState(() => { const t = new URLSearchParams(window.location.search).get('tab') || 'schedule'; return t === 'graphical' ? 'schedule' : t })
+  const [schedView, setSchedView] = useState(() => {
+    const q = new URLSearchParams(window.location.search)
+    return q.get('tab') === 'graphical' || q.get('view') === 'timeline' ? 'timeline' : 'grid'
+  })
   // Survive hard refresh: the active tab lives in the URL (?tab=), like MyPage.
   useEffect(() => {
     const u = new URL(window.location)
-    if (u.searchParams.get('tab') !== tab) { u.searchParams.set('tab', tab); window.history.replaceState({}, '', u) }
-  }, [tab])
+    const view = tab === 'schedule' && schedView === 'timeline' ? 'timeline' : null
+    if (u.searchParams.get('tab') !== tab || u.searchParams.get('view') !== view) {
+      u.searchParams.set('tab', tab)
+      if (view) u.searchParams.set('view', view); else u.searchParams.delete('view')
+      window.history.replaceState({}, '', u)
+    }
+  }, [tab, schedView])
   const [profiles, setProfiles] = useState([])
   const [schedules, setSchedules] = useState([])
   const [statusEvents, setStatusEvents] = useState([])
@@ -638,7 +650,6 @@ export default function AttendancePage() {
 
   const TABS = [
     { id:'schedule', label:'Schedule' },
-    { id:'graphical', label:'Graphical' },
     { id:'adherence', label:'Adherence' },
     { id:'points', label:'Points' },
     { id:'reports', label:'Reports' },
@@ -655,11 +666,14 @@ export default function AttendancePage() {
 
       {/* ── HEADER BAR ── tabs on the left, week navigation on the right. The
           schedule actions live in the Schedule tab's own toolbar. */}
-      <div style={{ background:'var(--surface)', borderBottom:'1px solid var(--border)', flexShrink:0, padding: isMobile ? '0 12px' : '0 24px',
+      <div style={{ background:'var(--bg)', flexShrink:0, padding: isMobile ? '6px 12px 0' : '10px 24px 0',
         display:'flex', alignItems:'center', gap:12, flexWrap:'wrap' }}>
         <PageTabs value={tab} onChange={setTab}
           tabs={TABS.map(t => [t.id, t.label, t.id === 'schedule' && isAdmin && draftCount ? draftCount : null])} />
-        {(tab === 'schedule' || tab === 'adherence') && (
+        {tab === 'schedule' && (
+          <Segmented value={schedView} onChange={setSchedView} options={[['grid', 'Week grid'], ['timeline', 'Day timeline']]} />
+        )}
+        {((tab === 'schedule' && schedView === 'grid') || tab === 'adherence') && (
           <div style={{ marginLeft: isMobile ? 0 : 'auto', display:'flex', alignItems:'center', gap:8, paddingBottom: isMobile ? 8 : 0 }}>
             {!weekDates.includes(today) && (
               <button className="btn sm" onClick={() => setWeekBase(localYMD())} style={{ borderRadius:99 }}>This week</button>
@@ -672,8 +686,8 @@ export default function AttendancePage() {
       {/* ── CONTENT AREA ── */}
       <div style={{ flex:1, overflowY:'auto' }}>
 
-        {/* ── SCHEDULE TAB ── */}
-        {tab === 'schedule' && (
+        {/* ── SCHEDULE TAB · week grid ── */}
+        {tab === 'schedule' && schedView === 'grid' && (
           <div style={{ padding: isMobile ? 12 : 24 }}>
             {/* Week at a glance, then the actions, then the grid. */}
             {(() => {
@@ -841,8 +855,8 @@ export default function AttendancePage() {
           </div>
         )}
 
-        {/* ── GRAPHICAL TAB ── */}
-        {tab === 'graphical' && (
+        {/* ── SCHEDULE TAB · day timeline (was the Graphical tab) ── */}
+        {tab === 'schedule' && schedView === 'timeline' && (
           <GraphicalSchedule profiles={schedProfiles} onUpdate={async () => {
             const from = new Date(); from.setDate(from.getDate() - 30)
             const to = new Date(); to.setDate(to.getDate() + 30)
@@ -956,7 +970,7 @@ export default function AttendancePage() {
           const wfmCard = isAdmin && wfmCfg && (
             <div style={{ ...panel, padding:'16px 20px' }}>
               <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:12 }}>
-                <span style={{ fontSize:14, fontWeight:700 }}>WFM settings</span>
+                <span className="disp" style={{ fontSize:14, fontWeight:700 }}>WFM settings</span>
                 <span style={{ fontSize:12, color:'var(--text-muted)' }}>Points per incident and the color thresholds</span>
                 <div style={{ marginLeft:'auto', display:'flex', alignItems:'center', gap:10 }}>
                   {wfmMsg && <span style={{ fontSize:12, color: wfmMsg.startsWith('Error') ? 'var(--danger)' : 'var(--tone-green-tx)' }}>{wfmMsg}</span>}
