@@ -83,7 +83,7 @@ function Section({ title, desc, isMobile, children }) {
   return (
     <div style={{ ...panel, overflow:'hidden', flexShrink:0 }}>
       <div style={{ display:'flex', alignItems:'baseline', gap:'2px 10px', flexWrap:'wrap', padding: isMobile ? '12px 14px' : '14px 20px', borderBottom:'1px solid var(--border)' }}>
-        <span style={{ fontSize:14.5, fontWeight:700 }}>{title}</span>
+        <span className="disp" style={{ fontSize:16, fontWeight:700, letterSpacing:'-.01em' }}>{title}</span>
         {desc && <span style={{ fontSize:12, color:'var(--text-muted)' }}>{desc}</span>}
       </div>
       {children}
@@ -254,7 +254,7 @@ export default function DashboardPage() {
     <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden', minWidth:0 }}>
 
       {/* -- HEADER BAR: page tabs, exports on the right (matches WFM / Team) -- */}
-      <div style={{ background:'var(--surface)', borderBottom:'1px solid var(--border)', flexShrink:0, padding: isMobile ? '0 12px' : '0 24px',
+      <div style={{ background:'var(--bg)', flexShrink:0, padding: isMobile ? '6px 12px 0' : '10px 24px 0',
         display:'flex', alignItems:'center', gap:12, flexWrap:'wrap' }}>
         <PageTabs tabs={TABS.map(t => [t.id, t.label])} value={tab} onChange={setTab} />
         {/* Phone: the four exports take their own full-width line and wrap two-up. */}

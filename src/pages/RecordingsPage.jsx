@@ -222,7 +222,7 @@ export default function RecordingsPage() {
 
       {/* ── Header bar — direction as page tabs (Voicemails carries the shared
           inbox's unheard count), the period on the right. ── */}
-      <div style={{ background:'var(--surface)', borderBottom:'1px solid var(--border)', flexShrink:0, padding: isMobile ? '0 12px' : '0 24px',
+      <div style={{ background:'var(--bg)', flexShrink:0, padding: isMobile ? '6px 12px 0' : '10px 24px 0',
         display:'flex', alignItems:'center', gap:12, flexWrap:'wrap' }}>
         <PageTabs value={dirFilter || 'all'} onChange={id => setDirFilter(id === 'all' ? '' : id)}
           tabs={DIRECTIONS.map(([id, label]) => [id, label, id === 'voicemail' && newVmCount ? newVmCount : null])} />
@@ -268,7 +268,7 @@ export default function RecordingsPage() {
           {/* The list — count and totals ride in its header row */}
           <div style={{ ...panel, overflow:'hidden' }}>
             <div style={{ padding: isMobile ? '12px 14px' : '14px 20px', display:'flex', alignItems:'center', gap:'6px 10px', flexWrap:'wrap' }}>
-              <span style={{ ...num, fontSize:14.5, fontWeight:700 }}>
+              <span className="disp" style={{ ...num, fontSize:16, fontWeight:700, letterSpacing:'-.01em' }}>
                 {loading ? 'Recordings' : `${filtered.length} recording${filtered.length !== 1 ? 's' : ''}`}
               </span>
               <span style={{ fontSize:12, color:'var(--text-muted)' }}>

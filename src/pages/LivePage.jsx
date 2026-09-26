@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useData } from '../lib/DataContext'
 import { useAuth } from '../lib/AuthContext'
 import { usePhone } from '../lib/PhoneContext'
@@ -75,7 +76,7 @@ const sec = { ...panel, overflow:'hidden', flexShrink:0 }
 function SectionHead({ title, desc, isMobile, children }) {
   return (
     <div style={{ padding: isMobile ? '12px 14px' : '14px 20px', borderBottom:'1px solid var(--border)', display:'flex', alignItems:'center', gap:'6px 10px', flexWrap:'wrap' }}>
-      <span style={{ fontSize:14.5, fontWeight:700 }}>{title}</span>
+      <span className="disp" style={{ fontSize:16, fontWeight:700, letterSpacing:'-.01em' }}>{title}</span>
       {desc && <span style={{ fontSize:12, color:'var(--text-muted)' }}>{desc}</span>}
       {children && <div style={{ marginLeft:'auto', display:'flex', alignItems:'center', gap:6, flexWrap:'wrap' }}>{children}</div>}
     </div>
@@ -83,6 +84,7 @@ function SectionHead({ title, desc, isMobile, children }) {
 }
 
 export default function LivePage() {
+  const navigate = useNavigate()
   const { contacts } = useData()
   const { isAdmin, profile: myProfile } = useAuth()
   const { callTeammate, twilioReady, callStatus } = usePhone()
@@ -315,6 +317,20 @@ export default function LivePage() {
         </div>
       )}
 
+      {/* The floor, and one click to put it on the wall (the Call Center TV
+          also stays in the sidebar's TV boards launcher). */}
+      <div style={{ display:'flex', alignItems:'center', gap:12, flexWrap:'wrap' }}>
+        <div style={{ display:'flex', flexDirection:'column', lineHeight:1.2 }}>
+          <span className="disp" style={{ fontSize:20, fontWeight:700, letterSpacing:'-.015em' }}>The floor right now</span>
+          <span style={{ fontSize:12.5, color:'var(--text-muted)' }}>Queue, live calls and who’s on what — updates live</span>
+        </div>
+        <a href="/warroom" onClick={(e) => { e.preventDefault(); navigate('/warroom') }} className="btn"
+          style={{ marginLeft:'auto', borderRadius:99, height:36, padding:'0 16px', display:'inline-flex', alignItems:'center', gap:7, textDecoration:'none' }}>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true"><rect x="3" y="5" width="18" height="12" rx="2" /><path d="M9 21h6M12 17v4" /></svg>
+          Put on TV
+        </a>
+      </div>
+
       {/* ── Telephony KPIs — always first, this is what a floor lead scans.
           One summary panel, zones split by hairlines. mgrid: auto-fit already
           gives two zones a row on a phone; without it the phone layer stacks
@@ -400,7 +416,7 @@ export default function LivePage() {
                 ? <span style={{ width:9, height:9, borderRadius:'50%', background:'var(--tone-red-tx)', animation:'pulse 1.2s infinite', flexShrink:0 }} />
                 : <span style={{ width:9, height:9, borderRadius:'50%', background:'var(--text-muted)', flexShrink:0 }} />}
               <div style={{ flex:1, minWidth:0 }}>
-                <div style={{ fontSize:15, fontWeight:700, display:'flex', alignItems:'center', gap:8, flexWrap:'wrap' }}>
+                <div className="disp" style={{ fontSize:16, fontWeight:700, display:'flex', alignItems:'center', gap:8, flexWrap:'wrap' }}>
                   {watchTx ? (watchTx.contactName || contacts.find(x => x.id === watchTx.contactId)?.name || 'Live call') : 'Live call'}
                   {watchTx?.active === false && <ToneChip tone="gray" small>Call ended</ToneChip>}
                 </div>

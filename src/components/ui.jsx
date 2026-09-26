@@ -8,6 +8,8 @@ import { Children } from 'react'
 // tokens in index.css (tone-* for status), so light and dark both work.
 
 export const num = { fontVariantNumeric: 'tabular-nums' }
+// Headline numbers (redesign, Sep 2026): Geist Mono, tabular.
+export const mono = { fontFamily: 'var(--font-mono)', fontVariantNumeric: 'tabular-nums', letterSpacing: '-.01em' }
 export const eyebrow = { fontSize: 10.5, fontWeight: 700, letterSpacing: '.07em', textTransform: 'uppercase', color: 'var(--text-muted)' }
 export const panel = { background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 16 }
 
@@ -120,7 +122,7 @@ export function Stat({ label, value, sub, tone, big }) {
   return (
     <div>
       <div style={eyebrow}>{label}</div>
-      <div style={{ ...num, fontSize: big ? 34 : 28, fontWeight: 800, letterSpacing: '-.03em', lineHeight: 1.1, marginTop: 6,
+      <div style={{ ...mono, fontSize: big ? 32 : 26, fontWeight: 600, letterSpacing: '-.03em', lineHeight: 1.1, marginTop: 6,
         color: tone ? `var(--tone-${tone}-tx)` : 'var(--text-primary)' }}>{value}</div>
       {sub && <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', marginTop: 4 }}>{sub}</div>}
     </div>
