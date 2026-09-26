@@ -43,7 +43,11 @@ export const HUBS = [
   },
   {
     id: 'leadership', label: 'Leadership', icon: 'leadership',
-    tabs: [{ to: '/leadership', label: 'Weekly agenda', gate: c => c.isLeader }],
+    tabs: [
+      { to: '/leadership', label: 'Weekly agenda', end: true, gate: c => c.isLeader },
+      // Stage 7: was a second tab row inside the page.
+      { to: '/leadership/analyst', label: 'AI Analyst', gate: c => c.isLeader },
+    ],
   },
 ]
 

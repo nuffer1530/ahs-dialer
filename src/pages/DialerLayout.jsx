@@ -497,7 +497,7 @@ function DialerLayoutInner() {
           <Route path="/recordings" element={isOpsManager ? <Navigate to="/" replace /> : <RecordingsPage />} />
           {isAdmin && <Route path="/attendance" element={<AttendancePage />} />}
           {(isAdmin || isOpsManager || (profile?.leads_teams || []).length > 0) && <Route path="/team" element={<TeamPage />} />}
-          {isLeader && <Route path="/leadership" element={<LeadershipPage />} />}
+          {isLeader && <Route path="/leadership/*" element={<LeadershipPage />} />}
           <Route path="/warroom" element={isOpsManager ? <Navigate to="/" replace /> : <WarRoomPage />} />
           {isLeader && <Route path="/tv/ceo" element={<CEOTVPage />} />}
           <Route path="/tv/:trade" element={<DeptTVPage />} />

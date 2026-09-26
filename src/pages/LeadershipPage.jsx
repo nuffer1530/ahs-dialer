@@ -8,10 +8,11 @@
 // simply won't load data for anyone else.
 
 import { useState, useEffect, useRef, useCallback, Component } from 'react'
+import { useLocation } from 'react-router-dom'
 import { sb } from '../lib/supabase'
 import { confirmDlg } from '../lib/dialogs'
 import { useIsMobile } from '../lib/useIsMobile'
-import { PageTabs, ToneChip, eyebrow, num, panel } from '../components/ui'
+import { ToneChip, eyebrow, num, mono, panel } from '../components/ui'
 
 const money = (n) => `$${Math.round(Number(n) || 0).toLocaleString()}`
 const pct = (n) => (n == null ? '—' : `${Math.round(Number(n) * 100)}%`)
@@ -30,10 +31,10 @@ const S = {
   page: { maxWidth: 1280, margin: '0 auto', padding: '24px 24px 60px' },
   // Print-only agenda title (the print sheet sizes it) — the screen title is `title`.
   h1: { fontSize: 22, fontWeight: 800, color: 'var(--text-primary)', margin: 0 },
-  title: { fontSize: 22, fontWeight: 800, letterSpacing: '-.02em', lineHeight: 1.2, color: 'var(--text-primary)', margin: 0 },
+  title: { fontSize: 24, fontWeight: 700, letterSpacing: '-.02em', lineHeight: 1.2, color: 'var(--text-primary)', margin: 0 },
   sub: { fontSize: 13, color: 'var(--text-secondary)' },
   section: { ...panel, padding: '16px 20px', marginTop: 16 },
-  sectionTitle: { ...eyebrow, marginBottom: 12 },
+  sectionTitle: { fontSize: 16, fontWeight: 700, letterSpacing: '-.01em', color: 'var(--text-primary)', marginBottom: 12 },
   th: { ...eyebrow, textAlign: 'right', padding: '8px 8px', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' },
   td: { ...num, textAlign: 'right', padding: '8px 8px', borderBottom: '1px solid var(--border)', fontSize: 13, color: 'var(--text-primary)', whiteSpace: 'nowrap' },
   // Paired with className="form-input" (border, radius, focus ring); this keeps the rows dense.
@@ -47,8 +48,9 @@ const S = {
 }
 const TONE = { good: 'green', warn: 'amber', bad: 'red' }
 
-// Section heading — the eyebrow label. lp-title is its print hook.
-const Title = ({ children, style }) => <div className="lp-title" style={{ ...S.sectionTitle, ...style }}>{children}</div>
+// Section heading in the display face (redesign stage 7). lp-title is its
+// print hook — print pins it back to the small uppercase label.
+const Title = ({ children, style }) => <div className="lp-title disp" style={{ ...S.sectionTitle, ...style }}>{children}</div>
 
 // Phone reading order for the report's top-level blocks: numbers first, the
 // AI read, then the rosters, with the fill-in sections last. Applied as flex
@@ -73,7 +75,7 @@ function Card({ label, value, sub, tone, style, big }) {
   return (
     <div className="lp-card" style={{ flex: 1, minWidth: 150, padding: isMobile ? '14px 14px' : '16px 20px', background: 'var(--surface)', ...style }}>
       <div className="lp-card-label" style={eyebrow}>{label}</div>
-      <div className="lp-card-value" style={{ ...num, fontSize: big ? 32 : isMobile ? 22 : 26, fontWeight: 800, letterSpacing: '-.02em', lineHeight: 1.15, marginTop: 6,
+      <div className="lp-card-value" style={{ ...mono, fontSize: big ? 32 : isMobile ? 22 : 26, fontWeight: 600, lineHeight: 1.15, marginTop: 6,
         color: TONE[tone] ? `var(--tone-${TONE[tone]}-tx)` : 'var(--text-primary)' }}>{value}</div>
       {sub && <div className="lp-card-sub" style={{ fontSize: 12.5, color: 'var(--text-secondary)', marginTop: 4 }}>{sub}</div>}
     </div>
@@ -232,7 +234,10 @@ export default function LeadershipPage() {
 }
 
 function LeadershipPageInner() {
-  const [ltab, setLtab] = useState('agenda')
+  // Weekly agenda (/leadership) and AI Analyst (/leadership/analyst) are the
+  // hub's tabs. One route renders both, so switching keeps the loaded report.
+  const location = useLocation()
+  const ltab = location.pathname.startsWith('/leadership/analyst') ? 'brain' : 'agenda'
   const [weeks, setWeeks] = useState([])
   const [week, setWeek] = useState(null)
   const [currentWeek, setCurrentWeek] = useState(null)
@@ -382,11 +387,6 @@ function LeadershipPageInner() {
 
   return (
     <div style={isMobile && ltab === 'brain' ? { ...S.scroll, display: 'flex', flexDirection: 'column' } : S.scroll}>
-    {/* The app's page header: full-width surface bar with the kit's page
-        tabs, sticky so it survives the agenda's scroll. */}
-    <div className="no-print" style={{ position: 'sticky', top: 0, zIndex: 30, background: 'var(--surface)', borderBottom: '1px solid var(--border)', padding: isMobile ? '0 12px' : '0 24px', display: 'flex', alignItems: 'center', gap: 12 }}>
-      <PageTabs value={ltab} onChange={setLtab} tabs={[['agenda', 'Weekly Agenda'], ['brain', 'AI Analyst']]} />
-    </div>
     {/* Phone + AI tab: the page becomes a flex column so the chat fills the
         space under the tabs instead of sizing itself off the viewport. */}
     <div style={ltab === 'brain'
@@ -446,12 +446,15 @@ function LeadershipPageInner() {
              labels, hairline stat strips, tabular numbers). These hold the printed
              agenda at its tuned values — keep them after the rules above. */
           #leadership-print, #leadership-print * { font-variant-numeric: normal !important; }
-          #leadership-print .lp-title { font-size: 8.5px !important; font-weight: 800 !important; letter-spacing: 1px !important; margin-bottom: 4px !important; }
+          #leadership-print .lp-title { font-size: 8.5px !important; font-weight: 800 !important; letter-spacing: 1px !important; margin-bottom: 4px !important;
+            font-family: var(--font-body) !important; text-transform: uppercase !important; }
+          #leadership-print .lp-title:not([style*="--tone-"]) { color: var(--text-muted) !important; }
           #leadership-print th { font-size: 8px !important; letter-spacing: 0.6px !important; }
           #leadership-print .lp-cards { background: none !important; border: none !important; overflow: visible !important; margin-left: 0 !important; margin-right: 0 !important; }
           #leadership-print .lp-card { border: 1px solid var(--border) !important; background: none !important; }
           #leadership-print .lp-card-label { font-size: 8px !important; letter-spacing: 0.8px !important; }
-          #leadership-print .lp-card-value { font-size: 14px !important; margin-top: 1px !important; line-height: 1.5 !important; letter-spacing: normal !important; }
+          #leadership-print .lp-card-value { font-size: 14px !important; margin-top: 1px !important; line-height: 1.5 !important; letter-spacing: normal !important;
+            font-family: var(--font-body) !important; font-weight: 800 !important; }
           #leadership-print .lp-card-sub { font-size: 8.5px !important; margin-top: 2px !important; line-height: 1.5 !important; }
         }
       `}</style>
@@ -471,7 +474,7 @@ function LeadershipPageInner() {
           land together on one row beneath it, all 40px tall. */}
       <div className="no-print" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>
         <div style={isMobile ? { flex: '1 1 100%' } : { flex: 1, minWidth: 0 }}>
-          <h1 style={S.title}>Weekly Leadership Agenda</h1>
+          <h1 className="disp" style={S.title}>Weekly Leadership Agenda</h1>
           <div style={{ ...S.sub, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 6 }}>
             <span>Week ending</span>
             <select className="form-input" value={week || ''} onChange={e => setWeek(e.target.value)}
