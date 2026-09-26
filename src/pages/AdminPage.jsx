@@ -545,7 +545,7 @@ function FloorTicker() {
 }
 
 export default function AdminPage() {
-  const { profile, isAdmin, refreshProfile } = useAuth()
+  const { profile, isAdmin, isOpsManager, refreshProfile } = useAuth()
   const { campaigns } = useData()
   const isMobile = useIsMobile()
   const [settingsTab, setSettingsTab] = useState(() => new URLSearchParams(window.location.search).get('tab') || 'users')
@@ -1061,6 +1061,8 @@ export default function AdminPage() {
   // Scorecard KPIs — single source of truth
   const TABS = isAdmin
     ? [{ id:'users', label:'Users' }, { id:'campaigns', label:'Campaigns' }, { id:'commission', label:'Commission' }, { id:'statuses', label:'Statuses' }, { id:'floortv', label:'Floor TV' }, { id:'ops', label:'Thresholds' }, { id:'knowledge', label:'Knowledge' }, { id:'routing', label:'Call Routing' }, { id:'callqa', label:'Call QA' }]
+    // Operations managers aren't paid CSR commissions — profile only.
+    : isOpsManager ? [{ id:'users', label:'My Profile' }]
     : [{ id:'users', label:'My Profile' }, { id:'commission', label:'My Earnings' }]
 
   return (
@@ -1132,7 +1134,7 @@ export default function AdminPage() {
       )}
 
       {/* Commission tab */}
-      {settingsTab === 'commission' && (
+      {settingsTab === 'commission' && !isOpsManager && (
         <div style={{ flex:1, overflowY:'auto', padding: isMobile ? 12 : 24, display:'flex', flexDirection:'column', gap:16 }}>
           {commLoading ? (
             <>

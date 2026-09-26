@@ -215,7 +215,8 @@ export default function AttendancePage() {
         sb.from('shift_templates').select('*').order('name'),
         sb.from('attendance_points').select('*').gte('date', new Date().getFullYear() + '-01-01').order('date', { ascending: false }),
       ])
-      setProfiles(p || []); setSchedules(s || []); setStatusEvents(ev || [])
+      // Operations managers are field-side — WFM is the call center's.
+      setProfiles((p || []).filter(x => x.role !== 'ops_manager')); setSchedules(s || []); setStatusEvents(ev || [])
       setTemplates(t || []); setAttendancePoints(ap || []); setLoading(false)
     }
     load()

@@ -577,7 +577,7 @@ export default function ScorecardsPanel() {
   const editable = monthKey(month) < monthKey(shiftMonth({ year: today.getFullYear(), month: today.getMonth() }, -1))
   const vs = MONTH_NAMES[shiftMonth(month, -1).month].slice(0, 3)
   const reps = profiles.filter(p => p.role === 'rep')
-  const others = profiles.filter(p => p.role !== 'rep')
+  const others = profiles.filter(p => p.role !== 'rep' && p.role !== 'ops_manager')   // ops managers are field-side
   const rep = profiles.find(p => p.id === selected)
 
   const cards = data ? [...reps].sort((a, b) => {

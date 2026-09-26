@@ -175,8 +175,8 @@ export default function MyPage() {
   const [annProfiles, setAnnProfiles] = useState([])
   useEffect(() => {
     if (!announceOpen || annProfiles.length) return
-    sb.from('profiles').select('id, name, email').eq('active', true).order('name')
-      .then(({ data }) => setAnnProfiles(data || []))
+    sb.from('profiles').select('id, name, email, role').eq('active', true).order('name')
+      .then(({ data }) => setAnnProfiles((data || []).filter(p => p.role !== 'ops_manager')))   // floor announcements = call center
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [announceOpen])
   // Sent through the server — this page already holds the 'floor-alerts'
@@ -284,7 +284,7 @@ export default function MyPage() {
         sb.from('call_tasks').select('*').eq('agent_profile_id', profile.id).gte('queued_at', fromStr + 'T00:00:00'),
         sb.from('call_logs').select('*').eq('rep', repName).gte('created_at', fromStr + 'T00:00:00'),
       ])
-      setProfiles(profs || [])
+      setProfiles((profs || []).filter(p => p.role !== 'ops_manager'))   // team schedule / swaps = call center only
       setSchedules(scheds || [])
       setStatusEvents(events || [])
       setAttendancePoints(pts || [])
