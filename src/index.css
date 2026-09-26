@@ -1,54 +1,67 @@
 :root {
-  --bg: #F7F6F3; --surface: #FFF; --surface-2: #F0EEE9;
-  --border: #E2DED6; --border-strong: #C8C3BA;
-  --text-primary: #1C1B19; --text-secondary: #6B6760; --text-muted: #9E9B96;
-  --accent: #1A5C8A; --accent-bg: #EAF3FB; --accent-text: #0D3D5C;
-  --success: #2E7D52; --success-bg: #EAF5EE;
-  --danger: #B5341A; --danger-bg: #FBEEEA;
-  --warning: #8A5A00; --warning-bg: #FBF3E0;
+  /* Redesign stage 1 (Sep 2026): cool stone ground, ink text, Andi orange. */
+  --bg: #F1F2EE; --surface: #FFF; --surface-2: #F4F5F1;
+  --border: #E1E3DD; --border-strong: #C9CCC5;
+  --text-primary: #0D1013; --text-secondary: #3F454B; --text-muted: #666C72;
+  --accent: #C2500A; --accent-bg: #FDEEE3; --accent-text: #8F3A04;
+  --success: #127A55; --success-bg: #E3F3EC;
+  --danger: #C0342B; --danger-bg: #FBE7E5;
+  --warning: #9A5B00; --warning-bg: #FBF0DC;
   --purple: #5B3FA0; --purple-bg: #F0ECFB;
   /* Tonal chip palette — flips in dark mode so pills stay readable */
-  --tone-green-bg: #EAF5EE;  --tone-green-bd: #BBE3C9;  --tone-green-tx: #15803D;
-  --tone-amber-bg: #FBF3E0;  --tone-amber-bd: #F0DCA8;  --tone-amber-tx: #8A5A00;
-  --tone-red-bg:   #FBEEEA;  --tone-red-bd:   #F0C8BE;  --tone-red-tx:   #B91C1C;
-  --tone-blue-bg:  #EAF2FB;  --tone-blue-bd:  #BBD4F0;  --tone-blue-tx:  #1D5FA8;
-  --tone-purple-bg:#F0EEFB;  --tone-purple-bd:#CFC9F0;  --tone-purple-tx:#5B4FB8;
-  --tone-gray-bg:  #F3F4F6;  --tone-gray-bd:  #E5E7EB;  --tone-gray-tx:  #6B7280;
-  --radius: 8px; --radius-lg: 12px;
+  --tone-green-bg: #E6F4EC;  --tone-green-bd: #BBE3C9;  --tone-green-tx: #127A55;
+  --tone-amber-bg: #FBF0DC;  --tone-amber-bd: #F0DCA8;  --tone-amber-tx: #8A5200;
+  --tone-red-bg:   #FBE9E6;  --tone-red-bd:   #F0C8BE;  --tone-red-tx:   #B02D25;
+  --tone-blue-bg:  #E8F0FD;  --tone-blue-bd:  #BBD0F2;  --tone-blue-tx:  #2155BE;
+  --tone-purple-bg:#EFEDFC;  --tone-purple-bd:#CFC9F0;  --tone-purple-tx:#5B4FB8;
+  --tone-gray-bg:  #F1F2EF;  --tone-gray-bd:  #E1E3DD;  --tone-gray-tx:  #5B6167;
+  --radius: 10px; --radius-lg: 14px;
   --sidebar-width: 280px;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  /* Type: Geist for text, Bricolage Grotesque for headings, Geist Mono for
+     numbers that line up. Wall TVs keep the system font (--font-legacy). */
+  --font-body: 'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --font-display: 'Bricolage Grotesque', 'Geist', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-legacy: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --ink: #0D1013; --signal: #F2600C;
+  --btn-primary-bg: #0D1013; --btn-primary-fg: #FFFFFF; --btn-primary-hover: #262B31;
+  /* The dark rail + dock */
+  --rail-bg: #0D1013; --rail-2: #171B20; --rail-line: #262B31; --rail-active: #1E2329;
+  --rail-text: #C9CDD1; --rail-muted: #8A9096;
+  font-family: var(--font-body);
 }
 
 /* ── DARK THEME ── */
 [data-theme="dark"] {
-  --bg: #0F1117;
-  --surface: #1A1D27;
-  --surface-2: #242940;
-  --border: #333A55;
-  --border-strong: #465073;
-  --text-primary: #EDEFF7;
-  --text-secondary: #B0B8D6;
-  --text-muted: #808AAD;
-  --accent: #4A9EDB;
-  --accent-bg: #0D2A40;
-  --accent-text: #A8D4F5;
+  --bg: #0B0D10;
+  --surface: #14171B;
+  --surface-2: #1B1F24;
+  --border: #2A2F36;
+  --border-strong: #3A4048;
+  --text-primary: #EEF0F2;
+  --text-secondary: #B6BCC3;
+  --text-muted: #8A9096;
+  --accent: #FF8A3D;
+  --accent-bg: #3A1D0B;
+  --accent-text: #FFB37F;
   --success: #3DB87A;
   --success-bg: #0A2E1C;
-  --danger: #E05C3A;
+  --danger: #E8634A;
   --danger-bg: #2E1410;
   --warning: #D4A017;
   --warning-bg: #2A2000;
   --purple: #8B6FD4;
   --purple-bg: #1E1640;
-  --tone-green-bg: #142B1D;  --tone-green-bd: #2A5E3C;  --tone-green-tx: #6FDDA0;
+  --tone-green-bg: #13291C;  --tone-green-bd: #2A5E3C;  --tone-green-tx: #6FDDA0;
   --tone-amber-bg: #2C2309;  --tone-amber-bd: #6E5716;  --tone-amber-tx: #EFC252;
   --tone-red-bg:   #331613;  --tone-red-bd:   #7A2D22;  --tone-red-tx:   #F49382;
-  --tone-blue-bg:  #10253C;  --tone-blue-bd:  #2E5A88;  --tone-blue-tx:  #85BEF0;
+  --tone-blue-bg:  #10223A;  --tone-blue-bd:  #2E5A88;  --tone-blue-tx:  #8DBDF2;
   --tone-purple-bg:#1E1940;  --tone-purple-bd:#4A3F82;  --tone-purple-tx:#BCB1F5;
-  --tone-gray-bg:  #252A3E;  --tone-gray-bd:  #3D4459;  --tone-gray-tx:  #A2AAC9;
+  --tone-gray-bg:  #1E2227;  --tone-gray-bd:  #343A42;  --tone-gray-tx:  #A9AFB6;
+  --btn-primary-bg: #EEF0F2; --btn-primary-fg: #0D1013; --btn-primary-hover: #FFFFFF;
+  --rail-bg: #08090B; --rail-2: #121417; --rail-line: #22262B; --rail-active: #1A1E23;
 }
 [data-theme="dark"] .modal-overlay { background: rgba(0,0,0,.65); }
-[data-theme="dark"] .btn.primary:hover { background: #3A8EC7; }
 [data-theme="dark"] .btn.success:hover { background: #2E9460; }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -70,8 +83,8 @@ body { background: var(--bg); color: var(--text-primary); font-size: 14px; line-
 .btn:hover { background: var(--surface-2); }
 .btn:active { transform: scale(.98); }
 .btn:disabled { opacity: .4; cursor: not-allowed; transform: none; }
-.btn.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
-.btn.primary:hover { background: #154e78; }
+.btn.primary { background: var(--btn-primary-bg); color: var(--btn-primary-fg); border-color: var(--btn-primary-bg); }
+.btn.primary:hover { background: var(--btn-primary-hover); }
 .btn.success { background: var(--success); color: #fff; border-color: var(--success); }
 .btn.success:hover { background: #245f3e; }
 .btn.danger { color: var(--danger); border-color: var(--danger); }
@@ -215,7 +228,7 @@ textarea.form-input { resize: vertical; min-height: 72px; }
   /* The app shell is 100vh; on iOS that is taller than what is visible under
      Safari's toolbar, which hid the bottom tab bar. dvh is the visible height. */
   .app-shell { height: 100dvh !important; }
-  .app-shell.has-tabbar { --tabbar-h: calc(52px + env(safe-area-inset-bottom)); }
+  .app-shell.has-tabbar { --tabbar-h: calc(70px + env(safe-area-inset-bottom)); }   /* the floating tab bar + its margin */
   .mgrid { overflow-x: auto; }
   html { -webkit-text-size-adjust: 100%; }
   input, select, textarea { font-size: 16px !important; }   /* iOS zooms the page on smaller inputs */
@@ -264,3 +277,63 @@ textarea.form-input { resize: vertical; min-height: 72px; }
 .lift-hover { transition: border-color .15s ease, box-shadow .15s ease; }
 .lift-hover:hover { border-color: var(--border-strong) !important; box-shadow: 0 10px 24px -14px rgba(15, 20, 40, .28); }
 @media (prefers-reduced-motion: reduce) { .btn, .page-tab, .lift-hover { transition: none; } }
+
+/* ── Shell (redesign stage 1, Sep 2026) ─────────────────────────────────────
+   The dark rail, hub tabs, phone dock, ⌘K palette and phone tab bar. The
+   shell's own markup lives in src/components/shell/. */
+.disp { font-family: var(--font-display); }
+.mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
+.rail { background: var(--rail-bg); color: var(--rail-text); }
+.rail-logo { width: 36px; height: 36px; border-radius: 11px; background: var(--rail-2); border: 1px solid var(--rail-line); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.rail-link { display: flex; align-items: center; gap: 11px; height: 40px; padding: 0 10px; border-radius: 10px; border: 0; background: transparent; color: var(--rail-text); font: inherit; font-size: 14px; text-decoration: none; cursor: pointer; white-space: nowrap; transition: background .12s, color .12s; }
+.rail-link:hover { background: var(--rail-2); color: #fff; }
+.rail-link[aria-current="page"] { background: var(--rail-active); color: #fff; font-weight: 600; }
+.rail.collapsed .rail-link { width: 44px; padding: 0; justify-content: center; margin: 0 auto; }
+.rail-active-dot { width: 6px; height: 6px; border-radius: 99px; background: var(--signal); flex-shrink: 0; }
+.rail-badge { font-family: var(--font-mono); font-size: 11px; font-weight: 600; background: var(--signal); color: #0D1013; border-radius: 99px; padding: 1px 7px; line-height: 1.5; flex-shrink: 0; }
+.rail-dot { position: absolute; top: -3px; right: -4px; width: 8px; height: 8px; border-radius: 99px; background: var(--signal); border: 2px solid var(--rail-bg); }
+.rail-search { display: flex; align-items: center; gap: 9px; height: 38px; padding: 0 10px; border-radius: 10px; background: var(--rail-2); border: 1px solid var(--rail-line); color: var(--rail-muted); font: inherit; font-size: 13px; cursor: pointer; }
+.rail-search:hover { color: var(--rail-text); border-color: #3A4047; }
+.rail-kbd { font-size: 11px; border: 1px solid var(--rail-line); border-radius: 6px; padding: 1px 6px; }
+.rail-icon-btn { width: 32px; height: 32px; border-radius: 9px; border: 0; background: transparent; color: var(--rail-muted); display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; }
+.rail-icon-btn:hover { background: var(--rail-2); color: #fff; }
+.rail-me { display: flex; align-items: center; gap: 10px; padding: 8px; border-radius: 12px; border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; width: 100%; }
+.rail-me:hover { background: var(--rail-2); }
+.rail-alert { display: flex; align-items: center; gap: 8px; margin: 6px 0 0; padding: 7px 10px; border-radius: 10px; background: rgba(232, 99, 74, .14); color: #F49382; font-size: 12.5px; font-weight: 600; text-decoration: none; }
+.rail.collapsed .rail-alert { width: 44px; margin: 6px auto 0; justify-content: center; padding: 7px 0; }
+.rail-link:focus-visible, .rail-search:focus-visible, .rail-icon-btn:focus-visible, .rail-me:focus-visible, .rail-alert:focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
+
+.topbar { background: var(--bg); border-bottom: 1px solid var(--border); position: relative; z-index: 100; }
+.topbar-icon { width: 40px; height: 40px; border-radius: 12px; border: 1px solid var(--border); background: var(--surface); color: var(--text-primary); display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; }
+.hub-tabs { display: flex; gap: 2px; background: var(--surface); border: 1px solid var(--border); border-radius: 99px; padding: 3px; flex-shrink: 0; }
+@media screen and (max-width: 768px) { .hub-tabs { background: transparent; border: 0; padding: 0 12px 10px; gap: 6px; } .hub-tabs .hub-tab { border: 1px solid var(--border); background: var(--surface); } }
+.hub-tab { display: inline-flex; align-items: center; height: 30px; padding: 0 14px; border-radius: 99px; font-size: 13px; font-weight: 500; color: var(--text-secondary); text-decoration: none; white-space: nowrap; transition: background .12s, color .12s; }
+.hub-tab:hover { background: var(--surface-2); color: var(--text-primary); }
+.hub-tab[aria-current="page"], .hub-tabs .hub-tab[aria-current="page"] { background: var(--btn-primary-bg); color: var(--btn-primary-fg); font-weight: 600; border-color: var(--btn-primary-bg); }
+.hub-tab:focus-visible, .topbar-icon:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.pop { background: var(--surface); color: var(--text-primary); border: 1px solid var(--border); border-radius: 14px; box-shadow: 0 24px 60px -20px rgba(13, 16, 19, .45); }
+.pop-label { font-size: 10.5px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--text-muted); padding: 6px 14px 4px; }
+.pop-item { display: flex; align-items: center; gap: 10px; width: 100%; padding: 9px 14px; border: 0; background: transparent; font: inherit; font-size: 13px; color: var(--text-primary); text-align: left; text-decoration: none; cursor: pointer; }
+.pop-item:hover, .pop-item[data-active="true"] { background: var(--surface-2); }
+.pop-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.pop-danger { color: var(--danger); }
+
+.dock { position: fixed; right: 88px; bottom: 22px; z-index: 1450; display: flex; align-items: center; gap: 6px; height: 52px; padding: 0 6px; border-radius: 99px; background: var(--rail-bg); color: #fff; border: 1px solid var(--rail-line); box-shadow: 0 18px 40px -16px rgba(13, 16, 19, .55); }
+.dock-status { display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 12px; border-radius: 99px; border: 0; background: transparent; color: #fff; font: inherit; font-size: 13px; cursor: pointer; }
+.dock-status:hover { background: var(--rail-2); }
+.dock-action { display: inline-flex; align-items: center; gap: 8px; height: 40px; padding: 0 16px; border-radius: 99px; font-size: 13px; font-weight: 700; text-decoration: none; white-space: nowrap; }
+.dock-signal { background: var(--signal); color: #0D1013; }
+.dock-signal:hover { background: #FF7424; }
+.dock-live { background: #1FA36B; color: #fff; }
+.dock-quiet { background: var(--rail-2); color: #fff; border: 1px solid var(--rail-line); }
+.dock-quiet:hover { background: var(--rail-active); }
+.dock-status:focus-visible, .dock-action:focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
+
+.tabbar { flex-shrink: 0; display: flex; margin: 0 10px calc(8px + env(safe-area-inset-bottom)); height: 62px; border-radius: 20px; background: var(--surface); border: 1px solid var(--border); box-shadow: 0 12px 30px -18px rgba(13, 16, 19, .45); z-index: 120; }
+.tabbar-item { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; border: 0; background: transparent; color: var(--text-muted); font: inherit; font-size: 11px; font-weight: 500; text-decoration: none; cursor: pointer; }
+.tabbar-item[aria-current="page"] { color: var(--text-primary); font-weight: 700; }
+.tabbar-item[aria-current="page"] svg { color: var(--accent); }
+.tabbar-item span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+@media (prefers-reduced-motion: reduce) { .rail-link, .hub-tab { transition: none; } }
+

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { Routes, Route, NavLink, Navigate, useNavigate, useLocation } from 'react-router-dom'
+import { Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../lib/AuthContext'
 import WeatherStrip from '../components/WeatherStrip'
 import AskAndi from '../components/AskAndi'
@@ -30,7 +30,12 @@ import LeadershipPage from './LeadershipPage'
 import TeamPage from './TeamPage'
 import WinCelebration from '../components/WinCelebration'
 import ScheduleAlerts from '../components/ScheduleAlerts'
-import Avatar from '../components/Avatar'
+import Sidebar from '../components/shell/Sidebar'
+import TopBar from '../components/shell/TopBar'
+import PhoneDock from '../components/shell/PhoneDock'
+import CommandPalette from '../components/shell/CommandPalette'
+import MobileTabBar from '../components/shell/MobileTabBar'
+import { visibleHubs, hubForPath, tvBoards, meLinks, roleLabel, OTHER_TITLES } from '../components/shell/nav'
 
 const DEFAULT_STATUS_OPTIONS = [
   { value: 'Inbound',   color: '#16a34a' },
@@ -43,168 +48,6 @@ const DEFAULT_STATUS_OPTIONS = [
 ]
 
 const GRACE_MINUTES = 5
-
-const ICON_COLOR = '#ff751f'
-const ICON_MUTED = '#9E9B96'
-
-const NAV_ICONS = {
-  dialer: (active) => {
-    const c = active ? ICON_COLOR : ICON_MUTED
-    return (
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <path d="M5.4 11.1C6.8 13.9 9.1 16.1 12 17.5l2.3-2.3c.3-.3.7-.4 1-.2 1.1.4 2.3.6 3.7.6.6 0 1 .4 1 1v3.6c0 .6-.4 1-1 1C9.6 21.2 2.8 14.4 2.8 6c0-.6.4-1 1-1H7.4c.6 0 1 .4 1 1 0 1.4.2 2.6.6 3.7.1.4 0 .7-.3 1L5.4 11.1z" fill={c}/>
-      </svg>
-    )
-  },
-  live: (active) => {
-    const c = active ? ICON_COLOR : ICON_MUTED
-    return (
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <circle cx="12" cy="12" r="3" fill={c}/>
-        <path d="M8.5 8.5a5 5 0 000 7M15.5 8.5a5 5 0 010 7" stroke={c} strokeWidth="1.8" strokeLinecap="round" fill="none"/>
-        <path d="M5.6 5.6a9 9 0 000 12.8M18.4 5.6a9 9 0 010 12.8" stroke={c} strokeWidth="1.8" strokeLinecap="round" fill="none" opacity=".5"/>
-      </svg>
-    )
-  },
-  analytics: (active) => {
-    const c = active ? ICON_COLOR : ICON_MUTED
-    return (
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <rect x="3" y="13" width="4" height="8" rx="1" fill={c} opacity=".5"/>
-        <rect x="10" y="8" width="4" height="13" rx="1" fill={c} opacity=".75"/>
-        <rect x="17" y="3" width="4" height="18" rx="1" fill={c}/>
-        <path d="M3 21h18" stroke={c} strokeWidth="1.5" strokeLinecap="round"/>
-      </svg>
-    )
-  },
-  board: (active) => {
-    const c = active ? ICON_COLOR : ICON_MUTED
-    return (
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <rect x="3" y="4" width="18" height="16" rx="2" stroke={c} strokeWidth="1.8" fill="none"/>
-        <path d="M3 9h18M9 9v11M15 9v11" stroke={c} strokeWidth="1.6"/>
-      </svg>
-    )
-  },
-  dispatch: (active) => {
-    const c = active ? ICON_COLOR : ICON_MUTED
-    return (
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <path d="M2 6.5A1.5 1.5 0 013.5 5h8A1.5 1.5 0 0113 6.5V16H2V6.5z" stroke={c} strokeWidth="1.8" fill="none" strokeLinejoin="round"/>
-        <path d="M13 9.5h3.6a2 2 0 011.7.95L22 16h-9V9.5z" stroke={c} strokeWidth="1.8" fill="none" strokeLinejoin="round"/>
-        <circle cx="6.5" cy="18" r="1.9" stroke={c} strokeWidth="1.7" fill="none"/>
-        <circle cx="17" cy="18" r="1.9" stroke={c} strokeWidth="1.7" fill="none"/>
-        <path d="M8.4 18h6.7" stroke={c} strokeWidth="1.5" strokeLinecap="round"/>
-      </svg>
-    )
-  },
-  leadership: (active) => {
-    const c = active ? ICON_COLOR : ICON_MUTED
-    return (
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <path d="M9 4h6v3H9z" stroke={c} strokeWidth="1.8" fill="none" strokeLinejoin="round"/>
-        <path d="M15 5h3a1 1 0 011 1v14a1 1 0 01-1 1H6a1 1 0 01-1-1V6a1 1 0 011-1h3" stroke={c} strokeWidth="1.8" fill="none" strokeLinejoin="round"/>
-        <path d="M8.5 12l2 2 4-4" stroke={c} strokeWidth="1.8" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
-        <path d="M8.5 17.5h7" stroke={c} strokeWidth="1.8" strokeLinecap="round"/>
-      </svg>
-    )
-  },
-  wfm: (active) => {
-    const c = active ? ICON_COLOR : ICON_MUTED
-    return (
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <rect x="3" y="4" width="18" height="17" rx="2" stroke={c} strokeWidth="1.8" fill="none"/>
-        <path d="M16 2v4M8 2v4M3 10h18" stroke={c} strokeWidth="1.8" strokeLinecap="round"/>
-        <circle cx="8" cy="15" r="1.2" fill={c}/>
-        <circle cx="12" cy="15" r="1.2" fill={c}/>
-        <circle cx="16" cy="15" r="1.2" fill={c}/>
-      </svg>
-    )
-  },
-  notes: (active) => {
-    const c = active ? ICON_COLOR : ICON_MUTED
-    return (
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6z" stroke={c} strokeWidth="1.8" fill="none" strokeLinejoin="round"/>
-        <path d="M14 2v6h6" stroke={c} strokeWidth="1.8" strokeLinejoin="round"/>
-        <path d="M8 13h8M8 17h6" stroke={c} strokeWidth="1.8" strokeLinecap="round"/>
-      </svg>
-    )
-  },
-  tv: (active) => {
-    const c = active ? ICON_COLOR : ICON_MUTED
-    return (
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <rect x="2" y="4" width="20" height="13" rx="2" stroke={c} strokeWidth="1.8" fill="none"/>
-        <path d="M8 21h8M12 17v4" stroke={c} strokeWidth="1.8" strokeLinecap="round"/>
-        <circle cx="8.5" cy="10.5" r="2.5" fill={c} opacity=".3"/>
-        <path d="M13 8.5h4M13 11.5h3M13 14h2" stroke={c} strokeWidth="1.5" strokeLinecap="round"/>
-      </svg>
-    )
-  },
-  recordings: (active) => {
-    const c = active ? ICON_COLOR : ICON_MUTED
-    return (
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <circle cx="12" cy="12" r="9" stroke={c} strokeWidth="1.8" fill="none"/>
-        <path d="M10 8.5v7l6-3.5-6-3.5z" fill={c}/>
-      </svg>
-    )
-  },
-  mypage: (active) => {
-    const c = active ? ICON_COLOR : ICON_MUTED
-    return (
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <circle cx="12" cy="8" r="3.5" stroke={c} strokeWidth="1.8" fill="none"/>
-        <path d="M5 20c0-3.314 3.134-6 7-6s7 2.686 7 6" stroke={c} strokeWidth="1.8" strokeLinecap="round" fill="none"/>
-      </svg>
-    )
-  },
-  settings: (active) => {
-    const c = active ? ICON_COLOR : ICON_MUTED
-    return (
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <circle cx="12" cy="12" r="3" stroke={c} strokeWidth="1.8" fill="none"/>
-        <path d="M12 2v2M12 20v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M2 12h2M20 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" stroke={c} strokeWidth="1.8" strokeLinecap="round"/>
-      </svg>
-    )
-  },
-}
-
-const NAV_ITEMS = [
-  { to:'/', label:'Dialer', iconKey:'dialer', end:true, ops:true },
-  { to:'/live', label:'Live Dashboard', iconKey:'live' },
-  { to:'/callboard', label:'Call Board', iconKey:'board', ops:true },
-  { to:'/dispatch', label:'Dispatch', iconKey:'dispatch', dispatchOnly:true },
-  { to:'/analytics', label:'Analytics', iconKey:'analytics' },
-  { to:'/recordings', label:'Recordings', iconKey:'recordings' },
-  { to:'/attendance', label:'WFM', iconKey:'wfm', adminOnly:true },
-  { to:'/team', label:'Team', iconKey:'wfm', teamLead:true, ops:true },
-  { to:'/leadership', label:'Leadership', iconKey:'leadership', leaderOnly:true },
-  { to:'/warroom', label:'Call Center TV', iconKey:'tv' },
-  { to:'/tv/hvac', label:'Department TV', iconKey:'tv', deptTv:true, ops:true },
-]
-
-const MY_PAGE_ITEM = { to:'/mypage', label:'My Page', iconKey:'mypage' }
-
-// Top-bar contextual header per route — title + one-line descriptor.
-const PAGE_META = {
-  '/':            { title: 'Dialer',                subtitle: 'Work your call queue' },
-  '/live':        { title: 'Live Dashboard',        subtitle: 'Real-time floor activity' },
-  '/callboard':   { title: '3-Day Call Board',       subtitle: 'Repair & replacement capacity' },
-  '/dispatch':    { title: 'Dispatch for Profit',    subtitle: 'Send the right tech to the right call' },
-  '/analytics':   { title: 'Analytics',             subtitle: 'Performance and pipeline' },
-  '/recordings':  { title: 'Recordings',            subtitle: 'Call playback and review' },
-  '/attendance':  { title: 'Workforce Management',  subtitle: 'Schedule, adherence, and points' },
-  '/team':        { title: 'Team',                  subtitle: 'Coaching, scorecards, and commissions for your team' },
-  '/warroom':     { title: 'Call Center TV',        subtitle: 'Big-screen floor view' },
-  '/mypage':      { title: 'My Page',               subtitle: 'Your schedule, commissions, and scorecard' },
-  '/settings':    { title: 'Settings',              subtitle: 'Your profile and configuration' },
-}
-
-const SETTINGS_ITEMS = [
-  { to:'/settings', label:'Settings', icon:'⚙️' },
-]
 
 // A ringing phone must interrupt you wherever you are. Previously the only
 // incoming-call UI was inside DialerPage, so a rep on any other screen had no
@@ -273,76 +116,6 @@ function GlobalIncomingCall() {
   )
 }
 
-// "Work is waiting" nudge: a rep who goes Available anywhere but the dialer
-// never sees their auto-served lead — the serve engine only runs on the
-// dialer page. This pulls them back.
-function OutboundNudge({ agentStatus }) {
-  const { incomingCall, callStatus } = usePhone()
-  const { profile } = useAuth()
-  const navigate = useNavigate()
-  const location = useLocation()
-  if (location.pathname === '/' || location.pathname === '/warroom' || location.pathname.startsWith('/tv/')) return null
-  if (incomingCall || callStatus) return null
-  if (agentStatus !== 'Available') return null
-  if (!(Array.isArray(profile?.active_campaign_ids) && profile.active_campaign_ids.length)) return null
-  return (
-    <div onClick={() => navigate('/')} title="Open the dialer"
-      style={{ position:'fixed', top:16, right:20, zIndex:1900, display:'flex', alignItems:'center', gap:10,
-        padding:'10px 14px', background:'#111318', border:'1px solid rgba(255,117,31,.4)', borderRadius:12,
-        boxShadow:'0 10px 30px rgba(0,0,0,.35)', cursor:'pointer' }}>
-      <span className="pulse-mark" style={{ width:26, height:26, borderRadius:8, background:'#0b0c0f', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
-        <svg width="16" height="16" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
-          <polyline points="9,32 19,32 25,17 33,47 40,26 45,32 55,32" fill="none" stroke="#ff751f" strokeWidth="7" strokeLinecap="round" strokeLinejoin="round"/>
-        </svg>
-      </span>
-      <div>
-        <div style={{ fontSize:12.5, fontWeight:800, color:'#ececee' }}>You're Available — outbound is waiting</div>
-        <div style={{ fontSize:10.5, color:'#9a9aa2' }}>Open the dialer to work your queue</div>
-      </div>
-    </div>
-  )
-}
-
-// Phone-only bottom tabs: the four places a manager opens from a phone, plus
-// "More" for the drawer. Desktop keeps the sidebar; wall routes have neither.
-function MobileTabBar({ isAdmin, canDispatch, isLeader, isOpsManager, onMore }) {
-  const location = useLocation()
-  const navigate = useNavigate()
-  const items = isOpsManager
-    ? [
-        { to: '/team', label: 'Team', iconKey: 'wfm' },
-        { to: '/callboard', label: 'Call Board', iconKey: 'board' },
-        { to: '/tv/hvac', label: 'Dept TV', iconKey: 'tv' },
-      ]
-    : isAdmin || canDispatch
-    ? [
-        { to: '/analytics', label: 'Dashboard', iconKey: 'analytics' },
-        ...(canDispatch ? [{ to: '/dispatch', label: 'Dispatch', iconKey: 'dispatch' }] : []),
-        isLeader ? { to: '/leadership', label: 'Leadership', iconKey: 'leadership' } : { to: '/callboard', label: 'Call Board', iconKey: 'board' },
-        { to: '/recordings', label: 'Recordings', iconKey: 'recordings' },
-      ]
-    : [
-        { to: '/analytics', label: 'Dashboard', iconKey: 'analytics' },
-        { to: '/callboard', label: 'Call Board', iconKey: 'board' },
-        { to: '/recordings', label: 'Recordings', iconKey: 'recordings' },
-        { to: '/mypage', label: 'My Page', iconKey: 'mypage' },
-      ]
-  const active = (to) => location.pathname === to || (to !== '/' && location.pathname.startsWith(to + '/'))
-  const Tab = ({ label, iconKey, on, onClick }) => (
-    <button onClick={onClick} style={{ flex: 1, minWidth: 0, height: 52, border: 'none', background: 'transparent', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 3,
-      color: on ? 'var(--accent)' : 'var(--text-muted)', fontSize: 10, fontWeight: on ? 700 : 500, letterSpacing: .2 }}>
-      <span style={{ display: 'flex', width: 22, height: 22, alignItems: 'center', justifyContent: 'center' }}>{NAV_ICONS[iconKey]?.(on)}</span>
-      <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%' }}>{label}</span>
-    </button>
-  )
-  return (
-    <nav style={{ flexShrink: 0, display: 'flex', borderTop: '1px solid var(--border)', background: 'var(--surface)', paddingBottom: 'env(safe-area-inset-bottom)', zIndex: 120 }}>
-      {items.map(it => <Tab key={it.to} label={it.label} iconKey={it.iconKey} on={active(it.to)} onClick={() => navigate(it.to)} />)}
-      <Tab label="More" iconKey="settings" on={false} onClick={onMore} />
-    </nav>
-  )
-}
-
 // The phone must be registered on every route, not just the dialer, so the
 // provider wraps the whole shell and the layout consumes it.
 export default function DialerLayout() {
@@ -381,7 +154,7 @@ function DialerLayoutInner() {
   const isLeader = isAdmin && ['brandynnuffer@gmail.com', 'brandyn.nuffer@awesomeservice.com']
     .includes((profile?.email || '').toLowerCase())
   const { contacts, syncStatus, reload } = useData()
-  const { cancelAutoWrap } = usePhone()
+  const { cancelAutoWrap, callStatus, callDuration, incomingCall } = usePhone()
   const navigate = useNavigate()
   const location = useLocation()
   // Wall TVs: no top bar, no banners, and — once the wall look is on for the
@@ -391,8 +164,6 @@ function DialerLayoutInner() {
   const isWall = onTvRoute || (location.pathname === '/callboard' && wallKiosk)
   const hideSidebar = wallKiosk && (onTvRoute || location.pathname === '/callboard')
   const [agentStatus, setAgentStatus] = useState('Offline')
-  const [showStatusMenu, setShowStatusMenu] = useState(false)
-  const [showSidebarStatus, setShowSidebarStatus] = useState(false)
   const isMobile = useIsMobile()
   // Touch device at phone width — decided once so a narrow desktop window never loses the dialer.
   const [isHandheld] = useState(() => typeof window !== 'undefined' && !!window.matchMedia
@@ -402,26 +173,12 @@ function DialerLayoutInner() {
   const statusTimerRef = useRef(null)
   const statusStartRef = useRef(null)
   const [alerts, setAlerts] = useState([])
-  const menuRef = useRef(null)
-  const sidebarStatusRef = useRef(null)
-  const sidebarBtnRef = useRef(null)
-  const [sbPopupStyle, setSbPopupStyle] = useState({})
-
-  // Open the sidebar status popup as a fixed-position element anchored to the
-  // button, so it escapes the sidebar's overflow:hidden (which was clipping it
-  // when collapsed).
-  const toggleSidebarStatus = () => {
-    setShowSidebarStatus(v => {
-      const next = !v
-      if (next && sidebarBtnRef.current) {
-        const r = sidebarBtnRef.current.getBoundingClientRect()
-        setSbPopupStyle({ position:'fixed', left: Math.round(r.left), bottom: Math.round(window.innerHeight - r.top + 6), width: 200 })
-      }
-      return next
-    })
-  }
   const currentEventRef = useRef(null)
-  const [navCollapsed, setNavCollapsed] = useState(false)
+  // The rail's collapsed state survives reloads.
+  const [navCollapsed, setNavCollapsed] = useState(() => { try { return localStorage.getItem('andi-rail') === 'collapsed' } catch { return false } })
+  const toggleRail = () => setNavCollapsed(v => { try { localStorage.setItem('andi-rail', v ? 'open' : 'collapsed') } catch {} return !v })
+  // ⌘K / Ctrl+K opens the command palette anywhere but the wall TVs.
+  const [paletteOpen, setPaletteOpen] = useState(false)
 
   // Open paid-lead count for the Dialer nav badge. Everyone sees it (leads are
   // claim-on-open, first rep there wins) and it clears the moment the inbox
@@ -494,20 +251,12 @@ function DialerLayoutInner() {
   }, [profile?.id])
 
   useEffect(() => {
-    const handleClick = (e) => {
-      if (menuRef.current && !menuRef.current.contains(e.target)) setShowStatusMenu(false)
-      if (sidebarStatusRef.current && !sidebarStatusRef.current.contains(e.target)) setShowSidebarStatus(false)
+    const onKey = (e) => {
+      if ((e.metaKey || e.ctrlKey) && !e.altKey && e.key.toLowerCase() === 'k') { e.preventDefault(); setPaletteOpen(v => !v) }
     }
-    document.addEventListener('mousedown', handleClick)
-    return () => document.removeEventListener('mousedown', handleClick)
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
   }, [])
-
-  // Close both status/profile menus whenever the route changes so nothing
-  // stays open and overlays the next page.
-  useEffect(() => {
-    setShowStatusMenu(false)
-    setShowSidebarStatus(false)
-  }, [location.pathname, location.search])
 
   useEffect(() => {
     if (!isAdmin) return
@@ -581,7 +330,6 @@ function DialerLayoutInner() {
     // Any manual status change cancels a pending auto-wrap-up return — including
     // re-selecting Wrap Up to keep wrapping.
     cancelAutoWrap?.()
-    setShowStatusMenu(false)
     setAgentStatus(newStatus)
     if (statusTimerRef.current) clearInterval(statusTimerRef.current)
     const now = new Date().toISOString()
@@ -622,347 +370,92 @@ function DialerLayoutInner() {
   }
 
   const currentStatusObj = statusOptions.find(s => s.value === agentStatus) || statusOptions[statusOptions.length - 1]
-  const NAV_WIDTH = navCollapsed ? 56 : 200
-
-  const navLinkStyle = ({ isActive }) => ({
-    display: 'flex',
-    alignItems: 'center',
-    gap: navCollapsed ? 0 : 10,
-    padding: navCollapsed ? '10px 0' : '9px 12px',
-    justifyContent: navCollapsed ? 'center' : 'flex-start',
-    borderRadius: 10,
-    fontSize: 13,
-    fontWeight: isActive ? 600 : 400,
-    color: isActive ? 'var(--accent)' : 'var(--text-muted)',
-    background: isActive ? 'var(--accent-bg)' : 'transparent',
-    textDecoration: 'none',
-    transition: 'background .1s, color .1s',
-    whiteSpace: 'nowrap',
-    overflow: 'hidden',
-    marginBottom: 2,
-  })
-
-  const handleNavHover = (e, isActive) => {
-    if (!isActive) {
-      e.currentTarget.style.background = 'var(--surface-2)'
-      e.currentTarget.style.color = 'var(--text-primary)'
-    }
-  }
-  const handleNavLeave = (e, isActive) => {
-    if (!isActive) {
-      e.currentTarget.style.background = 'transparent'
-      e.currentTarget.style.color = 'var(--text-muted)'
-    }
-  }
-
   // Mobile: the sidebar becomes a slide-over drawer; navigating closes it.
   useEffect(() => { setMobileNav(false) }, [location.pathname])
 
+  // ── Navigation model (redesign stage 1): hubs instead of 13 sidebar items.
+  const navCtx = { isAdmin, isOpsManager, canDispatch, isLeader, isHandheld, leadsTeams: (profile?.leads_teams || []).length > 0 }
+  const hubs = visibleHubs(navCtx)
+  const hub = hubForPath(hubs, location.pathname)
+  const boards = tvBoards(navCtx)
+  const mine = meLinks(navCtx)
+  const roleText = roleLabel(navCtx, profile)
+  const pageTitle = hub?.label || OTHER_TITLES[location.pathname] || 'andi'
+  const onDialer = location.pathname === '/'
+  const inCall = ['calling', 'ringing', 'connected'].includes(callStatus)
+  // Folded in from the old top-right nudge: Available with campaigns to work.
+  const outboundWaiting = agentStatus === 'Available' && !incomingCall
+    && Array.isArray(profile?.active_campaign_ids) && profile.active_campaign_ids.length > 0
+  const railProps = {
+    hubs, pathname: location.pathname, badges: { phones: openLeads }, profile, roleText,
+    statusColor: isOpsManager ? null : currentStatusObj.color, tvBoards: boards, meLinks: mine, ptoApprovals,
+    alerts: isAdmin ? alerts : [], onNavigate: (to) => navigate(to), onOpenPalette: () => setPaletteOpen(true),
+    darkMode, onToggleTheme: toggleTheme, onSignOut: signOut,
+  }
+  const paletteItems = [
+    ...hubs.flatMap(h => h.tabs.map(t => ({ id: `go:${t.to}`, label: h.tabs.length > 1 ? `${h.label} · ${t.label}` : h.label, keywords: t.label, group: 'Go to', icon: h.icon, run: () => navigate(t.to) }))),
+    ...boards.map(b => ({ id: `tv:${b.to}`, label: `${b.label} TV`, group: 'TV boards', icon: 'tv', run: () => navigate(b.to) })),
+    ...mine.map(l => ({ id: `me:${l.to}`, label: l.label, keywords: 'my page me', group: 'You', icon: l.to === '/settings' ? 'settings' : 'user', run: () => navigate(l.to) })),
+    ...(isOpsManager ? [] : statusOptions.map(o => ({ id: `status:${o.value}`, label: `Set status: ${o.value}`, keywords: 'status', group: 'Actions', icon: 'phone', run: () => updateStatus(o.value) }))),
+    { id: 'theme', label: darkMode ? 'Switch to light mode' : 'Switch to dark mode', keywords: 'theme dark light', group: 'Actions', icon: darkMode ? 'sun' : 'moon', run: toggleTheme },
+    ...(updateReady ? [{ id: 'reload', label: 'Reload to get the latest Andi', group: 'Actions', icon: 'refresh', run: () => window.location.reload() }] : []),
+    { id: 'signout', label: 'Sign out', group: 'Actions', icon: 'logout', run: signOut },
+  ]
+  // Phone tab bar: the hubs this role opens most from a phone, then More.
+  const mobileItems = (() => {
+    const hubItem = (id, to, label) => {
+      const h = hubs.find(x => x.id === id)
+      return h ? { to: to && h.tabs.some(t => t.to === to) ? to : h.tabs[0].to, label: label || h.label, icon: h.icon, match: h.tabs.map(t => t.to) } : null
+    }
+    const list = isOpsManager
+      ? [hubItem('team'), hubItem('dispatch'), boards[0] && { to: boards.find(b => b.to !== '/warroom')?.to || boards[0].to, label: 'TV', icon: 'tv', match: ['/tv'] }]
+      : [hubItem('calls', '/analytics'), hubItem('dispatch'), hubItem('team'), isLeader ? hubItem('leadership') : null,
+         { to: '/mypage', label: 'Me', icon: 'user' }]
+    return list.filter(Boolean).slice(0, 4)
+  })()
+
   return (
-    <div className={`app-shell${isMobile && !isWall ? ' has-tabbar' : ''}`} style={{ display:'flex', height:'100vh', overflow:'hidden' }}>
+    <div className={`app-shell${isMobile && !isWall ? ' has-tabbar' : ''}`}
+      style={{ display:'flex', height:'100vh', overflow:'hidden', fontFamily: isWall ? 'var(--font-legacy)' : undefined }}>
       <WinCelebration />
 
+      {/* ── Rail (desktop) / slide-over drawer (phone) ── */}
+      {!hideSidebar && !isMobile && (
+        <div style={{ flexShrink: 0, height: '100%', zIndex: 100, transition: 'width .2s' }}>
+          <Sidebar {...railProps} collapsed={navCollapsed} onToggleCollapse={toggleRail} />
+        </div>
+      )}
       {isMobile && mobileNav && (
-        <div onClick={() => setMobileNav(false)}
-          style={{ position:'fixed', inset:0, background:'rgba(0,0,0,.45)', zIndex:1290 }} />
+        <>
+          <div onClick={() => setMobileNav(false)} style={{ position:'fixed', inset:0, background:'rgba(13,16,19,.5)', zIndex:1290 }} />
+          <div style={{ position:'fixed', top:0, bottom:0, left:0, zIndex:1300, boxShadow:'0 0 40px rgba(0,0,0,.35)' }}>
+            <Sidebar {...railProps} drawer onNavigate={(to) => { setMobileNav(false); navigate(to) }}
+              onOpenPalette={() => { setMobileNav(false); setPaletteOpen(true) }}
+              statusOptions={isOpsManager ? null : statusOptions} currentStatus={agentStatus} onSetStatus={updateStatus} />
+          </div>
+        </>
       )}
 
-      {/* ── LEFT SIDEBAR (fixed drawer on mobile) ── */}
-      {!hideSidebar && <aside style={isMobile ? {
-        position: 'fixed', top: 0, bottom: 0, left: mobileNav ? 0 : -300,
-        width: 280, minWidth: 280,
-        background: 'var(--surface)',
-        borderRight: '1px solid var(--border)',
-        display: 'flex', flexDirection: 'column',
-        transition: 'left .2s', overflow: 'hidden', zIndex: 1300,
-        boxShadow: mobileNav ? '0 0 40px rgba(0,0,0,.35)' : 'none',
-      } : {
-        width: NAV_WIDTH,
-        minWidth: NAV_WIDTH,
-        flexShrink: 0,
-        background: 'var(--surface)',
-        borderRight: '1px solid var(--border)',
-        display: 'flex',
-        flexDirection: 'column',
-        transition: 'width .2s, min-width .2s',
-        overflow: 'hidden',
-        zIndex: 100,
-      }}>
-
-        {/* Logo + collapse toggle */}
-        <div style={{ display:'flex', alignItems:'center', justifyContent: navCollapsed ? 'center' : 'space-between', padding: navCollapsed ? '0' : '0 14px 0 16px', borderBottom:'1px solid var(--border)', flexShrink:0, height:53, minHeight:53, boxSizing:'border-box' }}>
-          {!navCollapsed && (
-            <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-              <svg width="24" height="24" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
-                <rect width="64" height="64" rx="14" fill="#111318"/>
-                <polyline points="9,32 19,32 25,17 33,47 40,26 45,32 55,32" fill="none" stroke="#ff751f" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round"/>
-              </svg>
-              <span style={{ fontSize:17, fontWeight:400, letterSpacing:1, color:'var(--text-primary)', fontFamily:'-apple-system, BlinkMacSystemFont, sans-serif' }}>andi</span>
-            </div>
-          )}
-          <button onClick={() => setNavCollapsed(p => !p)}
-            style={{ background:'none', border:'none', cursor:'pointer', color:'var(--text-muted)', fontSize:16, padding:4, display:'flex', alignItems:'center', justifyContent:'center', borderRadius:'var(--radius)', flexShrink:0 }}
-            title={navCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}>
-            {navCollapsed ? '→' : '←'}
-          </button>
-        </div>
-
-        {/* Nav links */}
-        <div style={{ flex:1, overflowY:'auto', padding:'10px 8px', display:'flex', flexDirection:'column' }}>
-          {NAV_ITEMS.filter(n => (!isOpsManager || n.ops) && (!n.adminOnly || isAdmin) && (!n.dispatchOnly || canDispatch) && (!n.leaderOnly || isLeader) && (!n.teamLead || isAdmin || isOpsManager || (profile?.leads_teams || []).length > 0) && (!n.deptTv || isAdmin || isOpsManager || canDispatch || (profile?.leads_teams || []).length > 0)).map(({ to, label, iconKey, end }) => (
-            <NavLink key={to} to={to} end={end} style={navLinkStyle} title={navCollapsed ? label : undefined}
-              onMouseEnter={e => { const isActive = e.currentTarget.style.fontWeight === '600'; handleNavHover(e, isActive) }}
-              onMouseLeave={e => { const isActive = e.currentTarget.style.fontWeight === '600'; handleNavLeave(e, isActive) }}>
-              {({ isActive }) => (
-                <>
-                  <span style={{ flexShrink:0, display:'flex', alignItems:'center', position:'relative' }}>
-                    {NAV_ICONS[iconKey]?.(isActive)}
-                    {iconKey === 'dialer' && openLeads > 0 && navCollapsed && (
-                      <span style={{ position:'absolute', top:-2, right:-3, width:8, height:8, borderRadius:'50%', background:'var(--danger)', border:'1.5px solid var(--surface)' }} />
-                    )}
-                  </span>
-                  {!navCollapsed && <span>{label}</span>}
-                  {iconKey === 'dialer' && openLeads > 0 && !navCollapsed && (
-                    <span title={`${openLeads} paid lead${openLeads === 1 ? '' : 's'} waiting`}
-                      style={{ marginLeft:'auto', fontSize:10, fontWeight:700, background:'var(--danger)', color:'#fff', borderRadius:99, padding:'1px 7px', lineHeight:1.5 }}>
-                      {openLeads}
-                    </span>
-                  )}
-                </>
-              )}
-            </NavLink>
-          ))}
-
-          {!isOpsManager && (<>
-          {/* My Page — above settings */}
-          <div style={{ height:1, background:'var(--border)', margin:'8px 0' }} />
-          <NavLink to={MY_PAGE_ITEM.to} style={navLinkStyle} title={navCollapsed ? MY_PAGE_ITEM.label : undefined}
-            onMouseEnter={e => { const isActive = e.currentTarget.style.fontWeight === '600'; handleNavHover(e, isActive) }}
-            onMouseLeave={e => { const isActive = e.currentTarget.style.fontWeight === '600'; handleNavLeave(e, isActive) }}>
-            {({ isActive }) => (
-              <>
-                <span style={{ flexShrink:0, display:'flex', alignItems:'center', position:'relative' }}>
-                  {NAV_ICONS[MY_PAGE_ITEM.iconKey]?.(isActive)}
-                  {ptoApprovals > 0 && navCollapsed && (
-                    <span style={{ position:'absolute', top:-2, right:-2, width:8, height:8, borderRadius:'50%', background:'var(--danger)', border:'2px solid var(--surface)' }} />
-                  )}
-                </span>
-                {!navCollapsed && <span>{MY_PAGE_ITEM.label}</span>}
-                {ptoApprovals > 0 && !navCollapsed && (
-                  <span title={`${ptoApprovals} time-off request${ptoApprovals === 1 ? '' : 's'} waiting on you`}
-                    style={{ marginLeft:'auto', fontSize:10, fontWeight:700, background:'var(--danger)', color:'#fff', borderRadius:99, padding:'1px 7px', lineHeight:1.5 }}>
-                    {ptoApprovals}
-                  </span>
-                )}
-              </>
-            )}
-          </NavLink>
-
-          </>)}
-
-          {/* Settings — everyone: reps manage their own name, avatar and
-              password there; the admin-only cards are gated inside the page. */}
-          {(
-            <>
-              <div style={{ height:1, background:'var(--border)', margin:'8px 0' }} />
-              <NavLink to="/settings" style={navLinkStyle} title={navCollapsed ? 'Settings' : undefined}
-                onMouseEnter={e => { const isActive = e.currentTarget.style.fontWeight === '600'; handleNavHover(e, isActive) }}
-                onMouseLeave={e => { const isActive = e.currentTarget.style.fontWeight === '600'; handleNavLeave(e, isActive) }}>
-                {({ isActive }) => (
-                  <>
-                    <span style={{ flexShrink:0, display:'flex', alignItems:'center' }}>{NAV_ICONS.settings(isActive)}</span>
-                    {!navCollapsed && <span>Settings</span>}
-                  </>
-                )}
-              </NavLink>
-            </>
-          )}
-
-          {/* Alert badge */}
-          {isAdmin && alerts.length > 0 && !navCollapsed && (
-            <div style={{ margin:'6px 0', padding:'6px 10px', background:'var(--danger-bg)', border:'1px solid var(--danger)', borderRadius:'var(--radius)', fontSize:11, color:'var(--danger)', fontWeight:600 }}
-              title={alerts.map(a => `${a.name}: ${a.elapsed}m on ${a.status}`).join('\n')}>
-              ⚠ {alerts.length} overrun{alerts.length > 1 ? 's' : ''}
-            </div>
-          )}
-          {isAdmin && alerts.length > 0 && navCollapsed && (
-            <div style={{ display:'flex', justifyContent:'center', padding:'4px 0' }}
-              title={alerts.map(a => `${a.name}: ${a.elapsed}m on ${a.status}`).join('\n')}>
-              <span style={{ background:'var(--danger)', color:'#fff', borderRadius:'50%', width:18, height:18, fontSize:10, fontWeight:700, display:'flex', alignItems:'center', justifyContent:'center' }}>{alerts.length}</span>
-            </div>
-          )}
-        </div>
-
-        {/* Bottom: status changer (primary) + theme toggle */}
-        <div style={{ borderTop:'1px solid var(--border)', padding:'10px 8px', flexShrink:0, display:'flex', flexDirection:'column', gap:8 }}>
-          {/* Status changer — primary place to set status */}
-          <div ref={sidebarStatusRef} style={{ position:'relative', display: isOpsManager ? 'none' : undefined }}>
-            <button ref={sidebarBtnRef} onClick={toggleSidebarStatus}
-              title={navCollapsed ? `${currentStatusObj.value} · ${fmtDur(statusDuration)}` : undefined}
-              style={{ width:'100%', padding: navCollapsed ? '8px 0' : '7px 10px', background:'var(--surface-2)', border:'1px solid var(--border)', borderRadius:'var(--radius)', cursor:'pointer', display:'flex', alignItems:'center', justifyContent: navCollapsed ? 'center' : 'space-between', gap:8 }}>
-              <span style={{ display:'flex', alignItems:'center', gap:8, minWidth:0 }}>
-                <span style={{ width:10, height:10, borderRadius:'50%', background:currentStatusObj.color, flexShrink:0, border:'1px solid rgba(0,0,0,.1)' }} />
-                {!navCollapsed && (
-                  <span style={{ display:'flex', flexDirection:'column', lineHeight:1.25, minWidth:0, textAlign:'left' }}>
-                    <span style={{ fontSize:12, fontWeight:700, color:'var(--text-primary)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{currentStatusObj.value}</span>
-                    <span style={{ fontSize:10, color:'var(--text-muted)', fontVariantNumeric:'tabular-nums' }}>{fmtDur(statusDuration)}</span>
-                  </span>
-                )}
-              </span>
-              {!navCollapsed && <span style={{ fontSize:9, color:'var(--text-muted)' }}>{'\u25B2'}</span>}
-            </button>
-
-            {showSidebarStatus && (
-              <div style={{ ...sbPopupStyle, background:'var(--surface)', border:'1px solid var(--border)', borderRadius:10, boxShadow:'0 8px 32px rgba(0,0,0,.18)', overflow:'hidden', zIndex:9999 }}>
-                <div style={{ fontSize:9, fontWeight:700, textTransform:'uppercase', letterSpacing:.7, color:'var(--text-muted)', padding:'10px 14px 6px' }}>Set status</div>
-                {statusOptions.map(s => (
-                  <button key={s.value} onClick={() => { updateStatus(s.value); setShowSidebarStatus(false) }}
-                    onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
-                    onMouseLeave={e => e.currentTarget.style.background = agentStatus === s.value ? 'var(--accent-bg)' : 'transparent'}
-                    style={{ display:'flex', alignItems:'center', gap:9, width:'100%', padding:'8px 14px', background: agentStatus === s.value ? 'var(--accent-bg)' : 'transparent', border:'none', cursor:'pointer', fontSize:12, fontWeight: agentStatus === s.value ? 600 : 400, color: agentStatus === s.value ? 'var(--accent)' : 'var(--text-primary)', textAlign:'left' }}>
-                    <div style={{ width:9, height:9, borderRadius:'50%', background:s.color, flexShrink:0 }}></div>
-                    {s.value}
-                    {agentStatus === s.value && <span style={{ marginLeft:'auto', fontSize:11 }}>{'\u2713'}</span>}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Theme toggle */}
-          <button onClick={toggleTheme}
-            style={{ width:'100%', padding: navCollapsed ? '8px 0' : '7px 10px', background:'transparent', border:'1px solid var(--border)', borderRadius:'var(--radius)', cursor:'pointer', fontSize:12, color:'var(--text-muted)', display:'flex', alignItems:'center', justifyContent: navCollapsed ? 'center' : 'flex-start', gap:8 }}
-            onMouseEnter={e => { e.currentTarget.style.background = 'var(--surface-2)'; e.currentTarget.style.color = 'var(--text-primary)' }}
-            onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-muted)' }}
-            title={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}>
-            <span style={{ fontSize:14 }}>{darkMode ? '\u2600\uFE0F' : '\uD83C\uDF19'}</span>
-            {!navCollapsed && <span>{darkMode ? 'Light mode' : 'Dark mode'}</span>}
-          </button>
-        </div>
-      </aside>}
-
-      {/* ── MAIN CONTENT (with a real top bar so the profile menu never overlaps pages) ── */}
+      {/* ── Main column ── */}
       <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden', minWidth:0 }}>
         {/* Wallboards update themselves in the background — never a banner on a TV. */}
         {updateReady && !isWall && (
-          <div style={{ background:'#7C3AED', color:'#fff', padding:'7px 16px', display:'flex', alignItems:'center', justifyContent:'center', gap:12, fontSize:12.5, fontWeight:600, flexShrink:0, zIndex:200 }}>
+          <div style={{ background:'var(--ink)', color:'#fff', padding:'7px 16px', display:'flex', alignItems:'center', justifyContent:'center', gap:12, fontSize:12.5, fontWeight:600, flexShrink:0, zIndex:200 }}>
             <span>Andi was updated — reload to get the latest (finish your call first).</span>
             <button onClick={() => window.location.reload()}
-              style={{ background:'#fff', color:'#7C3AED', border:'none', borderRadius:99, padding:'3px 14px', fontSize:12, fontWeight:700, cursor:'pointer' }}>
+              style={{ background:'var(--signal)', color:'#0D1013', border:'none', borderRadius:99, padding:'4px 14px', fontSize:12, fontWeight:700, cursor:'pointer' }}>
               Reload now
             </button>
           </div>
         )}
-        {/* Top bar — reserves its own height; hidden on the wall-TV routes */}
         {!isWall && <AskAndi />}
         <DialogHost />
         {!isWall && (
-        <div style={{ height:53, minHeight:53, boxSizing:'border-box', flexShrink:0, borderBottom:'1px solid var(--border)', background:'var(--surface)', display:'flex', alignItems:'center', justifyContent:'space-between', padding:'0 16px', position:'relative', zIndex:100 }}>
-          {isMobile && (
-            <button onClick={() => setMobileNav(v => !v)} title="Menu"
-              style={{ border:'1px solid var(--border)', background:'var(--surface-2)', color:'var(--text-primary)',
-                borderRadius:8, width:36, height:36, fontSize:17, cursor:'pointer', marginRight:10, flexShrink:0 }}>
-              ☰
-            </button>
-          )}
-          {/* Contextual page header */}
-          <div style={{ display:'flex', flexDirection:'column', lineHeight:1.2, minWidth:0 }}>
-            <span style={{ fontSize:15, fontWeight:700, color:'var(--text-primary)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
-              {(PAGE_META[location.pathname] || {}).title || 'andi'}
-            </span>
-            {(PAGE_META[location.pathname] || {}).subtitle && (
-              <span style={{ fontSize:11, color:'var(--text-muted)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
-                {PAGE_META[location.pathname].subtitle}
-              </span>
-            )}
-          </div>
-          {/* Weather — centered in the top bar's dead space on every page */}
-          <div style={{ flex:1, display:'flex', justifyContent:'center', minWidth:0, overflow:'hidden', padding:'0 14px' }}>
-            {!isMobile && <WeatherStrip />}
-          </div>
-          <div ref={menuRef} style={{ position:'relative' }}>
-        <button onClick={() => setShowStatusMenu(v => !v)}
-          title={`${currentStatusObj.value} · ${fmtDur(statusDuration)}`}
-          style={{ display:'flex', alignItems:'center', gap:8, padding:'4px 10px 4px 5px', background:'var(--surface-2)', border:'1px solid var(--border)', borderRadius:99, cursor:'pointer' }}>
-          {/* Avatar with status ring */}
-          <div style={{ position:'relative', flexShrink:0 }}>
-            <div style={{ width:30, height:30, borderRadius:'50%', background:'var(--accent-bg)', color:'var(--accent)', display:'flex', alignItems:'center', justifyContent:'center', fontSize: profile?.avatar ? 16 : 12, fontWeight:700, border:`2px solid ${currentStatusObj.color}` }}>
-              <Avatar avatar={profile?.avatar} name={profile?.name || profile?.email} />
-            </div>
-            <div style={{ position:'absolute', bottom:-1, right:-1, width:9, height:9, borderRadius:'50%', background:currentStatusObj.color, border:'2px solid var(--surface)' }} />
-          </div>
-          <div style={{ textAlign:'left', lineHeight:1.2 }}>
-            <div style={{ fontSize:11, fontWeight:700, color:'var(--text-primary)', whiteSpace:'nowrap' }}>{isOpsManager ? (profile?.name || 'Operations') : currentStatusObj.value}</div>
-            <div style={{ fontSize:10, color:'var(--text-muted)', fontVariantNumeric:'tabular-nums' }}>{isOpsManager ? 'Operations Manager' : fmtDur(statusDuration)}</div>
-          </div>
-        </button>
-
-        {showStatusMenu && (
-          <div style={{ position:'absolute', top:'calc(100% + 6px)', right:0, width:240, background:'var(--surface)', border:'1px solid var(--border)', borderRadius:14, boxShadow:'0 24px 60px -20px rgba(15,20,40,.35)', overflow:'hidden' }}>
-
-            {/* Who you are */}
-            <div style={{ padding:'12px 14px', borderBottom:'1px solid var(--border)', background:'var(--surface-2)', display:'flex', alignItems:'center', gap:10 }}>
-              <div style={{ width:34, height:34, borderRadius:'50%', background:'var(--accent-bg)', color:'var(--accent)', display:'flex', alignItems:'center', justifyContent:'center', fontSize: profile?.avatar ? 18 : 13, fontWeight:700, flexShrink:0 }}>
-                <Avatar avatar={profile?.avatar} name={profile?.name || profile?.email} />
-              </div>
-              <div style={{ minWidth:0 }}>
-                <div style={{ fontSize:12, fontWeight:700, color:'var(--text-primary)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{profile?.name || profile?.email}</div>
-                {(isAdmin || isDispatcher) && <div style={{ fontSize:9, color:'var(--accent)', fontWeight:700, textTransform:'uppercase', letterSpacing:.5 }}>{isAdmin ? 'Admin' : 'Dispatcher'}</div>}
-              </div>
-            </div>
-
-            {!isOpsManager && (<>
-            {/* Status list */}
-            <div style={{ padding:'6px 0', borderBottom:'1px solid var(--border)' }}>
-              <div style={{ fontSize:9, fontWeight:700, textTransform:'uppercase', letterSpacing:.7, color:'var(--text-muted)', padding:'4px 14px 6px' }}>Set status</div>
-              {statusOptions.map(s => (
-                <button key={s.value} onClick={() => { updateStatus(s.value); setShowStatusMenu(false) }}
-                  onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
-                  onMouseLeave={e => e.currentTarget.style.background = agentStatus === s.value ? 'var(--accent-bg)' : 'transparent'}
-                  style={{ display:'flex', alignItems:'center', gap:9, width:'100%', padding:'8px 14px', background: agentStatus === s.value ? 'var(--accent-bg)' : 'transparent', border:'none', cursor:'pointer', fontSize:12, fontWeight: agentStatus === s.value ? 600 : 400, color: agentStatus === s.value ? 'var(--accent)' : 'var(--text-primary)', textAlign:'left' }}>
-                  <div style={{ width:9, height:9, borderRadius:'50%', background:s.color, flexShrink:0 }}></div>
-                  {s.value}
-                  {agentStatus === s.value && <span style={{ marginLeft:'auto', fontSize:11 }}>{'\u2713'}</span>}
-                </button>
-              ))}
-            </div>
-
-            </>)}
-            {/* Links */}
-            <div style={{ padding:'6px 0', borderBottom:'1px solid var(--border)' }}>
-              {(isOpsManager ? [
-                { to:'/team', label:'Team' },
-                { to:'/settings', label:'Settings' },
-              ] : [
-                { to:'/mypage', label:'My Page' },
-                { to:'/mypage?tab=commissions', label:'Commissions' },
-                { to:'/mypage?tab=scorecard', label:'Scorecard' },
-                { to:'/settings', label:'Settings' },
-              ]).map(({ to, label }) => (
-                <button key={label} onClick={() => { navigate(to); setShowStatusMenu(false) }}
-                  onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
-                  onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-                  style={{ display:'flex', alignItems:'center', width:'100%', padding:'8px 14px', background:'transparent', border:'none', cursor:'pointer', fontSize:12, color:'var(--text-primary)', textAlign:'left' }}>
-                  {label}
-                </button>
-              ))}
-            </div>
-
-            {/* Sign out */}
-            <button onClick={signOut}
-              onMouseEnter={e => { e.currentTarget.style.background = 'var(--danger-bg)'; e.currentTarget.style.color = 'var(--danger)' }}
-              onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-muted)' }}
-              style={{ display:'flex', alignItems:'center', width:'100%', padding:'9px 14px', background:'transparent', border:'none', cursor:'pointer', fontSize:12, color:'var(--text-muted)', textAlign:'left' }}>
-              Sign out
-            </button>
-          </div>
-        )}
-      </div>
-
-        </div>
+          <TopBar title={pageTitle} tabs={hub?.tabs || []} pathname={location.pathname} onNavigate={(to) => navigate(to)}
+            isMobile={isMobile} onOpenPalette={() => setPaletteOpen(true)} onOpenMenu={() => setMobileNav(true)}
+            right={!isMobile ? <WeatherStrip /> : null} />
         )}
         <GlobalIncomingCall />
-        {!isOpsManager && <OutboundNudge agentStatus={agentStatus} />}
         {!isOpsManager && <ScheduleAlerts />}
         <div style={isMobile && !isWall ? { flex:1, minHeight:0, display:'flex', flexDirection:'column', overflow:'hidden' } : { display:'contents' }}>
         <Routes>
@@ -984,8 +477,17 @@ function DialerLayoutInner() {
           <Route path="/settings" element={<AdminPage />} />
         </Routes>
         </div>
-        {isMobile && !isWall && <MobileTabBar isAdmin={isAdmin} canDispatch={canDispatch} isLeader={isLeader} isOpsManager={isOpsManager} onMore={() => setMobileNav(true)} />}
+        {isMobile && !isWall && <MobileTabBar items={mobileItems} pathname={location.pathname} onNavigate={(to) => navigate(to)} onMore={() => setMobileNav(true)} />}
       </div>
+
+      {/* ── Phone dock: status + the phone on every desktop page ── */}
+      {!isWall && !isMobile && (
+        <PhoneDock showStatus={!isOpsManager} status={currentStatusObj.value} statusColor={currentStatusObj.color}
+          statusSeconds={statusDuration} statusOptions={statusOptions} onSetStatus={updateStatus}
+          onDialer={onDialer} onOpenDialer={() => navigate('/')} inCall={inCall} callSeconds={callDuration || 0}
+          outboundWaiting={!isOpsManager && outboundWaiting} openLeads={isOpsManager ? 0 : openLeads} isOpsManager={isOpsManager} />
+      )}
+      <CommandPalette open={paletteOpen && !isWall} onClose={() => setPaletteOpen(false)} items={paletteItems} />
     </div>
   )
 }
