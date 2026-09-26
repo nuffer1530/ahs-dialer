@@ -1,22 +1,43 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Icon } from './icons'
 
-// ⌘K / Ctrl+K (redesign stage 1): jump to any page you can open, or run a
-// quick action (status, theme, sign out). items: [{ id, label, group, hint?,
-// keywords?, icon?, run }]. Customer search joins in the Phones stage.
-export default function CommandPalette({ open, onClose, items }) {
+// ⌘K / Ctrl+K: jump to any page you can open, run a quick action (status,
+// theme, sign out), or — with searchCustomers — find a ServiceTitan customer
+// by name, phone or address and open them in the dialer (stage 3).
+// items: [{ id, label, group, hint?, keywords?, icon?, run }].
+export default function CommandPalette({ open, onClose, items, searchCustomers, onPickCustomer }) {
   const [q, setQ] = useState('')
   const [sel, setSel] = useState(0)
+  const [custs, setCusts] = useState([])
+  const [custBusy, setCustBusy] = useState(false)
   const inputRef = useRef(null)
   const listRef = useRef(null)
 
-  useEffect(() => { if (open) { setQ(''); setSel(0); setTimeout(() => inputRef.current?.focus(), 0) } }, [open])
+  useEffect(() => { if (open) { setQ(''); setSel(0); setCusts([]); setTimeout(() => inputRef.current?.focus(), 0) } }, [open])
+
+  // Customers: 3+ characters, debounced, newest query wins.
+  useEffect(() => {
+    const term = q.trim()
+    if (!open || !searchCustomers || term.length < 3) { setCusts([]); setCustBusy(false); return }
+    let dead = false
+    setCustBusy(true)
+    const t = setTimeout(() => {
+      searchCustomers(term).then(list => { if (!dead) setCusts(list || []) }).catch(() => { if (!dead) setCusts([]) })
+        .finally(() => { if (!dead) setCustBusy(false) })
+    }, 300)
+    return () => { dead = true; clearTimeout(t) }
+  }, [q, open, searchCustomers])
 
   const results = useMemo(() => {
     const words = q.trim().toLowerCase().split(/\s+/).filter(Boolean)
     const hay = (it) => `${it.label} ${it.group} ${it.keywords || ''}`.toLowerCase()
-    return items.filter(it => words.every(w => hay(it).includes(w))).slice(0, 40)
-  }, [q, items])
+    const pages = items.filter(it => words.every(w => hay(it).includes(w))).slice(0, 40)
+    const people = custs.map(c => ({
+      id: `cust:${c.id}`, label: c.name || 'Customer', group: 'Customers in ServiceTitan', icon: 'user',
+      hint: [c.phone, c.city].filter(Boolean).join(' · '), run: () => onPickCustomer?.(c),
+    }))
+    return [...pages, ...people]
+  }, [q, items, custs, onPickCustomer])
   useEffect(() => { setSel(0) }, [q])
   useEffect(() => {
     listRef.current?.querySelector(`[data-idx="${sel}"]`)?.scrollIntoView({ block: 'nearest' })
@@ -39,13 +60,13 @@ export default function CommandPalette({ open, onClose, items }) {
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '14px 16px', borderBottom: '1px solid var(--border)' }}>
           <Icon name="search" size={18} style={{ color: 'var(--text-muted)' }} />
           <input ref={inputRef} value={q} onChange={e => setQ(e.target.value)} onKeyDown={onKey}
-            placeholder="Jump to a page or run an action…" aria-label="Search pages and actions"
+            placeholder={searchCustomers ? 'Jump to a page, run an action, or find a customer…' : 'Jump to a page or run an action…'} aria-label="Search pages, actions and customers"
             role="combobox" aria-expanded="true" aria-controls="cmdk-list" aria-activedescendant={results[sel] ? `cmdk-${results[sel].id}` : undefined}
             style={{ flex: 1, border: 'none', outline: 'none', background: 'transparent', font: 'inherit', fontSize: 16, color: 'var(--text-primary)' }} />
           <span className="mono" style={{ fontSize: 11, color: 'var(--text-muted)', border: '1px solid var(--border)', borderRadius: 6, padding: '1px 6px' }}>esc</span>
         </div>
         <div id="cmdk-list" ref={listRef} role="listbox" style={{ overflowY: 'auto', padding: '6px 0' }}>
-          {!results.length && <div style={{ padding: '18px 16px', fontSize: 13, color: 'var(--text-muted)' }}>Nothing matches “{q}”.</div>}
+          {!results.length && !custBusy && <div style={{ padding: '18px 16px', fontSize: 13, color: 'var(--text-muted)' }}>Nothing matches “{q}”.</div>}
           {results.map((it, i) => {
             const head = it.group !== lastGroup ? it.group : null
             lastGroup = it.group
@@ -61,6 +82,7 @@ export default function CommandPalette({ open, onClose, items }) {
               </div>
             )
           })}
+          {custBusy && <div style={{ padding: '10px 16px', fontSize: 12.5, color: 'var(--text-muted)' }}>Searching ServiceTitan…</div>}
         </div>
       </div>
     </div>

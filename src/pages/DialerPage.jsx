@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { toast } from '../lib/dialogs'
 import { useData } from '../lib/DataContext'
 import { useAuth } from '../lib/AuthContext'
@@ -186,7 +187,9 @@ function SearchSelect({ label, value, onChange, options, placeholder, disabled }
 }
 
 export default function DialerPage() {
-  const { contacts, setContacts, campaigns, dncSet } = useData()
+  const { contacts, setContacts, campaigns, dncSet, loading: contactsLoading } = useData()
+  const location = useLocation()
+  const navigate = useNavigate()
   const { profile, isOpsManager } = useAuth()
   const currentRep = profile?.name || profile?.email || 'Unknown'
 
@@ -772,6 +775,16 @@ export default function DialerPage() {
     }).select().single()
     if (created) { setContacts(prev => [created, ...prev]); selectContact(created.id) }
   }
+
+  // A customer picked in ⌘K arrives in the route state. Wait for the contact
+  // list (so an existing contact is reused, never duplicated), then open it
+  // exactly as the header search does and clear the state.
+  useEffect(() => {
+    const cust = location.state?.openStCustomer
+    if (!cust || contactsLoading) return
+    navigate('/', { replace: true, state: null })
+    openStCustomer(cust)
+  }, [location.state, contactsLoading])   // eslint-disable-line react-hooks/exhaustive-deps
 
   // Customer tags: add/remove straight on the ST account. Heavy tags (DNC,
   // Do Not Service) get a confirm click before they fly.
@@ -1493,8 +1506,8 @@ export default function DialerPage() {
 
   // Workspace sections share the app-wide panel look (16px corners, eyebrow
   // titles) but keep the dialer's tighter padding — it's a working screen.
-  const sectionCard = { background:'var(--surface)', border:'1px solid var(--border)', borderRadius:14, overflow:'hidden', marginBottom:0 }
-  const sectionHeader = { padding:'9px 16px', borderBottom:'1px solid var(--border)', display:'flex', alignItems:'center', justifyContent:'space-between', background:'var(--surface)' }
+  const sectionCard = { background:'var(--surface)', border:'1px solid var(--border)', borderRadius:16, overflow:'hidden', marginBottom:0 }
+  const sectionHeader = { padding:'11px 16px', borderBottom:'1px solid var(--border)', display:'flex', alignItems:'center', justifyContent:'space-between', background:'var(--surface)' }
   const sectionTitle = { fontSize:10.5, fontWeight:700, textTransform:'uppercase', letterSpacing:'.07em', color:'var(--text-muted)' }
 
   return (
@@ -1506,7 +1519,7 @@ export default function DialerPage() {
           two Answer/Decline prompts at once. */}
 
       {/* == TOP BAR == */}
-      <div style={{ display:'flex', alignItems:'center', gap:8, padding:'6px 12px', background:'var(--surface)', borderBottom:'1px solid var(--border)', flexShrink:0 }}>
+      <div style={{ display:'flex', alignItems:'center', gap:10, padding:'10px 16px', background:'var(--bg)', borderBottom:'1px solid var(--border)', flexShrink:0, flexWrap:'wrap' }}>
         {/* Collapse toggle. Carries a dot when leads are waiting — with the rail
             collapsed this button is the only thing on screen that could tell a
             rep a paid lead is sitting there. */}
@@ -1515,8 +1528,9 @@ export default function DialerPage() {
         {!isOpsManager && (<>
         <button onClick={() => setQueueCollapsed(p => !p)}
           title={openLeadCount > 0 ? `${openLeadCount} paid lead${openLeadCount === 1 ? '' : 's'} waiting` : 'Show leads'}
-          style={{ position:'relative', width:28, height:28, border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface-2)', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', fontSize:12, color:'var(--text-muted)', flexShrink:0 }}>
-          {queueCollapsed ? '>' : '<'}
+          aria-label={queueCollapsed ? 'Show leads' : 'Hide leads'}
+          style={{ position:'relative', width:34, height:34, border:'1px solid var(--border)', borderRadius:99, background:'var(--surface)', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', fontSize:13, fontWeight:700, color:'var(--text-secondary)', flexShrink:0 }}>
+          {queueCollapsed ? '›' : '‹'}
           {openLeadCount > 0 && (
             <span style={{ position:'absolute', top:-3, right:-3, minWidth:8, height:8, borderRadius:99, background:'var(--danger)', border:'1.5px solid var(--surface)' }} />
           )}
@@ -1524,22 +1538,23 @@ export default function DialerPage() {
         <QueueSelector />
         </>)}
         <button onClick={() => setShowDialpad(true)}
-          style={{ display:'flex', alignItems:'center', gap:5, padding:'5px 12px', background: twilioReady ? 'var(--success)' : 'var(--border)', border:'none', borderRadius:'var(--radius)', cursor: twilioReady ? 'pointer' : 'not-allowed', fontSize:11, fontWeight:600, color:'#fff' }}>
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="white"><path d="M6.6 10.8c1.4 2.8 3.8 5.1 6.6 6.6l2.2-2.2c.3-.3.7-.4 1-.2 1.1.4 2.3.6 3.6.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1C10.6 21 3 13.4 3 4c0-.6.4-1 1-1h3.5c.6 0 1 .4 1 1 0 1.3.2 2.5.6 3.6.1.3 0 .7-.2 1L6.6 10.8z"/></svg>
-          Manual Dial
+          style={{ display:'flex', alignItems:'center', gap:7, height:34, padding:'0 15px', background: twilioReady ? 'var(--btn-primary-bg)' : 'var(--border)', border:'none', borderRadius:99, cursor: twilioReady ? 'pointer' : 'not-allowed', fontSize:12.5, fontWeight:700, color: twilioReady ? 'var(--btn-primary-fg)' : 'var(--text-muted)' }}>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M6.6 10.8c1.4 2.8 3.8 5.1 6.6 6.6l2.2-2.2c.3-.3.7-.4 1-.2 1.1.4 2.3.6 3.6.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1C10.6 21 3 13.4 3 4c0-.6.4-1 1-1h3.5c.6 0 1 .4 1 1 0 1.3.2 2.5.6 3.6.1.3 0 .7-.2 1L6.6 10.8z"/></svg>
+          Manual dial
         </button>
         {powerDialActive && (
-          <div style={{ display:'flex', alignItems:'center', gap:5, padding:'3px 9px', background:'var(--accent)', borderRadius:'var(--radius)', color:'#fff', fontSize:11 }}>
-            Power Dial <button onClick={() => setPowerDialActive(false)} style={{ background:'rgba(255,255,255,.2)', border:'none', color:'#fff', padding:'1px 5px', borderRadius:3, cursor:'pointer', fontSize:10 }}>Stop</button>
+          <div style={{ display:'flex', alignItems:'center', gap:6, height:34, padding:'0 6px 0 12px', background:'var(--accent)', borderRadius:99, color:'#fff', fontSize:12, fontWeight:700 }}>
+            Power dial <button onClick={() => setPowerDialActive(false)} style={{ background:'rgba(255,255,255,.22)', border:'none', color:'#fff', padding:'4px 10px', borderRadius:99, cursor:'pointer', fontSize:11, fontWeight:700 }}>Stop</button>
           </div>
         )}
         {callStatus && (
-          <div style={{ display:'flex', alignItems:'center', gap:6, padding:'4px 10px', borderRadius:'var(--radius)', fontSize:11, fontWeight:600,
-            background: callStatus==='connected' ? 'var(--tone-green-bg)' : callStatus==='ended' ? 'var(--surface-2)' : 'var(--tone-amber-bg)',
-            border:`1px solid ${callStatus==='connected' ? 'var(--success)' : callStatus==='ended' ? 'var(--border)' : 'var(--tone-amber-tx)'}`,
-            color: callStatus==='connected' ? 'var(--success)' : callStatus==='ended' ? 'var(--text-muted)' : 'var(--tone-amber-tx)' }}>
-            <span style={{ width:6, height:6, borderRadius:'50%', background:'currentColor', display:'inline-block' }}></span>
-            {callStatus==='calling' ? 'Dialing...' : callStatus==='ringing' ? 'Ringing...' : callStatus==='connected' ? fmtDuration(callDuration) : 'Ended'}
+          <div style={{ display:'flex', alignItems:'center', gap:7, minHeight:34, padding:'3px 4px 3px 12px', borderRadius:99, fontSize:12.5, fontWeight:600,
+            background:'var(--rail-bg)', border:'1px solid var(--rail-line)', color:'#fff' }}>
+            <span style={{ width:8, height:8, borderRadius:'50%', display:'inline-block',
+              background: callStatus==='connected' ? '#1FA36B' : callStatus==='ended' ? '#9AA0A6' : 'var(--signal)' }}></span>
+            <span style={callStatus==='connected' ? { fontFamily:'var(--font-mono)', fontVariantNumeric:'tabular-nums' } : undefined}>
+              {callStatus==='calling' ? 'Dialing…' : callStatus==='ringing' ? 'Ringing…' : callStatus==='connected' ? fmtDuration(callDuration) : 'Ended'}
+            </span>
             {holdOn && (
               <span style={{ fontSize:9.5, fontWeight:800, padding:'1px 6px', borderRadius:99, background:'var(--tone-amber-bg)', color:'var(--tone-amber-tx)', border:'1px solid var(--tone-amber-bd)' }}>ON HOLD</span>
             )}
@@ -1558,36 +1573,36 @@ export default function DialerPage() {
             {callStatus==='connected' && !callIsTeammate && (
               <>
                 <button onClick={toggleHold} disabled={ctlBusy}
-                  style={{ background: holdOn ? 'var(--tone-amber-bd)' : 'var(--surface)', border:'1px solid var(--tone-amber-bd)', color: holdOn ? '#fff' : 'var(--tone-amber-tx)', padding:'2px 7px', borderRadius:3, cursor: ctlBusy ? 'wait' : 'pointer', fontSize:10, fontWeight:700 }}>
+                  style={{ background: holdOn ? '#B97A0B' : 'var(--rail-2)', border:'1px solid var(--rail-line)', color:'#fff', padding:'5px 12px', borderRadius:99, cursor: ctlBusy ? 'wait' : 'pointer', fontSize:12, fontWeight:700 }}>
                   {ctlBusy ? '…' : holdOn ? 'Resume' : 'Hold'}
                 </button>
                 <button onClick={() => setXferOpen(true)} disabled={ctlBusy}
-                  style={{ background:'var(--surface)', border:'1px solid var(--accent)', color:'var(--accent)', padding:'2px 7px', borderRadius:3, cursor: ctlBusy ? 'wait' : 'pointer', fontSize:10, fontWeight:700 }}>
+                  style={{ background:'var(--rail-2)', border:'1px solid var(--rail-line)', color:'#fff', padding:'5px 12px', borderRadius:99, cursor: ctlBusy ? 'wait' : 'pointer', fontSize:12, fontWeight:700 }}>
                   Transfer
                 </button>
               </>
             )}
             {['calling','ringing','connected'].includes(callStatus) && (
-              <button onClick={hangUp} style={{ background:'#DC2626', border:'none', color:'#fff', padding:'2px 7px', borderRadius:3, cursor:'pointer', fontSize:10, marginLeft:2 }}>Hang up</button>
+              <button onClick={hangUp} style={{ background:'#D8352B', border:'none', color:'#fff', padding:'6px 14px', borderRadius:99, cursor:'pointer', fontSize:12, fontWeight:700, marginLeft:2 }}>Hang up</button>
             )}
           </div>
         )}
         {/* ST GLOBAL SEARCH */}
-        <div ref={stSearchRef} style={{ position:'relative', flex:1, maxWidth:380, marginLeft:8 }}>
+        <div ref={stSearchRef} style={{ position:'relative', flex:1, minWidth:220, maxWidth:420 }}>
           <div style={{ position:'relative' }}>
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" style={{ position:'absolute', left:9, top:'50%', transform:'translateY(-50%)', pointerEvents:'none' }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" style={{ position:'absolute', left:13, top:'50%', transform:'translateY(-50%)', pointerEvents:'none' }}>
               <circle cx="11" cy="11" r="7" stroke="var(--text-muted)" strokeWidth="2"/>
               <path d="M20 20l-4-4" stroke="var(--text-muted)" strokeWidth="2" strokeLinecap="round"/>
             </svg>
             <input value={stSearch}
               onChange={e => { setStSearch(e.target.value); setStSearchOpen(true) }}
               onFocus={() => setStSearchOpen(true)}
-              placeholder="Search ServiceTitan by name, phone, or address..."
-              style={{ width:'100%', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'6px 10px 6px 28px', fontSize:12, background:'var(--surface-2)', color:'var(--text-primary)' }} />
+              placeholder="Find a customer in ServiceTitan — name, phone or address"
+              style={{ width:'100%', height:34, border:'1px solid var(--border)', borderRadius:99, padding:'0 14px 0 34px', fontSize:12.5, background:'var(--surface)', color:'var(--text-primary)' }} />
             {stSearchLoading && <div className="spinner" style={{ position:'absolute', right:9, top:'50%', transform:'translateY(-50%)', width:12, height:12, borderWidth:2 }} />}
           </div>
           {stSearchOpen && stSearch.trim().length >= 3 && (
-            <div style={{ position:'absolute', top:'100%', left:0, right:0, zIndex:500, background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius)', boxShadow:'0 4px 20px rgba(0,0,0,.15)', marginTop:3, maxHeight:340, overflowY:'auto' }}>
+            <div style={{ position:'absolute', top:'100%', left:0, right:0, zIndex:500, background:'var(--surface)', border:'1px solid var(--border)', borderRadius:14, boxShadow:'0 24px 60px -20px rgba(13,16,19,.45)', marginTop:6, maxHeight:360, overflowY:'auto' }}>
               {stSearchLoading ? (
                 <div style={{ padding:'14px', textAlign:'center', fontSize:12, color:'var(--text-muted)' }}>Searching...</div>
               ) : stSearchResults.length === 0 ? (
@@ -1623,7 +1638,7 @@ export default function DialerPage() {
         </div>
 
         <div style={{ flex:1 }} />
-        {cbDue.length > 0 && <div style={{ fontSize:11, fontWeight:600, color:'var(--tone-amber-tx)', padding:'3px 8px', background:'var(--tone-amber-bg)', border:'1px solid #FCD34D', borderRadius:99 }}>CB: {cbDue.length}</div>}
+        {cbDue.length > 0 && <div title="Callbacks due today" style={{ fontSize:12, fontWeight:700, color:'var(--tone-amber-tx)', padding:'6px 12px', background:'var(--tone-amber-bg)', border:'1px solid var(--tone-amber-bd)', borderRadius:99 }}>{cbDue.length} callback{cbDue.length === 1 ? '' : 's'} due</div>}
       </div>
 
       {/* == BODY == */}
@@ -1634,7 +1649,7 @@ export default function DialerPage() {
             is worth far more showing the handful of paid leads that are on a
             clock. Outbound contacts are still reachable via Next pending and
             the ServiceTitan search in the header. */}
-        <aside style={{ width: queueCollapsed || isOpsManager ? 0 : 232, minWidth: queueCollapsed || isOpsManager ? 0 : 232, flexShrink:0, background:'var(--surface)', borderRight:'1px solid var(--border)', display:'flex', flexDirection:'column', overflow:'hidden', transition:'width .2s, min-width .2s' }}>
+        <aside style={{ width: queueCollapsed || isOpsManager ? 0 : 252, minWidth: queueCollapsed || isOpsManager ? 0 : 252, flexShrink:0, background:'var(--surface-2)', borderRight:'1px solid var(--border)', display:'flex', flexDirection:'column', overflow:'hidden', transition:'width .2s, min-width .2s' }}>
           {!isOpsManager && <LeadsRail currentRep={currentRep} onOpenContact={openPromotedContact} />}
         </aside>
 
@@ -1643,21 +1658,20 @@ export default function DialerPage() {
 
           {/* Customer tabs (up to 3 open at once) */}
           {openTabIds.length > 0 && (
-            <div style={{ display:'flex', alignItems:'stretch', background:'var(--surface-2)', borderBottom:'1px solid var(--border)', flexShrink:0, overflowX:'auto' }}>
+            <div style={{ display:'flex', alignItems:'center', gap:6, padding:'8px 16px', background:'var(--bg)', borderBottom:'1px solid var(--border)', flexShrink:0, overflowX:'auto' }}>
               {openTabIds.map(tid => {
                 const tc = contacts.find(x => x.id === tid)
                 const isActive = tid === selectedId
                 return (
                   <div key={tid} onClick={() => { setSelectedId(tid); setSelectedOutcome(null) }}
-                    style={{ display:'flex', alignItems:'center', gap:8, padding:'7px 10px 7px 13px', cursor:'pointer', minWidth:120, maxWidth:200, flexShrink:0,
-                      background: isActive ? 'var(--surface)' : 'transparent',
-                      borderRight:'1px solid var(--border)',
-                      borderTop: isActive ? '2px solid var(--accent)' : '2px solid transparent' }}>
-                    <span style={{ fontSize:12, fontWeight: isActive ? 600 : 500, color: isActive ? 'var(--text-primary)' : 'var(--text-muted)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
+                    style={{ display:'flex', alignItems:'center', gap:8, height:32, padding:'0 6px 0 14px', cursor:'pointer', minWidth:120, maxWidth:220, flexShrink:0, borderRadius:99,
+                      background: isActive ? 'var(--btn-primary-bg)' : 'var(--surface)',
+                      border: `1px solid ${isActive ? 'var(--btn-primary-bg)' : 'var(--border)'}` }}>
+                    <span style={{ fontSize:12.5, fontWeight: isActive ? 700 : 500, color: isActive ? 'var(--btn-primary-fg)' : 'var(--text-secondary)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
                       {tc?.name || 'Customer'}
                     </span>
                     <button onClick={(e) => closeTab(tid, e)} title="Close tab"
-                      style={{ display:'flex', alignItems:'center', justifyContent:'center', width:16, height:16, borderRadius:4, border:'none', background:'transparent', cursor:'pointer', color:'var(--text-muted)', flexShrink:0, padding:0 }}>
+                      style={{ display:'flex', alignItems:'center', justifyContent:'center', width:20, height:20, borderRadius:99, border:'none', background:'transparent', cursor:'pointer', color: isActive ? 'var(--btn-primary-fg)' : 'var(--text-muted)', opacity:.75, flexShrink:0, padding:0 }}>
                       <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
                     </button>
                   </div>
@@ -1676,12 +1690,12 @@ export default function DialerPage() {
                   <polyline points="9,32 19,32 25,17 33,47 40,26 45,32 55,32" fill="none" stroke="#ff751f" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round"/>
                 </svg>
               </div>
-              <div style={{ fontSize:17, fontWeight:700, color:'var(--text-primary)', marginTop:22 }}>
+              <div className="disp" style={{ fontSize:26, fontWeight:700, letterSpacing:'-.02em', color:'var(--text-primary)', marginTop:22 }}>
                 {autoServePaused ? 'Taking a breather' : 'Ready to dial'}
               </div>
-              <div style={{ fontSize:12.5, color:'var(--text-muted)', marginTop:6 }}>
+              <div style={{ fontSize:13.5, color:'var(--text-secondary)', marginTop:8, maxWidth:460, textAlign:'center', lineHeight:1.5 }}>
                 {isOpsManager
-                  ? 'Search a customer in ServiceTitan above, or use Manual Dial.'
+                  ? 'Find a customer above (or with ⌘K), or use Manual dial.'
                   : autoServePaused
                   ? 'Auto-serve is paused because you closed the last contact.'
                   : profile?.status === 'Available'
@@ -1694,7 +1708,7 @@ export default function DialerPage() {
                   Serve me the next lead
                 </button>
               )}
-              <div style={{ marginTop:26, fontSize:11.5, color:'var(--text-muted)' }}>
+              <div style={{ marginTop:26, fontSize:12.5, color:'var(--text-muted)', fontFamily:'var(--font-mono)', fontVariantNumeric:'tabular-nums' }}>
                 Today: <b style={{ color:'var(--text-secondary)' }}>{myStats.calls} call{myStats.calls === 1 ? '' : 's'}</b>
                 {' · '}<b style={{ color:'var(--text-secondary)' }}>{myStats.booked} booked</b>
                 {' · '}<b onClick={() => setFilter('callback')} style={{ color:'var(--text-secondary)', cursor:'pointer', textDecoration: cbDue.length ? 'underline' : 'none' }}>{cbDue.length} callback{cbDue.length === 1 ? '' : 's'} due</b>
@@ -1711,20 +1725,20 @@ export default function DialerPage() {
             <div style={{ flex:1, minHeight:0, display:'flex', flexDirection:'column', overflow:'hidden' }}>
 
               {/* -- CONTACT HEADER -- */}
-              <div style={{ padding:'10px 16px', background:'var(--surface)', borderBottom:'1px solid var(--border)', display:'flex', alignItems:'center', gap:12, flexShrink:0 }}>
-                <div style={{ width:40, height:40, borderRadius:'50%', background:'var(--accent-bg)', color:'var(--accent)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:14, fontWeight:700, flexShrink:0 }}>
+              <div style={{ padding:'14px 20px', background:'var(--surface)', borderBottom:'1px solid var(--border)', display:'flex', alignItems:'center', gap:14, flexShrink:0 }}>
+                <div className="disp" style={{ width:46, height:46, borderRadius:14, background:'var(--tone-blue-bg)', color:'var(--tone-blue-tx)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:16, fontWeight:700, flexShrink:0 }}>
                   {getInitials(c.name)}
                 </div>
                 <div style={{ flex:1, minWidth:0 }}>
                   <div style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap' }}>
-                    <span style={{ fontSize:15, fontWeight:700, color:'var(--text-primary)' }}>{c.name || '--'}</span>
+                    <span className="disp" style={{ fontSize:21, fontWeight:700, letterSpacing:'-.015em', color:'var(--text-primary)' }}>{c.name || '--'}</span>
                     {/* 'Pending' and 'Booked' are outbound-campaign lifecycle labels —
                         meaningless on a customer account now that Andi handles every
                         interaction type. Other statuses (callbacks, Max Attempts…)
                         still tell the rep something and stay. */}
                     {c.status && !['Pending', 'Booked'].includes(c.status) && <Badge status={c.status} />}
-                    {isDNC && <span style={{ fontSize:10, fontWeight:700, background:'#FEE2E2', color:'#7F1D1D', border:'1px solid #FECACA', borderRadius:99, padding:'1px 6px' }}>DNC</span>}
-                    {isDup && <span style={{ fontSize:10, fontWeight:700, background:'#F3E8FF', color:'#5B21B6', border:'1px solid #DDD6FE', borderRadius:99, padding:'1px 6px' }}>Duplicate</span>}
+                    {isDNC && <span style={{ fontSize:10.5, fontWeight:700, background:'var(--tone-red-bg)', color:'var(--tone-red-tx)', border:'1px solid var(--tone-red-bd)', borderRadius:99, padding:'1px 8px' }}>DNC</span>}
+                    {isDup && <span style={{ fontSize:10.5, fontWeight:700, background:'var(--tone-purple-bg)', color:'var(--tone-purple-tx)', border:'1px solid var(--tone-purple-bd)', borderRadius:99, padding:'1px 8px' }}>Duplicate</span>}
                     {campName(c) && <span style={{ fontSize:10, background:'var(--surface-2)', color:'var(--text-muted)', border:'1px solid var(--border)', borderRadius:99, padding:'1px 7px' }}>{campName(c)}</span>}
                     {/* ServiceTitan customer tags, in ST's own colors */}
                     {(stCustomerInfo?.tags || []).map((t, i) => (
@@ -1747,41 +1761,41 @@ export default function DialerPage() {
                     )}
                     {tagErr && <span style={{ fontSize:10, color:'var(--danger)' }}>{tagErr}</span>}
                   </div>
-                  <div style={{ display:'flex', gap:16, marginTop:3 }}>
+                  <div style={{ display:'flex', gap:16, marginTop:4, flexWrap:'wrap' }}>
                     {[c.phone, c.email, [c.address,c.city,c.state].filter(Boolean).join(', ')].filter(Boolean).map((v,i) => (
-                      <span key={i} style={{ fontSize:11, color:'var(--text-secondary)' }}>{v}</span>
+                      <span key={i} style={{ fontSize:12.5, color:'var(--text-secondary)', ...(i === 0 && v === c.phone ? { fontFamily:'var(--font-mono)', fontVariantNumeric:'tabular-nums' } : {}) }}>{v}</span>
                     ))}
-                    <span style={{ fontSize:11, color:'var(--text-secondary)' }}>ST: {c.external_id || '--'}</span>
+                    <span style={{ fontSize:12.5, color:'var(--text-muted)', fontFamily:'var(--font-mono)' }}>ST {c.external_id || '--'}</span>
                     {/* Attempts is outbound-campaign lifecycle — hidden for paid
                         leads (the 'Leads' campaign) and ST-searched customers. */}
-                    {isOutbound && campName(c) !== 'Leads' && <span style={{ fontSize:11, color:'var(--text-secondary)' }}>Attempts: {c.attempts||0}/{MAX_ATTEMPTS}</span>}
+                    {isOutbound && campName(c) !== 'Leads' && <span style={{ fontSize:12.5, color:'var(--text-secondary)' }}>Attempt {c.attempts||0} of {MAX_ATTEMPTS}</span>}
                   </div>
                 </div>
                 {/* Action buttons */}
                 <div style={{ display:'flex', gap:6, flexShrink:0, alignItems:'center' }}>
-                  {c.callback_at && <span style={{ fontSize:10, padding:'4px 8px', background:'var(--tone-amber-bg)', border:'1px solid #FCD34D', borderRadius:'var(--radius)', color:'var(--tone-amber-tx)' }}>CB: {fmtDate(c.callback_at)}</span>}
+                  {c.callback_at && <span style={{ fontSize:11.5, fontWeight:600, padding:'5px 10px', background:'var(--tone-amber-bg)', border:'1px solid var(--tone-amber-bd)', borderRadius:99, color:'var(--tone-amber-tx)' }}>Callback {fmtDate(c.callback_at)}</span>}
                   {c.phone && (
                     <button onClick={() => makeCall(c.phone)} disabled={!twilioReady || !!callStatus}
-                      style={{ display:'flex', alignItems:'center', gap:6, padding:'8px 18px', border:'none', borderRadius:'var(--radius)', background: twilioReady && !callStatus ? 'var(--success)' : 'var(--border)', cursor: twilioReady && !callStatus ? 'pointer' : 'not-allowed', fontSize:13, fontWeight:700, color:'#fff' }}>
+                      style={{ display:'flex', alignItems:'center', gap:7, height:38, padding:'0 20px', border:'none', borderRadius:99, background: twilioReady && !callStatus ? '#1FA36B' : 'var(--border)', cursor: twilioReady && !callStatus ? 'pointer' : 'not-allowed', fontSize:13.5, fontWeight:700, color:'#fff' }}>
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="white"><path d="M6.6 10.8c1.4 2.8 3.8 5.1 6.6 6.6l2.2-2.2c.3-.3.7-.4 1-.2 1.1.4 2.3.6 3.6.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1C10.6 21 3 13.4 3 4c0-.6.4-1 1-1h3.5c.6 0 1 .4 1 1 0 1.3.2 2.5.6 3.6.1.3 0 .7-.2 1L6.6 10.8z"/></svg>
                       Call
                     </button>
                   )}
                   {c.phone && (
                     <button onClick={() => { setShowTextModal(true); setTextResult(null) }}
-                      style={{ display:'flex', alignItems:'center', gap:5, padding:'7px 12px', border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface-2)', cursor:'pointer', fontSize:12, color:'var(--text-primary)' }}
+                      style={{ display:'flex', alignItems:'center', gap:6, height:34, padding:'0 14px', border:'1px solid var(--border)', borderRadius:99, background:'var(--surface)', cursor:'pointer', fontSize:12.5, fontWeight:600, color:'var(--text-primary)' }}
                       title="Send text message">
                       <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M21 12a8 8 0 01-8 8H8l-5 2 1.5-4.5A8 8 0 1121 12z" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>
                       Text
                     </button>
                   )}
                   <button onClick={sendEmail} disabled={!stCustomerInfo?.email && !c.email}
-                    style={{ display:'flex', alignItems:'center', gap:5, padding:'7px 12px', border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface-2)', cursor: (stCustomerInfo?.email || c.email) ? 'pointer' : 'not-allowed', opacity: (stCustomerInfo?.email || c.email) ? 1 : .4, fontSize:12, color:'var(--text-primary)' }}
+                    style={{ display:'flex', alignItems:'center', gap:6, height:34, padding:'0 14px', border:'1px solid var(--border)', borderRadius:99, background:'var(--surface)', cursor: (stCustomerInfo?.email || c.email) ? 'pointer' : 'not-allowed', opacity: (stCustomerInfo?.email || c.email) ? 1 : .4, fontSize:12.5, fontWeight:600, color:'var(--text-primary)' }}
                     title="Send email">
                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><rect x="2" y="4" width="20" height="16" rx="2" stroke="currentColor" strokeWidth="1.8"/><path d="M2 7l10 6 10-6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/></svg>
                     Email
                   </button>
-                  <button onClick={() => openInST(c)} style={{ padding:'7px 12px', border:'1px solid var(--border)', borderRadius:'var(--radius)', background:'var(--surface-2)', cursor:'pointer', fontSize:12, color:'var(--text-primary)' }}>Open in ST</button>
+                  <button onClick={() => openInST(c)} style={{ height:34, padding:'0 14px', border:'1px solid var(--border)', borderRadius:99, background:'var(--surface)', cursor:'pointer', fontSize:12.5, fontWeight:600, color:'var(--text-primary)' }}>Open in ST ↗</button>
                   {isOutbound && !c.claimed_by && !done && <button className="btn sm primary" onClick={claimContact}>Claim</button>}
                   {isOutbound && isMe && c.claimed_by && !done && <button className="btn sm" onClick={() => releaseContact(c.id)}>Release</button>}
                   {isOther && <span style={{ fontSize:11, color:'var(--text-muted)' }}>Claimed by {c.claimed_by}</span>}
@@ -1798,8 +1812,8 @@ export default function DialerPage() {
                 gridTemplateRows:'minmax(0, 1fr)', overflow:'hidden', minHeight:0 }}>
 
                 {/* -- LEFT: Customer info + Job history -- */}
-                <div style={{ borderRight:'1px solid var(--border)', overflowY:'auto', minHeight:0, background:'var(--surface-2)' }}>
-                <div style={{ display:'flex', flexDirection:'column', gap:1 }}>
+                <div style={{ borderRight:'1px solid var(--border)', overflowY:'auto', minHeight:0, background:'var(--bg)' }}>
+                <div style={{ display:'flex', flexDirection:'column', gap:10, padding:10 }}>
 
                   {/* Customer info card */}
                   <div style={sectionCard}>
@@ -1839,7 +1853,7 @@ export default function DialerPage() {
                   </div>
 
                   {/* Intelligence brief — AI synthesis of ST customer history */}
-                  <div style={{ ...sectionCard, marginTop:1, borderLeft:'3px solid var(--accent)' }}>
+                  <div style={sectionCard}>
                     <div style={sectionHeader}>
                       <span style={sectionTitle}>Intelligence brief</span>
                       {c.external_id && (
@@ -1934,7 +1948,7 @@ export default function DialerPage() {
                   </div>
 
                   {/* Recent jobs — last 5 */}
-                  <div style={{ ...sectionCard, marginTop:1, flex:1, display:'flex', flexDirection:'column', minHeight:0 }}>
+                  <div style={{ ...sectionCard, flex:1, display:'flex', flexDirection:'column', minHeight:0 }}>
                     <div style={sectionHeader}>
                       <span style={sectionTitle}>Recent jobs</span>
                       {c.external_id && <span onClick={() => openInST(c)} style={{ fontSize:10, color:'var(--accent)', cursor:'pointer' }}>View all in ST</span>}
@@ -2036,7 +2050,7 @@ export default function DialerPage() {
                               const cm = OUTCOME_CONFIG[o.id] || {}
                               return (
                                 <button key={o.id} disabled={!isMe} onClick={() => setSelectedOutcome(sel ? null : o.id)}
-                                  style={{ padding:'12px 8px', borderRadius:'var(--radius)', fontSize:12, fontWeight: sel ? 700 : 500, border: sel ? `2px solid ${cm.border}` : '1px solid var(--border)', background: sel ? cm.bg : 'var(--surface-2)', color: sel ? cm.color : 'var(--text-secondary)', cursor: isMe ? 'pointer' : 'not-allowed', opacity: isMe ? 1 : .4, textAlign:'center', transition:'all .1s' }}>
+                                  style={{ padding:'12px 8px', borderRadius:12, fontSize:12.5, fontWeight: sel ? 700 : 600, border: sel ? `2px solid ${cm.border}` : '1px solid var(--border)', background: sel ? cm.bg : 'var(--surface)', color: sel ? cm.color : 'var(--text-secondary)', cursor: isMe ? 'pointer' : 'not-allowed', opacity: isMe ? 1 : .4, textAlign:'center', transition:'all .1s' }}>
                                   <div style={{ display:'flex', alignItems:'center', justifyContent:'center', marginBottom:5 }}>{OUTCOME_ICONS[o.id]?.(sel ? cm.color : 'var(--text-muted)')}</div>
                                   {o.id}
                                 </button>
@@ -2047,7 +2061,7 @@ export default function DialerPage() {
                           {/* Notes */}
                           <div>
                             {autoNote && autoNote.contactId === selectedId && (
-                              <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:8, background:'#F3E8FF', border:'1px solid #DDD6FE', borderRadius:'var(--radius)', padding:'6px 10px', marginBottom:6, fontSize:11.5, color:'#5B21B6' }}>
+                              <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:8, background:'var(--tone-purple-bg)', border:'1px solid var(--tone-purple-bd)', borderRadius:10, padding:'7px 11px', marginBottom:6, fontSize:12, color:'var(--tone-purple-tx)' }}>
                                 <span>✨ {callStatus === 'connected' || callStatus === 'calling' ? 'Live notes — updating as the call goes' : 'Notes drafted from the call — review before saving.'}</span>
                                 {notesVal.trim() !== autoNote.text && (
                                   <button className="btn sm" onClick={() => setNotesVal(autoNote.text)} style={{ flexShrink:0 }}>Use draft</button>
@@ -2056,7 +2070,7 @@ export default function DialerPage() {
                             )}
                             <textarea value={notesVal} onChange={e => setNotesVal(e.target.value)} disabled={!isMe}
                               placeholder={selectedOutcome === 'Booked' ? 'Notes required before booking...' : 'Add call notes...'}
-                              style={{ width:'100%', border:`1px solid ${selectedOutcome==='Booked' ? 'var(--accent)' : 'var(--border)'}`, borderRadius:'var(--radius)', padding:'9px 10px', fontSize:12, fontFamily:'inherit', resize:'vertical', minHeight:80, background:'var(--surface)', color:'var(--text-primary)', opacity: isMe ? 1 : .4 }} />
+                              style={{ width:'100%', border:`1px solid ${selectedOutcome==='Booked' ? 'var(--accent)' : 'var(--border)'}`, borderRadius:12, padding:'10px 12px', fontSize:13, lineHeight:1.5, fontFamily:'inherit', resize:'vertical', minHeight:84, background:'var(--surface)', color:'var(--text-primary)', opacity: isMe ? 1 : .4 }} />
                             <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginTop:6 }}>
                               <div style={{ fontSize:10, color:'var(--text-muted)' }}>
                                 Notes save with the outcome and sync to ServiceTitan.
@@ -2068,7 +2082,7 @@ export default function DialerPage() {
                                   </span>
                                 )}
                                 <button onClick={sendNoteToST} disabled={!c.external_id || !notesVal.trim() || stNoteSending}
-                                  style={{ padding:'5px 12px', border:'1px solid var(--accent)', borderRadius:'var(--radius)', background:'var(--surface)', color:'var(--accent)', fontSize:11, fontWeight:600, cursor: (c.external_id && notesVal.trim() && !stNoteSending) ? 'pointer' : 'not-allowed', opacity: (c.external_id && notesVal.trim()) ? 1 : .4 }}>
+                                  style={{ padding:'6px 13px', border:'1px solid var(--accent)', borderRadius:99, background:'var(--surface)', color:'var(--accent)', fontSize:12, fontWeight:700, cursor: (c.external_id && notesVal.trim() && !stNoteSending) ? 'pointer' : 'not-allowed', opacity: (c.external_id && notesVal.trim()) ? 1 : .4 }}>
                                   {stNoteSending ? 'Sending...' : 'Send note to ST'}
                                 </button>
                               </div>
@@ -2108,14 +2122,14 @@ export default function DialerPage() {
                               {/* Sell a membership into ServiceTitan. Only types an admin has
                                   mapped to a sale task are offered — the rest can't be sold. */}
                               {sellableMemberships.length > 0 && (
-                                <div style={{ padding:'8px 10px', background: alsoMembership ? '#EFF6FF' : 'var(--surface)', border:`1px solid ${alsoMembership ? '#3b82f6' : 'var(--border)'}`, borderRadius:'var(--radius)', display:'flex', flexDirection:'column', gap:8 }}>
+                                <div style={{ padding:'8px 10px', background: alsoMembership ? 'var(--tone-blue-bg)' : 'var(--surface)', border:`1px solid ${alsoMembership ? 'var(--tone-blue-bd)' : 'var(--border)'}`, borderRadius:'var(--radius)', display:'flex', flexDirection:'column', gap:8 }}>
                                   <label style={{ display:'flex', alignItems:'center', gap:8, cursor:'pointer' }}>
                                     <div onClick={() => { setAlsoMembership(p => !p); setMembershipTypeId('') }}
                                       style={{ width:18, height:18, borderRadius:4, border:`2px solid ${alsoMembership ? '#3b82f6' : 'var(--border)'}`, background: alsoMembership ? '#3b82f6' : 'transparent', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0, cursor:'pointer' }}>
                                       {alsoMembership && <svg width="10" height="10" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>}
                                     </div>
                                     <div onClick={() => { setAlsoMembership(p => !p); setMembershipTypeId('') }}>
-                                      <span style={{ fontSize:12, fontWeight:600, color: alsoMembership ? '#1d4ed8' : 'var(--text-primary)' }}>Sell Membership?</span>
+                                      <span style={{ fontSize:12, fontWeight:600, color: alsoMembership ? 'var(--tone-blue-tx)' : 'var(--text-primary)' }}>Sell Membership?</span>
                                     </div>
                                   </label>
 

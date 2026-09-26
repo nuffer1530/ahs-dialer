@@ -88,13 +88,13 @@ export default function QueueSelector() {
   return (
     <div ref={ref} style={{ position:'relative', flexShrink:0 }}>
       <button onClick={() => setOpen(o => !o)} className="btn"
-        style={{ fontSize:11, padding:'4px 10px', display:'flex', gap:6, alignItems:'center' }}>
+        style={{ fontSize:12.5, height:34, padding:'0 14px', borderRadius:99, display:'flex', gap:7, alignItems:'center' }}>
         Queues
         {activeCount > 0 && <span style={{ background:'var(--accent)', color:'#fff', borderRadius:99, padding:'0 6px', fontSize:10, fontWeight:700 }}>{activeCount}</span>}
         <span style={{ fontSize:9, color:'var(--text-muted)' }}>▾</span>
       </button>
       {open && (
-        <div style={{ position:'absolute', top:'115%', left:0, zIndex:300, background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius)', boxShadow:'0 8px 28px rgba(0,0,0,.18)', minWidth:250, padding:8 }}>
+        <div style={{ position:'absolute', top:'calc(100% + 6px)', left:0, zIndex:300, background:'var(--surface)', border:'1px solid var(--border)', borderRadius:14, boxShadow:'0 24px 60px -20px rgba(13,16,19,.45)', minWidth:260, padding:8 }}>
           <div style={{ fontSize:10, fontWeight:700, textTransform:'uppercase', letterSpacing:.5, color:'var(--text-muted)', padding:'4px 8px 6px' }}>Go available for</div>
           {hasDispatch && (
             <Toggle label="Dispatch line" sub="Technician calls · (719) 259-2681" on={dispatchAvail} onClick={toggleDispatch} accent="#8B5CF6" />

@@ -1,11 +1,11 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
+import { Navigate } from 'react-router-dom'
 import { toast } from '../lib/dialogs'
 import { sb } from '../lib/supabase'
 import { useAuth } from '../lib/AuthContext'
 import { useData } from '../lib/DataContext'
 import { useIsMobile } from '../lib/useIsMobile'
 import Modal from '../components/Modal'
-import CampaignsPage from './CampaignsPage'
 import AvatarCropper from '../components/AvatarCropper'
 import KnowledgeTab from '../components/KnowledgeTab'
 import CallRoutingTab from '../components/CallRoutingTab'
@@ -1060,7 +1060,7 @@ export default function AdminPage() {
 
   // Scorecard KPIs — single source of truth
   const TABS = isAdmin
-    ? [{ id:'users', label:'Users' }, { id:'campaigns', label:'Campaigns' }, { id:'commission', label:'Commission' }, { id:'statuses', label:'Statuses' }, { id:'floortv', label:'Floor TV' }, { id:'ops', label:'Thresholds' }, { id:'knowledge', label:'Knowledge' }, { id:'routing', label:'Call Routing' }, { id:'callqa', label:'Call QA' }]
+    ? [{ id:'users', label:'Users' }, { id:'commission', label:'Commission' }, { id:'statuses', label:'Statuses' }, { id:'floortv', label:'Floor TV' }, { id:'ops', label:'Thresholds' }, { id:'knowledge', label:'Knowledge' }, { id:'routing', label:'Call Routing' }, { id:'callqa', label:'Call QA' }]
     // Operations managers aren't paid CSR commissions — profile only.
     : isOpsManager ? [{ id:'users', label:'My Profile' }]
     : [{ id:'users', label:'My Profile' }, { id:'commission', label:'My Earnings' }]
@@ -1076,8 +1076,8 @@ export default function AdminPage() {
         <PageTabs tabs={TABS.map(t => [t.id, t.label])} value={settingsTab} onChange={setSettingsTab} />
       </div>
 
-      {/* Campaigns tab — full CampaignsPage */}
-      {settingsTab === 'campaigns' && <CampaignsPage />}
+      {/* Campaigns moved to Phones → Campaigns (redesign stage 3); old links land there. */}
+      {settingsTab === 'campaigns' && <Navigate to="/campaigns" replace />}
 
 
       {settingsTab === 'floortv' && isAdmin && (

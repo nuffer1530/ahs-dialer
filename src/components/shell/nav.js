@@ -15,6 +15,8 @@ export const HUBS = [
     tabs: [
       // A phone is for looking, not dialing — the dialer is desktop-only.
       { to: '/', label: 'Dialer', end: true, gate: c => !c.isHandheld },
+      // Stage 3: campaigns live where they're dialed (was Settings → Campaigns).
+      { to: '/campaigns', label: 'Campaigns', gate: c => c.isAdmin },
     ],
   },
   {

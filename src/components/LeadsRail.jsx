@@ -77,31 +77,31 @@ export default function LeadsRail({ currentRep, onOpenContact }) {
 
   return (
     <>
-      <div style={{ padding: '9px 10px 7px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+      <div style={{ padding: '14px 14px 10px', flexShrink: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <span style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: .8, color: 'var(--text-muted)' }}>Leads</span>
+          <span className="disp" style={{ fontSize: 16, fontWeight: 700 }}>Paid leads</span>
           {leads.length > 0 && (
-            <span style={{ fontSize: 10, fontWeight: 700, background: 'var(--danger)', color: '#fff', borderRadius: 99, padding: '1px 7px' }}>
+            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 700, background: 'var(--signal)', color: '#0D1013', borderRadius: 99, padding: '1px 8px' }}>
               {leads.length}
             </span>
           )}
         </div>
-        <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 3, lineHeight: 1.4 }}>
-          Paid leads — work these first
+        <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 2, lineHeight: 1.4 }}>
+          Work these first — first to open claims it
         </div>
       </div>
 
       {err && (
-        <div style={{ background: 'var(--danger-bg)', color: 'var(--danger)', fontSize: 10, padding: '6px 10px', borderBottom: '1px solid var(--border)' }}>
+        <div style={{ background: 'var(--danger-bg)', color: 'var(--danger)', fontSize: 11.5, padding: '8px 14px', margin: '0 8px 8px', borderRadius: 10 }}>
           {err}
         </div>
       )}
 
-      <div style={{ flex: 1, overflowY: 'auto' }}>
+      <div style={{ flex: 1, overflowY: 'auto', padding: '0 8px 8px', display: 'flex', flexDirection: 'column', gap: 8 }}>
         {leads.length === 0 && (
-          <div style={{ padding: '22px 12px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 11, lineHeight: 1.5 }}>
+          <div style={{ padding: '22px 12px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 12.5, lineHeight: 1.5 }}>
             No open leads.<br />
-            <span style={{ fontSize: 10 }}>New ones appear here within a minute.</span>
+            <span style={{ fontSize: 11.5 }}>New ones appear here within a minute.</span>
           </div>
         )}
 
@@ -113,26 +113,27 @@ export default function LeadsRail({ currentRep, onOpenContact }) {
             <div key={lead.id} onClick={() => !takenByOther && work(lead)}
               title={takenByOther ? `${lead.claimed_by} is working this` : 'Claim and open this lead'}
               style={{
-                padding: '9px 10px', borderBottom: '1px solid var(--border)',
+                padding: '11px 12px', borderRadius: 12,
+                border: `1px solid ${mine ? 'var(--accent)' : 'var(--border)'}`,
                 cursor: takenByOther ? 'not-allowed' : 'pointer',
                 opacity: takenByOther ? .5 : (busyId === lead.id ? .6 : 1),
-                borderLeft: `3px solid ${takenByOther ? 'var(--border)' : overnight ? 'var(--warning)' : 'var(--danger)'}`,
-                background: mine ? 'var(--accent-bg)' : 'transparent',
+                background: mine ? 'var(--accent-bg)' : 'var(--surface)',
               }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 4, marginBottom: 3 }}>
-                <span style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: .4, color: 'var(--accent)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, marginBottom: 4 }}>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', color: 'var(--text-muted)' }}>
+                  <span style={{ width: 7, height: 7, borderRadius: 99, flexShrink: 0, background: takenByOther ? 'var(--border-strong)' : overnight ? 'var(--warning)' : 'var(--signal)' }} />
                   {lead.provider || 'Lead'}
                 </span>
-                <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>{ago(lead.submitted_at)}</span>
+                <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{ago(lead.submitted_at)}</span>
               </div>
 
-              <div style={{ fontWeight: 600, fontSize: 12, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              <div style={{ fontWeight: 600, fontSize: 13.5, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {lead.name || 'Unknown'}
               </div>
-              <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{lead.phone || 'No phone'}</div>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontVariantNumeric: 'tabular-nums' }}>{lead.phone || 'No phone'}</div>
 
               {lead.job_type && (
-                <div style={{ fontSize: 10, color: 'var(--text-primary)', marginTop: 3, lineHeight: 1.35, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 4, lineHeight: 1.4, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
                   {lead.job_type}
                 </div>
               )}
@@ -142,7 +143,7 @@ export default function LeadsRail({ currentRep, onOpenContact }) {
                   actually scheduled. Badged rather than hidden — the rep should
                   see it came through, and confirm rather than re-book. */}
               {lead.already_booked && (
-                <div style={{ marginTop: 5, padding: '4px 7px', borderRadius: 4, background: 'var(--success-bg, #e8f5ee)', border: '1px solid var(--success)', fontSize: 9, color: 'var(--success)', fontWeight: 700, lineHeight: 1.4 }}>
+                <div style={{ marginTop: 6, padding: '6px 9px', borderRadius: 8, background: 'var(--tone-green-bg)', border: '1px solid var(--tone-green-bd)', fontSize: 11, color: 'var(--tone-green-tx)', fontWeight: 700, lineHeight: 1.4 }}>
                   ALREADY SCHEDULED{lead.booked_job_number ? ` · Job #${lead.booked_job_number}` : ''}
                   {lead.booked_at && (
                     <div style={{ fontWeight: 500, marginTop: 1 }}>
@@ -153,26 +154,26 @@ export default function LeadsRail({ currentRep, onOpenContact }) {
                 </div>
               )}
 
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 5 }}>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginTop: 6 }}>
                 {lead.urgency && (
-                  <span style={{ fontSize: 9, background: 'var(--danger-bg)', color: 'var(--danger)', borderRadius: 3, padding: '1px 5px', fontWeight: 600 }}>
+                  <span style={{ fontSize: 10.5, background: 'var(--tone-red-bg)', color: 'var(--tone-red-tx)', borderRadius: 99, padding: '1px 8px', fontWeight: 700 }}>
                     {lead.urgency}
                   </span>
                 )}
                 {lead.lead_fee != null && (
-                  <span style={{ fontSize: 9, background: 'var(--surface-2)', color: 'var(--text-muted)', borderRadius: 3, padding: '1px 5px' }}>
+                  <span style={{ fontSize: 10.5, background: 'var(--surface-2)', color: 'var(--text-secondary)', borderRadius: 99, padding: '1px 8px', fontFamily: 'var(--font-mono)' }}>
                     ${Number(lead.lead_fee).toFixed(2)}
                   </span>
                 )}
                 {overnight && (
-                  <span style={{ fontSize: 9, background: 'var(--warning-bg, #fdf6e3)', color: 'var(--warning)', borderRadius: 3, padding: '1px 5px' }}>
+                  <span style={{ fontSize: 10.5, background: 'var(--tone-amber-bg)', color: 'var(--tone-amber-tx)', borderRadius: 99, padding: '1px 8px', fontWeight: 600 }}>
                     overnight
                   </span>
                 )}
               </div>
 
               {lead.claimed_by && (
-                <div style={{ fontSize: 9, marginTop: 5, color: mine ? 'var(--accent)' : 'var(--text-muted)', fontWeight: 600 }}>
+                <div style={{ fontSize: 11.5, marginTop: 6, color: mine ? 'var(--accent)' : 'var(--text-muted)', fontWeight: 600 }}>
                   {mine ? 'You claimed this' : `${lead.claimed_by} is working this`}
                 </div>
               )}

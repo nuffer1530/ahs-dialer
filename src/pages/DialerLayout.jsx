@@ -50,6 +50,15 @@ const DEFAULT_STATUS_OPTIONS = [
 
 const GRACE_MINUTES = 5
 
+// ⌘K customer search — the dialer's own ServiceTitan search endpoint. Module
+// scope so its identity is stable (the layout re-renders every second for the
+// status timer, which would otherwise restart the palette's debounce).
+async function searchStCustomers(q) {
+  const r = await fetch(`/api/st/search?q=${encodeURIComponent(q)}`)
+  const d = await r.json().catch(() => ({}))
+  return Array.isArray(d.data) ? d.data : []
+}
+
 // A ringing phone must interrupt you wherever you are. Previously the only
 // incoming-call UI was inside DialerPage, so a rep on any other screen had no
 // idea a customer was waiting.
@@ -479,6 +488,7 @@ function DialerLayoutInner() {
             : isHandheld ? <Navigate to={homeAllowed ? '/home' : '/analytics'} replace />
             : <DialerPage />} />
           {homeAllowed && <Route path="/home" element={<HomePage />} />}
+          {isAdmin && <Route path="/campaigns" element={<div style={{ flex: 1, overflowY: 'auto', background: 'var(--bg)' }}><CampaignsPage /></div>} />}
           {/* Operations managers are field-side: call-center pages bounce home. */}
           <Route path="/live" element={isOpsManager ? <Navigate to="/" replace /> : <LivePage />} />
           <Route path="/callboard" element={<CallBoardPage />} />
@@ -505,7 +515,10 @@ function DialerLayoutInner() {
           onDialer={onDialer} onOpenDialer={() => navigate('/')} inCall={inCall} callSeconds={callDuration || 0}
           outboundWaiting={!isOpsManager && outboundWaiting} openLeads={isOpsManager ? 0 : openLeads} isOpsManager={isOpsManager} />
       )}
-      <CommandPalette open={paletteOpen && !isWall} onClose={() => setPaletteOpen(false)} items={paletteItems} />
+      <CommandPalette open={paletteOpen && !isWall} onClose={() => setPaletteOpen(false)} items={paletteItems}
+        // ServiceTitan customers, straight into the dialer (desktop only — the dialer is).
+        searchCustomers={isHandheld ? null : searchStCustomers}
+        onPickCustomer={(cust) => navigate('/', { state: { openStCustomer: cust } })} />
     </div>
   )
 }
