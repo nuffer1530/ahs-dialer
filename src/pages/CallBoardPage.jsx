@@ -59,7 +59,7 @@ function Cell({ trade, dayLabel, d, onDrill, tv }) {
         </div>
       ) : (
         <div style={{ padding: tv ? '22px 20px 16px' : '16px 16px 12px', display:'flex', alignItems: tv ? 'center' : 'baseline', gap:10, flex: tv ? 1 : undefined }}>
-          <span style={{ fontSize:fz(46), fontWeight:800, lineHeight:.9, color: d.needed > 0 ? s.color : 'var(--success)', fontVariantNumeric:'tabular-nums' }}>
+          <span style={{ fontSize:fz(46), fontWeight: tv ? 800 : 600, lineHeight:.9, color: d.needed > 0 ? s.color : 'var(--success)', fontVariantNumeric:'tabular-nums', ...(tv ? {} : { fontFamily:'var(--font-mono)', letterSpacing:'-.02em' }) }}>
             {d.needed > 0 ? d.needed : '✓'}
           </span>
           <span style={{ fontSize:fz(12), color:'var(--text-muted)', fontWeight:600 }}>{d.needed > 0 ? 'calls needed' : 'at target'}</span>
@@ -117,7 +117,7 @@ function PhoneCell({ trade, date, dayLabel, d, onDrill, first }) {
         </div>
       ) : (
         <div style={{ padding:'10px 8px 8px', display:'flex', flexDirection:'column', gap:3, flex:1, justifyContent:'center' }}>
-          <span style={{ fontSize:28, fontWeight:800, lineHeight:.9, color: d.needed > 0 ? s.color : 'var(--success)', fontVariantNumeric:'tabular-nums' }}>
+          <span style={{ fontSize:28, fontWeight:600, lineHeight:.9, color: d.needed > 0 ? s.color : 'var(--success)', fontVariantNumeric:'tabular-nums', fontFamily:'var(--font-mono)', letterSpacing:'-.02em' }}>
             {d.needed > 0 ? d.needed : '✓'}
           </span>
           <span style={{ fontSize:9.5, color:'var(--text-muted)', fontWeight:600 }}>{d.needed > 0 ? 'calls needed' : 'at target'}</span>
@@ -177,7 +177,7 @@ export default function CallBoardPage() {
   // Phone layout (≤768px). The wall TV is always wider, so nothing here
   // reaches the isFull path. Toolbar buttons grow to a thumb-sized 40px.
   const isMobile = useIsMobile()
-  const tap = isMobile ? { minHeight:40 } : undefined
+  const tap = { borderRadius:99, ...(isMobile ? { minHeight:40 } : {}) }
 
   const load = useCallback(async () => {
     try {
@@ -212,8 +212,10 @@ export default function CallBoardPage() {
 
   return (
     <div ref={rootRef} style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden', background:'var(--bg)' }}>
-      {/* Slim toolbar (page title is already in the top bar) */}
-      <div style={{ background:'var(--surface)', borderBottom:'1px solid var(--border)', flexShrink:0, padding: isMobile ? '8px 12px' : '10px 24px', display:'flex', alignItems:'center', justifyContent:'space-between', flexWrap: isMobile ? 'wrap' : undefined, gap: isMobile ? 8 : undefined }}>
+      {/* Slim toolbar (page title is already in the top bar). In the app it
+          sits on the page background like every other hub page; the wall
+          (isFull) keeps its bar — TV looks don't change with the redesign. */}
+      <div style={{ background: isFull ? 'var(--surface)' : 'var(--bg)', borderBottom: isFull ? '1px solid var(--border)' : 'none', flexShrink:0, padding: isMobile ? '8px 12px' : '10px 24px', display:'flex', alignItems:'center', justifyContent:'space-between', flexWrap: isMobile ? 'wrap' : undefined, gap: isMobile ? 8 : undefined }}>
         <span style={{ fontSize:12, color:'var(--text-muted)' }}>Target {data?.target ?? 80}% · live from ServiceTitan</span>
         <div style={{ display:'flex', alignItems:'center', gap: isMobile ? 8 : 12, flexWrap: isMobile ? 'wrap' : undefined }}>
           {refreshedAt && <span style={{ fontSize:11, color:'var(--text-muted)' }}>Updated {fmtTime(refreshedAt, { hour:'2-digit', minute:'2-digit' })}</span>}
@@ -242,7 +244,11 @@ export default function CallBoardPage() {
       </div>
 
       <div style={{ flex:1, overflow: isFull ? 'hidden' : 'auto', padding: isFull ? '16px 28px 24px' : isMobile ? '12px 12px 20px' : '20px 24px', background:'var(--bg)' }}>
-        {loading ? <div className="spinner lg" style={{ margin:'60px auto' }} /> :
+        {loading ? (
+          <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
+            {[48, 150, 150, 150, 150].map((h, i) => <div key={i} className="skel" style={{ height:h, borderRadius:14 }} />)}
+          </div>
+         ) :
          error ? <div style={{ color:'var(--danger)', fontSize:13, background:'var(--danger-bg)', padding:'12px 16px', borderRadius:'var(--radius)' }}>Couldn’t load the board: {error}</div> :
          !data ? null : (
           <div style={{ display:'flex', flexDirection:'column', gap: isFull ? 14 : 18, height: isFull ? '100%' : undefined }}>
@@ -253,7 +259,7 @@ export default function CallBoardPage() {
                  there is no header row to line up with. */
               data.board.map(row => (
                 <div key={row.trade} style={{ border:'1px solid var(--border)', borderRadius:14, background:'var(--surface)', overflow:'hidden' }}>
-                  <div style={{ padding:'9px 12px', fontSize:15, fontWeight:800, borderBottom:'1px solid var(--border)' }}>{row.trade}</div>
+                  <div className="disp" style={{ padding:'9px 12px', fontSize:15, fontWeight:700, borderBottom:'1px solid var(--border)' }}>{row.trade}</div>
                   <div className="mgrid" style={{ display:'grid', gridTemplateColumns:'repeat(3, minmax(0, 1fr))' }}>
                     {row.days.map((d, i) => (
                       <PhoneCell key={i} first={i === 0} date={data.dates[i]} trade={row.trade} dayLabel={DAY_LABELS[i]} d={d}
@@ -268,7 +274,7 @@ export default function CallBoardPage() {
               <div />
               {data.dates.map((date, i) => (
                 <div key={date} style={{ textAlign:'center' }}>
-                  <div style={{ fontSize: isFull ? 24 : 15, fontWeight:800 }}>{DAY_LABELS[i]}</div>
+                  <div className={isFull ? undefined : 'disp'} style={{ fontSize: isFull ? 24 : 16, fontWeight: isFull ? 800 : 700 }}>{DAY_LABELS[i]}</div>
                   <div style={{ fontSize: isFull ? 15 : 11, color:'var(--text-muted)' }}>{fmtDate(date + 'T18:00:00Z', { weekday:'long', month:'short', day:'numeric' })}</div>
                 </div>
               ))}
@@ -276,7 +282,7 @@ export default function CallBoardPage() {
             {/* Trade rows — in TV mode each row takes an equal share of the screen */}
             {data.board.map(row => (
               <div key={row.trade} style={{ display:'grid', gridTemplateColumns: `${isFull ? 170 : 130}px repeat(3, 1fr)`, gap:16, alignItems:'stretch', flex: isFull ? 1 : undefined, minHeight:0 }}>
-                <div style={{ display:'flex', alignItems:'center', fontSize: isFull ? 26 : 17, fontWeight:800 }}>{row.trade}</div>
+                <div className={isFull ? undefined : 'disp'} style={{ display:'flex', alignItems:'center', fontSize: isFull ? 26 : 17, fontWeight: isFull ? 800 : 700 }}>{row.trade}</div>
                 {row.days.map((d, i) => <Cell key={i} tv={isFull} trade={row.trade} dayLabel={DAY_LABELS[i]} d={d} onDrill={(t, day, label, items, kind) => setDrill({ trade:t, day, label, items, kind })} />)}
               </div>
             ))}

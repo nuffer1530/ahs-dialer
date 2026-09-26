@@ -6,10 +6,10 @@ import { PageTabs, Segmented, ToneChip, SummaryPanel, Stat, EmptyState, Face, ey
 
 // Dispatch for Profit — who to send, and whether today's board agrees.
 //
-// Two tabs:
-//  - Batting Order: cached tech ranking per business unit (the scoring job runs
-//    on a schedule; this only reads it).
-//  - Live Board: today's assignments scored against those ranks.
+// Four tabs: Command Center (the action queue), Batting Order (cached tech
+// ranking per business unit — overall, by job type, and dispatcher notes),
+// Live Board Analyzer (today's assignments scored against those ranks) and
+// Decision Maker (who to send on one job).
 
 // Baseball, to match the tab name. 'On the Bench' says where to route without
 // branding anyone a bad tech; 'Rookie' keeps thin data from reading as a grade.
@@ -179,7 +179,7 @@ function TechInfo() {
       </div>
       {teams.map(team => (
         <div key={team} style={{ marginBottom:20 }}>
-          <div style={{ fontSize:14, fontWeight:700, marginBottom:10 }}>{team}</div>
+          <div className="disp" style={{ fontSize:14, fontWeight:700, marginBottom:10 }}>{team}</div>
           <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(min(320px, 100%), 1fr))', gap:12 }}>
             {(data.techs || []).filter(t => t.team === team).map(t => (
               <div key={t.id} style={{ ...panel, padding:'12px 14px' }}>
@@ -302,7 +302,7 @@ function BattingOrder() {
         return (
           <div key={bu} style={{ ...panel, overflow:'hidden', marginBottom:16 }}>
             <div style={{ display:'flex', alignItems:'center', gap:10, padding:'11px 16px', borderBottom:'1px solid var(--border)', flexWrap:'wrap' }}>
-              <span style={{ fontSize:14, fontWeight:700, color:'var(--text-primary)' }}>{bu}</span>
+              <span className="disp" style={{ fontSize:14, fontWeight:700, color:'var(--text-primary)' }}>{bu}</span>
               {(() => {
                 // A tight bench is the most important thing to say out loud:
                 // ranking #1 vs #2 on a 7% gap is noise, and treating it as a
@@ -687,7 +687,7 @@ function LiveBoard() {
             style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:18, width:'100%', maxWidth:520, boxShadow:'0 24px 60px -20px rgba(15,20,40,.45)', overflow:'hidden', display:'flex', flexDirection:'column', maxHeight:'80vh' }}>
             <div style={{ padding:'14px 18px', borderBottom:'1px solid var(--border)', display:'flex', alignItems:'center', justifyContent:'space-between', gap:12 }}>
               <div>
-                <div style={{ fontSize:15, fontWeight:700 }}>Expected revenue — the receipts</div>
+                <div className="disp" style={{ fontSize:15, fontWeight:700 }}>Expected revenue — the receipts</div>
                 <div style={{ fontSize:11.5, color:'var(--text-muted)', marginTop:1 }}>Installs whose final day is today · invoice counts once, on the finish day</div>
               </div>
               <button className="btn sm" onClick={() => setShowRevDetail(false)} style={{ borderRadius:99 }}>Close</button>
@@ -1264,23 +1264,46 @@ function DecisionMaker() {
   )
 }
 
+// Batting Order, By Job Type and Tech Info were three tabs about one thing —
+// the tech ranking (Tech Info's notes already show as tooltips on the Batting
+// Order) — so they're one tab with a switch now (redesign stage 6). Old
+// ?tab=jobtype / ?tab=techinfo links open the matching view.
+const RANK_VIEWS = [['order', 'Overall'], ['jobtype', 'By job type'], ['techinfo', 'Tech info']]
+const TABS = [['center', 'Command Center'], ['order', 'Batting Order'], ['live', 'Live Board Analyzer'], ['decide', 'Decision Maker']]
+
 export default function DispatchPage() {
-  const [tab, setTab] = useState(() => new URLSearchParams(window.location.search).get('tab') || 'center')
+  const [tab, setTab] = useState(() => {
+    const t = new URLSearchParams(window.location.search).get('tab') || 'center'
+    return t === 'jobtype' || t === 'techinfo' ? 'order' : TABS.some(([id]) => id === t) ? t : 'center'
+  })
+  const [rankView, setRankView] = useState(() => {
+    const q = new URLSearchParams(window.location.search)
+    const v = q.get('tab') === 'jobtype' || q.get('tab') === 'techinfo' ? q.get('tab') : q.get('view')
+    return RANK_VIEWS.some(([id]) => id === v) ? v : 'order'
+  })
   const isMobile = useIsMobile()
-  // Survive hard refresh: the active tab lives in the URL (?tab=), like MyPage.
+  // Survive hard refresh: the active tab (and ranking view) live in the URL.
   useEffect(() => {
     const u = new URL(window.location)
-    if (u.searchParams.get('tab') !== tab) { u.searchParams.set('tab', tab); window.history.replaceState({}, '', u) }
-  }, [tab])
+    const view = tab === 'order' && rankView !== 'order' ? rankView : null
+    if (u.searchParams.get('tab') !== tab || u.searchParams.get('view') !== view) {
+      u.searchParams.set('tab', tab)
+      if (view) u.searchParams.set('view', view); else u.searchParams.delete('view')
+      window.history.replaceState({}, '', u)
+    }
+  }, [tab, rankView])
   return (
     <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden' }}>
-      {/* Six tabs. On a phone the bar scrolls sideways rather than wrapping into three lines. */}
-      <div style={{ background:'var(--surface)', borderBottom:'1px solid var(--border)', flexShrink:0, padding: isMobile ? '0 12px' : '0 24px' }}>
-        <PageTabs value={tab} onChange={setTab}
-          tabs={[['center','Command Center'],['order','Batting Order'],['jobtype','By Job Type'],['live','Live Board Analyzer'],['decide','Decision Maker'],['techinfo','Tech Info']]} />
+      {/* On a phone the tab row scrolls sideways rather than wrapping. */}
+      <div style={{ background:'var(--bg)', flexShrink:0, padding: isMobile ? '6px 12px 0' : '10px 24px 0',
+        display:'flex', alignItems:'center', gap:12, flexWrap:'wrap' }}>
+        <PageTabs value={tab} onChange={setTab} tabs={TABS} />
+        {tab === 'order' && <Segmented value={rankView} onChange={setRankView} options={RANK_VIEWS} />}
       </div>
       <div style={{ flex:1, overflow:'auto', padding: isMobile ? 12 : 24, background:'var(--bg)' }}>
-        {tab === 'center' ? <CommandCenter /> : tab === 'order' ? <BattingOrder /> : tab === 'jobtype' ? <ByJobType /> : tab === 'decide' ? <DecisionMaker /> : tab === 'techinfo' ? <TechInfo /> : <LiveBoard />}
+        {tab === 'center' ? <CommandCenter />
+          : tab === 'order' ? (rankView === 'jobtype' ? <ByJobType /> : rankView === 'techinfo' ? <TechInfo /> : <BattingOrder />)
+          : tab === 'decide' ? <DecisionMaker /> : <LiveBoard />}
       </div>
     </div>
   )

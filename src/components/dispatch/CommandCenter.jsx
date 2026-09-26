@@ -772,7 +772,7 @@ export default function CommandCenter() {
             {/* Queue */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}>
               <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
-                <span style={{ fontSize: 14, fontWeight: 700 }}>Needs a decision</span>
+                <span className="disp" style={{ fontSize: 14, fontWeight: 700 }}>Needs a decision</span>
                 <span style={MUTED}>{queue.hiddenCount ? `${queue.hiddenCount} snoozed or dismissed · ` : ''}sorted by when you have to act</span>
                 {day === 0 && <MovesStrip actions={payload.actions || []} dismissals={payload.dismissals || []} />}
               </div>
@@ -1084,7 +1084,7 @@ const Board = memo(function Board({ board, onOpen, onUnhold, pendingKeys }) {
   return (
     <div className="card" style={{ padding: 0, position: 'sticky', top: 0 }}>
       <div style={{ padding: '11px 14px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 10, ...(isMobile ? { flexWrap: 'wrap' } : {}) }}>
-        <span style={{ fontSize: 14, fontWeight: 700 }}>The board</span><span style={MUTED}>click any call · $ = opportunity, ring = seat tier</span>
+        <span className="disp" style={{ fontSize: 14, fontWeight: 700 }}>The board</span><span style={MUTED}>click any call · $ = opportunity, ring = seat tier</span>
         <span style={{ marginLeft: 'auto', display: 'flex', gap: 10, fontSize: 10.5, color: 'var(--text-muted)' }}>
           {[['green', 'opportunity'], ['amber', 'repair'], ['blue', 'install'], ['gray', 'routine']].map(([t, l]) => <span key={t}><i style={{ display: 'inline-block', width: 9, height: 9, borderRadius: 3, marginRight: 4, verticalAlign: -1, background: `var(--tone-${t}-bg)`, border: `1px solid var(--tone-${t}-bd)` }} />{l}</span>)}
         </span>
