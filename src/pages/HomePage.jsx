@@ -138,9 +138,12 @@ const since = (iso) => {
 }
 
 // Owners, admins and operations managers get the business Home below; CSRs
-// and dispatchers get their own day (components/home/MyDayHome).
+// and dispatchers get their own day (components/home/MyDayHome). An admin or
+// dispatcher with profiles.home_view = 'dispatch_manager' (Brittany) gets the
+// call center & dispatch manager view instead.
 export default function HomePage() {
-  const { isAdmin, isOpsManager, isDispatcher } = useAuth()
+  const { profile, isAdmin, isOpsManager, isDispatcher } = useAuth()
+  if ((isAdmin || isDispatcher) && profile?.home_view === 'dispatch_manager') return <MyDayHome dispatcher manager />
   if (isAdmin || isOpsManager) return <BusinessHome />
   return <MyDayHome dispatcher={isDispatcher} />
 }

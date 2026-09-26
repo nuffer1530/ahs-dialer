@@ -960,7 +960,9 @@ export default function AdminPage() {
     if (!editProfile) return
     setSaving(true)
     try {
-      let { error } = await sb.from('profiles').update({ name: editProfile.name, role: editProfile.role, inbound_skill: !!editProfile.inbound_skill, dispatch_skill: !!editProfile.dispatch_skill, manager_id: editProfile.manager_id || null }).eq('id', editProfile.id)
+      // home_view only means something for admins and dispatchers (HomePage).
+      const homeView = ['admin', 'dispatcher'].includes(editProfile.role) ? (editProfile.home_view || null) : null
+      let { error } = await sb.from('profiles').update({ name: editProfile.name, role: editProfile.role, inbound_skill: !!editProfile.inbound_skill, dispatch_skill: !!editProfile.dispatch_skill, manager_id: editProfile.manager_id || null, home_view: homeView }).eq('id', editProfile.id)
       // dispatch_skill is a newer column — retry without it pre-migration.
       if (error) ({ error } = await sb.from('profiles').update({ name: editProfile.name, role: editProfile.role, inbound_skill: !!editProfile.inbound_skill, manager_id: editProfile.manager_id || null }).eq('id', editProfile.id))
       // Push the skill change onto their TaskRouter worker right away.
@@ -1651,6 +1653,15 @@ export default function AdminPage() {
                     <option value="admin">Admin — full access including uploads and user management</option>
                   </select>
                 </div>
+                {['admin', 'dispatcher'].includes(editProfile.role) && (
+                  <div className="form-field">
+                    <label className="form-label">Home screen — what they see when they open Andi</label>
+                    <select className="form-input" value={editProfile.home_view || ''} onChange={e => setEditProfile(p => ({ ...p, home_view: e.target.value || null }))}>
+                      <option value="">{editProfile.role === 'admin' ? 'Business — sales pace, departments, the floor' : 'Dispatcher — decisions, coverage, their week'}</option>
+                      <option value="dispatch_manager">Call center & dispatch manager — the floor, each CSR today, decisions, coverage</option>
+                    </select>
+                  </div>
+                )}
                 <div className="form-field">
                   <label className="form-label">Manager — approves their PTO / sick requests</label>
                   <select className="form-input" value={editProfile.manager_id || ''}

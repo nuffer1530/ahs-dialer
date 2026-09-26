@@ -13357,6 +13357,39 @@ app.get('/api/home/me', async (req, res) => {
     const talk = (tasks || []).map(t => Number(t.talk_seconds) || 0).filter(Boolean)
     const fb = _ceoFast.data?.booking || null
 
+    // Call center & dispatch manager view (profiles.home_view): the live
+    // floor, every CSR's day from ServiceTitan, and time off waiting on them.
+    let manager = null
+    if (req.query.manager === '1' && ['admin', 'dispatcher'].includes(prof.role)) {
+      const [floorProfs, queued, ptoMine] = await Promise.all([
+        safe(supabase.from('profiles').select('id, name, email, role, status, status_since').eq('active', true)),
+        safe(supabase.from('call_tasks').select('queued_at').eq('state', 'queued').is('ended_at', null)),
+        safe(supabase.from('pto_requests').select('profile_id, date, end_date, kind').eq('manager_id', prof.id).eq('status', 'pending').order('date').limit(8)),
+      ])
+      const people = floorProfs || []
+      const hide = new Set(['brandynnuffer@gmail.com', 'brandyn.nuffer@awesomeservice.com'])
+      const idsBy = new Map()
+      for (const m of (allMaps || [])) { const a = idsBy.get(String(m.profile_id)) || []; a.push(m.st_user_id); idsBy.set(String(m.profile_id), a) }
+      const reps2 = people.filter(p => p.role === 'rep').map(p => {
+        const x = byAgent ? sum(idsBy.get(String(p.id)) || []) : null
+        const lc = x ? x.booked + x.missed : null
+        return { id: p.id, name: p.name || p.email, status: p.status || 'Offline', since: p.status_since || null,
+          booked: x?.booked ?? null, unbooked: x?.missed ?? null, leadCalls: lc, pct: lc ? Math.round(x.booked / lc * 100) : null, outbounds: x?.outbounds ?? null,
+          linked: idsBy.has(String(p.id)) }
+      }).sort((a, b) => (b.leadCalls || 0) - (a.leadCalls || 0) || String(a.name).localeCompare(String(b.name)))
+      const waits = (queued || []).map(q => Date.now() - Date.parse(q.queued_at)).filter(n => n > 0)
+      const nameOf = new Map(people.map(p => [String(p.id), p.name || p.email]))
+      manager = {
+        reps: reps2,
+        floor: {
+          agents: people.filter(p => p.role !== 'ops_manager' && p.status && p.status !== 'Offline' && !hide.has(String(p.email || '').toLowerCase()))
+            .map(p => ({ id: p.id, name: p.name || p.email, status: p.status, since: p.status_since || null })),
+          queued: (queued || []).length, longestWaitSec: waits.length ? Math.round(Math.max(...waits) / 1000) : 0,
+        },
+        pto: (ptoMine || []).map(r => ({ ...r, name: nameOf.get(String(r.profile_id)) || 'Someone' })),
+      }
+    }
+
     const amt = (rows, fromIso) => Math.round((rows || []).filter(c => Date.parse(c.earned_at) >= Date.parse(fromIso)).reduce((a, c) => a + (Number(c.amount) || 0), 0) * 100) / 100
 
     // Where the board needs bookings: open cells, today first.
@@ -13389,6 +13422,7 @@ app.get('/api/home/me', async (req, res) => {
       eval: ev || null,
       pto: pto || [],
       board: needs ? { dates: board.dates || [], target: board.target ?? null, needs } : null,
+      manager,
     })
   } catch (e) {
     console.error('home/me:', e.message)

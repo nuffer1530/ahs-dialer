@@ -908,3 +908,9 @@ create table if not exists siro_tech_scorecards (
 alter table siro_tech_scorecards enable row level security;
 -- Settings: field_ops_managers (trade → {name, email}) and reengage_emails
 -- ({enabled, since, startAt, minScore, to[]}) live in app_settings.
+
+-- ── Home screen choice (Sep 26, 2026) ────────────────────────────────────────
+-- Which Home an admin or dispatcher lands on. null = the default for their
+-- role; 'dispatch_manager' = the call center & dispatch manager view (Brittany).
+-- Set in Settings → Users → edit. Applied via migration profiles_home_view.
+alter table public.profiles add column if not exists home_view text;
